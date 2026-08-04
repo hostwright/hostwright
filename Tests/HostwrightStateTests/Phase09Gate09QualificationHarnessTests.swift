@@ -228,6 +228,35 @@ final class Phase09Gate09QualificationHarnessTests: XCTestCase {
     XCTAssertFalse(source.contains("gh pr"))
   }
 
+  func testConfirmedApplyUsesDedicatedJSONFlag() throws {
+    let source = try String(contentsOf: harness, encoding: .utf8)
+    let live = try XCTUnwrap(source.section(named: "live"))
+    let confirmedApply =
+      "\"$cli\" apply \"$config\" --state-db \"$state\" --confirm-plan \"$plan_hash\" --json"
+
+    XCTAssertTrue(live.contains(confirmedApply))
+    XCTAssertFalse(live.contains("\"$cli\" apply \"$config\" --state-db \"$state\" --confirm-plan \"$plan_hash\" --output json"))
+  }
+
+  func testKeychainCleanupIsLedgerOnlyMarkerVerifiedAndBootstrapFree() throws {
+    let source = try String(contentsOf: harness, encoding: .utf8)
+    let live = try XCTUnwrap(source.section(named: "live"))
+    let emergencyCleanup = try XCTUnwrap(source.section(named: "emergency_live_cleanup"))
+    let keychainCleanup = try XCTUnwrap(source.section(named: "cleanup_keychain_items"))
+    let absenceVerification = try XCTUnwrap(source.section(named: "verify_keychain_absent"))
+
+    XCTAssertTrue(keychainCleanup.contains("$2==\"keychain-item\""))
+    XCTAssertTrue(keychainCleanup.contains("security find-generic-password -s \"$service\" -a \"$account\""))
+    XCTAssertTrue(keychainCleanup.contains("hostwright-audit-owned-v1"))
+    XCTAssertTrue(keychainCleanup.contains("security delete-generic-password -s \"$service\" -a \"$account\""))
+    XCTAssertTrue(absenceVerification.contains("security find-generic-password -s \"$service\" -a \"$account\""))
+    XCTAssertTrue(absenceVerification.contains("[[ \"$status\" == 44 ]]"))
+    XCTAssertTrue(live.contains("cleanup_keychain_items"))
+    XCTAssertTrue(emergencyCleanup.contains("cleanup_keychain_items"))
+    XCTAssertFalse(live.contains("\"$bootstrap\" --cleanup"))
+    XCTAssertFalse(emergencyCleanup.contains("\"$bootstrap\" --cleanup"))
+  }
+
   func testContainerDeletionIsCentralizedBehindExactLedgerRevalidation() throws {
     let source = try String(contentsOf: harness, encoding: .utf8)
     let identity = try XCTUnwrap(source.section(named: "container_identity_is_exact"))

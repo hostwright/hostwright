@@ -255,6 +255,15 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
       "admission.exception.delete",
     ]).union(WorkloadProfileControlOperations.mutatingOperations)
       .union(PluginControlOperations.mutatingOperations)
+    let mutationClassifier: PersistentControlConnectionServer.MutationClassifier = { request in
+      if try CLIControlRoute.validateStreamPreparation(request: request) != nil {
+        return false
+      }
+      if let route = try CLIControlRoute.validate(request: request) {
+        return route.mutating
+      }
+      return mutatingOperations.contains(request.operation)
+    }
     let server = try PersistentControlConnectionServer(
       authenticator: authenticator,
       requestRepository: requestRepository,
@@ -298,20 +307,13 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
         return try PersistentControlPreparedRequest(request: request)
       },
       unaryRequestCoordinator: { request, operation in
-        try StateUpgradeService(store: store).withExclusiveLifecycleFence(
+        guard try mutationClassifier(request) else { return try operation() }
+        return try StateUpgradeService(store: store).withExclusiveLifecycleFence(
           lockWaitMilliseconds: min(request.timeoutMilliseconds ?? 30_000, 30_000),
           operation
         )
       },
-      mutationClassifier: { request in
-        if try CLIControlRoute.validateStreamPreparation(request: request) != nil {
-          return false
-        }
-        if let route = try CLIControlRoute.validate(request: request) {
-          return route.mutating
-        }
-        return mutatingOperations.contains(request.operation)
-      },
+      mutationClassifier: mutationClassifier,
       auditRecorder: auditTrail,
       authorizer: { peer, request, at in
         let scope = try CLIControlRoute.validateStreamPreparation(request: request)?

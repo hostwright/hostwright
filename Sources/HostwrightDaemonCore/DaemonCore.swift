@@ -303,10 +303,7 @@ public struct DaemonLoopRunner {
             }
 
             iterations += 1
-            let result = try await StateUpgradeService(store: store)
-                .withExclusiveLifecycleFence(lockWaitMilliseconds: 30_000) {
-                    try await runIteration(iteration: iterations, store: store)
-                }
+            let result = try await runIteration(iteration: iterations, store: store)
             switch result {
             case .success:
                 successfulIterations += 1
@@ -539,21 +536,23 @@ public struct DaemonLoopRunner {
             } else {
                 enteredLifecycleDriver = true
                 do {
-                    reconciliation = try await reconciliationDriver.reconcile(
-                        request: try DaemonReconciliationRequest(
-                            manifestPath: manifestPath,
-                            manifestSHA256: manifestSnapshot.target.contentSHA256,
-                            configurationSetSHA256: configurationSetSHA256,
-                            configurationTargets: configurationTargets,
-                            stateDatabasePath: configuration.stateDatabasePath,
-                            projectID: projectID,
-                            maximumParallelism: configuration.maximumParallelism,
-                            selectedServiceNames: selectedServiceNames,
-                            operationIdempotencyKeySHA256:
-                                operationIdempotencyKeySHA256,
-                            maintenanceAdmission: maintenance.binding
-                        )
+                    let request = try DaemonReconciliationRequest(
+                        manifestPath: manifestPath,
+                        manifestSHA256: manifestSnapshot.target.contentSHA256,
+                        configurationSetSHA256: configurationSetSHA256,
+                        configurationTargets: configurationTargets,
+                        stateDatabasePath: configuration.stateDatabasePath,
+                        projectID: projectID,
+                        maximumParallelism: configuration.maximumParallelism,
+                        selectedServiceNames: selectedServiceNames,
+                        operationIdempotencyKeySHA256:
+                            operationIdempotencyKeySHA256,
+                        maintenanceAdmission: maintenance.binding
                     )
+                    reconciliation = try await StateUpgradeService(store: store)
+                        .withExclusiveLifecycleFence(lockWaitMilliseconds: 30_000) {
+                            try await reconciliationDriver.reconcile(request: request)
+                        }
                 } catch {
                     try recordMaintenanceCompletion(
                         maintenance,

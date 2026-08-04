@@ -243,6 +243,11 @@ final class Phase09Gate09QualificationHarnessTests: XCTestCase {
     XCTAssertTrue(live.contains("owned Gate 9 container was not observed."))
     XCTAssertTrue(live.contains("\"$cli\" metrics export --state-db \"$state\""))
     XCTAssertTrue(live.contains("--confirm-snapshot \"$metrics_hash\""))
+    XCTAssertTrue(live.contains("metrics_exported=0"))
+    XCTAssertTrue(live.contains("for n in {1..5}"))
+    XCTAssertTrue(live.contains("HW-METRIC-003"))
+    XCTAssertTrue(live.contains("else\n      metrics_export_status=$?"))
+    XCTAssertTrue(live.contains("metrics snapshot remained unstable across bounded retries"))
     XCTAssertTrue(source.contains("\"$cli\" status \"$config\" --state-db \"$state\" --output json"))
     XCTAssertTrue(source.contains("qualification.status-plan-v1.json"))
   }

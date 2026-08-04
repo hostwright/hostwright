@@ -123,7 +123,7 @@ live(){
   swift build --jobs 1 --product hostwright-control
   swift build --jobs 1 --product hostwrightd
   swift build --jobs 1 --product hostwright-stream-qualification
-  local bin runtime cli control daemon bootstrap config state socket pid resource output first_process_identity metrics_hash trace_id trace_hash n
+  local bin runtime cli control daemon bootstrap config state socket pid resource output first_process_identity metrics_hash metrics_exported metrics_export_status trace_id trace_hash n
   bin="$(swift build --show-bin-path)"
   runtime="$(short_live_runtime)"
   mkdir "$runtime"
@@ -180,8 +180,23 @@ live(){
   HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" HOSTWRIGHT_CACHE_DIR="$runtime/cache" HOSTWRIGHT_LOG_DIR="$runtime/logs" "$cli" events --state-db "$state" --project "$live_project" --limit 20 --output json | /usr/bin/jq -e . >/dev/null
   HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" HOSTWRIGHT_CACHE_DIR="$runtime/cache" HOSTWRIGHT_LOG_DIR="$runtime/logs" "$bootstrap" --live --root "$runtime" --state "$state" --socket "$socket" > "$runtime/stream-live.json"
 
-  metrics_hash="$(HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" metrics snapshot --state-db "$state" --output json | /usr/bin/jq -er '.snapshotSHA256')"
-  HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" metrics export --state-db "$state" --output-path "$runtime/metrics.json" --confirm-snapshot "$metrics_hash" --output json | /usr/bin/jq -e . >/dev/null
+  metrics_exported=0
+  for n in {1..5}; do
+    metrics_hash="$(HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" metrics snapshot --state-db "$state" --output json | /usr/bin/jq -er '.snapshotSHA256')"
+    if HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" metrics export --state-db "$state" --output-path "$runtime/metrics.json" --confirm-snapshot "$metrics_hash" --output json > "$runtime/qualification.metrics-export-v1.json" 2> "$runtime/qualification.metrics-export-v1.stderr.log"; then
+      /usr/bin/jq -e . "$runtime/qualification.metrics-export-v1.json" >/dev/null || die 'Gate 9 metrics export returned invalid JSON.' 66
+      metrics_exported=1
+      break
+    else
+      metrics_export_status=$?
+    fi
+    if ! /usr/bin/grep -q 'HW-METRIC-003' "$runtime/qualification.metrics-export-v1.json" "$runtime/qualification.metrics-export-v1.stderr.log" 2>/dev/null; then
+      /bin/cat "$runtime/qualification.metrics-export-v1.json" "$runtime/qualification.metrics-export-v1.stderr.log" >&2
+      die 'Gate 9 metrics export failed for a non-retryable reason.' "$metrics_export_status"
+    fi
+    /bin/sleep 1
+  done
+  [[ "$metrics_exported" == 1 ]] || die 'Gate 9 metrics snapshot remained unstable across bounded retries.' 124
   trace_id="$(/usr/bin/sqlite3 "$state" 'SELECT trace_id FROM trace_spans ORDER BY started_at DESC LIMIT 1;')"
   if [[ -n "$trace_id" ]]; then
     trace_hash="$(HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" traces inspect --state-db "$state" --trace-id "$trace_id" --output json | /usr/bin/jq -er --arg id "$trace_id" '.traces[] | select(.traceID == $id) | .traceSHA256')"

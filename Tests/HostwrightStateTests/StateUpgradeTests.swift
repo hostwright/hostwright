@@ -242,6 +242,91 @@ final class StateUpgradeTests: XCTestCase {
         }
     }
 
+    func testSynchronousExclusiveLifecycleFenceAuthorityPropagatesToInheritingTask() throws {
+        try withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) { store, _ in
+            let outcome = TaskOutcome()
+
+            try StateUpgradeService(store: store).withExclusiveLifecycleFence {
+                Task { [store, outcome] in
+                    do {
+                        let version = try store.schemaVersion()
+                        outcome.record(
+                            version == MigrationRunner.latestSchemaVersion
+                                ? "success" : "unexpected-schema-version"
+                        )
+                    } catch {
+                        outcome.record(String(describing: error))
+                    }
+                    outcome.finish()
+                }
+                XCTAssertEqual(outcome.wait(timeout: .now() + 2), .success)
+            }
+
+            XCTAssertEqual(outcome.value, "success")
+        }
+    }
+
+    func testInheritedLifecycleFenceAuthorityIsRevokedWhenTheFenceReturns() async throws {
+        try await withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) {
+            store, _ in
+            try store.configuration.prepareStateAccessFoundation()
+            let lockPath = try store.configuration.maintenancePaths().accessLockPath
+
+            let escaped = try StateUpgradeService(store: store).withExclusiveLifecycleFence {
+                Task { [store] in
+                    try? await Task.sleep(for: .milliseconds(100))
+                    do {
+                        _ = try store.schemaVersion()
+                        return "unexpected-success"
+                    } catch {
+                        return String(describing: error)
+                    }
+                }
+            }
+
+            let descriptor = open(lockPath, O_RDWR | O_NOFOLLOW | O_CLOEXEC)
+            XCTAssertGreaterThanOrEqual(descriptor, 0)
+            XCTAssertEqual(flock(descriptor, LOCK_EX | LOCK_NB), 0)
+            let outcome = await escaped.value
+            _ = flock(descriptor, LOCK_UN)
+            close(descriptor)
+
+            XCTAssertNotEqual(outcome, "unexpected-success")
+            XCTAssertTrue(outcome.contains("state-access fence"), outcome)
+        }
+    }
+
+    func testAsyncLifecycleFenceAllowsNestedAccessAcrossAwaitAndExcludesCompetingAccessor()
+        async throws
+    {
+        try await withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) {
+            store, _ in
+            let service = StateUpgradeService(store: store)
+
+            try await service.withExclusiveLifecycleFence {
+                try await Task.sleep(for: .milliseconds(10))
+                XCTAssertEqual(
+                    try store.schemaVersion(),
+                    MigrationRunner.latestSchemaVersion
+                )
+
+                let competing = Task.detached { () -> String in
+                    do {
+                        try store.migrate()
+                        return "unexpected-success"
+                    } catch {
+                        return String(describing: error)
+                    }
+                }
+                let outcome = await competing.value
+                XCTAssertNotEqual(outcome, "unexpected-success")
+                XCTAssertTrue(outcome.contains("state-access fence"), outcome)
+            }
+
+            XCTAssertNoThrow(try store.migrate())
+        }
+    }
+
     func testExclusiveLifecycleFenceSupportsBoundedControlPlaneWait() throws {
         try withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) { store, _ in
             try store.configuration.prepareStateAccessFoundation()
@@ -546,8 +631,51 @@ final class StateUpgradeTests: XCTestCase {
         try body(store, directory)
     }
 
+    private func withTemporaryStore(
+        throughVersion: Int,
+        _ body: (SQLiteStateStore, URL) async throws -> Void
+    ) async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hostwright-state-upgrade-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700]
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = SQLiteStateStore(path: directory.appendingPathComponent("state.sqlite").path)
+        try MigrationRunner().apply(to: store, throughVersion: throughVersion)
+        try await body(store, directory)
+    }
+
     private func permissions(_ path: String) -> Int {
         let attributes = try? FileManager.default.attributesOfItem(atPath: path)
         return (attributes?[.posixPermissions] as? NSNumber)?.intValue ?? -1
+    }
+}
+
+private final class TaskOutcome: @unchecked Sendable {
+    private let lock = NSLock()
+    private let completion = DispatchSemaphore(value: 0)
+    private var storedValue: String?
+
+    func record(_ value: String) {
+        lock.lock()
+        storedValue = value
+        lock.unlock()
+    }
+
+    func finish() {
+        completion.signal()
+    }
+
+    func wait(timeout: DispatchTime) -> DispatchTimeoutResult {
+        completion.wait(timeout: timeout)
+    }
+
+    var value: String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedValue
     }
 }

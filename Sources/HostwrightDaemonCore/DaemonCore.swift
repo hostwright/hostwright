@@ -303,7 +303,10 @@ public struct DaemonLoopRunner {
             }
 
             iterations += 1
-            let result = try await runIteration(iteration: iterations, store: store)
+            let result = try await StateUpgradeService(store: store)
+                .withExclusiveLifecycleFence(lockWaitMilliseconds: 30_000) {
+                    try await runIteration(iteration: iterations, store: store)
+                }
             switch result {
             case .success:
                 successfulIterations += 1

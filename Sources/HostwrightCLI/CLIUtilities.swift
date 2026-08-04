@@ -40,7 +40,7 @@ func hostwrightWaitForAsync<T: Sendable>(_ operation: @escaping @Sendable () asy
     let traceSession = HostwrightTraceContext.session
     let traceSpan = HostwrightTraceContext.span
 
-    Task.detached {
+    Task {
         do {
             box.result = Result.success(try await HostwrightTraceContext.withValues(
                 session: traceSession,

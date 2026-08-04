@@ -237,6 +237,9 @@ final class Phase09Gate09QualificationHarnessTests: XCTestCase {
     XCTAssertTrue(live.contains(confirmedApply))
     XCTAssertFalse(live.contains("\"$cli\" apply \"$config\" --state-db \"$state\" --confirm-plan \"$plan_hash\" --json"))
     XCTAssertFalse(live.contains("\"$cli\" apply \"$config\" --state-db \"$state\" --confirm-plan \"$plan_hash\" --output"))
+    XCTAssertTrue(live.contains("\"$cli\" status \"$config\" --state-db \"$state\" --output json"))
+    XCTAssertTrue(live.contains("qualification.status-plan-v1.json"))
+    XCTAssertTrue(live.contains("plan_hash=\"$(/usr/bin/jq -er '.planHash"))
   }
 
   func testKeychainCleanupIsLedgerOnlyMarkerVerifiedAndBootstrapFree() throws {

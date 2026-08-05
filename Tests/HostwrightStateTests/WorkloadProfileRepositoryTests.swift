@@ -119,25 +119,45 @@ final class WorkloadProfileRepositoryTests: XCTestCase {
     }
   }
 
-  func testSchemaV20PersistsWorkloadProfiles() throws {
+  func testLatestSchemaPersistsWorkloadProfiles() throws {
+    let root = try temporaryRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = SQLiteStateStore(path: root.appendingPathComponent("state.sqlite").path)
+    let latestSchemaVersion = MigrationRunner.latestSchemaVersion
+    try MigrationRunner().apply(to: store, throughVersion: latestSchemaVersion)
+    try store.controlIdentities.bootstrap(identity("owner"))
+    XCTAssertEqual(try store.schemaVersion(), latestSchemaVersion)
+
+    let stored = try store.workloadProfiles.create(record(profile("latest-root")))
+    let row = try store.withConnection(createIfNeeded: false, readOnly: true) { connection in
+      try connection.query(
+        "SELECT profile_id, version, generation, profile_sha256 FROM workload_profiles WHERE profile_id = ?",
+        bindings: [.text("latest-root")])
+    }.first
+    XCTAssertEqual(row?.count, 4)
+    XCTAssertEqual(row?[0], "latest-root")
+    XCTAssertEqual(row?[1], "1")
+    XCTAssertEqual(row?[2], "1")
+    XCTAssertEqual(row?[3], stored.profileSHA256)
+  }
+
+  func testSchemaV20RejectsWorkloadProfilePersistence() throws {
     let root = try temporaryRoot()
     defer { try? FileManager.default.removeItem(at: root) }
     let store = SQLiteStateStore(path: root.appendingPathComponent("state.sqlite").path)
     try MigrationRunner().apply(to: store, throughVersion: 20)
-    try store.controlIdentities.bootstrap(identity("owner"))
     XCTAssertEqual(try store.schemaVersion(), 20)
 
-    let stored = try store.workloadProfiles.create(record(profile("v20-root")))
-    let row = try store.withConnection(createIfNeeded: false, readOnly: true) { connection in
-      try connection.query(
-        "SELECT profile_id, version, generation, profile_sha256 FROM workload_profiles WHERE profile_id = ?",
-        bindings: [.text("v20-root")])
-    }.first
-    XCTAssertEqual(row?.count, 4)
-    XCTAssertEqual(row?[0], "v20-root")
-    XCTAssertEqual(row?[1], "1")
-    XCTAssertEqual(row?[2], "1")
-    XCTAssertEqual(row?[3], stored.profileSHA256)
+    do {
+      _ = try store.workloadProfiles.create(record(profile("v20-root")))
+      XCTFail("Expected workload profile creation to be rejected")
+    } catch let error as StateStoreError {
+      guard case .incompatibleSchema = error else {
+        return XCTFail("Expected incompatible schema, got \(error)")
+      }
+    } catch {
+      XCTFail("Expected StateStoreError.incompatibleSchema, got \(error)")
+    }
   }
 
   private func withStore(

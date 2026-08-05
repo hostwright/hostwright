@@ -83,9 +83,13 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
             as: UTF8.self
         )
         for fragment in [
-            "Phase 08 aggregate soak qualification contract v1 is valid.",
-            "exactly 259200 seconds",
-            "300-second samples",
+            "Phase 08 aggregate soak qualification contract v2 is valid.",
+            "cumulative qualifying duration is exactly 259200 seconds",
+            "864 durable 300-second samples",
+            "resumes from its last validated checkpoint instead of sequence zero",
+            "predecessor-hashed",
+            "physical host",
+            "Gaps and partial samples never count",
             "no other Hostwright-managed runtime",
             "writable internal non-removable storage",
             "timestamp-bound real sleep then wake",
@@ -101,11 +105,24 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
             "expected_samples=864",
             "compaction_attempt_limit=5",
             "power_evidence_version=1",
+            "qualification_schema_version=2",
+            "checkpoint_schema_version=1",
             "resource_uuid_pattern=",
+            "resource_identifier_pattern=",
             "phase08-gate16-soak-",
-            "active-run-v1",
+            "active-run-v2",
+            "checkpoints-v1",
+            "segments-v1.tsv",
+            "samples-v2.tsv",
+            "commit_checkpoint",
+            "validate_checkpoint_chain",
+            "run_checkpointed_fault",
+            "resume)",
+            "status)",
+            "progressPercent=",
             "preflight)",
             "source_digest",
+            "current_host_identity",
             "HOSTWRIGHT_PHASE08_SOAK_SOURCE_COMMIT",
             ".configuration.descriptor.digest",
             "require_internal_persistent_path",
@@ -125,7 +142,8 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
             "container stop",
             "--interval 4 --jitter 1",
             "final-rm-plan.json",
-            "evidence-v1.sha256"
+            "evidence-v2.sha256",
+            "next_sample=$((last_sample_epoch + sample_interval_seconds))"
         ] {
             XCTAssertTrue(script.contains(fragment), "Missing soak behavior: \(fragment)")
         }
@@ -253,6 +271,71 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
         }
     }
 
+    func testAggregateSoakSleepWakeProofCannotCrossCheckpointedSegments() throws {
+        let scriptURL = packageRoot().appendingPathComponent(
+            "scripts/phase08-soak-qualification.sh"
+        )
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-soak-power-segments-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let first = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        let second = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+        let firstStart = try epoch("2026-08-03 07:30:00 -0400")
+        let firstCheckpoint = try epoch("2026-08-03 08:00:00 -0400")
+        let secondStart = try epoch("2026-08-03 09:00:00 -0400")
+        let secondCheckpoint = try epoch("2026-08-03 09:30:00 -0400")
+        let source = #"""
+        source "$1"
+        segment_file="$2/segments-v1.tsv"
+        sample_file="$2/samples-v2.tsv"
+        printf 'segmentID\tevent\tepoch\tsequence\tqualifiedSeconds\tcheckpointSHA256\tdetail1\tdetail2\n' > "$segment_file"
+        printf '%s\tstart\t%s\t0\t0\t%s\tgapSeconds=0\tsourceCommit=x\n' "$3" "$5" "$genesis_checkpoint_sha256" >> "$segment_file"
+        printf '%s\tstart\t%s\t1\t300\t%s\tgapSeconds=3600\tsourceCommit=x\n' "$4" "$7" "$genesis_checkpoint_sha256" >> "$segment_file"
+        printf '%b\n' "$checkpoint_header" > "$sample_file"
+        printf '1\tq\t%s\t1\t%s\n' "$3" "$6" >> "$sample_file"
+        printf '2\tq\t%s\t1\t%s\n' "$4" "$8" >> "$sample_file"
+        printf '%s\n' "$HOSTWRIGHT_TEST_PMSET_LOG" | {
+          temporary_log="$2/pmset.log"
+          cat > "$temporary_log"
+          find_qualified_sleep_wake_pair "$temporary_log"
+        }
+        """#
+        let arguments = [
+            scriptURL.path,
+            root.path,
+            first,
+            second,
+            String(firstStart),
+            String(firstCheckpoint),
+            String(secondStart),
+            String(secondCheckpoint)
+        ]
+        let crossing = """
+        2026-08-03 07:50:00 -0400 Sleep               \tEntering Sleep state due to 'Idle Sleep'
+        2026-08-03 09:10:00 -0400 Wake                \tWake from Normal Sleep
+        """
+        let crossingResult = try runBash(
+            source,
+            arguments: arguments,
+            environment: ["HOSTWRIGHT_TEST_PMSET_LOG": crossing]
+        )
+        XCTAssertEqual(crossingResult.status, 1, crossingResult.output)
+
+        let valid = """
+        2026-08-03 09:05:00 -0400 Sleep               \tEntering Sleep state due to 'Idle Sleep'
+        2026-08-03 09:15:00 -0400 Wake                \tWake from Normal Sleep
+        """
+        let validResult = try runBash(
+            source,
+            arguments: arguments,
+            environment: ["HOSTWRIGHT_TEST_PMSET_LOG": valid]
+        )
+        XCTAssertEqual(validResult.status, 0, validResult.output)
+    }
+
     func testAggregateSoakRetriesFreshCompactionPlansOnlyForStaleConfirmation() throws {
         let scriptURL = packageRoot().appendingPathComponent(
             "scripts/phase08-soak-qualification.sh"
@@ -351,7 +434,7 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
         XCTAssertTrue(resultPayload.contains(#""integrityHealth":"healthy""#))
     }
 
-    func testAggregateSoakUnexpectedExitDurablyMarksFailure() throws {
+    func testAggregateSoakUnexpectedExitDurablyMarksResumable() throws {
         let scriptURL = packageRoot().appendingPathComponent(
             "scripts/phase08-soak-qualification.sh"
         )
@@ -381,7 +464,7 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
             contentsOf: root.appendingPathComponent("state-v1.tsv"),
             encoding: .utf8
         )
-        XCTAssertTrue(state.contains("phase\tfailed"))
+        XCTAssertTrue(state.contains("phase\tresumable"))
         XCTAssertTrue(state.contains("runnerExitCode\t1"))
         XCTAssertTrue(
             try String(
@@ -389,6 +472,200 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
                 encoding: .utf8
             ).contains("runner-exit-classified status=1")
         )
+    }
+
+    func testAggregateSoakReapsCleanlyExitedDaemonWithoutFalseTimeout() throws {
+        let scriptURL = packageRoot().appendingPathComponent(
+            "scripts/phase08-soak-qualification.sh"
+        )
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-soak-reap-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let result = try runBash(
+            #"""
+            source "$1"
+            state_file="$2/state-v2.tsv"
+            evidence_file="$2/evidence-v2.log"
+            printf 'schemaVersion\t2\n' > "$state_file"
+            : > "$evidence_file"
+            daemon_generation=1
+            /bin/bash -c 'trap "exit 0" TERM; while :; do sleep 1; done' &
+            daemon_pid=$!
+            sleep 0.1
+            stop_daemon
+            printf 'reaped\n'
+            """#,
+            arguments: [scriptURL.path, root.path]
+        )
+
+        XCTAssertEqual(result.status, 0, result.output)
+        XCTAssertTrue(result.output.contains("reaped"))
+        XCTAssertTrue(
+            try String(
+                contentsOf: root.appendingPathComponent("evidence-v2.log"),
+                encoding: .utf8
+            ).contains("daemon-stopped generation=1")
+        )
+    }
+
+    func testAggregateSoakRebuildsAndValidatesCumulativeCheckpointChain() throws {
+        let scriptURL = packageRoot().appendingPathComponent(
+            "scripts/phase08-soak-qualification.sh"
+        )
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-soak-checkpoints-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let setup = try runBash(
+            checkpointFixtureSource(validate: true),
+            arguments: [scriptURL.path, root.path]
+        )
+        XCTAssertEqual(setup.status, 0, setup.output)
+        XCTAssertTrue(setup.output.contains("samples=2 seconds=600 rows=3"))
+        XCTAssertTrue(setup.output.contains("readOnlyRows=1"))
+
+        let partialRecovery = try runBash(
+            #"""
+            source "$1"
+            HOSTWRIGHT_PHASE08_SOAK_ROOT="$2"
+            evidence_file="$2/evidence-v2.log"
+            checkpoint_root="$2/checkpoints-v1"
+            cumulative_samples=2
+            printf 'partial\n' > "$2/checkpoints-v1/sequence-0003.tsv.next.999"
+            printf 'partial\n' > "$2/fault-checkpoints-v1/sequence-0003-pressure.tsv.next.999"
+            printf 'partial\n' > "$2/hostwright.yaml.next"
+            dd if=/dev/zero of="$2/pressure-v1.bin" bs=1048576 count=64 >/dev/null 2>&1
+            printf '{"sequence":3}\n' > "$2/runtime-inventory-v1/sequence-0003.json"
+            recover_uncommitted_artifacts
+            count="$(find "$2/recovered-partials-v1" -type f | wc -l | tr -d ' ')"
+            printf 'preserved=%s\n' "$count"
+            """#,
+            arguments: [scriptURL.path, root.path]
+        )
+        XCTAssertEqual(partialRecovery.status, 0, partialRecovery.output)
+        XCTAssertTrue(partialRecovery.output.contains("preserved=5"))
+
+        try Data("tampered\n".utf8).write(
+            to: root.appendingPathComponent("runtime-inventory-v1/sequence-0002.json")
+        )
+        let rejected = try runBash(
+            checkpointFixtureSource(validate: false),
+            arguments: [scriptURL.path, root.path]
+        )
+        XCTAssertEqual(rejected.status, 75, rejected.output)
+        XCTAssertTrue(rejected.output.contains("runtime inventory hash changed"))
+    }
+
+    func testAggregateSoakReusesCompletedFaultReceiptExactlyOnce() throws {
+        let scriptURL = packageRoot().appendingPathComponent(
+            "scripts/phase08-soak-qualification.sh"
+        )
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-soak-fault-receipt-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let result = try runBash(
+            #"""
+            source "$1"
+            HOSTWRIGHT_PHASE08_SOAK_ROOT="$2"
+            HOSTWRIGHT_PHASE08_SOAK_SOURCE_COMMIT='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+            evidence_file="$2/evidence-v2.log"
+            qualification_id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+            hostwright_sha='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+            daemon_sha='cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'
+            host_identity_sha='dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
+            resource_identifier='hostwright-v2-p08-soa-web-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+            resource_uuid='cccccccc-cccc-8ccc-8ccc-cccccccccccc'
+            project_name='p08-soak-test'
+            previous_checkpoint_sha256="$genesis_checkpoint_sha256"
+            mkdir "$2/fault-checkpoints-v1"
+            : > "$evidence_file"
+            printf 'fixture\n' > "$2/hostwright.yaml"
+            printf '0\n' > "$2/counter"
+            test_root="$2"
+            perform_fault() {
+              printf '%s\n' "$(( $(<"$test_root/counter") + 1 ))" > "$test_root/counter"
+            }
+            run_checkpointed_fault 72 pressure perform_fault
+            run_checkpointed_fault 72 pressure perform_fault
+            printf 'count=%s\n' "$(<"$2/counter")"
+            """#,
+            arguments: [scriptURL.path, root.path]
+        )
+
+        XCTAssertEqual(result.status, 0, result.output)
+        XCTAssertTrue(result.output.contains("count=1"))
+        XCTAssertTrue(
+            try String(
+                contentsOf: root.appendingPathComponent("evidence-v2.log"),
+                encoding: .utf8
+            ).contains("fault-receipt-reused sequence=72 label=pressure")
+        )
+    }
+
+    func testAggregateSoakRecoversPowerLossMarkerWithoutLosingCheckpoints() throws {
+        let scriptURL = packageRoot().appendingPathComponent(
+            "scripts/phase08-soak-qualification.sh"
+        )
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-soak-stale-marker-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let result = try runBash(
+            #"""
+            source "$1"
+            HOSTWRIGHT_PHASE08_SOAK_ROOT="$2"
+            HOSTWRIGHT_PHASE08_SOAK_SOURCE_COMMIT='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+            state_file="$2/state-v2.tsv"
+            evidence_file="$2/evidence-v2.log"
+            segment_file="$2/segments-v1.tsv"
+            active_run_root="$2/active-run-v2"
+            cumulative_samples=2
+            cumulative_seconds=600
+            last_sample_epoch=1600
+            previous_checkpoint_sha256='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+            prior_segment='cccccccc-cccc-4ccc-8ccc-cccccccccccc'
+            printf 'phase\trunning\n' > "$state_file"
+            : > "$evidence_file"
+            printf 'segmentID\tevent\tepoch\tsequence\tqualifiedSeconds\tcheckpointSHA256\tdetail1\tdetail2\n' > "$segment_file"
+            mkdir "$active_run_root"
+            chmod 700 "$active_run_root"
+            {
+              printf 'schemaVersion\t1\n'
+              printf 'pid\t999999\n'
+              printf 'bootIdentity\t%s\n' "$(boot_identity)"
+              printf 'segmentID\t%s\n' "$prior_segment"
+              printf 'startEpoch\t1000\n'
+              printf 'startSequence\t0\n'
+              printf 'startCheckpointSHA256\t%s\n' "$genesis_checkpoint_sha256"
+              printf 'gapSeconds\t0\n'
+            } > "$active_run_root/owner-v1.tsv"
+            chmod 600 "$active_run_root/owner-v1.tsv"
+            recover_active_run_marker
+            validate_segment_ledger
+            [[ ! -e "$active_run_root" ]]
+            printf 'rows=%s phase=%s samples=%s seconds=%s\n' \
+              "$(wc -l < "$segment_file" | tr -d ' ')" \
+              "$(latest_state_value phase)" "$cumulative_samples" "$cumulative_seconds"
+            """#,
+            arguments: [scriptURL.path, root.path]
+        )
+
+        XCTAssertEqual(result.status, 0, result.output)
+        XCTAssertTrue(result.output.contains("rows=3 phase=resumable samples=2 seconds=600"))
     }
 
     func testAggregateSoakRefusesForeignManagedRuntimeInventory() throws {
@@ -490,6 +767,66 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
         """
     }
 
+    private func checkpointFixtureSource(validate: Bool) -> String {
+        let setup = #"""
+        source "$1"
+        HOSTWRIGHT_PHASE08_SOAK_ROOT="$2"
+        HOSTWRIGHT_PHASE08_SOAK_SOURCE_COMMIT='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+        state_file="$2/state-v2.tsv"
+        evidence_file="$2/evidence-v2.log"
+        sample_file="$2/samples-v2.tsv"
+        checkpoint_root="$2/checkpoints-v1"
+        segment_file="$2/segments-v1.tsv"
+        qualification_id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+        segment_id='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+        project_name='p08-soak-test'
+        resource_identifier='hostwright-v2-p08-soa-web-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+        resource_uuid='cccccccc-cccc-8ccc-8ccc-cccccccccccc'
+        hostwright_sha='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+        daemon_sha='cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'
+        template_sha='dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
+        host_identity_sha='9999999999999999999999999999999999999999999999999999999999999999'
+        previous_checkpoint_sha256="$genesis_checkpoint_sha256"
+        mkdir -p "$checkpoint_root" "$2/runtime-inventory-v1" "$2/fault-checkpoints-v1"
+        : > "$evidence_file"
+        printf 'schemaVersion\t2\n' > "$state_file"
+        printf 'segmentID\tevent\tepoch\tsequence\tqualifiedSeconds\tcheckpointSHA256\tdetail1\tdetail2\n' > "$segment_file"
+        printf '%s\tstart\t1000\t0\t0\t%s\tgapSeconds=0\tsourceCommit=%s\n' \
+          "$segment_id" "$genesis_checkpoint_sha256" "$HOSTWRIGHT_PHASE08_SOAK_SOURCE_COMMIT" >> "$segment_file"
+        printf '%b\n' "$checkpoint_header" > "$sample_file"
+        if [[ ! -e "$checkpoint_root/sequence-0001.tsv" ]]; then
+          for sequence in 1 2; do
+            printf '{"sequence":%s}\n' "$sequence" > "$2/runtime-inventory-v1/sequence-$(printf '%04d' "$sequence").json"
+            chmod 600 "$2/runtime-inventory-v1/sequence-$(printf '%04d' "$sequence").json"
+            inventory_sha="$(sha256 "$2/runtime-inventory-v1/sequence-$(printf '%04d' "$sequence").json")"
+            printf -v material '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' \
+              "$sequence" "$qualification_id" "$segment_id" "$sequence" "$((1000 + sequence * 300))" "$((sequence * 300))" \
+              123 1024 12 4096 10 0 20 2 0 1 "$inventory_sha" \
+              eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee \
+              ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff \
+              "$resource_identifier" "$resource_uuid" "$project_name" "$hostwright_sha" \
+              "$daemon_sha" "$template_sha" "$host_identity_sha" \
+              "$HOSTWRIGHT_PHASE08_SOAK_SOURCE_COMMIT" \
+              "$previous_checkpoint_sha256"
+            commit_checkpoint "$sequence" "$material"
+          done
+          printf '%b\n' "$checkpoint_header" > "$sample_file"
+        fi
+        """#
+        if validate {
+            return setup + "\n" + #"""
+            validate_checkpoint_chain read-only
+            printf 'readOnlyRows=%s\n' "$(wc -l < "$sample_file" | tr -d ' ')"
+            validate_checkpoint_chain
+            printf 'samples=%s seconds=%s rows=%s\n' \
+              "$cumulative_samples" "$cumulative_seconds" "$(wc -l < "$sample_file" | tr -d ' ')"
+            """#
+        }
+        return setup + "\n" + #"""
+        validate_checkpoint_chain
+        """#
+    }
+
     private func runBash(
         _ source: String,
         arguments: [String],
@@ -513,6 +850,16 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
                 as: UTF8.self
             )
         )
+    }
+
+    private func epoch(_ timestamp: String) throws -> Int {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss Z"
+        guard let date = formatter.date(from: timestamp) else {
+            throw NSError(domain: "MutationCheckpointQualificationScriptTests", code: 1)
+        }
+        return Int(date.timeIntervalSince1970)
     }
 
     private func packageRoot() -> URL {

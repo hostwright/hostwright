@@ -134,6 +134,9 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
             "diagnostics support preview",
             "state compact",
             "compaction-stale-plan",
+            "compaction-daemon-quiesce-requested",
+            "compaction-daemon-quiesced",
+            "compaction-daemon-resumed",
             "runner-exit-classified",
             "verify_exclusive_runtime_inventory",
             "runtimeInventorySHA256",
@@ -393,11 +396,26 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
             HOSTWRIGHT_PHASE08_SOAK_ROOT="$2"
             HOSTWRIGHT_PHASE08_SOAK_HOSTWRIGHT="$3"
             evidence_file="$2/evidence-v1.log"
+            daemon_pid='daemon-before'
+            stop_daemon() {
+              printf 'stop\n' >> "$HOSTWRIGHT_TEST_LIFECYCLE"
+              daemon_pid=''
+            }
+            start_daemon() {
+              printf 'start\n' >> "$HOSTWRIGHT_TEST_LIFECYCLE"
+              daemon_pid='daemon-after'
+            }
+            verify_running() {
+              [[ "$daemon_pid" == daemon-after ]]
+            }
             : > "$evidence_file"
             compact_state 12
             """#,
             arguments: [scriptURL.path, root.path, fakeHostwright.path],
-            environment: ["HOSTWRIGHT_TEST_COUNTER": counter.path]
+            environment: [
+                "HOSTWRIGHT_TEST_COUNTER": counter.path,
+                "HOSTWRIGHT_TEST_LIFECYCLE": root.appendingPathComponent("lifecycle").path
+            ]
         )
 
         XCTAssertEqual(result.status, 0, result.output)
@@ -432,6 +450,171 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
             encoding: .utf8
         )
         XCTAssertTrue(resultPayload.contains(#""integrityHealth":"healthy""#))
+        XCTAssertEqual(
+            try String(contentsOf: root.appendingPathComponent("lifecycle"), encoding: .utf8),
+            "stop\nstart\n"
+        )
+    }
+
+    func testAggregateSoakCompactionBoundsPersistentStalePlanChurnAndResumesDaemon() throws {
+        let scriptURL = packageRoot().appendingPathComponent(
+            "scripts/phase08-soak-qualification.sh"
+        )
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-soak-compaction-stale-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let counter = root.appendingPathComponent("counter")
+        let fakeHostwright = root.appendingPathComponent("hostwright")
+        try Data("0\n".utf8).write(to: counter)
+        try Data(
+            #"""
+            #!/usr/bin/env bash
+            set -euo pipefail
+            dry_run=false
+            token=''
+            while [[ "$#" -gt 0 ]]; do
+              case "$1" in
+                --dry-run) dry_run=true ;;
+                --confirm-compact) shift; token="$1" ;;
+              esac
+              shift
+            done
+            if [[ "$dry_run" == true ]]; then
+              attempt="$(( $(<"$HOSTWRIGHT_TEST_COUNTER") + 1 ))"
+              printf '%s\n' "$attempt" > "$HOSTWRIGHT_TEST_COUNTER"
+              printf '{"executable":true,"confirmationToken":"token-%s"}\n' "$attempt"
+              exit 0
+            fi
+            printf '{"code":"HW-CLI-003","exitCode":70,"kind":"error"}\n' >&2
+            exit 70
+            """#.utf8
+        ).write(to: fakeHostwright)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: fakeHostwright.path
+        )
+
+        let result = try runBash(
+            #"""
+            source "$1"
+            HOSTWRIGHT_PHASE08_SOAK_ROOT="$2"
+            HOSTWRIGHT_PHASE08_SOAK_HOSTWRIGHT="$3"
+            evidence_file="$2/evidence-v1.log"
+            daemon_pid='daemon-before'
+            stop_daemon() {
+              printf 'stop\n' >> "$HOSTWRIGHT_TEST_LIFECYCLE"
+              daemon_pid=''
+            }
+            start_daemon() {
+              printf 'start\n' >> "$HOSTWRIGHT_TEST_LIFECYCLE"
+              daemon_pid='daemon-after'
+            }
+            verify_running() {
+              [[ "$daemon_pid" == daemon-after ]]
+            }
+            : > "$evidence_file"
+            compact_state 24
+            """#,
+            arguments: [scriptURL.path, root.path, fakeHostwright.path],
+            environment: [
+                "HOSTWRIGHT_TEST_COUNTER": counter.path,
+                "HOSTWRIGHT_TEST_LIFECYCLE": root.appendingPathComponent("lifecycle").path
+            ]
+        )
+
+        XCTAssertEqual(result.status, 70, result.output)
+        XCTAssertEqual(try String(contentsOf: counter, encoding: .utf8), "5\n")
+        XCTAssertEqual(
+            try String(contentsOf: root.appendingPathComponent("lifecycle"), encoding: .utf8),
+            "stop\nstart\n"
+        )
+        let evidence = try String(
+            contentsOf: root.appendingPathComponent("evidence-v1.log"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(evidence.contains("compaction-daemon-quiesced sequence=24"))
+        XCTAssertTrue(evidence.contains("compaction-daemon-resumed sequence=24"))
+        XCTAssertTrue(evidence.contains("Soak compaction exhausted 5 fresh confirmation attempts"))
+    }
+
+    func testAggregateSoakCompactionRestoresDaemonAfterConfirmationFailure() throws {
+        let scriptURL = packageRoot().appendingPathComponent(
+            "scripts/phase08-soak-qualification.sh"
+        )
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-soak-compaction-cancel-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let fakeHostwright = root.appendingPathComponent("hostwright")
+        try Data(
+            #"""
+            #!/usr/bin/env bash
+            set -euo pipefail
+            dry_run=false
+            while [[ "$#" -gt 0 ]]; do
+              case "$1" in
+                --dry-run) dry_run=true ;;
+              esac
+              shift
+            done
+            if [[ "$dry_run" == true ]]; then
+              printf '{"executable":true,"confirmationToken":"token-cancel"}\n'
+              exit 0
+            fi
+            printf '{"code":"HW-CLI-999","exitCode":75,"kind":"error"}\n' >&2
+            exit 75
+            """#.utf8
+        ).write(to: fakeHostwright)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: fakeHostwright.path
+        )
+
+        let result = try runBash(
+            #"""
+            source "$1"
+            HOSTWRIGHT_PHASE08_SOAK_ROOT="$2"
+            HOSTWRIGHT_PHASE08_SOAK_HOSTWRIGHT="$3"
+            evidence_file="$2/evidence-v1.log"
+            daemon_pid='daemon-before'
+            stop_daemon() {
+              printf 'stop\n' >> "$HOSTWRIGHT_TEST_LIFECYCLE"
+              daemon_pid=''
+            }
+            start_daemon() {
+              printf 'start\n' >> "$HOSTWRIGHT_TEST_LIFECYCLE"
+              daemon_pid='daemon-after'
+            }
+            verify_running() {
+              [[ "$daemon_pid" == daemon-after ]]
+            }
+            : > "$evidence_file"
+            compact_state 36
+            """#,
+            arguments: [scriptURL.path, root.path, fakeHostwright.path],
+            environment: [
+                "HOSTWRIGHT_TEST_LIFECYCLE": root.appendingPathComponent("lifecycle").path
+            ]
+        )
+
+        XCTAssertEqual(result.status, 75, result.output)
+        XCTAssertEqual(
+            try String(contentsOf: root.appendingPathComponent("lifecycle"), encoding: .utf8),
+            "stop\nstart\n"
+        )
+        let evidence = try String(
+            contentsOf: root.appendingPathComponent("evidence-v1.log"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(evidence.contains("compaction-daemon-resumed sequence=36"))
+        XCTAssertTrue(evidence.contains("confirmation failed at sequence 36 attempt 1"))
     }
 
     func testAggregateSoakUnexpectedExitDurablyMarksResumable() throws {

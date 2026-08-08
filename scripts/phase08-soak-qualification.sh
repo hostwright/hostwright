@@ -39,6 +39,10 @@ daemon_sha=''
 template_sha=''
 host_identity_sha=''
 last_config_sha256=''
+compaction_failure_message=''
+checkpoint_source_commit=''
+source_commit_history=''
+source_transition_required=0
 
 die() {
   local message="$1"
@@ -61,6 +65,7 @@ contract() {
   printf '%s\n' 'The clean source, executables, template, and private evidence root must remain on writable internal non-removable storage.'
   printf '%s\n' 'Configuration churn, bounded pressure, daemon/workload/helper/runtime faults, and all local observability sinks are exercised serially.'
   printf '%s\n' 'A timestamp-bound real sleep then wake must occur inside a qualified segment; the runner never forces either transition.'
+  printf '%s\n' 'Compaction quiesces the foreground daemon for the plan-confirm transaction and always restores a fresh daemon before returning.'
   printf '%s\n' 'Failure preserves evidence and exact resource identity; success performs confirmation-bound owned-only cleanup.'
   printf '%s\n' 'No CI, GitHub, network listener, upload, reboot, logout, release, tag, tap, or website action is performed.'
 }
@@ -156,6 +161,70 @@ source_digest() {
       /usr/bin/shasum -a 256 "$path"
     done < <(git ls-files --others --exclude-standard | LC_ALL=C sort)
   } | /usr/bin/shasum -a 256 | awk '{ print $1 }'
+}
+
+accepted_source_commits() {
+  local history="${source_commit_history:-$checkpoint_source_commit}"
+  if [[ -z "$history" ]]; then
+    history="$HOSTWRIGHT_PHASE08_SOAK_SOURCE_COMMIT"
+  else
+    case ",$history," in
+      *,$HOSTWRIGHT_PHASE08_SOAK_SOURCE_COMMIT,*) ;;
+      *) history="$history,$HOSTWRIGHT_PHASE08_SOAK_SOURCE_COMMIT" ;;
+    esac
+  fi
+  printf '%s\n' "$history"
+}
+
+source_commit_is_allowed() {
+  local candidate="$1"
+  local history
+  history="$(accepted_source_commits)"
+  [[ ",$history," == *",$candidate,"* ]]
+}
+
+validate_source_transition() {
+  [[ "$source_transition_required" == 1 ]] || return 0
+  local prior_commit="$checkpoint_source_commit"
+  local current_commit="$HOSTWRIGHT_PHASE08_SOAK_SOURCE_COMMIT"
+  local changed_path
+  [[ "$prior_commit" =~ ^[a-f0-9]{40}$ && "$current_commit" =~ ^[a-f0-9]{40}$ \
+      && "$prior_commit" != "$current_commit" ]] \
+    || die 'The source transition identity is malformed.' 75
+  [[ "$(git rev-parse "$current_commit^" 2>/dev/null || true)" == "$prior_commit" ]] \
+    || die 'The source transition must be one direct child of the checkpoint source commit.' 75
+  while IFS= read -r changed_path; do
+    [[ -z "$changed_path" ]] && continue
+    case "$changed_path" in
+      scripts/phase08-soak-qualification.sh|Tests/HostwrightDaemonTests/MutationCheckpointQualificationScriptTests.swift)
+        ;;
+      *)
+        die "The source transition changed an out-of-scope path: $changed_path" 75
+        ;;
+    esac
+  done < <(git diff --name-only "$prior_commit" "$current_commit")
+}
+
+commit_source_transition() {
+  [[ "$source_transition_required" == 1 ]] || return 0
+  validate_source_transition
+  local prior_commit="$checkpoint_source_commit"
+  local current_commit="$HOSTWRIGHT_PHASE08_SOAK_SOURCE_COMMIT"
+  local new_digest history
+  new_digest="$(source_digest)"
+  history="${source_commit_history:-$checkpoint_source_commit}"
+  case ",$history," in
+    *,$current_commit,*) die 'The source transition was already recorded.' 75 ;;
+  esac
+  history="$history,$current_commit"
+  append_state sourceCommitHistory "$history"
+  append_state sourceCommit "$current_commit"
+  append_state sourceDigest "$new_digest"
+  checkpoint_source_commit="$current_commit"
+  source_commit_history="$history"
+  source_sha="$new_digest"
+  source_transition_required=0
+  record "source-transition-accepted prior=$prior_commit current=$current_commit sourceDigest=$new_digest"
 }
 
 require_canonical_file() {
@@ -623,6 +692,9 @@ load_qualification_state() {
   [[ "$(latest_state_value schemaVersion)" == "$qualification_schema_version" ]] \
     || die 'The resumable qualification schema is unsupported.' 75
   qualification_id="$(latest_state_value qualificationID)"
+  checkpoint_source_commit="$(latest_state_value sourceCommit)"
+  source_commit_history="$(latest_state_value sourceCommitHistory)"
+  [[ -n "$source_commit_history" ]] || source_commit_history="$checkpoint_source_commit"
   source_sha="$(latest_state_value sourceDigest)"
   hostwright_sha="$(latest_state_value hostwrightSHA256)"
   daemon_sha="$(latest_state_value daemonSHA256)"
@@ -639,6 +711,8 @@ load_qualification_state() {
   fi
   daemon_generation="$(latest_state_value daemonGeneration)"
   [[ "$qualification_id" =~ $uuid_pattern \
+      && "$checkpoint_source_commit" =~ ^[a-f0-9]{40}$ \
+      && "$source_commit_history" =~ ^[a-f0-9]{40}(,[a-f0-9]{40})*$ \
       && "$source_sha" =~ ^[a-f0-9]{64}$ \
       && "$hostwright_sha" =~ ^[a-f0-9]{64}$ \
       && "$daemon_sha" =~ ^[a-f0-9]{64}$ \
@@ -648,9 +722,15 @@ load_qualification_state() {
       && "$(latest_state_value expectedSamples)" == "$expected_samples" \
       && "$(latest_state_value requiredQualifiedSeconds)" == "$duration_seconds" ]] \
     || die 'The resumable qualification authority is malformed.' 75
-  [[ "$(latest_state_value sourceCommit)" == "$HOSTWRIGHT_PHASE08_SOAK_SOURCE_COMMIT" \
-      && "$source_sha" == "$(source_digest)" \
-      && "$hostwright_sha" == "$(sha256 "$HOSTWRIGHT_PHASE08_SOAK_HOSTWRIGHT")" \
+  source_transition_required=0
+  if [[ "$checkpoint_source_commit" != "$HOSTWRIGHT_PHASE08_SOAK_SOURCE_COMMIT" ]]; then
+    source_transition_required=1
+  fi
+  if [[ "$source_transition_required" == 0 ]]; then
+    [[ "$source_sha" == "$(source_digest)" ]] \
+      || die 'Resume refused changed source digest.' 75
+  fi
+  [[ "$hostwright_sha" == "$(sha256 "$HOSTWRIGHT_PHASE08_SOAK_HOSTWRIGHT")" \
       && "$daemon_sha" == "$(sha256 "$HOSTWRIGHT_PHASE08_SOAK_DAEMON")" \
       && "$template_sha" == "$(sha256 "$HOSTWRIGHT_PHASE08_SOAK_CONFIG_TEMPLATE")" \
       && "$host_identity_sha" == "$(current_host_identity)" \
@@ -670,10 +750,19 @@ validate_segment_ledger() {
   [[ "$(sed -n '1p' "$segment_file")" \
       == $'segmentID\tevent\tepoch\tsequence\tqualifiedSeconds\tcheckpointSHA256\tdetail1\tdetail2' ]] \
     || die 'The segment ledger header changed.' 75
+  local accepted_commits
+  accepted_commits="$(accepted_source_commits)"
   awk -F '\t' \
     -v expectedSamples="$expected_samples" \
     -v interval="$sample_interval_seconds" \
-    -v sourceCommit="$HOSTWRIGHT_PHASE08_SOAK_SOURCE_COMMIT" '
+    -v sourceCommits="$accepted_commits" '
+      function source_allowed(candidate, parts, count, idx) {
+        count = split(sourceCommits, parts, ",")
+        for (idx = 1; idx <= count; idx++) {
+          if (parts[idx] == candidate) return 1
+        }
+        return 0
+      }
       NR == 1 { next }
       NF != 8 { exit 1 }
       $1 !~ /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/ { exit 1 }
@@ -682,7 +771,7 @@ validate_segment_ledger() {
       $4 > expectedSamples || $5 != $4 * interval { exit 1 }
       $2 == "start" {
         if (++starts[$1] != 1 || finishes[$1] != 0) exit 1
-        if ($7 !~ /^gapSeconds=[0-9]+$/ || $8 != "sourceCommit=" sourceCommit) exit 1
+        if ($7 !~ /^gapSeconds=[0-9]+$/ || !source_allowed(substr($8, 14))) exit 1
         startEpoch[$1] = $3
         next
       }
@@ -775,10 +864,11 @@ validate_checkpoint_chain() {
         && "$row_daemon_sha" == "$daemon_sha" \
         && "$row_template_sha" == "$template_sha" \
         && "$row_host_identity_sha" == "$host_identity_sha" \
-        && "$row_source_commit" == "$HOSTWRIGHT_PHASE08_SOAK_SOURCE_COMMIT" \
         && "$predecessor_sha256" == "$expected_predecessor" \
         && "$checkpoint_sha256" == "$computed" ]] \
       || die 'A cumulative checkpoint failed identity, bound, or predecessor validation.' 75
+    source_commit_is_allowed "$row_source_commit" \
+      || die 'A cumulative checkpoint is bound to an unknown source commit.' 75
     if [[ "$row_segment_id" == "$prior_segment_id" ]]; then
       [[ "$row_segment_sample" == "$((prior_segment_sample + 1))" ]] \
         || die 'A cumulative checkpoint skipped or duplicated a segment sample.' 75
@@ -999,9 +1089,10 @@ inject_pressure() {
   record 'pressure-cell-pass bytes=67108864 fdLimit=64'
 }
 
-compact_state() {
+compact_state_attempts() {
   local sequence="$1"
   local attempt=1
+  compaction_failure_message=''
   while [[ "$attempt" -le "$compaction_attempt_limit" ]]; do
     local prefix="$HOSTWRIGHT_PHASE08_SOAK_ROOT/compaction-${sequence}-attempt-${attempt}"
     local plan="${prefix}-plan.json"
@@ -1013,17 +1104,21 @@ compact_state() {
         --state-db "$HOSTWRIGHT_PHASE08_SOAK_ROOT/state.sqlite" --output json \
         > "$plan" 2> "$plan_error"; then
       chmod 600 "$plan" "$plan_error"
-      die "Soak compaction dry-run failed at sequence $sequence attempt $attempt."
+      compaction_failure_message="Soak compaction dry-run failed at sequence $sequence attempt $attempt."
+      return 70
     fi
     chmod 600 "$plan" "$plan_error"
     if [[ "$(/usr/bin/jq -er '.executable' "$plan")" != true ]]; then
       record "compaction-noop sequence=$sequence attempt=$attempt"
-      return
+      return 0
     fi
 
     local token status
     token="$(/usr/bin/jq -er '.confirmationToken' "$plan")" \
-      || die "Soak compaction plan omitted its confirmation token at sequence $sequence attempt $attempt."
+      || {
+        compaction_failure_message="Soak compaction plan omitted its confirmation token at sequence $sequence attempt $attempt."
+        return 70
+      }
     status=0
     "$HOSTWRIGHT_PHASE08_SOAK_HOSTWRIGHT" state compact \
       "$HOSTWRIGHT_PHASE08_SOAK_ROOT/hostwright.yaml" --confirm-compact "$token" \
@@ -1031,10 +1126,12 @@ compact_state() {
       > "$result" 2> "$result_error" || status=$?
     chmod 600 "$result" "$result_error"
     if [[ "$status" == 0 ]]; then
-      [[ "$(/usr/bin/jq -er '.integrityHealth' "$result")" == healthy ]] \
-        || die 'Confirmed soak compaction did not preserve healthy integrity.'
+      if [[ "$(/usr/bin/jq -er '.integrityHealth' "$result")" != healthy ]]; then
+        compaction_failure_message='Confirmed soak compaction did not preserve healthy integrity.'
+        return 70
+      fi
       record "compaction-pass sequence=$sequence attempt=$attempt"
-      return
+      return 0
     fi
     if [[ "$status" == 70 ]] \
         && /usr/bin/jq -e '.code == "HW-CLI-003"' "$result_error" >/dev/null 2>&1; then
@@ -1043,9 +1140,37 @@ compact_state() {
       sleep 1
       continue
     fi
-    die "Soak compaction confirmation failed at sequence $sequence attempt $attempt with exit $status."
+    compaction_failure_message="Soak compaction confirmation failed at sequence $sequence attempt $attempt with exit $status."
+    return "$status"
   done
-  die "Soak compaction exhausted $compaction_attempt_limit fresh confirmation attempts at sequence $sequence."
+  compaction_failure_message="Soak compaction exhausted $compaction_attempt_limit fresh confirmation attempts at sequence $sequence."
+  return 70
+}
+
+compact_state() {
+  local sequence="$1"
+  local prior_pid="$daemon_pid"
+  local status=0
+
+  record "compaction-daemon-quiesce-requested sequence=$sequence priorPID=${prior_pid:-none}"
+  stop_daemon
+  record "compaction-daemon-quiesced sequence=$sequence priorPID=${prior_pid:-none}"
+
+  compact_state_attempts "$sequence" || status=$?
+  local failure_message="$compaction_failure_message"
+
+  # The daemon must be restored before either a successful return or a
+  # durable failure. This keeps the fault cell bounded and leaves the
+  # cumulative run resumable even when confirmation churn persists.
+  start_daemon
+  verify_running
+  [[ "$daemon_pid" != "$prior_pid" ]] \
+    || die 'The compaction quiescence did not produce a fresh daemon process identity.' 75
+  record "compaction-daemon-resumed sequence=$sequence priorPID=${prior_pid:-none} currentPID=$daemon_pid"
+
+  if [[ "$status" -ne 0 ]]; then
+    die "$failure_message" "$status"
+  fi
 }
 
 recover_active_run_marker() {
@@ -1494,6 +1619,7 @@ initialize_qualification() {
     printf 'qualificationID\t%s\n' "$qualification_id"
     printf 'phase\tprepared\n'
     printf 'sourceCommit\t%s\n' "$HOSTWRIGHT_PHASE08_SOAK_SOURCE_COMMIT"
+    printf 'sourceCommitHistory\t%s\n' "$HOSTWRIGHT_PHASE08_SOAK_SOURCE_COMMIT"
     printf 'sourceDigest\t%s\n' "$source_sha"
     printf 'hostwrightSHA256\t%s\n' "$hostwright_sha"
     printf 'daemonSHA256\t%s\n' "$daemon_sha"
@@ -1542,6 +1668,7 @@ prepare_resume() {
     > "$HOSTWRIGHT_PHASE08_SOAK_ROOT/manifest-resume-validation.log"
   chmod 600 "$HOSTWRIGHT_PHASE08_SOAK_ROOT/manifest-resume-validation.log"
   validate_inputs resume
+  commit_source_transition
   record "checkpoint-chain-validated sequence=$cumulative_samples qualifiedSeconds=$cumulative_seconds checkpoint=$previous_checkpoint_sha256"
 }
 

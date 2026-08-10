@@ -100,8 +100,10 @@ let package = Package(
         .library(name: "HostwrightRuntime", targets: ["HostwrightRuntime"]),
         .library(name: "HostwrightState", targets: ["HostwrightState"]),
         .library(name: "HostwrightReconciler", targets: ["HostwrightReconciler"]),
+        .library(name: "HostwrightScheduler", targets: ["HostwrightScheduler"]),
         .library(name: "HostwrightDaemonCore", targets: ["HostwrightDaemonCore"]),
         .library(name: "HostwrightHealth", targets: ["HostwrightHealth"]),
+        .library(name: "HostwrightAccelerator", targets: ["HostwrightAccelerator"]),
         .library(name: "HostwrightImport", targets: ["HostwrightImport"]),
         .library(name: "HostwrightExtensions", targets: ["HostwrightExtensions"]),
         .library(name: "HostwrightNetworking", targets: ["HostwrightNetworking"]),
@@ -339,11 +341,13 @@ let package = Package(
             dependencies: [
                 "HostwrightControlPlane",
                 "HostwrightControlSecurity",
+                "HostwrightAccelerator",
                 "HostwrightCore",
                 "HostwrightManifest",
                 "HostwrightObservability",
                 "HostwrightRegistry",
                 "HostwrightRuntime",
+                "HostwrightScheduler",
                 "HostwrightStorage",
                 "HostwrightSQLiteSupport"
             ],
@@ -368,11 +372,14 @@ let package = Package(
                 "HostwrightObservability",
                 "HostwrightPolicy",
                 "HostwrightRuntime",
+                "HostwrightScheduler",
                 "HostwrightSecrets",
                 "HostwrightState",
                 "HostwrightStorage"
             ]
         ),
+        .target(name: "HostwrightScheduler"),
+        .target(name: "HostwrightAccelerator"),
         .target(
             name: "HostwrightDaemonCore",
             dependencies: [
@@ -700,12 +707,14 @@ let package = Package(
         .testTarget(
             name: "HostwrightStateTests",
             dependencies: [
+                "HostwrightAccelerator",
                 "HostwrightControlPlane",
                 "HostwrightControlSecurity",
                 "HostwrightManifest",
                 "HostwrightObservability",
                 "HostwrightRegistry",
                 "HostwrightRuntime",
+                "HostwrightScheduler",
                 "HostwrightState",
                 "HostwrightStorage"
             ]
@@ -717,6 +726,10 @@ let package = Package(
                 "HostwrightPolicy",
                 "HostwrightReconciler"
             ]
+        ),
+        .testTarget(
+            name: "HostwrightSchedulerTests",
+            dependencies: ["HostwrightScheduler"]
         ),
         .testTarget(
             name: "HostwrightDaemonTests",

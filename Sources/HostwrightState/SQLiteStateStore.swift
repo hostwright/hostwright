@@ -57,6 +57,10 @@ public struct SQLiteStateStore: StateStore {
         AdmissionRepository(store: self)
     }
 
+    public var schedulerAdmissions: SchedulerAdmissionRepository {
+        SchedulerAdmissionRepository(store: self)
+    }
+
     public var workloadProfiles: WorkloadProfileRepository {
         WorkloadProfileRepository(store: self)
     }

@@ -11,13 +11,13 @@ final class ContractVersionsTests: XCTestCase {
             )
         )
         XCTAssertEqual(HostwrightIdentity.releaseTarget, "v0.0.2")
-        XCTAssertEqual(HostwrightContractVersions.manifest, 2)
+        XCTAssertEqual(HostwrightContractVersions.manifest, 3)
         XCTAssertEqual(HostwrightContractVersions.controlAPI, 2)
         XCTAssertEqual(HostwrightContractVersions.runtimeProviderAPI, 2)
         XCTAssertEqual(HostwrightContractVersions.storageProviderAPI, 1)
         XCTAssertEqual(HostwrightContractVersions.networkProviderSPI, 1)
         XCTAssertEqual(HostwrightContractVersions.pluginABI, 1)
-        XCTAssertEqual(HostwrightContractVersions.stateSchema, 22)
+        XCTAssertEqual(HostwrightContractVersions.stateSchema, 24)
     }
 
     func testCapabilityCatalogIsDeterministicUniqueAndCoversEveryRoadmapPhase() {
@@ -84,11 +84,7 @@ final class ContractVersionsTests: XCTestCase {
             ])
         })
 
-        let phase04Identifiers = [
-            "lifecycle.single-host",
-            "manifest.restricted-parser",
-            "manifest.v2"
-        ]
+        let phase04Identifiers = ["manifest.restricted-parser"]
         let phase04Capabilities = report.capabilities.filter {
             phase04Identifiers.contains($0.identifier)
         }
@@ -96,10 +92,19 @@ final class ContractVersionsTests: XCTestCase {
         XCTAssertTrue(phase04Capabilities.allSatisfy {
             $0.state == .stable && $0.phase == 4
         })
-        XCTAssertEqual(
-            Set(phase04Capabilities.map(\.issue)),
-            Set([130, 131, 140])
-        )
+        XCTAssertEqual(Set(phase04Capabilities.map(\.issue)), Set([130]))
+
+        let phase10Identifiers = ["lifecycle.single-host", "manifest.v3"]
+        let phase10Capabilities = report.capabilities.filter {
+            phase10Identifiers.contains($0.identifier)
+        }
+        XCTAssertEqual(phase10Capabilities.count, phase10Identifiers.count)
+        XCTAssertTrue(phase10Capabilities.allSatisfy {
+            $0.state == .experimental && $0.phase == 10 && $0.issue == 207
+        })
+        XCTAssertTrue(phase10Capabilities.allSatisfy {
+            $0.reason.contains("pending") || $0.reason.contains("under implementation")
+        })
 
         guard let ingress = report.capabilities.first(where: {
             $0.identifier == "networking.ingress"

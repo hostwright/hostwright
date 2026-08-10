@@ -233,6 +233,19 @@ public struct StateIntegrityService: Sendable {
                      WHERE id = '' OR timestamp = '' OR type = '' OR source = '' OR message = ''
                         OR severity NOT IN ('info', 'warning', 'error')
                         OR json_type(CASE WHEN json_valid(payload_json_redacted) THEN payload_json_redacted ELSE 'null' END) != 'object')
+                  + (SELECT COUNT(*) FROM accelerator_state_journal
+                     WHERE id = '' OR timestamp = '' OR type NOT LIKE 'accelerator.state.%'
+                        OR source != 'accelerator-state-journal'
+                        OR severity != 'info' OR message != 'durable accelerator state append'
+                        OR json_type(CASE WHEN json_valid(payload_json_redacted) THEN payload_json_redacted ELSE 'null' END) != 'object'
+                        OR json_extract(payload_json_redacted, '$.envelopeVersion') != 1)
+                  + (SELECT COUNT(*) FROM accelerator_state_current
+                     WHERE id = '' OR timestamp = '' OR type NOT LIKE 'accelerator.state.%'
+                        OR source != 'accelerator-state-journal'
+                        OR severity != 'info' OR message != 'durable accelerator state append'
+                        OR record_id = '' OR generation < 1
+                        OR json_type(CASE WHEN json_valid(payload_json_redacted) THEN payload_json_redacted ELSE 'null' END) != 'object'
+                        OR json_extract(payload_json_redacted, '$.envelopeVersion') != 1)
                   + (SELECT COUNT(*) FROM operation_ledger
                      WHERE id = '' OR created_at = '' OR updated_at = '' OR planned_action_type = ''
                         OR status NOT IN ('planned', 'recorded', 'succeeded', 'failed', 'abandoned')
@@ -2125,6 +2138,8 @@ public struct StateIntegrityService: Sendable {
         "observed_runtime_snapshots",
         "observed_services",
         "event_ledger",
+        "accelerator_state_journal",
+        "accelerator_state_current",
         "operation_ledger",
         "ownership_records",
         "health_check_results",
@@ -2181,6 +2196,14 @@ public struct StateIntegrityService: Sendable {
         "admission_policies",
         "admission_exceptions",
         "workload_profiles",
+        "scheduler_node_capacity_snapshots",
+        "scheduler_fence_state",
+        "scheduler_decisions",
+        "scheduler_reservations",
+        "scheduler_fairness_accounting",
+        "scheduler_disruption_budgets",
+        "scheduler_preemption_intents",
+        "scheduler_host_pressure",
         "plugin_packages",
         "plugin_provenance",
         "plugin_grants",
@@ -2194,6 +2217,10 @@ public struct StateIntegrityService: Sendable {
         "desired_services_project_idx",
         "observed_services_snapshot_idx",
         "event_ledger_timestamp_idx",
+        "accelerator_state_journal_type_id_idx",
+        "accelerator_state_current_record_scope_idx",
+        "accelerator_state_current_generation_idx",
+        "accelerator_state_current_record_idx",
         "operation_ledger_project_idx",
         "ownership_records_project_idx",
         "health_check_results_project_idx",
@@ -2230,6 +2257,17 @@ public struct StateIntegrityService: Sendable {
         "admission_exceptions_lookup_idx",
         "workload_profiles_parent_idx",
         "workload_profiles_digest_idx",
+        "scheduler_node_capacity_generation_idx",
+        "scheduler_decisions_node_idx",
+        "scheduler_decisions_workload_idx",
+        "scheduler_reservations_active_workload_idx",
+        "scheduler_reservations_decision_idx",
+        "scheduler_reservations_node_idx",
+        "scheduler_reservations_workload_idx",
+        "scheduler_fairness_project_idx",
+        "scheduler_disruption_budgets_project_idx",
+        "scheduler_preemption_intents_project_idx",
+        "scheduler_host_pressure_generation_idx",
         "plugin_packages_identifier_idx",
         "plugin_packages_state_idx",
         "plugin_provenance_signer_idx",

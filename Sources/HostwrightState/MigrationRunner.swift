@@ -74,6 +74,7 @@ public struct MigrationRunner: Sendable {
     public static let latestSchemaVersion =
         HostwrightContractVersions.stateSchema
     static let applicationID = 0x48575254
+    static let legacyV23AcceleratorChecksum = "fnv1a64:147eba7ebe350e07"
 
     public init() {}
 
@@ -140,6 +141,17 @@ public struct MigrationRunner: Sendable {
                         throw StateStoreError.migrationFailed(
                             version: migration.version,
                             message: "Recorded checksum \(checksum) does not match expected checksum \(migration.checksum)."
+                        )
+                    }
+                    if migration.version == 23,
+                       checksum == Self.legacyV23AcceleratorChecksum {
+                        try upgradeLegacyV23AcceleratorTables(
+                            on: connection,
+                            migration: migration
+                        )
+                        try connection.run(
+                            "UPDATE schema_migrations SET checksum = ? WHERE version = 23",
+                            bindings: [.text(migration.checksum)]
                         )
                     }
                     if migration.version == 7, checksum != migration.checksum {
@@ -504,6 +516,126 @@ public struct MigrationRunner: Sendable {
 
         let applied = try appliedMigrations(on: connection)
         try validateCompatibility(applied, requireLatest: true)
+        if applied[23] == Self.legacyV23AcceleratorChecksum {
+            throw StateStoreError.incompatibleSchema(
+                foundVersion: 23,
+                latestSupported: Self.latestSchemaVersion,
+                message: "Schema v23 predates the durable accelerator replay table upgrade; run the explicit migration path before reading or writing state."
+            )
+        }
+    }
+
+    private func upgradeLegacyV23AcceleratorTables(
+        on connection: SQLiteConnection,
+        migration: SchemaMigration
+    ) throws {
+        let legacyStatements = Self.legacyV23AcceleratorStatements()
+        guard legacyStatements.count == 6,
+              migration.statements.count == 6 else {
+            throw StateStoreError.migrationFailed(
+                version: 23,
+                message: "The v23 accelerator migration definition is incomplete."
+            )
+        }
+
+        for (table, expectedSQL) in [
+            ("accelerator_state_journal", legacyStatements[0]),
+            ("accelerator_state_current", legacyStatements[1])
+        ] {
+            let rows = try connection.query(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+                bindings: [.text(table)]
+            )
+            guard let actualSQL = rows.first?.first ?? nil,
+                  Self.normalizedSchemaSQL(actualSQL) == Self.normalizedSchemaSQL(expectedSQL) else {
+                throw StateStoreError.migrationFailed(
+                    version: 23,
+                    message: "The recorded v23 accelerator table \(table) is not the recognized pre-replay schema."
+                )
+            }
+        }
+
+        let indexNames = [
+            "accelerator_state_journal_type_id_idx",
+            "accelerator_state_current_record_scope_idx",
+            "accelerator_state_current_generation_idx",
+            "accelerator_state_current_record_idx"
+        ]
+        for indexName in indexNames {
+            try connection.execute("DROP INDEX IF EXISTS \(indexName)")
+        }
+
+        let legacyJournal = "accelerator_state_journal_v23_legacy"
+        let legacyCurrent = "accelerator_state_current_v23_legacy"
+        try connection.execute(
+            "ALTER TABLE accelerator_state_journal RENAME TO \(legacyJournal)"
+        )
+        try connection.execute(
+            "ALTER TABLE accelerator_state_current RENAME TO \(legacyCurrent)"
+        )
+        for statement in migration.statements {
+            try connection.execute(statement)
+        }
+
+        let journalColumns = "id, timestamp, severity, type, source, project_id, service_name, runtime_adapter, message, payload_json_redacted"
+        try connection.execute(
+            "INSERT INTO accelerator_state_journal (\(journalColumns)) SELECT \(journalColumns) FROM \(legacyJournal)"
+        )
+        let currentColumns = journalColumns + ", record_id, generation"
+        try connection.execute(
+            "INSERT INTO accelerator_state_current (\(currentColumns)) SELECT \(currentColumns) FROM \(legacyCurrent)"
+        )
+
+        func rowCount(_ sql: String) throws -> Int {
+            guard let value = try connection.query(sql).first?.first ?? nil,
+                  let count = Int(value) else {
+                return -1
+            }
+            return count
+        }
+        let oldJournalCount = try rowCount(
+            "SELECT COUNT(*) FROM \(legacyJournal)"
+        )
+        let newJournalCount = try rowCount(
+            "SELECT COUNT(*) FROM accelerator_state_journal"
+        )
+        let oldCurrentCount = try rowCount(
+            "SELECT COUNT(*) FROM \(legacyCurrent)"
+        )
+        let newCurrentCount = try rowCount(
+            "SELECT COUNT(*) FROM accelerator_state_current"
+        )
+        guard oldJournalCount >= 0,
+              oldJournalCount == newJournalCount,
+              oldCurrentCount >= 0,
+              oldCurrentCount == newCurrentCount else {
+            throw StateStoreError.migrationFailed(
+                version: 23,
+                message: "The v23 accelerator replay-table upgrade did not preserve row counts."
+            )
+        }
+
+        try connection.execute("DROP TABLE \(legacyJournal)")
+        try connection.execute("DROP TABLE \(legacyCurrent)")
+    }
+
+    static func legacyV23AcceleratorStatements() -> [String] {
+        guard let migration = migrations.first(where: { $0.version == 23 }) else {
+            return []
+        }
+        return migration.statements.map { statement in
+            statement.replacingOccurrences(
+                of: ",\n        'accelerator.state.xpc-replay'",
+                with: ""
+            )
+        }
+    }
+
+    private static func normalizedSchemaSQL(_ value: String) -> String {
+        value
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
+            .lowercased()
     }
 
     func applicationIdentity(on connection: SQLiteConnection) throws -> Int {
@@ -3839,6 +3971,515 @@ public struct MigrationRunner: Sendable {
             WHERE validation_mode = 'installedRequirement' AND revoked_at IS NULL
             """
           ]
+        ),
+        SchemaMigration(
+          version: 23,
+          description: "Durable scheduler node capacity, admission decisions, reservations, and fencing authority",
+          implementationRevision: "phase10-scheduler-admission-v2",
+          statements: [
+            """
+            CREATE TABLE scheduler_node_capacity_snapshots (
+                node_uuid TEXT NOT NULL CHECK (
+                    length(node_uuid) = 36
+                    AND substr(node_uuid, 9, 1) = '-'
+                    AND substr(node_uuid, 14, 1) = '-'
+                    AND substr(node_uuid, 19, 1) = '-'
+                    AND substr(node_uuid, 24, 1) = '-'
+                    AND replace(lower(node_uuid), '-', '') NOT GLOB '*[^0-9a-f]*'
+                ),
+                capacity_json TEXT NOT NULL CHECK (
+                    json_valid(capacity_json)
+                    AND json_type(capacity_json) = 'object'
+                    AND length(capacity_json) BETWEEN 2 AND 1048576
+                ),
+                capacity_digest TEXT NOT NULL CHECK (
+                    length(capacity_digest) = 64
+                    AND capacity_digest NOT GLOB '*[^0-9a-f]*'
+                ),
+                generation INTEGER NOT NULL CHECK (generation >= 1),
+                observed_at TEXT NOT NULL CHECK (julianday(observed_at) IS NOT NULL),
+                updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL),
+                PRIMARY KEY (node_uuid, generation),
+                CHECK (julianday(updated_at) >= julianday(observed_at))
+            )
+            """,
+            """
+            CREATE TABLE scheduler_fence_state (
+                node_uuid TEXT PRIMARY KEY,
+                node_epoch INTEGER NOT NULL CHECK (node_epoch >= 1),
+                next_reservation_sequence INTEGER NOT NULL CHECK (
+                    next_reservation_sequence >= 1
+                ),
+                updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL),
+                recovery_evidence_digest TEXT CHECK (
+                    recovery_evidence_digest IS NULL
+                    OR (
+                        length(recovery_evidence_digest) = 64
+                        AND recovery_evidence_digest NOT GLOB '*[^0-9a-f]*'
+                    )
+                ),
+                recovery_evidence_at TEXT CHECK (
+                    recovery_evidence_at IS NULL
+                    OR julianday(recovery_evidence_at) IS NOT NULL
+                ),
+                CHECK (
+                    (recovery_evidence_digest IS NULL
+                        AND recovery_evidence_at IS NULL)
+                    OR (recovery_evidence_digest IS NOT NULL
+                        AND recovery_evidence_at IS NOT NULL
+                        AND julianday(recovery_evidence_at)
+                            >= julianday(updated_at))
+                )
+            )
+            """,
+            """
+            CREATE TABLE scheduler_decisions (
+                decision_id TEXT PRIMARY KEY CHECK (
+                    length(decision_id) = 36
+                    AND substr(decision_id, 9, 1) = '-'
+                    AND substr(decision_id, 14, 1) = '-'
+                    AND substr(decision_id, 19, 1) = '-'
+                    AND substr(decision_id, 24, 1) = '-'
+                    AND replace(lower(decision_id), '-', '') NOT GLOB '*[^0-9a-f]*'
+                ),
+                project_uuid TEXT NOT NULL REFERENCES projects(resource_uuid) ON DELETE RESTRICT,
+                input_digest TEXT NOT NULL CHECK (
+                    length(input_digest) = 64
+                    AND input_digest NOT GLOB '*[^0-9a-f]*'
+                ),
+                config_digest TEXT NOT NULL CHECK (
+                    length(config_digest) = 64
+                    AND config_digest NOT GLOB '*[^0-9a-f]*'
+                ),
+                profile_digest TEXT NOT NULL CHECK (
+                    length(profile_digest) = 64
+                    AND profile_digest NOT GLOB '*[^0-9a-f]*'
+                ),
+                lifecycle_plan_digest TEXT NOT NULL CHECK (
+                    length(lifecycle_plan_digest) = 64
+                    AND lifecycle_plan_digest NOT GLOB '*[^0-9a-f]*'
+                ),
+                decision_json TEXT NOT NULL CHECK (
+                    json_valid(decision_json)
+                    AND json_type(decision_json) = 'object'
+                    AND length(decision_json) BETWEEN 2 AND 1048576
+                ),
+                workload_ids_json TEXT NOT NULL CHECK (
+                    json_valid(workload_ids_json)
+                    AND json_type(workload_ids_json) = 'array'
+                    AND length(workload_ids_json) BETWEEN 2 AND 1048576
+                ),
+                workload_bindings_json TEXT NOT NULL CHECK (
+                    json_valid(workload_bindings_json)
+                    AND json_type(workload_bindings_json) = 'array'
+                    AND length(workload_bindings_json) BETWEEN 2 AND 1048576
+                ),
+                created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL),
+                updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL),
+                artifact_digest TEXT NOT NULL CHECK (
+                    length(artifact_digest) = 64
+                    AND artifact_digest NOT GLOB '*[^0-9a-f]*'
+                ),
+                CHECK (julianday(updated_at) >= julianday(created_at))
+            )
+            """,
+            """
+            CREATE TABLE scheduler_reservations (
+                reservation_id TEXT PRIMARY KEY CHECK (
+                    length(reservation_id) = 36
+                    AND substr(reservation_id, 9, 1) = '-'
+                    AND substr(reservation_id, 14, 1) = '-'
+                    AND substr(reservation_id, 19, 1) = '-'
+                    AND substr(reservation_id, 24, 1) = '-'
+                    AND replace(lower(reservation_id), '-', '') NOT GLOB '*[^0-9a-f]*'
+                ),
+                decision_id TEXT NOT NULL REFERENCES scheduler_decisions(decision_id) ON DELETE RESTRICT,
+                workload_uuid TEXT NOT NULL CHECK (
+                    length(workload_uuid) = 36
+                    AND substr(workload_uuid, 9, 1) = '-'
+                    AND substr(workload_uuid, 14, 1) = '-'
+                    AND substr(workload_uuid, 19, 1) = '-'
+                    AND substr(workload_uuid, 24, 1) = '-'
+                    AND replace(lower(workload_uuid), '-', '') NOT GLOB '*[^0-9a-f]*'
+                ),
+                node_uuid TEXT NOT NULL CHECK (
+                    length(node_uuid) = 36
+                    AND substr(node_uuid, 9, 1) = '-'
+                    AND substr(node_uuid, 14, 1) = '-'
+                    AND substr(node_uuid, 19, 1) = '-'
+                    AND substr(node_uuid, 24, 1) = '-'
+                    AND replace(lower(node_uuid), '-', '') NOT GLOB '*[^0-9a-f]*'
+                ),
+                resource_vector_json TEXT NOT NULL CHECK (
+                    json_valid(resource_vector_json)
+                    AND json_type(resource_vector_json) = 'object'
+                    AND length(resource_vector_json) BETWEEN 2 AND 1048576
+                ),
+                capacity_digest TEXT NOT NULL CHECK (
+                    length(capacity_digest) = 64
+                    AND capacity_digest NOT GLOB '*[^0-9a-f]*'
+                ),
+                capacity_generation INTEGER NOT NULL CHECK (capacity_generation >= 1),
+                input_digest TEXT NOT NULL CHECK (
+                    length(input_digest) = 64 AND input_digest NOT GLOB '*[^0-9a-f]*'
+                ),
+                config_digest TEXT NOT NULL CHECK (
+                    length(config_digest) = 64 AND config_digest NOT GLOB '*[^0-9a-f]*'
+                ),
+                profile_digest TEXT NOT NULL CHECK (
+                    length(profile_digest) = 64 AND profile_digest NOT GLOB '*[^0-9a-f]*'
+                ),
+                lifecycle_plan_digest TEXT NOT NULL CHECK (
+                    length(lifecycle_plan_digest) = 64
+                    AND lifecycle_plan_digest NOT GLOB '*[^0-9a-f]*'
+                ),
+                owner_subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                project_uuid TEXT NOT NULL REFERENCES projects(resource_uuid) ON DELETE RESTRICT,
+                status TEXT NOT NULL CHECK (
+                    status IN ('pending', 'committed', 'release-pending', 'fenced', 'released')
+                ),
+                created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL),
+                updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL),
+                expires_at TEXT NOT NULL CHECK (julianday(expires_at) IS NOT NULL),
+                fencing_node_epoch INTEGER NOT NULL CHECK (fencing_node_epoch >= 1),
+                fencing_reservation_sequence INTEGER NOT NULL CHECK (
+                    fencing_reservation_sequence >= 1
+                ),
+                fence_evidence_digest TEXT CHECK (
+                    fence_evidence_digest IS NULL
+                    OR (length(fence_evidence_digest) = 64 AND fence_evidence_digest NOT GLOB '*[^0-9a-f]*')
+                ),
+                fence_evidence_at TEXT CHECK (
+                    fence_evidence_at IS NULL OR julianday(fence_evidence_at) IS NOT NULL
+                ),
+                fence_evidence_node_epoch INTEGER CHECK (
+                    fence_evidence_node_epoch IS NULL
+                    OR fence_evidence_node_epoch >= 1
+                ),
+                fence_evidence_reservation_sequence INTEGER CHECK (
+                    fence_evidence_reservation_sequence IS NULL
+                    OR fence_evidence_reservation_sequence >= 1
+                ),
+                fence_evidence_reservation_id TEXT,
+                fence_evidence_workload_uuid TEXT,
+                release_evidence_kind TEXT CHECK (
+                    release_evidence_kind IS NULL
+                    OR release_evidence_kind IN ('runtime-absence', 'authoritative-fence')
+                ),
+                release_evidence_digest TEXT CHECK (
+                    release_evidence_digest IS NULL
+                    OR (length(release_evidence_digest) = 64 AND release_evidence_digest NOT GLOB '*[^0-9a-f]*')
+                ),
+                release_evidence_at TEXT CHECK (
+                    release_evidence_at IS NULL OR julianday(release_evidence_at) IS NOT NULL
+                ),
+                release_evidence_node_epoch INTEGER CHECK (
+                    release_evidence_node_epoch IS NULL
+                    OR release_evidence_node_epoch >= 1
+                ),
+                release_evidence_reservation_sequence INTEGER CHECK (
+                    release_evidence_reservation_sequence IS NULL
+                    OR release_evidence_reservation_sequence >= 1
+                ),
+                release_evidence_reservation_id TEXT,
+                release_evidence_workload_uuid TEXT,
+                UNIQUE (decision_id, workload_uuid),
+                UNIQUE (node_uuid, fencing_reservation_sequence),
+                CHECK (julianday(updated_at) >= julianday(created_at)),
+                CHECK (julianday(expires_at) > julianday(created_at)),
+                CHECK ((fence_evidence_digest IS NULL
+                    AND fence_evidence_at IS NULL
+                    AND fence_evidence_node_epoch IS NULL
+                    AND fence_evidence_reservation_sequence IS NULL
+                    AND fence_evidence_reservation_id IS NULL
+                    AND fence_evidence_workload_uuid IS NULL)
+                   OR (fence_evidence_digest IS NOT NULL
+                    AND fence_evidence_at IS NOT NULL
+                    AND fence_evidence_node_epoch IS NOT NULL
+                    AND fence_evidence_reservation_sequence IS NOT NULL
+                    AND fence_evidence_reservation_id IS NOT NULL
+                    AND fence_evidence_workload_uuid IS NOT NULL)),
+                CHECK (fence_evidence_at IS NULL OR (
+                    julianday(fence_evidence_at) >= julianday(created_at)
+                    AND (
+                        (status = 'fenced'
+                            AND julianday(fence_evidence_at)
+                                = julianday(updated_at))
+                        OR (status = 'released'
+                            AND julianday(fence_evidence_at)
+                                <= julianday(updated_at))
+                    )
+                )),
+                CHECK (fence_evidence_at IS NULL
+                    OR fence_evidence_reservation_sequence = fencing_reservation_sequence),
+                CHECK (fence_evidence_at IS NULL
+                    OR fence_evidence_node_epoch > fencing_node_epoch),
+                CHECK (fence_evidence_at IS NULL
+                    OR fence_evidence_reservation_id = reservation_id),
+                CHECK (fence_evidence_at IS NULL
+                    OR fence_evidence_workload_uuid = workload_uuid),
+                CHECK ((release_evidence_kind IS NULL
+                    AND release_evidence_digest IS NULL
+                    AND release_evidence_at IS NULL
+                    AND release_evidence_node_epoch IS NULL
+                    AND release_evidence_reservation_sequence IS NULL
+                    AND release_evidence_reservation_id IS NULL
+                    AND release_evidence_workload_uuid IS NULL)
+                   OR (release_evidence_kind = 'runtime-absence'
+                    AND release_evidence_digest IS NOT NULL
+                    AND release_evidence_at IS NOT NULL
+                    AND release_evidence_node_epoch IS NULL
+                    AND release_evidence_reservation_sequence IS NULL
+                    AND release_evidence_reservation_id IS NULL
+                    AND release_evidence_workload_uuid IS NULL)
+                   OR (release_evidence_kind = 'authoritative-fence'
+                    AND release_evidence_digest IS NOT NULL
+                    AND release_evidence_at IS NOT NULL
+                    AND release_evidence_node_epoch IS NOT NULL
+                    AND release_evidence_reservation_sequence IS NOT NULL
+                    AND release_evidence_reservation_id IS NOT NULL
+                    AND release_evidence_workload_uuid IS NOT NULL)),
+                CHECK (release_evidence_at IS NULL OR (
+                    status = 'released'
+                    AND julianday(release_evidence_at)
+                        >= julianday(created_at)
+                    AND julianday(release_evidence_at)
+                        = julianday(updated_at)
+                )),
+                CHECK (fence_evidence_at IS NULL OR release_evidence_at IS NULL
+                    OR julianday(fence_evidence_at) <= julianday(release_evidence_at)),
+                CHECK (release_evidence_kind != 'authoritative-fence'
+                    OR release_evidence_reservation_sequence = fencing_reservation_sequence),
+                CHECK (release_evidence_kind != 'authoritative-fence'
+                    OR release_evidence_node_epoch > fencing_node_epoch),
+                CHECK (release_evidence_kind != 'authoritative-fence'
+                    OR release_evidence_reservation_id = reservation_id),
+                CHECK (release_evidence_kind != 'authoritative-fence'
+                    OR release_evidence_workload_uuid = workload_uuid),
+                CHECK (fence_evidence_at IS NULL OR release_evidence_kind != 'authoritative-fence'
+                    OR (release_evidence_reservation_sequence = fence_evidence_reservation_sequence
+                        AND release_evidence_reservation_id = fence_evidence_reservation_id
+                        AND release_evidence_workload_uuid = fence_evidence_workload_uuid
+                        AND release_evidence_node_epoch >= fence_evidence_node_epoch)),
+                CHECK ((status = 'released' AND release_evidence_kind IS NOT NULL) OR (status != 'released' AND release_evidence_kind IS NULL)),
+                FOREIGN KEY (node_uuid, capacity_generation)
+                    REFERENCES scheduler_node_capacity_snapshots(node_uuid, generation)
+                    ON DELETE RESTRICT
+            )
+            """,
+            """
+            CREATE TABLE scheduler_fairness_accounting (
+                subject_id TEXT NOT NULL CHECK (length(subject_id) BETWEEN 1 AND 128),
+                project_id TEXT NOT NULL CHECK (length(project_id) BETWEEN 1 AND 128),
+                state_json TEXT NOT NULL CHECK (
+                    json_valid(state_json)
+                    AND json_type(state_json) = 'object'
+                    AND length(state_json) BETWEEN 2 AND 1048576
+                ),
+                generation INTEGER NOT NULL CHECK (generation >= 1),
+                updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL),
+                accounting_digest TEXT NOT NULL CHECK (
+                    length(accounting_digest) = 64
+                    AND accounting_digest NOT GLOB '*[^0-9a-f]*'
+                ),
+                PRIMARY KEY (subject_id, project_id)
+            )
+            """,
+            """
+            CREATE TABLE scheduler_disruption_budgets (
+                budget_id TEXT NOT NULL CHECK (length(budget_id) BETWEEN 1 AND 128),
+                project_id TEXT NOT NULL CHECK (length(project_id) BETWEEN 1 AND 128),
+                remaining_victim_count INTEGER NOT NULL CHECK (remaining_victim_count >= 0),
+                remaining_disruption_cost_basis_points INTEGER NOT NULL CHECK (
+                    remaining_disruption_cost_basis_points >= 0
+                ),
+                generation INTEGER NOT NULL CHECK (generation >= 1),
+                updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL),
+                budget_digest TEXT NOT NULL CHECK (
+                    length(budget_digest) = 64
+                    AND budget_digest NOT GLOB '*[^0-9a-f]*'
+                ),
+                PRIMARY KEY (budget_id, project_id)
+            )
+            """,
+            """
+            CREATE TABLE scheduler_preemption_intents (
+                intent_id TEXT PRIMARY KEY CHECK (
+                    length(intent_id) = 36
+                    AND substr(intent_id, 9, 1) = '-'
+                    AND substr(intent_id, 14, 1) = '-'
+                    AND substr(intent_id, 19, 1) = '-'
+                    AND substr(intent_id, 24, 1) = '-'
+                    AND replace(lower(intent_id), '-', '') NOT GLOB '*[^0-9a-f]*'
+                ),
+                project_id TEXT NOT NULL CHECK (length(project_id) BETWEEN 1 AND 128),
+                proposal_json TEXT NOT NULL CHECK (
+                    json_valid(proposal_json)
+                    AND json_type(proposal_json) = 'object'
+                    AND length(proposal_json) BETWEEN 2 AND 1048576
+                ),
+                intent_digest TEXT NOT NULL CHECK (
+                    length(intent_digest) = 64
+                    AND intent_digest NOT GLOB '*[^0-9a-f]*'
+                ),
+                status TEXT NOT NULL CHECK (
+                    status IN ('proposed', 'fence-pending', 'fenced', 'applied', 'recovered', 'rejected')
+                ),
+                created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL),
+                updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL),
+                record_digest TEXT NOT NULL CHECK (
+                    length(record_digest) = 64
+                    AND record_digest NOT GLOB '*[^0-9a-f]*'
+                ),
+                CHECK (julianday(updated_at) >= julianday(created_at))
+            )
+            """,
+            """
+            CREATE TABLE scheduler_host_pressure (
+                node_uuid TEXT PRIMARY KEY CHECK (
+                    length(node_uuid) = 36
+                    AND substr(node_uuid, 9, 1) = '-'
+                    AND substr(node_uuid, 14, 1) = '-'
+                    AND substr(node_uuid, 19, 1) = '-'
+                    AND substr(node_uuid, 24, 1) = '-'
+                    AND replace(lower(node_uuid), '-', '') NOT GLOB '*[^0-9a-f]*'
+                ),
+                pressure TEXT NOT NULL CHECK (
+                    pressure IN ('nominal', 'elevated', 'critical', 'unknown', 'unavailable')
+                ),
+                energy TEXT NOT NULL CHECK (
+                    energy IN ('efficient', 'balanced', 'performance', 'constrained', 'unknown')
+                ),
+                generation INTEGER NOT NULL CHECK (generation >= 1),
+                observed_at TEXT NOT NULL CHECK (julianday(observed_at) IS NOT NULL),
+                evidence_digest TEXT NOT NULL CHECK (
+                    length(evidence_digest) = 64
+                    AND evidence_digest NOT GLOB '*[^0-9a-f]*'
+                ),
+                policy_state_json TEXT NOT NULL CHECK (
+                    json_valid(policy_state_json)
+                    AND json_type(policy_state_json) = 'object'
+                    AND length(policy_state_json) BETWEEN 2 AND 16384
+                    AND json_extract(policy_state_json, '$.version') = 1
+                    AND json_type(json_extract(policy_state_json, '$.reasonCodes')) = 'array'
+                    AND json_array_length(json_extract(policy_state_json, '$.reasonCodes')) BETWEEN 1 AND 64
+                    AND json_type(json_extract(policy_state_json, '$.nextHysteresisState')) = 'object'
+                ),
+                record_digest TEXT NOT NULL CHECK (
+                    length(record_digest) = 64
+                    AND record_digest NOT GLOB '*[^0-9a-f]*'
+                )
+            )
+            """,
+            "CREATE INDEX scheduler_fairness_project_idx ON scheduler_fairness_accounting(project_id, subject_id)",
+            "CREATE INDEX scheduler_disruption_budgets_project_idx ON scheduler_disruption_budgets(project_id, budget_id)",
+            "CREATE INDEX scheduler_preemption_intents_project_idx ON scheduler_preemption_intents(project_id, intent_id)",
+            "CREATE INDEX scheduler_host_pressure_generation_idx ON scheduler_host_pressure(generation, node_uuid)",
+            "CREATE INDEX scheduler_node_capacity_generation_idx ON scheduler_node_capacity_snapshots(node_uuid, generation)",
+            "CREATE INDEX scheduler_decisions_node_idx ON scheduler_decisions(project_uuid, decision_id)",
+            "CREATE INDEX scheduler_decisions_workload_idx ON scheduler_decisions(project_uuid, input_digest, decision_id)",
+            "CREATE UNIQUE INDEX scheduler_reservations_active_workload_idx ON scheduler_reservations(workload_uuid) WHERE status IN ('pending', 'committed', 'release-pending', 'fenced')",
+            "CREATE INDEX scheduler_reservations_decision_idx ON scheduler_reservations(decision_id, reservation_id)",
+            "CREATE INDEX scheduler_reservations_node_idx ON scheduler_reservations(node_uuid, reservation_id)",
+            "CREATE INDEX scheduler_reservations_workload_idx ON scheduler_reservations(workload_uuid, reservation_id)",
+          ]
+        ),
+        SchemaMigration(
+            version: 24,
+            description: "Dedicated accelerator authority journal and current indexes",
+            legacyChecksums: [legacyV23AcceleratorChecksum],
+            implementationRevision: "phase10-accelerator-authority-v1",
+            statements: [
+                """
+                CREATE TABLE accelerator_state_journal (
+                    id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 255),
+                    timestamp TEXT NOT NULL CHECK (julianday(timestamp) IS NOT NULL),
+                    severity TEXT NOT NULL CHECK (severity = 'info'),
+                    type TEXT NOT NULL CHECK (type IN (
+                        'accelerator.state.inventory',
+                        'accelerator.state.claim',
+                        'accelerator.state.reservation',
+                        'accelerator.state.grant',
+                        'accelerator.state.execution-request',
+                        'accelerator.state.execution-result',
+                        'accelerator.state.usage',
+                        'accelerator.state.provenance',
+                        'accelerator.state.cancellation',
+                        'accelerator.state.revocation',
+                        'accelerator.state.xpc-replay'
+                    )),
+                    source TEXT NOT NULL CHECK (source = 'accelerator-state-journal'),
+                    project_id TEXT CHECK (
+                        project_id IS NULL
+                        OR (
+                            length(project_id) BETWEEN 1 AND 256
+                            AND project_id <> '__global__'
+                            AND project_id NOT GLOB '*[^ -~]*'
+                            AND instr(project_id, char(34)) = 0
+                            AND instr(project_id, char(92)) = 0
+                        )
+                    ),
+                    service_name TEXT,
+                    runtime_adapter TEXT,
+                    message TEXT NOT NULL CHECK (message = 'durable accelerator state append'),
+                    payload_json_redacted TEXT NOT NULL CHECK (
+                        json_valid(payload_json_redacted)
+                        AND json_type(payload_json_redacted) = 'object'
+                        AND length(payload_json_redacted) BETWEEN 2 AND 4194304
+                        AND json_extract(payload_json_redacted, '$.envelopeVersion') = 1
+                    )
+                )
+                """,
+                """
+                CREATE TABLE accelerator_state_current (
+                    id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 255),
+                    timestamp TEXT NOT NULL CHECK (julianday(timestamp) IS NOT NULL),
+                    severity TEXT NOT NULL CHECK (severity = 'info'),
+                    type TEXT NOT NULL CHECK (type IN (
+                        'accelerator.state.inventory',
+                        'accelerator.state.claim',
+                        'accelerator.state.reservation',
+                        'accelerator.state.grant',
+                        'accelerator.state.execution-request',
+                        'accelerator.state.execution-result',
+                        'accelerator.state.usage',
+                        'accelerator.state.provenance',
+                        'accelerator.state.cancellation',
+                        'accelerator.state.revocation',
+                        'accelerator.state.xpc-replay'
+                    )),
+                    source TEXT NOT NULL CHECK (source = 'accelerator-state-journal'),
+                    project_id TEXT CHECK (
+                        project_id IS NULL
+                        OR (
+                            length(project_id) BETWEEN 1 AND 256
+                            AND project_id <> '__global__'
+                            AND project_id NOT GLOB '*[^ -~]*'
+                            AND instr(project_id, char(34)) = 0
+                            AND instr(project_id, char(92)) = 0
+                        )
+                    ),
+                    service_name TEXT,
+                    runtime_adapter TEXT,
+                    message TEXT NOT NULL CHECK (message = 'durable accelerator state append'),
+                    payload_json_redacted TEXT NOT NULL CHECK (
+                        json_valid(payload_json_redacted)
+                        AND json_type(payload_json_redacted) = 'object'
+                        AND length(payload_json_redacted) BETWEEN 2 AND 4194304
+                        AND json_extract(payload_json_redacted, '$.envelopeVersion') = 1
+                    ),
+                    record_id TEXT NOT NULL CHECK (length(record_id) BETWEEN 1 AND 128),
+                    generation INTEGER NOT NULL CHECK (generation >= 1)
+                )
+                """,
+                "CREATE INDEX accelerator_state_journal_type_id_idx ON accelerator_state_journal(type, id)",
+                "CREATE UNIQUE INDEX accelerator_state_current_record_scope_idx "
+                    + "ON accelerator_state_current(type, record_id, COALESCE(project_id, '__global__'))",
+                "CREATE INDEX accelerator_state_current_generation_idx "
+                    + "ON accelerator_state_current(type, project_id, generation, record_id)",
+                "CREATE INDEX accelerator_state_current_record_idx "
+                    + "ON accelerator_state_current(type, project_id, record_id)"
+            ]
         ),
     ]
 }

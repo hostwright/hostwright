@@ -1,11 +1,12 @@
 public enum HostwrightContractVersions {
-    public static let manifest = 2
+    public static let manifest = 3
     public static let controlAPI = 2
     public static let runtimeProviderAPI = 2
     public static let storageProviderAPI = 1
     public static let networkProviderSPI = 1
     public static let pluginABI = 1
-    public static let stateSchema = 22
+    // P09 owns schema 22; P10 appends scheduler and accelerator migrations as 23/24.
+    public static let stateSchema = 24
 }
 
 public struct HostwrightContractSnapshot: Codable, Equatable, Sendable {

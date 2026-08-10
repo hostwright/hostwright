@@ -49,7 +49,7 @@ A passing check proves only that the exact reviewed file completed this protocol
 | Runtime adapter | Runtime observation declarations can be evaluated only as non-mutating paths behind `RuntimeAdapter`; runtime mutation remains unsupported for extensions. |
 | Networking provider | The general extension host blocks networking configuration; Phase 07 certificate/tunnel providers use the separate signed Network Provider SPI. |
 | Tunnel provider | The general extension host blocks tunnel authority; Phase 07's separate SPI grants only exact brokered origins, secret references, identities, and routes. |
-| Scheduler integration | Declaration-only scheduler advice can be allowed when it stays advisory, local, redacted, audited, and non-mutating. |
+| Scheduler integration | A declaration-only `schedulerAdvice` capability may be evaluated only as local, redacted, audited metadata. It cannot recommend placement, reserve capacity, mutate runtime state, or act as a compatibility scheduler; placement and admission remain solely the `HostwrightScheduler`/`HostwrightState` boundary. |
 | Future extension | Must fail closed until a separate issue defines capability, threat model, and proof. |
 
 ## Capability Rules
@@ -61,7 +61,7 @@ Allowed in current declaration policy when required boundaries are present:
 - `diagnosticsRead`
 - `runtimeObservation`
 - `stateRead`
-- `schedulerAdvice`
+- `schedulerAdvice` (declaration-only metadata; it never produces placement, reservation, or runtime decisions)
 
 Blocked in current core scope:
 

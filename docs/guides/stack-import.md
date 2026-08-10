@@ -30,6 +30,8 @@ The importer accepts:
 
 The converted output still runs through Hostwright manifest validation. Invalid names, missing images, unsafe ports, unsafe mounts, plaintext credential-like environment keys, and unsupported restart policies fail closed.
 
+Manifest v3 also requires explicit CPU and memory requests and limits for every executable service. The importer does not infer capacity from a stack file, so an otherwise supported stack without those declarations is returned as a reviewable validation failure; add bounded v3 resources manually before planning or applying it.
+
 ## Rejected Scope
 
 The importer rejects unsupported or unsafe stack semantics instead of silently dropping them. Rejected fields include:

@@ -19,7 +19,7 @@ This keeps the current product centered on one local Mac, explicit local state p
 - Phase 27 found no supported Apple-container path for Apple GPU, ANE, Metal, Core ML, MLX, or PyTorch MPS acceleration inside managed Linux containers.
 - Phase 29 rejected current-core CRI, Kubernetes node behavior, Docker API, Testcontainers, full Compose parity, attach, exec, log-follow, and port-forward compatibility because those contracts require broader protocol, lifecycle, stream, state, and network semantics.
 - Phase 30 kept current core single-host because multi-host work requires identity, membership, transport trust, state authority, failure recovery, audit, revocation, and scheduler policy.
-- Phase 31 added only local advisory scheduling. It does not reserve capacity, place workloads automatically, expose a scheduler API, schedule accelerators, or place work on remote hosts.
+- Phase 10 adds an experimental pure scheduler and durable single-host admission boundary. Aggregate qualification and Control 2.2 integration remain pending; this does not add remote placement or accelerator execution.
 - Phase 36 has an explicit local evidence runner, but blocked/failed/dirty reports and single-host raw values do not publish benchmark numbers or prove production capacity.
 - Phase 39 keeps beta release claims blocked until clean-checkout, CI, docs, examples, state, security, operations, telemetry, and support evidence exist.
 
@@ -34,7 +34,7 @@ This keeps the current product centered on one local Mac, explicit local state p
 | Docker API or full Compose parity in current core | Reject | Existing clients expect broad daemon, stream, image, network, volume, lifecycle, and schema semantics that Hostwright does not expose. | Separate API subset proposal with client contract and tests. |
 | Cloud control plane in current core | Reject | Hosted authority changes credentials, privacy, telemetry, audit, data retention, support, and product positioning. | Separate product approval, security review, data model, privacy policy, and support plan. |
 | Accelerator-aware scheduling | Reject for current core | No proved accelerator execution path, measured capacity model, or policy gate exists for managed container workloads. | Official supported access path, local proof, threat model, measured capacity model, and maintainer approval. |
-| Local advisory scheduling | Keep | Deterministic recommendations are useful without taking control of placement or resources. | Keep advisory-only until separate placement/reservation proof exists. |
+| Phase 10 scheduler/admission | Experimental | Pure placement decisions and durable single-host admission are implemented as a bounded vertical slice. | Require aggregate qualification, lifecycle/control evidence, and maintainer approval before a stable capability claim. |
 | Platform expansion path | Split | Separate work avoids weakening current single-host safety assumptions. | Approved issue or repository with boundaries, tests, docs, and release claims scoped to evidence. |
 
 ## Current Product Direction

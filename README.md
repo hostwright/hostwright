@@ -1,8 +1,10 @@
 # Hostwright
 
-Hostwright is a macOS command-line control plane for declaring and managing Apple container workloads on one Apple silicon Mac. It reads strict Manifest v2 YAML, produces plans for review, executes confirmed lifecycle actions through runtime providers, and records local state in SQLite schema v22.
+Hostwright is a macOS command-line control plane for declaring and managing Apple container workloads on one Apple silicon Mac. It reads strict Manifest v3 YAML, produces plans for review, executes confirmed lifecycle actions through runtime providers, and records local state in SQLite schema v24.
 
 Status: `0.0.2-dev`, targeting `v0.0.2`. Hostwright is not production-ready.
+
+The Phase 10 Manifest v3, Control API 2.2, scheduler admission, and state v23 slices are active implementation boundaries, not aggregate qualification claims. `scheduler.optimization` and `accelerators.host-native` remain unavailable pending converged G13-G15 aggregate, live, hardware, and security evidence; direct guest passthrough remains blocked.
 
 ## Requirements
 
@@ -42,16 +44,23 @@ SwiftPM fetches the pinned Containerization 0.35.0 and Yams 6.2.2 dependencies d
 
 ## Quick start
 
-Start a supported Apple `container` runtime, then save this Manifest v2 file as `hostwright.yaml`:
+Start a supported Apple `container` runtime, then save this Manifest v3 file as `hostwright.yaml`:
 
 ```yaml
-version: 2
+version: 3
 project: quickstart
 imagePolicy: require-digest
 
 services:
   web:
     image: docker.io/library/python@sha256:26730869004e2b9c4b9ad09cab8625e81d256d1ce97e72df5520e806b1709f92
+    resources:
+      requests:
+        cpus: 1
+        memory: 512MiB
+      limits:
+        cpus: 1
+        memory: 512MiB
     command: ["python3", "-m", "http.server", "8080", "--bind", "0.0.0.0"]
     ports:
       - "18080:8080"
@@ -70,6 +79,8 @@ hostwright image pull \
   --runtime-provider apple-cli
 hostwright up hostwright.yaml --dry-run --runtime-provider apple-cli
 ```
+
+At the current Phase 10 boundary, Manifest v3 validation and planning remain experimental. The current-source scheduler qualification is sealed, but confirmed allocation/lifecycle mutation remains unavailable until the persistent Control 2.2 lifecycle handoff, repository-backed runtime/victim-fencing seam, and remaining G13-G15 integration evidence are qualified. A confirmed mutation fails closed with `scheduler-authority-unavailable` and does not touch the runtime.
 
 Copy the plan hash from the dry run into the confirmed command:
 
@@ -96,7 +107,7 @@ In a source checkout, replace `hostwright` with `swift run hostwright`. The [Man
 
 | Surface | Purpose |
 | --- | --- |
-| `hostwright validate`, `plan`, `migrate preview`, `import-stack` | Validate Manifest v2, produce deterministic plans, preview legacy migration, and convert a narrow stack-file subset. |
+| `hostwright validate`, `plan`, `migrate preview`, `import-stack` | Validate Manifest v3, produce deterministic plans, preview legacy migration, and convert a narrow stack-file subset. |
 | `hostwright up`, `down`, `run`, `start`, `stop`, `restart`, `rm`, `update` | Execute plan-hash-gated lifecycle operations. `apply` routes to a confirmed `up` plan for compatibility. |
 | `hostwright exec`, `attach`, `copy`, `export`, `inspect`, `stats`, `logs` | Use provider-gated interactive, transfer, inspection, and streaming operations. |
 | `hostwright image`, `registry`, `secret`, `volume` | Manage provider images, registry authentication and OCI evidence, typed local secret references, and exact Hostwright-owned named-volume, snapshot, backup, quota, reclaim, and orphan workflows. |
@@ -113,9 +124,9 @@ SwiftPM separates contracts, runtime access, orchestration, state, and process s
 
 | Boundary | Modules and executables |
 | --- | --- |
-| Contracts and input | `HostwrightCore`, `HostwrightManifest`, `HostwrightImport`, and `HostwrightPolicy` define identities, contract versions, Manifest v2 decoding, conversion, and local policy. |
+| Contracts and input | `HostwrightCore`, `HostwrightManifest`, `HostwrightImport`, and `HostwrightPolicy` define identities, contract versions, Manifest v3 decoding, conversion, and local policy. |
 | Runtime providers | `HostwrightRuntime` owns `RuntimeAdapter`, capability negotiation, observation, and mutation contracts. `hostwright-containerization-helper` keeps the pinned Containerization framework in an authenticated out-of-process helper. |
-| Planning and state | `HostwrightReconciler` builds lifecycle plans and recovery actions. `HostwrightState` persists desired state, observations, ownership, operation records, and schema-v17 migrations in SQLite. |
+| Planning and state | `HostwrightReconciler` builds lifecycle plans and recovery actions. `HostwrightState` persists desired state, observations, ownership, operation records, and schema-v17 through v23 migrations in SQLite. |
 | Registry and secrets | `HostwrightRegistry` handles registry authentication and digest-bound OCI evidence. `HostwrightSecrets` handles Keychain and typed secret-provider boundaries. |
 | Storage | `HostwrightStorage` defines Storage Provider API v1, the built-in local provider, guarded mounts, snapshots, verified local/S3-compatible backup and restore, capacity policy, reclaim, and orphan recovery. `hostwright-storage-helper` keeps provider execution out of process. |
 | User and automation surfaces | `HostwrightCLI`, `HostwrightControl`, `HostwrightDaemonCore`, and their executable targets expose the CLI, one-shot JSON process, foreground daemon loop, and exact per-user LaunchAgent lifecycle. |

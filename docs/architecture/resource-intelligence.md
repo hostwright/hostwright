@@ -48,7 +48,7 @@ The local runner measures bounded per-container memory use, boot latency, observ
 
 Apple container version drift remains unavailable in the extended doctor resource report. Doctor readiness records the observed CLI/service versions but does not apply a benchmark compatibility claim. The benchmark command performs a reviewed RuntimeAdapter-backed version probe and compares it with an explicit expected version; mismatch fails that report rather than becoming a compatibility claim.
 
-Phase 31 advisory scheduling may consume resource reports as coarse local host facts, but it must keep capacity, memory pressure, density, and placement claims advisory. It does not turn resource intelligence into reservation, automatic placement, or production capacity planning.
+Resource intelligence is not scheduler capacity authority. The experimental Phase 10 scheduler consumes durable node-capacity snapshots and explicit manifest requests; doctor/resource reports cannot create reservations, inflate capacity, or establish placement evidence.
 
 Accelerator evidence remains separate from resource intelligence. See [Accelerator Boundary Research](accelerator-boundary-research.md) for the Phase 27 decision record covering Apple GPU, ANE, Metal, Core ML, MLX, PyTorch MPS, host-native accelerator helpers, and scheduler placeholders.
 

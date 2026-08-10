@@ -110,11 +110,14 @@ final class RuntimeProviderMigrationStateTests: XCTestCase {
     private func seedSourceState(_ store: SQLiteStateStore) throws -> Fixture {
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: demo
             services:
               api:
                 image: example.local/api:1
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """
         )
         try store.desiredStates.saveManifestSnapshot(

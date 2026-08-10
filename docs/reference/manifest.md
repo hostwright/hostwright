@@ -5,7 +5,7 @@ The manifest filename is `hostwright.yaml`.
 ## Current Shape
 
 ```yaml
-version: 2
+version: 3
 project: api-local
 imagePolicy: allow-tags
 restartBudget:
@@ -37,8 +37,18 @@ services:
       os: linux
       architecture: arm64
     resources:
-      cpus: 2
-      memory: 1GiB
+      requests:
+        cpus: 2
+        memory: 512MiB
+      limits:
+        cpus: 4
+        memory: 1GiB
+    scheduling:
+      priority: 10
+      provider: apple-container-cli
+      acceleratorClaims:
+        - name: neural-engine
+          count: 1
     user: 1000
     group: 1000
     workdir: /app
@@ -99,7 +109,7 @@ Canonical Hostwright manifests use this versioned Hostwright contract. Phase 12 
 
 ## Version Policy
 
-`version: 2` is the current manifest contract. New examples and generated starter manifests include it explicitly.
+`version: 3` is the current manifest contract. New examples and generated starter manifests include it explicitly.
 
 Versionless manifests and explicit `version: 1` manifests are legacy input. Execution fails closed with migration guidance. Preview the deterministic read-only conversion without modifying the source:
 
@@ -108,7 +118,7 @@ hostwright migrate preview hostwright.yaml
 hostwright migrate preview hostwright.yaml --json
 ```
 
-The migration preview inserts or replaces the locked version contract, reports whether input was legacy, and is idempotent for v2. It also converts legacy `health` into an equivalent typed liveness probe. It rejects future versions. Hostwright does not silently downgrade or mutate a manifest during validate, plan, or lifecycle execution.
+The migration preview inserts or replaces the locked version contract, reports whether input was legacy, and is idempotent for v3. It maps legacy v1/v2 flat `resources.cpus` and `resources.memory` values to both `resources.requests` and `resources.limits`, and converts legacy `health` into an equivalent typed liveness probe. Current v3 resources must use nested requests and limits and cannot mix flat and nested forms. It rejects future versions. Hostwright does not silently downgrade or mutate a manifest during validate, plan, or lifecycle execution.
 
 ## Parser Contract
 
@@ -121,7 +131,7 @@ Hostwright pins Yams 6.2.2 only inside `HostwrightManifest` and applies its own 
 
 Duplicate keys are rejected at every level. Anchors, aliases, merge keys, custom tags, multiple documents, ambiguous scalar coercion, unknown fields, and limit violations fail with stable line, column, and manifest-path diagnostics. Canonical encoding uses fixed field order and lexically sorted maps; every checked-in manifest must satisfy parse → canonical encode → parse equality.
 
-The top-level schema accepts bounded project `restartBudget`, local `maintenance` admission policy, schema-v17 `retention` policy, and exact named-volume declarations. The service schema accepts `image`, `replicas`, `platform`, `resources`, numeric `user` and `group`, `workdir`, `entrypoint`, `command`, `init`, `dependsOn`, `env`, `secretEnv`, `labels`, `ports`, typed bind/named-volume/tmpfs `volumes`, `probes`, legacy `health`, `restart`, `update`, `hooks`, `rosetta`, `virtualization`, `readOnlyRootFilesystem`, and `shmSize`. No accepted field is inert: it maps to desired runtime behavior or fails before mutation when the selected provider cannot execute it.
+The top-level schema accepts bounded project `restartBudget`, local `maintenance` admission policy, schema-v23 `retention` policy, and exact named-volume declarations. The service schema accepts `image`, `replicas`, `platform`, nested `resources`, separate `scheduling`, numeric `user` and `group`, `workdir`, `entrypoint`, `command`, `init`, `dependsOn`, `env`, `secretEnv`, `labels`, `ports`, typed bind/named-volume/tmpfs `volumes`, `probes`, legacy `health`, `restart`, `update`, `hooks`, `rosetta`, `virtualization`, `readOnlyRootFilesystem`, and `shmSize`. Every v3 service must declare nonempty requests and limits containing CPU and memory. Resource requests and limits also use disk, I/O, network, and process quantities; every declared dimension must occur on both sides, requests cannot exceed limits, and an explicit resource block cannot be empty. Provider selection and accelerator claims are scheduling constraints only. No accepted field is inert: it maps to desired runtime behavior or fails before mutation when the selected provider cannot execute it.
 
 Unsupported Kubernetes, Compose, or other orchestrator fields fail closed. This includes `apiVersion`, `kind`, `metadata`, `build`, `depends_on`, `deploy`, `networks`, `network_mode`, `dns`, `dns_search`, `domainname`, `hostname`, `extra_hosts`, `aliases`, `expose`, `configs`, and `secrets`.
 
@@ -176,13 +186,16 @@ After validation, Hostwright maps accepted manifests into runtime desired state 
 `imagePolicy` controls which image reference forms are accepted. The default is `allow-tags`, which accepts tag-based manifests such as `ghcr.io/example/api:latest`. `require-digest` rejects mutable tag-only image references and accepts digest-pinned references:
 
 ```yaml
-version: 2
+version: 3
 project: api-local
 imagePolicy: require-digest
 
 services:
   api:
     image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    resources:
+      requests: {cpus: 1, memory: 512MiB}
+      limits: {cpus: 1, memory: 512MiB}
 ```
 
 Lifecycle dry-run resolves every selected local image through structured provider evidence and binds the requested reference, immutable descriptor digest, exact Linux platform-variant digest, platform, provider identity, and capability digest into the reviewed plan. Under `allow-tags`, a moved local tag therefore produces a different plan generation and stale confirmation is refused. Under `require-digest`, the supplied descriptor must match the observed descriptor. Execution and rollback reverify the same lock before native create effects.
@@ -192,7 +205,7 @@ Lifecycle image resolution remains local and offline: it does not contact a regi
 `imageTrust` adds an optional offline image-signature trust policy on top of digest pinning:
 
 ```yaml
-version: 2
+version: 3
 project: api-local
 imagePolicy: require-digest
 imageTrust:
@@ -211,9 +224,12 @@ imageTrust:
 services:
   api:
     image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    resources:
+      requests: {cpus: 1, memory: 512MiB}
+      limits: {cpus: 1, memory: 512MiB}
 ```
 
-`imageTrust` is supported only in Manifest v2 and requires `imagePolicy: require-digest`. The `imageTrust.version` field is locked to `1`. `threshold` must be between 1 and 8, `authorities` must contain between 1 and 8 entries, and threshold cannot exceed the number of declared authorities.
+`imageTrust` is supported only in Manifest v3 and requires `imagePolicy: require-digest`. The `imageTrust.version` field is locked to `1`. `threshold` must be between 1 and 8, `authorities` must contain between 1 and 8 entries, and threshold cannot exceed the number of declared authorities.
 
 Each authority must declare a unique bounded identifier, a `type`, and only the fields for that type. `keyed` authorities require an absolute normalized `publicKey` path. `keyless` authorities require an exact HTTPS `issuer`, a bounded non-empty `identity`, and a top-level absolute normalized path to a Sigstore TrustedRoot JSON document. Optional `notBefore`, `notAfter`, and `revokedAt` timestamps must be RFC3339 and chronologically ordered.
 
@@ -222,7 +238,7 @@ Canonical encoding sorts `imageTrust.authorities` by `id` and preserves a fixed 
 `imageSBOM` declares which bounded image-SBOM formats Hostwright may generate and whether exact evidence is required before lifecycle effects:
 
 ```yaml
-version: 2
+version: 3
 project: api-local
 imagePolicy: require-digest
 imageSBOM:
@@ -234,14 +250,17 @@ imageSBOM:
 services:
   api:
     image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    resources:
+      requests: {cpus: 1, memory: 512MiB}
+      limits: {cpus: 1, memory: 512MiB}
 ```
 
-`imageSBOM` is supported only in Manifest v2 with `imagePolicy: require-digest`. Version is locked to `1`; `requirement` is `optional` or `required`; `formats` contains one or both unique values `spdx-json` and `cyclonedx-json`. Canonical encoding sorts formats, and unknown or duplicate fields fail closed. The policy hash and exact image descriptor participate in lifecycle confirmation. A required policy revalidates an immutable schema-v11 binding and its complete Gate 6 graph before execution and again during persisted recovery. Gate 8 binds optional provenance descriptor/referrer identities but does not generate or verify provenance.
+`imageSBOM` is supported only in Manifest v3 with `imagePolicy: require-digest`. Version is locked to `1`; `requirement` is `optional` or `required`; `formats` contains one or both unique values `spdx-json` and `cyclonedx-json`. Canonical encoding sorts formats, and unknown or duplicate fields fail closed. The policy hash and exact image descriptor participate in lifecycle confirmation. A required policy revalidates an immutable schema-v11 binding and its complete Gate 6 graph before execution and again during persisted recovery. Gate 8 binds optional provenance descriptor/referrer identities but does not generate or verify provenance.
 
 `imageVulnerability` declares an explainable signed-report policy:
 
 ```yaml
-version: 2
+version: 3
 project: api-local
 imagePolicy: require-digest
 imageTrust:
@@ -268,14 +287,17 @@ imageVulnerability:
 services:
   api:
     image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    resources:
+      requests: {cpus: 1, memory: 512MiB}
+      limits: {cpus: 1, memory: 512MiB}
 ```
 
-The policy is Manifest v2 only and requires `imagePolicy: require-digest` plus `imageTrust`. Version is locked to `1`. Severity is `low`, `medium`, `high`, or `critical`; exploitability is `any` or `known-exploited`; fix availability is `any` or `fix-available`; stale and unavailable actions are `fail-open` or `fail-closed`; exception approval is `required` or `disabled`. Allowlist entries bind an exact vulnerability ID and optional package PURL, require a reason and RFC3339 expiry, and are sorted canonically. All bounds, duplicate keys, duplicate allowlist identities, unknown fields, and invalid cross-field combinations fail closed. The policy hash is part of lifecycle confirmation and schema-v12 decisions.
+The policy is Manifest v3 only and requires `imagePolicy: require-digest` plus `imageTrust`. Version is locked to `1`. Severity is `low`, `medium`, `high`, or `critical`; exploitability is `any` or `known-exploited`; fix availability is `any` or `fix-available`; stale and unavailable actions are `fail-open` or `fail-closed`; exception approval is `required` or `disabled`. Allowlist entries bind an exact vulnerability ID and optional package PURL, require a reason and RFC3339 expiry, and are sorted canonically. All bounds, duplicate keys, duplicate allowlist identities, unknown fields, and invalid cross-field combinations fail closed. The policy hash is part of lifecycle confirmation and schema-v12 decisions.
 
 `imageProvenance` declares which signed build provenance may authorize an exact image:
 
 ```yaml
-version: 2
+version: 3
 project: api-local
 imagePolicy: require-digest
 imageProvenance:
@@ -294,9 +316,12 @@ imageProvenance:
 services:
   api:
     image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    resources:
+      requests: {cpus: 1, memory: 512MiB}
+      limits: {cpus: 1, memory: 512MiB}
 ```
 
-The policy is Manifest v2 only and requires `imagePolicy: require-digest`. Version is locked to `1`; `requirement` is `optional` or `required`; builder and build-type entries are unique bounded credential-free HTTPS or URN values; signer identifiers are unique; public-key paths are normalized absolute host paths; optional authority timestamps are RFC3339 and chronologically ordered. `maximumAgeSeconds` is between 60 seconds and one year. Canonical encoding sorts builders, build types, and signers, and unknown or duplicate fields fail closed. The policy and current signer material are bound into lifecycle confirmation. A required policy revalidates immutable schema-v14 evidence, the exact Gate 6 graph and referrer, DSSE signature, in-toto/SLSA subject and materials, signer authority, age, and optional reproducibility proof before execution and again during persisted recovery.
+The policy is Manifest v3 only and requires `imagePolicy: require-digest`. Version is locked to `1`; `requirement` is `optional` or `required`; builder and build-type entries are unique bounded credential-free HTTPS or URN values; signer identifiers are unique; public-key paths are normalized absolute host paths; optional authority timestamps are RFC3339 and chronologically ordered. `maximumAgeSeconds` is between 60 seconds and one year. Canonical encoding sorts builders, build types, and signers, and unknown or duplicate fields fail closed. The policy and current signer material are bound into lifecycle confirmation. A required policy revalidates immutable schema-v14 evidence, the exact Gate 6 graph and referrer, DSSE signature, in-toto/SLSA subject and materials, signer authority, age, and optional reproducibility proof before execution and again during persisted recovery.
 
 Legacy `"host:container"` port strings remain valid and canonicalize to localhost TCP mappings. Structured Phase 07 networking fields execute through exact Hostwright-owned project networks, service aliases, ingress, host access, certificate, policy, and tunnel boundaries; unsupported providers or unavailable exposure modes still fail before mutation.
 

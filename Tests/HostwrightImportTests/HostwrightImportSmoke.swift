@@ -3,7 +3,7 @@ import HostwrightManifest
 import XCTest
 
 final class HostwrightImportTests: XCTestCase {
-    func testAcceptedStackSubsetProducesGoldenHostwrightManifest() throws {
+    func testStackSubsetWithoutExplicitResourcesFailsClosed() throws {
         let result = StackFileImporter.convert(
             """
             version: "3.9"
@@ -31,37 +31,17 @@ final class HostwrightImportTests: XCTestCase {
             """
         )
 
-        XCTAssertTrue(result.succeeded)
+        XCTAssertFalse(result.succeeded)
+        XCTAssertNil(result.manifest)
+        XCTAssertNil(result.manifestText)
         XCTAssertEqual(result.warnings.count, 1)
         XCTAssertEqual(result.warnings.first?.line, 1)
-        let expectedManifest = """
-            version: 2
-            project: demo
-
-            services:
-              api:
-                image: ghcr.io/example/api:latest
-                command: ["serve"]
-                ports:
-                  - "8080:8080"
-                volumes:
-                  - "./data:/data:rw"
-                env:
-                  APP_ENV: development
-                  PUBLIC_URL: http://localhost:8080
-                health:
-                  command: ["curl", "http://localhost:8080/health"]
-                  interval: 10s
-                restart:
-                  policy: on-failure
-              worker:
-                image: ghcr.io/example/worker:latest
-                env:
-                  APP_ENV: development
-
-            """ + "\n"
-        XCTAssertEqual(result.manifestText, expectedManifest)
-        XCTAssertNoThrow(try ManifestValidator.validated(try XCTUnwrap(result.manifestText)))
+        let resourceErrors = result.errors.filter {
+            $0.message.contains("resources must declare explicit requests and limits")
+        }
+        XCTAssertEqual(resourceErrors.count, 2)
+        XCTAssertTrue(resourceErrors.contains { $0.message.contains("api") })
+        XCTAssertTrue(resourceErrors.contains { $0.message.contains("worker") })
     }
 
     func testImportDiagnosticsAreDeterministic() {
@@ -81,7 +61,7 @@ final class HostwrightImportTests: XCTestCase {
         XCTAssertEqual(first.errors.map(\.rendered), second.errors.map(\.rendered))
     }
 
-    func testInlineArraysRespectQuotedCommas() throws {
+    func testInlineArraysWithoutExplicitResourcesFailClosed() throws {
         let result = StackFileImporter.convert(
             """
             name: demo
@@ -95,16 +75,15 @@ final class HostwrightImportTests: XCTestCase {
             """
         )
 
-        XCTAssertTrue(result.succeeded)
-        let service = try XCTUnwrap(result.manifest?.services.first)
-        XCTAssertEqual(service.command, ["python", "print(a,b)"])
-        XCTAssertEqual(service.health?.command, ["curl", "http://localhost:8080/a,b"])
-        XCTAssertTrue(result.manifestText?.contains(#"command: ["python", "print(a,b)"]"#) == true)
-        XCTAssertTrue(result.manifestText?.contains(#"command: ["curl", "http://localhost:8080/a,b"]"#) == true)
-        XCTAssertNoThrow(try ManifestValidator.validated(try XCTUnwrap(result.manifestText)))
+        XCTAssertFalse(result.succeeded)
+        XCTAssertNil(result.manifest)
+        XCTAssertNil(result.manifestText)
+        XCTAssertTrue(result.errors.contains {
+            $0.message.contains("resources must declare explicit requests and limits")
+        })
     }
 
-    func testQuotedEnvironmentScalarsDecodeAndRenderedManifestRoundTrips() throws {
+    func testQuotedEnvironmentScalarsCannotBypassResourceAdmission() throws {
         let result = StackFileImporter.convert(
             #"""
             name: demo
@@ -118,13 +97,12 @@ final class HostwrightImportTests: XCTestCase {
             """#
         )
 
-        XCTAssertTrue(result.succeeded)
-        let service = try XCTUnwrap(result.manifest?.services.first)
-        XCTAssertEqual(service.env["JSON_DOC"], #"{"a":1}"#)
-        XCTAssertEqual(service.env["NOTE"], #"a\b"c"#)
-        let roundTripped = try ManifestValidator.validated(try XCTUnwrap(result.manifestText))
-        XCTAssertEqual(roundTripped.services.first?.env["JSON_DOC"], #"{"a":1}"#)
-        XCTAssertEqual(roundTripped.services.first?.env["NOTE"], #"a\b"c"#)
+        XCTAssertFalse(result.succeeded)
+        XCTAssertNil(result.manifest)
+        XCTAssertNil(result.manifestText)
+        XCTAssertTrue(result.errors.contains {
+            $0.message.contains("resources must declare explicit requests and limits")
+        })
     }
 
     func testManifestEmitterPreservesStructuredPublishedPorts() throws {
@@ -143,12 +121,16 @@ final class HostwrightImportTests: XCTestCase {
             ),
         ]
         let manifest = HostwrightManifest(
-            version: 2,
+            version: 3,
             project: "demo",
             services: [
                 HostwrightService(
                     name: "api",
                     image: "example.invalid/api:latest",
+                    resources: HostwrightResources(
+                        requests: HostwrightResourceSet(cpus: 1, memory: "512MiB"),
+                        limits: HostwrightResourceSet(cpus: 1, memory: "512MiB")
+                    ),
                     publishedPorts: publishedPorts
                 ),
             ]

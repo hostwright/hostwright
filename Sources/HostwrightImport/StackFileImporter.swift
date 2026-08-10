@@ -607,6 +607,15 @@ public enum HostwrightManifestEmitter {
             if let image = service.image {
                 lines.append("    image: \(image)")
             }
+            if let resources = service.resources {
+                lines.append("    resources:")
+                lines.append("      requests:")
+                appendResourceSet(resources.requests, to: &lines)
+                if let limits = resources.limits {
+                    lines.append("      limits:")
+                    appendResourceSet(limits, to: &lines)
+                }
+            }
             if !service.command.isEmpty {
                 lines.append("    command: \(inlineArray(service.command))")
             }
@@ -648,6 +657,30 @@ public enum HostwrightManifestEmitter {
 
         lines.append("")
         return lines.joined(separator: "\n") + "\n"
+    }
+
+    private static func appendResourceSet(
+        _ resources: HostwrightResourceSet,
+        to lines: inout [String]
+    ) {
+        if let cpus = resources.cpus {
+            lines.append("        cpus: \(cpus)")
+        }
+        if let memory = resources.memory {
+            lines.append("        memory: \(scalar(memory))")
+        }
+        if let disk = resources.disk {
+            lines.append("        disk: \(scalar(disk))")
+        }
+        if let io = resources.io {
+            lines.append("        io: \(scalar(io))")
+        }
+        if let network = resources.network {
+            lines.append("        network: \(scalar(network))")
+        }
+        if let process = resources.process {
+            lines.append("        process: \(process)")
+        }
     }
 
     private static func inlineArray(_ values: [String]) -> String {

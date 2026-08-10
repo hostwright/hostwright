@@ -76,18 +76,18 @@ def main() -> int:
             errors,
         )
         require(
-            version_golden.get("stateSchema") == 22,
+            version_golden.get("stateSchema") == 24,
             "version golden stateSchema does not match the current schema authority",
             errors,
         )
     require('releaseTarget = "v0.0.2"' in identity, "HostwrightIdentity release target is not v0.0.2", errors)
-    for fragment in ["manifest = 2", "controlAPI = 2", "runtimeProviderAPI = 2", "storageProviderAPI = 1", "pluginABI = 1", "stateSchema = 22"]:
+    for fragment in ["manifest = 3", "controlAPI = 2", "runtimeProviderAPI = 2", "storageProviderAPI = 1", "pluginABI = 1", "stateSchema = 24"]:
         require(fragment in contracts, f"missing contract truth: {fragment}", errors)
 
     require("0.0.2-dev" in readme and "v0.0.2" in readme, "README lacks current version/release truth", errors)
     require("`brew install hostwright` does not exist today" in readme, "README must state the unqualified brew command does not exist", errors)
     require("macOS command-line control plane" in readme, "README lacks the product purpose", errors)
-    require("Manifest v2" in readme and "SQLite schema v22" in readme, "README lacks current manifest/state contracts", errors)
+    require("Manifest v3" in readme and "SQLite schema v24" in readme, "README lacks current manifest/state contracts", errors)
     require("project networks" in readme and "service tunnels" in readme, "README lacks current Phase 07 networking truth", errors)
     require("Apple `container` 1.0.0 and 1.1.0" in readme, "README lacks the tested Apple container matrix", errors)
     require("`hostwright image`, `registry`, `secret`" in readme, "README lacks the current image, registry, and secret surfaces", errors)
@@ -103,7 +103,7 @@ def main() -> int:
     require("exact development evidence" in compatibility, "compatibility docs must distinguish evidence from GA claims", errors)
     require("Apple `container` 1.0.0 and 1.1.0" in compatibility, "compatibility docs lack the exact Phase 03 Apple CLI matrix", errors)
     require("Containerization 0.35.0" in compatibility, "compatibility docs lack the exact Phase 03 Containerization pin", errors)
-    require("version: 2" in manifest_doc and "migrate preview" in manifest_doc, "manifest docs lack v2/migration truth", errors)
+    require("version: 3" in manifest_doc and "migrate preview" in manifest_doc, "manifest docs lack v3/migration truth", errors)
     require("Yams 6.2.2" in manifest_doc and "1 MiB" in manifest_doc, "manifest docs lack the maintained bounded parser truth", errors)
     require("0.0.2-dev" in cli and "apiVersion\":2" in cli, "CLI docs lack product/API v2 truth", errors)
     for fragment in ["hostwright runtime providers", "hostwright runtime migrate", "--runtime-provider auto|apple-cli|containerization"]:
@@ -121,14 +121,15 @@ def main() -> int:
     for identifier in ["runtime.apple-container-cli", "runtime.containerization"]:
         pattern = rf'capability\("{re.escape(identifier)}"[^\n]+\.stable, 3, 129'
         require(re.search(pattern, capability_catalog) is not None, f"capability catalog does not report qualified Phase 03 provider: {identifier}", errors)
-    for identifier, issue in [
-        ("lifecycle.single-host", 140),
-        ("manifest.restricted-parser", 130),
-        ("manifest.v2", 131),
+    for identifier, phase, issue, capability_state in [
+        ("lifecycle.single-host", 10, 207, "experimental"),
+        ("manifest.restricted-parser", 4, 130, "stable"),
+        ("manifest.v3", 10, 207, "experimental"),
     ]:
-        pattern = rf'capability\("{re.escape(identifier)}"[^\n]+\.stable, 4, {issue}'
-        require(re.search(pattern, capability_catalog) is not None, f"capability catalog does not report qualified Phase 04 capability: {identifier}", errors)
-    require("Schema version 22 is the latest" in state, "state docs do not name schema v22", errors)
+        pattern = rf'capability\("{re.escape(identifier)}"[^\n]+\.{capability_state}, {phase}, {issue}'
+        require(re.search(pattern, capability_catalog) is not None, f"capability catalog does not report current capability truth: {identifier}", errors)
+    require("Schema version 24 is the latest" in state, "state docs do not name schema v24", errors)
+    require("Control API 2.2" in compatibility, "compatibility docs do not name the active Control API 2.2 boundary", errors)
     require(
         re.search(r'capability\("storage\.persistent"[^\n]+\.stable, 6, 163', capability_catalog)
         is not None,
@@ -168,7 +169,7 @@ def main() -> int:
 
     schema = json.loads(read("schemas/hostwright-yaml.schema.json"))
     version_schema = schema.get("properties", {}).get("version", {})
-    require(version_schema.get("const") == 2, "manifest JSON schema version is not const 2", errors)
+    require(version_schema.get("const") == 3, "manifest JSON schema version is not const 3", errors)
     require("version" in schema.get("required", []), "manifest JSON schema does not require version", errors)
 
     model_evidence_classes = re.findall(r'case\s+\w+\s*=\s*"([a-z-]+)"', evidence_models.split("public enum HostwrightEvidenceStatus", 1)[0])
@@ -188,7 +189,7 @@ def main() -> int:
     require(bool(example_paths), "no executable manifest examples found", errors)
     for path in example_paths:
         content = path.read_text(encoding="utf-8")
-        require(re.search(r"(?m)^version:\s*2\s*$", content) is not None, f"{path.relative_to(ROOT)} is not Manifest v2", errors)
+        require(re.search(r"(?m)^version:\s*3\s*$", content) is not None, f"{path.relative_to(ROOT)} is not Manifest v3", errors)
 
     immutable = json.loads(read("docs/release/IMMUTABLE_RELEASES.json"))
     require(immutable.get("schemaVersion") == 1, "immutable release manifest schema is invalid", errors)

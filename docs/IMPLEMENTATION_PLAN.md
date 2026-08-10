@@ -2,6 +2,8 @@
 
 > **Historical record:** this document preserves the earlier phase program and its evidence language. It is not the active release plan or current product boundary. The canonical all-in roadmap is [Hostwright v0.0.2 All-In Implementation Plan](roadmap/v0.0.2/IMPLEMENTATION_PLAN.md), backed by the checked-in 183-issue manifest. Earlier “non-goal,” “deferred,” “research-only,” and “reject from current core” decisions are now limitations with owning `v0.0.2` phases unless the new plan records a permanent public-API, safety, privacy, or quorum boundary.
 
+> **Phase-numbering notice:** the Phase 10 section below is a superseded legacy record. Current Phase 10 is the `v0.0.2` epic #219 qualification program (G0–G15); consult the active roadmap and its evidence gates for current capability truth.
+
 This was the canonical first-release roadmap for Hostwright before the v0.0.2 truth reset.
 
 The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundation work. Phase 3 is intentionally a short alignment and test-foundation control gate. It is not a broad documentation expansion and it does not add runtime behavior.
@@ -41,7 +43,7 @@ The maintainer approved a compressed 10-phase plan after the Phase 0/1/2 foundat
 | 28 | Stack-File Import And Migration Tooling | Complete locally | Add import-only conversion for a narrow safe stack-file subset. | Golden conversion, unsupported-field, policy-reason, CLI JSON/text, and validation-gate tests pass without runtime/state mutation or Compose parity claims. |
 | 29 | External Orchestration Compatibility Research | Research complete; implementation not started | Decide CRI, Kubernetes, Docker API, Compose, attach, forwarding, scheduler, lifecycle, networking, identity, and state compatibility boundaries before implementation. | Research is recorded; any exact-version compatibility implementation belongs in a separately approved project or extension. |
 | 30 | Multi-Host Apple Silicon Platform Research | Research complete; implementation not started | Decide multi-host identity, membership, trust, state authority, transport, failure recovery, cloud boundary, and scheduler implications before implementation. | Research is recorded; no transport, membership, replicated state, or two-host proof exists. |
-| 31 | Scheduler And Placement Engine | Complete locally | Add deterministic local advisory scheduling without automatic placement or capacity guarantees. | Advisory scheduler tests cover policy blockers, memory overcommit, fairness scoring, accelerator blockers, remote-placement blockers, and unsupported current-support claims. |
+| 31 | Scheduler And Placement Engine | Superseded by Phase 10 | The historical local recommendation experiment is replaced by the direct Phase 10 scheduler and durable admission boundary. | Historical design notes remain traceable; current placement uses the pure scheduler contracts and authoritative state admission described below. |
 | 32 | Policy Engine | Complete locally | Add deterministic local policy decisions before import, compatibility, multi-host, and scheduler work. | Policy evaluator tests cover ports, mounts, images, env/secrets, cleanup, lifecycle, exposure, untrusted manifests, accelerator placeholders, and planner migration. |
 | 33 | Plugin And Extension Architecture | Declaration policy complete; handshake host delivered separately in Phase 41 | Define safe extension types, trust model, versioning, capability declarations, and non-mutating prototype boundaries. | Declarations are policy checked; Phase 41 adds only an explicit reviewed-local handshake, while generic loading, installation, and capability invocation remain unavailable. |
 | 34 | Enterprise And Team Workflow | Complete locally | Enforce explicit local team profiles, exact approval bindings, and append-only audit records without cloud dependency. | Strict versioned JSON artifacts, SHA-256 binding, validate/plan/import/apply/cleanup wiring, real-file tests, real SQLite audit tests, and built-CLI checks pass. |
@@ -85,7 +87,7 @@ All evidence follows [Testing And Evidence](reference/testing-evidence.md). Fixt
 - Planning is deterministic and non-mutating.
 - Apply executes at most one supported action and refuses every other planned action.
 - Manifest parsing remains a restricted Hostwright subset, not general YAML or Compose parity.
-- Explicit `version: 1` manifests are supported; omitted version is legacy v1 input; explicit older/newer versions fail closed with no automatic conversion.
+- Normal execution requires Manifest v3; explicit v1/v2 input is legacy migration-preview material only, and future/unknown versions fail closed.
 - Networking remains local-first: Hostwright-created publishes use `127.0.0.1`, observed host-port conflicts block planning, and DNS/service discovery/reverse proxy/tunnel/cloud exposure remain unsupported.
 - Image trust remains local-first: `imagePolicy: require-digest` validates `@sha256` reference syntax only and does not resolve registries, pull images, verify signatures, scan vulnerabilities, generate SBOMs, or prove provenance.
 - Resource intelligence remains local and diagnostic: it reports host facts and explicit unmeasured dimensions without capacity guarantees, runtime mutation, image pulls, external telemetry, accelerator scheduling, or Apple container command execution from `doctor`.
@@ -96,7 +98,7 @@ All evidence follows [Testing And Evidence](reference/testing-evidence.md). Fixt
 - Stack-file import is conversion-only: it prints reviewed `hostwright.yaml` text for a narrow safe subset and rejects unsupported networking, secrets, configs, build, deploy, named-volume, shell-healthcheck, cloud, tunnel, and lifecycle semantics without writing files, touching state, observing runtime, pulling images, or claiming Compose parity.
 - External orchestration compatibility remains research-only: no CRI shim, Kubernetes node behavior, Docker API shim, Testcontainers target, full Compose parity, attach/exec/log-follow/port-forward stream, or external scheduler API exists in current core scope.
 - Multi-host platform work remains research-only: current core has no remote host agent, membership service, peer discovery, state replication, remote mutation, cloud control plane, scheduler API, or remote placement behavior.
-- Scheduler behavior is local and advisory: it scores explicit local recommendations from declared inputs and existing policy decisions, but it does not mutate runtime, write state, reserve capacity, perform automatic placement, expose a scheduler API, schedule accelerators, or place work on remote hosts.
+- Scheduler behavior has one direct production boundary: `HostwrightScheduler` produces deterministic placement decisions, `ManifestSchedulerAdmissionBridge` maps manifest requests into scheduler workloads and limits into runtime enforcement, and `HostwrightState` durably binds admission/reservation authority. The pure scheduler does not mutate runtime or write state, and no second advisory scheduler is supported.
 - Documentation-site work is source-of-truth planning only: current support claims stay grounded in this repository, while website frontend, hosted docs deployment, analytics, search, and presentation work belong outside the core repository.
 - Beta readiness work is checklist and claim-gating only: no beta tag, GitHub Release, version bump, binary artifact, installer, support promise, or production-readiness claim exists until separate maintainer approval and matching evidence.
 - Control-plane direction work keeps Hostwright core single-host for beta and first supported release work; Kubernetes-class, CRI, Docker API, full Compose, cloud, multi-host, remote-placement, and accelerator-aware scheduling work require a separate approved track.
@@ -170,6 +172,8 @@ Phase 8 remains intentionally narrow as historical context. It proved one create
 Phase 9 remains intentionally narrow. It does not implement stop, restart command, image replacement, port mutation, mount mutation, daemon restart loops, image cleanup, volume cleanup, DNS, tunnels, cloud, GPU/ANE behavior, or production readiness.
 
 ## Phase 10 Outputs
+
+> **Legacy section:** these source-only alpha outputs are retained for historical traceability and do not describe the current Phase 10 #219 (G0–G15) program.
 
 - Central version source of truth is `0.1.0-alpha.1`.
 - `hostwright --version` reports `0.1.0-alpha.1`.
@@ -379,7 +383,7 @@ Phase 28 does not add general YAML parsing, Docker Compose parity, runtime compa
 - CRI and Kubernetes node compatibility are rejected from current core scope because they require kubelet-facing runtime and image services, pod sandbox behavior, streaming setup, log semantics, node status, leases, scheduler accounting, and reconciliation contracts.
 - Docker API and Testcontainers compatibility are rejected from current core scope because they require daemon-shaped API versioning, attach/log stream behavior, event streams, broad lifecycle, image, network, volume, and inspect semantics.
 - Full Compose parity remains rejected from current core scope; Phase 28 remains an import-only reviewed subset with fail-closed unsupported-field behavior.
-- External scheduler integration is deferred; Phase 31 may add advisory local scheduling, not an external orchestrator API.
+- External scheduler integration remains deferred; Phase 10's direct `HostwrightScheduler` boundary is not an external orchestrator API.
 - Public limitations, requirements, acceptance gates, and build status keep external orchestration compatibility listed as unsupported current behavior.
 - XCTest coverage guards the research decision and unsupported-current-support wording.
 
@@ -396,18 +400,17 @@ Phase 29 does not add CRI, Kubernetes, Docker API, Compose parity, Testcontainer
 
 Phase 30 does not add multi-host orchestration, remote mutation, remote host agents, state replication, membership service, peer discovery, transport or certificate implementation, cloud control plane, DNS, tunnels, scheduler API, remote placement, runtime mutation expansion, state writes, network calls, image pulls, dependencies, release tags, or GitHub Releases.
 
-## Phase 31 Outputs
+## Phase 31 Outputs (Superseded)
 
-- `Sources/HostwrightReconciler/AdvisoryScheduler.swift` and `AdvisorySchedulingModels.swift` add a deterministic in-memory advisory scheduler.
-- Scheduler inputs include desired runtime state, optional observed runtime state, local resource report facts, explicit memory/workload-class/accelerator/remote-placement requests, and the local policy evaluator.
-- Scheduler output is an `AdvisorySchedulingReport` with sorted recommendations, stable reason codes, blockers, warnings, remediations, scores, memory budget summary, and `advisoryOnly = true`.
-- Policy integration carries existing local planner blockers and warnings into scheduler explanations without changing `ReconciliationPlan`, plan hashes, CLI output, RuntimeAdapter behavior, or state.
-- Memory and overcommit checks use declared memory requests and local physical-memory facts only; missing facts block and missing service memory requests warn instead of inferring capacity.
-- Workload class fairness lowers advisory scores when one declared class exceeds the local threshold, but does not enforce operating-system QoS, preemption, or fair share.
-- Accelerator and remote-placement requirements are blockers.
-- XCTest coverage proves deterministic recommendations, policy/port blockers, memory overcommit, accelerator blockers, fairness scoring, remote-placement blockers, and fail-closed missing memory evidence.
+Phase 31's local recommendation experiment is historical. Its in-memory implementation and compatibility path are no longer part of `HostwrightReconciler`; the current boundary is the Phase 10 direct scheduler/admission slice.
 
-Phase 31 does not add automatic placement, capacity reservation, runtime mutation, RuntimeAdapter changes, SQLite access, state writes, daemon scheduling, scheduler API, external scheduler compatibility, Kubernetes scheduler behavior, multi-host scheduling, remote placement, DNS, tunnels, cloud behavior, registry calls, image pulls, telemetry upload, accelerator-aware scheduling, GPU/ANE/Metal/Core ML/MLX/PyTorch MPS support, third-party dependencies, release tags, or GitHub Releases.
+## Phase 10 Scheduler And Admission Boundary
+
+- `HostwrightScheduler` owns pure, deterministic resource placement contracts, hard filters, scoring/explanation ordering, and plan/simulate operations.
+- `ManifestSchedulerAdmissionBridge` maps canonical manifest requests into `SchedulerWorkload` placement demand, maps declared limits into runtime hard-enforcement inputs, and rejects profile or unsupported-runtime claims before mutation.
+- `HostwrightState` owns durable node-capacity snapshots, decision/reservation bindings, active-capacity accounting, idempotent replay, and fencing/release evidence. Runtime calls remain outside database transactions.
+- Capacity is authoritative state, not an ephemeral caller assertion; a reservation binds the persisted capacity generation/digest and all decision/profile/config/lifecycle inputs.
+- There is no second advisory or compatibility scheduler in the reconciler. Current-source G3-G8 scheduler qualification is sealed with zero safety mismatches and 382 retained intentional optimization-gap fixtures; lifecycle/control integration and the remaining aggregate G13-G15 checks remain evidence-gated.
 
 ## Phase 32 Outputs
 

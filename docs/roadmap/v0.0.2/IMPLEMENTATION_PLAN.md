@@ -52,11 +52,11 @@ Hostwright `v0.0.2` is a dependable Apple-silicon container platform that provid
 
 ```mermaid
 flowchart LR
-    U["CLI, GUI, Docker, CRI, or cloud client"] --> API["Control API v2"]
+    U["CLI, GUI, Docker, CRI, or cloud client"] --> API["Control API 2.2"]
     API --> AUTH["Identity, RBAC, admission, and audit"]
     AUTH --> INTENT["Versioned desired-state intent"]
     INTENT --> STATE{"Authority"}
-    STATE -->|"single Mac"| SQLITE["SQLite schema v7"]
+    STATE -->|"single Mac"| SQLITE["SQLite schema v23"]
     STATE -->|"cluster"| ETCD["Managed etcd 3.7.x"]
     STATE --> PLAN["Planner and scheduler"]
     PLAN --> SAGA["Durable operation DAG and saga"]
@@ -110,11 +110,11 @@ Hostwright does not pretend separate per-container VMs share Linux namespaces. K
 
 | Contract | v0.0.2 version | Compatibility rule | Migration rule |
 | --- | ---: | --- | --- |
-| Manifest | 2 | v2 is required for execution; versionless and v1 input are legacy. | `hostwright migrate preview` produces deterministic read-only v2 output; Phase 04 owns full semantic migration. |
-| Control API | 2 | API N/N-1 is required once API v2 is released; current v1 requests fail explicitly. | Clients negotiate a version and receive stable unsupported-version errors. |
+| Manifest | 3 | Manifest v3 is the active breaking contract; versionless and v1/v2 input are legacy and are accepted only by explicit migration preview. | `hostwright migrate preview` produces deterministic read-only v3 output, maps legacy flat resource values to both request and limit, and refuses legacy resource-less workloads that need a manual capacity declaration. |
+| Control API | 2 (current protocol revision 2.2) | API N/N-1 is required once API v2 is released; current v1 requests fail explicitly. | Clients negotiate a version and receive stable unsupported-version errors. |
 | Runtime Provider API | 2 | Provider capability negotiation is mandatory. | Projects stay bound to their generation’s provider until an explicit fenced migration. |
 | Plugin ABI | 1 | Capability manifests and protocol version are checked before launch. | No ambient-privilege compatibility shim; incompatible plugins remain quarantined. |
-| State schema | 7 | Newer schemas fail closed; migrations are contiguous and checksummed. | Deterministic UUID/fencing backfill; real upgrade/restore evidence is required. |
+| State schema | 23 | Newer schemas fail closed; migrations are contiguous, checksummed, and preserve historical authority. | Deterministic UUID/fencing backfill through v23; real upgrade/restore and Phase 10 recovery evidence is required. |
 
 ## Complete Limitation Register
 
@@ -128,7 +128,7 @@ Hostwright does not pretend separate per-container VMs share Linux namespaces. K
 | SQLite durability | Schema v7 plus full integrity classification, online backup, strict catalog verification, atomic restore, projection-only repair, access fencing, and interruption recovery are implemented. | Generalized file-pressure behavior, more disk-fault matrices, state-retention policy, and long-soak proof remain. | Yes. | P02 issue #115, then P15 requalification. | SQLite remains single-host/node-local by design; cluster authority uses etcd. Arbitrary authoritative-row/page salvage is forbidden. |
 | Apple `container` provider | Partial observation and narrow create/start/restart/delete. | Structured codecs, capability negotiation, complete observation/lifecycle, normalization, cancellation, upgrades, and full conformance are incomplete. | Yes. | P03. | Exact current/previous tested minor only. |
 | Containerization provider | Architecture only. | No pinned helper, versioned protocol, lifecycle implementation, isolation, or conformance evidence. | Yes. | P03. | No in-process unpinned framework coupling. |
-| Manifest v2 | Version contract and migration preview exist; schema remains narrow. | Maintained YAML, complete workload schema, defaults, update semantics, and executable field coverage are missing. | Yes. | P04. | Unknown or unimplemented fields fail closed. |
+| Manifest v3 | Strict nested request/limit resources, separate scheduling policy, deterministic legacy migration, and direct scheduler-admission mapping are implemented in the active boundary. | Direct fenced lifecycle admission, migrated-fixture convergence, aggregate evidence, and Phase 10 qualification remain incomplete. | Yes. | P10 / #207. | v1/v2 remain explicit migration inputs; unknown or unenforceable fields fail closed. |
 | Full local lifecycle | Four narrow mutation actions plus observation/logs/cleanup. | No durable multi-action DAG, dependency reconciliation, complete commands, rolling update, or automatic rollback. | Yes. | P04. | None. |
 | Exec/attach/copy/export/stats/follow | Mostly absent. | Process/TTY/stream/backpressure/cancellation semantics are not implemented. | Yes. | P04. | Unsupported calls return stable explicit errors until implemented. |
 | Startup/readiness/liveness | Narrow allowlisted in-process health behavior. | Typed runtime probes, gates, budgets, rollout integration, and recovery are incomplete. | Yes. | P04 and P08. | None. |
@@ -146,9 +146,9 @@ Hostwright does not pretend separate per-container VMs share Linux namespaces. K
 | Persistent Control API | One-shot local JSON subset. | No Unix socket, full parity, streams, watch recovery, authentication, backpressure, or compatibility window. | Yes. | P09. | Local offline operation remains primary. |
 | Identity/RBAC/admission/audit | Local policy/team profile fragments. | Peer identity, least privilege, admission, tamper evidence, workload profiles, revocation, and complete audit are incomplete. | Yes. | P09. | Unauthenticated public control is prohibited. |
 | Plugins/providers | Reviewed-local executable handshake with ambient account privilege. | No WASI sandbox, signed XPC mediation, capability grants, install/update/revoke/quarantine, or adversarial proof. | Yes. | P09. | Native plugins only where WASI cannot provide the capability. |
-| Scheduler | Local advisory model only. | No actual requests/limits, hard filters, packing, fairness, topology, preemption, disruption, hysteresis, or exact-oracle qualification. | Yes. | P10. | None. Invalid or nondeterministic placement fails the gate. |
-| Pressure/thermal/battery/sleep | Diagnostic facts and benchmark scaffolding. | No admission, reclamation, maintenance, energy policy, or live-hardware regression system. | Yes. | P10 and P15. | Policies remain explainable and operator-overridable within safety bounds. |
-| GPU/ANE/Metal/Core ML/MLX | Research-only, no workload access. | Apple does not expose a supported direct guest passthrough path in the locked design baseline. | Yes, user outcome. | P10. | Implement authenticated host-native service; add direct passthrough only when a public API and conformance evidence exist. |
+| Scheduler | Pure `HostwrightScheduler` contracts, hard filters, deterministic scoring/explanations, and durable admission bindings are implemented for the experimental boundary. | Lifecycle/Control 2.2 handoff, aggregate G13–G15 evidence, live/hardware/security qualification, and optimization availability remain incomplete. | Yes. | P10 / #219. | There is no advisory or compatibility scheduler; invalid or nondeterministic placement fails the gate. |
+| Pressure/thermal/battery/sleep | Bounded pressure, reclamation, and energy-policy contracts exist for experimental admission/recovery decisions. | Live sleep/wake, hardware, performance, and aggregate safety qualification remain incomplete. | Yes. | P10 and P15. | Policies remain explainable and operator-overridable within safety bounds; no live capability claim is made. |
+| GPU/ANE/Metal/Core ML/MLX | Host-native contract and service slices exist but remain unavailable; direct guest passthrough remains blocked. | Aggregate, live, hardware, security, and G15 qualification are incomplete, and Apple does not expose a supported direct guest passthrough path in the locked design baseline. | Yes, user outcome. | P10 / #219. | Implement and qualify the authenticated host-native service; add direct passthrough only when a public API and conformance evidence exist. |
 | Multi-Mac/HA | Research documents and local-only scheduling. | No membership, CA, consensus store, node agents, fencing, remote execution, volumes, discovery, failover, upgrades, or DR. | Yes. | P11. | Mutation stops on quorum loss; etcd supplies consensus. |
 | Kubernetes/CRI/CNI/CSI/Helm | Explicitly unsupported today. | No real pod sandbox, guest agent, CRI services, guest topology, CSI adapters, translation, or conformance. | Yes. | P12. | No fake namespace compatibility; use real sandbox VMs. |
 | Docker Engine API | Not implemented. | No negotiated endpoint, authenticated socket/context, stream semantics, endpoint matrix, or compatibility reports. | Yes. | P13. | Untested endpoints fail explicitly. |
@@ -173,7 +173,7 @@ The daily dates are aggressive execution targets, not permission to weaken a gat
 | 01 | 2026-07-13 | [#110](https://github.com/hostwright/hostwright/issues/110) | Truth reset, breaking contracts, migrations, capability report, roadmap/docs/GitHub governance. | None | Unit-contract, migration-upgrade, docs/site/build gates; every gap has an owner. |
 | 02 | 2026-07-14 | [#120](https://github.com/hostwright/hostwright/issues/120) | Trusted installation, secure defaults, durable local state, upgrade/rollback/uninstall. | P01 | Distribution-artifact, migration-upgrade, security-assessment, corruption/disk/process tests. |
 | 03 | 2026-07-15 | [#129](https://github.com/hostwright/hostwright/issues/129) | Conformant Apple CLI and pinned Containerization providers with safe binding/migration. | P01–P02 | Identical provider conformance, live-runtime, cancellation, failure, cleanup, upgrade evidence. |
-| 04 | 2026-07-16 | [#140](https://github.com/hostwright/hostwright/issues/140) | Complete Manifest v2 and single-host app lifecycle on durable sagas. | P01–P03 | Real three-service install/update/failure/recovery/cleanup proof. |
+| 04 | 2026-07-16 | [#140](https://github.com/hostwright/hostwright/issues/140) | Historical Phase 04 qualification of the Manifest v2 and single-host app lifecycle boundary on durable sagas. | P01–P03 | Historical three-service install/update/failure/recovery/cleanup proof; Phase 10 v3 is a separate breaking boundary. |
 | 05 | 2026-07-17 | [#152](https://github.com/hostwright/hostwright/issues/152) | OCI lifecycle, registries, Keychain/providers, signatures, SBOM, vulnerability and provenance policy. | P02–P04 | Registry/offline/tamper/bomb/no-secret-leak conformance. |
 | 06 | 2026-07-18 | [#163](https://github.com/hostwright/hostwright/issues/163) | Persistent storage, snapshots, online backup/restore, quotas, fencing, reclaim, orphan GC. | P02–P04 | End-to-end hashes across replacement, crash, upgrade, restore, and cleanup. |
 | 07 | 2026-07-19 | [#178](https://github.com/hostwright/hostwright/issues/178) | Networks, DNS, dual stack, ingress, TLS/mTLS, policy, secure tunnels and provider SPI. | P03–P04 | Permission, PF loss, sleep/wake, switch, rotation, partition, and cleanup evidence. |
@@ -208,6 +208,8 @@ The child issue ranges below are not placeholders: each issue contains outcome, 
 
 ## Scheduler and Optimization Contract
 
+The contract below is a locked qualification target, not a claim that G13–G15 has passed. The current Phase 10 implementation is experimental: the pure scheduler, manifest bridge, and durable state contracts are independently testable, and the current-source G3-G8 scheduler qualification is sealed with zero safety mismatches. The sealed evidence covers 1,000,000 generated cases, 10,000 exact-oracle cases with 382 retained intentional optimization-gap fixtures, and a 0.917259875-second p95 on Mac16,8; it does not close G13-G15 or promote `scheduler.optimization`. Lifecycle/Control integration and aggregate live, hardware, security, and accelerator evidence remain pending, and `accelerators.host-native` remains unavailable.
+
 Scheduling is deterministic and explainable. The order is locked:
 
 1. validate workload requests, limits, reservations, priority, topology, policy, and accelerator claims;
@@ -219,6 +221,8 @@ Scheduling is deterministic and explainable. The order is locked:
 7. return the chosen node plus filter failures, score components, alternatives, and preemption explanation.
 
 Property tests require zero capacity/policy violations, starvation, nondeterminism, and unbounded churn across one million seeded cases. At least 10,000 small cases are compared with an exact solver/oracle. Performance target is 1,000 pending workloads across 100 nodes under one second p95 on the recorded reference Mac.
+
+The sealed current-source qualification retained 382 exact-oracle optimization-gap fixtures. These are replayable safety-neutral diagnostics where the scheduler placed fewer workloads than the exact oracle; they are not safety mismatches, hidden successes, or evidence that the unavailable optimization capability should be promoted.
 
 ## Verification Constitution
 

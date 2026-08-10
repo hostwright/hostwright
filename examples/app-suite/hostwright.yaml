@@ -1,16 +1,22 @@
-version: 2
+version: 3
 project: phase04-three-service
 imagePolicy: require-digest
 
 services:
   prepare:
     image: docker.io/library/python@sha256:26730869004e2b9c4b9ad09cab8625e81d256d1ce97e72df5520e806b1709f92
+    resources:
+      requests: {cpus: 1, memory: 256MiB}
+      limits: {cpus: 1, memory: 256MiB}
     command: ["python3", "-c", "print('prepared')"]
     restart:
       policy: "no"
 
   worker:
     image: docker.io/library/python@sha256:26730869004e2b9c4b9ad09cab8625e81d256d1ce97e72df5520e806b1709f92
+    resources:
+      requests: {cpus: 1, memory: 512MiB}
+      limits: {cpus: 1, memory: 512MiB}
     replicas: 2
     command: ["python3", "-c", "import time; time.sleep(3600)"]
     dependsOn:
@@ -30,6 +36,9 @@ services:
 
   web:
     image: docker.io/library/python@sha256:26730869004e2b9c4b9ad09cab8625e81d256d1ce97e72df5520e806b1709f92
+    resources:
+      requests: {cpus: 1, memory: 512MiB}
+      limits: {cpus: 1, memory: 512MiB}
     command: ["python3", "-m", "http.server", "8080", "--bind", "0.0.0.0"]
     dependsOn:
       worker: ready

@@ -17,13 +17,57 @@ public struct ReconciliationPlanner: Sendable {
         restartPolicyStates: [RuntimeServiceIdentity: RestartPolicyStateRecord] = [:],
         currentTimestamp: String? = nil
     ) -> ReconciliationPlan {
-        let mapping = ManifestRuntimeMapper.map(manifest, policy: policy)
+        let schedulerAdmissionValidated: Bool
+        let schedulerIssues: [PlanIssue]
+        do {
+            _ = try ManifestSchedulerAdmissionBridge.map(
+                manifest: manifest,
+                subjectID: "owner"
+            )
+            schedulerAdmissionValidated = false
+            schedulerIssues = [
+                PlanIssue(
+                    kind: .unsupportedFeature,
+                    severity: .blocker,
+                    identity: nil,
+                    message: "Scheduler admission was validated, but no persisted Control 2.2 placement decision and fenced reservation were supplied. Manifest-only admission cannot authorize runtime mutation.",
+                    stableDetailKey: "scheduler-authority-unavailable"
+                )
+            ]
+        } catch let error as ManifestSchedulerAdmissionError {
+            schedulerAdmissionValidated = false
+            schedulerIssues = [
+                PlanIssue(
+                    kind: .unsupportedFeature,
+                    severity: .blocker,
+                    identity: nil,
+                    message: "Scheduler admission failed: \(error.stableKey). No runtime mutation was attempted.",
+                    stableDetailKey: error.stableKey
+                )
+            ]
+        } catch {
+            schedulerAdmissionValidated = false
+            schedulerIssues = [
+                PlanIssue(
+                    kind: .unsupportedFeature,
+                    severity: .blocker,
+                    identity: nil,
+                    message: "Scheduler admission failed before planning. No runtime mutation was attempted.",
+                    stableDetailKey: "scheduler-admission:failed"
+                )
+            ]
+        }
+        let mapping = ManifestRuntimeMapper.map(
+            manifest,
+            policy: policy,
+            schedulerAdmissionValidated: schedulerAdmissionValidated
+        )
         return reconcile(
             PlanningInput(
                 desiredState: mapping.desiredState,
                 observedState: observedState,
                 policy: policy,
-                additionalIssues: mapping.issues,
+                additionalIssues: mapping.issues + schedulerIssues,
                 restartPolicyStates: restartPolicyStates,
                 currentTimestamp: currentTimestamp
             )

@@ -106,12 +106,15 @@ final class RetentionManifestTests: XCTestCase {
 
     private func manifest(retention: String) -> String {
         """
-        version: 2
+        version: 3
         project: demo
         \(retention)
         services:
           api:
             image: local/api:latest
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
         """
     }
 }

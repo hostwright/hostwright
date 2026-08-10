@@ -1,6 +1,9 @@
-version: 2
+version: 3
 project: golden-contract
 
 services:
   api:
     image: local/golden-contract:latest
+    resources:
+      requests: {cpus: 1, memory: 512MiB}
+      limits: {cpus: 1, memory: 512MiB}

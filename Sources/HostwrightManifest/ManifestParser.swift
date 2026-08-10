@@ -8,16 +8,36 @@ public enum ManifestParser {
     public static let maximumUTF8Bytes = 1_048_576
     public static let maximumDepth = 64
     public static let maximumExpandedNodes = 100_000
-    public static let limitation = "Hostwright Manifest v2 accepts one bounded YAML document."
+    public static let limitation = "Hostwright Manifest v3 accepts one bounded YAML document."
 
     public static func parse(_ text: String) throws -> HostwrightManifest {
-        try parse(text, cancellationCheck: { false })
+        (try parse(text, cancellationCheck: { false }, allowLegacyFlatResources: false)).manifest
     }
 
     public static func parse(
         _ text: String,
         cancellationCheck: @escaping @Sendable () -> Bool
     ) throws -> HostwrightManifest {
+        (try parse(
+            text,
+            cancellationCheck: cancellationCheck,
+            allowLegacyFlatResources: false
+        )).manifest
+    }
+
+    static func parseForMigrationPreview(_ text: String) throws -> ManifestMigrationParseResult {
+        try parse(
+            text,
+            cancellationCheck: { false },
+            allowLegacyFlatResources: true
+        )
+    }
+
+    private static func parse(
+        _ text: String,
+        cancellationCheck: @escaping @Sendable () -> Bool,
+        allowLegacyFlatResources: Bool
+    ) throws -> ManifestMigrationParseResult {
         try checkCancellation(cancellationCheck)
         guard text.utf8.count <= maximumUTF8Bytes else {
             throw failure(
@@ -40,7 +60,14 @@ public enum ManifestParser {
             var traversal = NodeTraversal(cancellationCheck: cancellationCheck)
             try traversal.inspect(root, path: "$", depth: 1)
             try checkCancellation(cancellationCheck)
-            return try ManifestNodeDecoder().decode(root)
+            let decoder = ManifestNodeDecoder(
+                allowLegacyFlatResources: allowLegacyFlatResources
+            )
+            return ManifestMigrationParseResult(
+                manifest: try decoder.decode(root),
+                usedLegacyFlatResources: decoder.usedLegacyFlatResources,
+                legacyFlatResourcePaths: decoder.legacyFlatResourcePaths
+            )
         } catch let error as ManifestParseError {
             throw error
         } catch is CancellationError {
@@ -178,6 +205,12 @@ public enum ManifestParser {
     }
 }
 
+struct ManifestMigrationParseResult {
+    let manifest: HostwrightManifest
+    let usedLegacyFlatResources: Bool
+    let legacyFlatResourcePaths: [String]
+}
+
 private struct NodeTraversal {
     private var count = 0
     let cancellationCheck: @Sendable () -> Bool
@@ -278,7 +311,15 @@ private struct NodeTraversal {
     }
 }
 
-private struct ManifestNodeDecoder {
+private final class ManifestNodeDecoder {
+    let allowLegacyFlatResources: Bool
+    private(set) var usedLegacyFlatResources = false
+    private(set) var legacyFlatResourcePaths: [String] = []
+
+    init(allowLegacyFlatResources: Bool = false) {
+        self.allowLegacyFlatResources = allowLegacyFlatResources
+    }
+
     func decode(_ root: Node) throws -> HostwrightManifest {
         let values = try mapping(
             root,
@@ -1297,7 +1338,7 @@ private struct ManifestNodeDecoder {
             allowed: [
                 "image", "replicas", "platform", "resources", "user", "group", "workdir",
                 "entrypoint", "command", "init", "dependsOn", "env", "secretEnv", "labels",
-                "ports", "hostAccess", "networks", "networkPolicy", "volumes", "health", "probes", "restart", "update", "hooks",
+                "ports", "hostAccess", "networks", "networkPolicy", "volumes", "health", "probes", "restart", "update", "hooks", "scheduling",
                 "rosetta", "virtualization", "readOnlyRootFilesystem", "shmSize"
             ]
         )
@@ -1305,7 +1346,13 @@ private struct ManifestNodeDecoder {
         let image = try values["image"].map { try string($0, path: "\(path).image") }
         let replicas = try values["replicas"].map { try integer($0, path: "\(path).replicas") } ?? 1
         let platform = try values["platform"].map { try decodePlatform($0, path: "\(path).platform") } ?? HostwrightPlatform()
-        let resources = try values["resources"].map { try decodeResources($0, path: "\(path).resources") }
+        let resources = try values["resources"].map {
+            try decodeResources(
+                $0,
+                path: "\(path).resources",
+                allowLegacyFlatResources: allowLegacyFlatResources
+            )
+        }
         let user = try values["user"].map { try unsignedID($0, path: "\(path).user") }
         let group = try values["group"].map { try unsignedID($0, path: "\(path).group") }
         let workdir = try values["workdir"].map { try string($0, path: "\(path).workdir") }
@@ -1354,6 +1401,9 @@ private struct ManifestNodeDecoder {
         let restart = try values["restart"].map { try decodeRestart($0, path: "\(path).restart") }
         let update = try values["update"].map { try decodeUpdate($0, path: "\(path).update") } ?? HostwrightUpdatePolicy()
         let hooks = try values["hooks"].map { try decodeHooks($0, path: "\(path).hooks") } ?? HostwrightHooks()
+        let scheduling = try values["scheduling"].map {
+            try decodeScheduling($0, path: "\(path).scheduling")
+        }
         let rosetta = try values["rosetta"].map { try boolean($0, path: "\(path).rosetta") } ?? false
         let virtualization = try values["virtualization"].map { try boolean($0, path: "\(path).virtualization") } ?? false
         let readOnlyRoot = try values["readOnlyRootFilesystem"].map {
@@ -1367,6 +1417,7 @@ private struct ManifestNodeDecoder {
             replicas: replicas,
             platform: platform,
             resources: resources,
+            scheduling: scheduling,
             user: user,
             group: group,
             workdir: workdir,
@@ -1844,11 +1895,369 @@ private struct ManifestNodeDecoder {
         return HostwrightPlatform(os: os, architecture: architecture)
     }
 
-    private func decodeResources(_ node: Node, path: String) throws -> HostwrightResources {
-        let values = try mapping(node, path: path, allowed: ["cpus", "memory"])
+    private func decodeResources(
+        _ node: Node,
+        path: String,
+        allowLegacyFlatResources: Bool
+    ) throws -> HostwrightResources {
+        let values = try mapping(
+            node,
+            path: path,
+            allowed: [
+                "requests", "limits", "cpus", "memory"
+            ]
+        )
+        let hasNested = values["requests"] != nil || values["limits"] != nil
+        let hasLegacy = values["cpus"] != nil || values["memory"] != nil
+        guard !(hasNested && hasLegacy) else {
+            throw ManifestParser.failure(
+                "resources cannot mix legacy flat cpus/memory with nested requests/limits.",
+                code: .manifestValidationFailed,
+                node: node,
+                path: path
+            )
+        }
+        if hasLegacy {
+            usedLegacyFlatResources = true
+            legacyFlatResourcePaths.append(path)
+            guard allowLegacyFlatResources else {
+                throw ManifestParser.failure(
+                    "Flat resources.cpus/resources.memory are legacy input. Run 'hostwright migrate preview' before execution.",
+                    code: .manifestUnsupportedFeature,
+                    node: node,
+                    path: path
+                )
+            }
+            let legacy = HostwrightResourceSet(
+                cpus: try values["cpus"].map { try integer($0, path: "\(path).cpus") },
+                memory: try values["memory"].map { try string($0, path: "\(path).memory") }
+            )
+            return HostwrightResources(requests: legacy, limits: legacy)
+        }
+
         return HostwrightResources(
+            requests: try values["requests"].map {
+                try decodeResourceSet($0, path: "\(path).requests")
+            } ?? HostwrightResourceSet(),
+            limits: try values["limits"].map {
+                try decodeResourceSet($0, path: "\(path).limits")
+            }
+        )
+    }
+
+    private func decodeResourceSet(_ node: Node, path: String) throws -> HostwrightResourceSet {
+        let values = try mapping(
+            node,
+            path: path,
+            allowed: [
+                "cpus", "memory", "disk", "io", "network", "process"
+            ]
+        )
+        return HostwrightResourceSet(
             cpus: try values["cpus"].map { try integer($0, path: "\(path).cpus") },
-            memory: try values["memory"].map { try string($0, path: "\(path).memory") }
+            memory: try values["memory"].map { try string($0, path: "\(path).memory") },
+            disk: try values["disk"].map { try string($0, path: "\(path).disk") },
+            io: try values["io"].map { try string($0, path: "\(path).io") },
+            network: try values["network"].map { try string($0, path: "\(path).network") },
+            process: try values["process"].map { try integer($0, path: "\(path).process") }
+        )
+    }
+
+    private func decodeAcceleratorClaims(
+        _ node: Node,
+        path: String
+    ) throws -> [HostwrightAcceleratorClaim] {
+        guard case .sequence(let sequence) = node else {
+            throw ManifestParser.failure(
+                "Accelerator claims must be a sequence.",
+                code: .manifestValidationFailed,
+                node: node,
+                path: path
+            )
+        }
+        guard sequence.count <= HostwrightSchedulingPolicy.maximumAcceleratorClaims else {
+            throw ManifestParser.failure(
+                "Accelerator claims must contain at most \(HostwrightSchedulingPolicy.maximumAcceleratorClaims) entries.",
+                code: .manifestValidationFailed,
+                node: node,
+                path: path
+            )
+        }
+        return try sequence.enumerated().map { index, child in
+            let itemPath = "\(path)[\(index)]"
+            let values = try mapping(child, path: itemPath, allowed: ["name", "count"])
+            return HostwrightAcceleratorClaim(
+                name: try requiredString(
+                    values["name"],
+                    path: "\(itemPath).name",
+                    message: "Accelerator claim name is required."
+                ),
+                count: try values["count"].map {
+                    try integer($0, path: "\(itemPath).count")
+                } ?? 1
+            )
+        }
+    }
+
+    private func decodeScheduling(
+        _ node: Node,
+        path: String
+    ) throws -> HostwrightSchedulingPolicy {
+        let values = try mapping(
+            node,
+            path: path,
+            allowed: [
+                "priority", "requiredAffinity", "preferredAffinity",
+                "requiredAntiAffinity", "preferredAntiAffinity", "topologySpread",
+                "tolerations", "disruption", "preemption", "provider", "acceleratorClaims"
+            ]
+        )
+        return HostwrightSchedulingPolicy(
+            priority: try values["priority"].map {
+                try signedInteger($0, path: "\(path).priority")
+            } ?? 0,
+            requiredAffinity: try values["requiredAffinity"].map {
+                try decodeSelectors($0, path: "\(path).requiredAffinity")
+            } ?? [],
+            preferredAffinity: try values["preferredAffinity"].map {
+                try decodePreferences($0, path: "\(path).preferredAffinity")
+            } ?? [],
+            requiredAntiAffinity: try values["requiredAntiAffinity"].map {
+                try decodeSelectors($0, path: "\(path).requiredAntiAffinity")
+            } ?? [],
+            preferredAntiAffinity: try values["preferredAntiAffinity"].map {
+                try decodePreferences($0, path: "\(path).preferredAntiAffinity")
+            } ?? [],
+            topologySpread: try values["topologySpread"].map {
+                try decodeTopologySpreads($0, path: "\(path).topologySpread")
+            } ?? [],
+            tolerations: try values["tolerations"].map {
+                try decodeTolerations($0, path: "\(path).tolerations")
+            } ?? [],
+            disruption: try values["disruption"].map {
+                try decodeDisruption($0, path: "\(path).disruption")
+            },
+            preemption: try values["preemption"].map {
+                let raw = try string($0, path: "\(path).preemption")
+                guard let value = HostwrightPreemptionPolicy(rawValue: raw) else {
+                    throw ManifestParser.failure(
+                        "scheduling.preemption must be disabled or lower-priority.",
+                        code: .manifestValidationFailed,
+                        node: $0,
+                        path: "\(path).preemption"
+                    )
+                }
+                return value
+            } ?? .disabled,
+            provider: try values["provider"].map {
+                try string($0, path: "\(path).provider")
+            },
+            acceleratorClaims: try values["acceleratorClaims"].map {
+                try decodeAcceleratorClaims($0, path: "\(path).acceleratorClaims")
+            } ?? []
+        )
+    }
+
+    private func decodeSelectors(_ node: Node, path: String) throws -> [HostwrightSchedulingSelector] {
+        guard case .sequence(let sequence) = node else {
+            throw ManifestParser.failure("Affinity rules must be a sequence.", node: node, path: path)
+        }
+        guard sequence.count <= HostwrightSchedulingPolicy.maximumRules else {
+            throw ManifestParser.failure(
+                "Affinity rules must contain at most \(HostwrightSchedulingPolicy.maximumRules) entries.",
+                code: .manifestValidationFailed,
+                node: node,
+                path: path
+            )
+        }
+        return try sequence.enumerated().map { index, child in
+            try decodeSelector(child, path: "\(path)[\(index)]")
+        }
+    }
+
+    private func decodeSelector(_ node: Node, path: String) throws -> HostwrightSchedulingSelector {
+        let values = try mapping(node, path: path, allowed: ["key", "operator", "values"])
+        return try decodeSelector(values: values, path: path)
+    }
+
+    private func decodeSelector(
+        values: [String: Node],
+        path: String
+    ) throws -> HostwrightSchedulingSelector {
+        let rawOperator = try requiredString(
+            values["operator"],
+            path: "\(path).operator",
+            message: "Affinity operator is required."
+        )
+        guard let operatorValue = HostwrightAffinityOperator(rawValue: rawOperator) else {
+            throw ManifestParser.failure(
+                "Affinity operator must be in, not-in, exists, or does-not-exist.",
+                code: .manifestValidationFailed,
+                node: values["operator"],
+                path: "\(path).operator"
+            )
+        }
+        return HostwrightSchedulingSelector(
+            key: try requiredString(
+                values["key"],
+                path: "\(path).key",
+                message: "Affinity key is required."
+            ),
+            operator: operatorValue,
+            values: try values["values"].map { try strings($0, path: "\(path).values") } ?? []
+        )
+    }
+
+    private func decodePreferences(
+        _ node: Node,
+        path: String
+    ) throws -> [HostwrightSchedulingPreference] {
+        guard case .sequence(let sequence) = node else {
+            throw ManifestParser.failure("Affinity preferences must be a sequence.", node: node, path: path)
+        }
+        guard sequence.count <= HostwrightSchedulingPolicy.maximumRules else {
+            throw ManifestParser.failure(
+                "Affinity preferences must contain at most \(HostwrightSchedulingPolicy.maximumRules) entries.",
+                code: .manifestValidationFailed,
+                node: node,
+                path: path
+            )
+        }
+        return try sequence.enumerated().map { index, child in
+            let itemPath = "\(path)[\(index)]"
+            let values = try mapping(child, path: itemPath, allowed: ["weight", "key", "operator", "values"])
+            return HostwrightSchedulingPreference(
+                weight: try requiredInteger(
+                    values["weight"],
+                    path: "\(itemPath).weight",
+                    message: "Affinity preference weight is required."
+                ),
+                match: try decodeSelector(values: values, path: "\(itemPath).match")
+            )
+        }
+    }
+
+    private func decodeTopologySpreads(
+        _ node: Node,
+        path: String
+    ) throws -> [HostwrightTopologySpread] {
+        guard case .sequence(let sequence) = node else {
+            throw ManifestParser.failure(
+                "topologySpread must be a sequence.",
+                node: node,
+                path: path
+            )
+        }
+        guard sequence.count <= HostwrightSchedulingPolicy.maximumTopologySpreads else {
+            throw ManifestParser.failure(
+                "topologySpread must contain at most \(HostwrightSchedulingPolicy.maximumTopologySpreads) entries.",
+                code: .manifestValidationFailed,
+                node: node,
+                path: path
+            )
+        }
+        return try sequence.enumerated().map { index, child in
+            let itemPath = "\(path)[\(index)]"
+            let values = try mapping(
+                child,
+                path: itemPath,
+                allowed: ["topologyKey", "maxSkew", "whenUnsatisfiable"]
+            )
+            let rawAction = try values["whenUnsatisfiable"].map {
+                try string($0, path: "\(itemPath).whenUnsatisfiable")
+            } ?? HostwrightTopologyUnsatisfiableAction.doNotSchedule.rawValue
+            guard let action = HostwrightTopologyUnsatisfiableAction(rawValue: rawAction) else {
+                throw ManifestParser.failure(
+                    "topologySpread.whenUnsatisfiable must be do-not-schedule or schedule-anyway.",
+                    code: .manifestValidationFailed,
+                    node: values["whenUnsatisfiable"],
+                    path: "\(itemPath).whenUnsatisfiable"
+                )
+            }
+            return HostwrightTopologySpread(
+                topologyKey: try requiredString(
+                    values["topologyKey"],
+                    path: "\(itemPath).topologyKey",
+                    message: "topologySpread.topologyKey is required."
+                ),
+                maxSkew: try values["maxSkew"].map {
+                    try integer($0, path: "\(itemPath).maxSkew")
+                } ?? 1,
+                whenUnsatisfiable: action
+            )
+        }
+    }
+
+    private func decodeTolerations(
+        _ node: Node,
+        path: String
+    ) throws -> [HostwrightSchedulingToleration] {
+        guard case .sequence(let sequence) = node else {
+            throw ManifestParser.failure("tolerations must be a sequence.", node: node, path: path)
+        }
+        guard sequence.count <= HostwrightSchedulingPolicy.maximumTolerations else {
+            throw ManifestParser.failure(
+                "tolerations must contain at most \(HostwrightSchedulingPolicy.maximumTolerations) entries.",
+                code: .manifestValidationFailed,
+                node: node,
+                path: path
+            )
+        }
+        return try sequence.enumerated().map { index, child in
+            let itemPath = "\(path)[\(index)]"
+            let values = try mapping(
+                child,
+                path: itemPath,
+                allowed: ["key", "value", "effect", "operator"]
+            )
+            let rawOperator = try requiredString(
+                values["operator"],
+                path: "\(itemPath).operator",
+                message: "Toleration operator is required."
+            )
+            guard let operatorValue = HostwrightTolerationOperator(rawValue: rawOperator) else {
+                throw ManifestParser.failure(
+                    "Toleration operator must be equals or exists.",
+                    code: .manifestValidationFailed,
+                    node: values["operator"],
+                    path: "\(itemPath).operator"
+                )
+            }
+            let rawEffect = try values["effect"].map {
+                try string($0, path: "\(itemPath).effect")
+            }
+            let effect = try rawEffect.map { raw -> HostwrightTaintEffect in
+                guard let effect = HostwrightTaintEffect(rawValue: raw) else {
+                    throw ManifestParser.failure(
+                        "Toleration effect must be no-schedule or no-execute.",
+                        code: .manifestValidationFailed,
+                        node: values["effect"],
+                        path: "\(itemPath).effect"
+                    )
+                }
+                return effect
+            }
+            return HostwrightSchedulingToleration(
+                key: try values["key"].map { try string($0, path: "\(itemPath).key") },
+                value: try values["value"].map { try string($0, path: "\(itemPath).value") },
+                effect: effect,
+                operator: operatorValue
+            )
+        }
+    }
+
+    private func decodeDisruption(
+        _ node: Node,
+        path: String
+    ) throws -> HostwrightDisruptionPolicy {
+        let values = try mapping(node, path: path, allowed: ["maxUnavailable", "minAvailable"])
+        return HostwrightDisruptionPolicy(
+            maxUnavailable: try values["maxUnavailable"].map {
+                try integer($0, path: "\(path).maxUnavailable")
+            },
+            minAvailable: try values["minAvailable"].map {
+                try integer($0, path: "\(path).minAvailable")
+            }
         )
     }
 
@@ -2561,6 +2970,23 @@ private struct ManifestNodeDecoder {
         else {
             throw ManifestParser.failure(
                 "Expected a canonical non-negative decimal integer.",
+                code: .manifestValidationFailed,
+                node: node,
+                path: path
+            )
+        }
+        return value
+    }
+
+    private func signedInteger(_ node: Node, path: String) throws -> Int {
+        guard case .scalar(let scalar) = node,
+              node.tag.rawValue == Tag.Name.int.rawValue,
+              scalar.string.range(of: #"^-?(0|[1-9][0-9]*)$"#, options: .regularExpression) != nil,
+              scalar.string != "-0",
+              let value = Int(scalar.string)
+        else {
+            throw ManifestParser.failure(
+                "Expected a canonical signed decimal integer.",
                 code: .manifestValidationFailed,
                 node: node,
                 path: path

@@ -5,10 +5,16 @@ import XCTest
 @testable import HostwrightRuntime
 
 final class ManifestRuntimePortMappingTests: XCTestCase {
+    private static let executableResources = HostwrightResources(
+        requests: HostwrightResourceSet(cpus: 1, memory: "512MiB"),
+        limits: HostwrightResourceSet(cpus: 1, memory: "512MiB")
+    )
+
     func testMapsFixedAndDynamicPublishedPorts() throws {
         let service = HostwrightService(
             name: "api",
             image: "example.invalid/api:local",
+            resources: Self.executableResources,
             publishedPorts: [
                 HostwrightPublishedPort(
                     host: HostwrightPortSpan(start: 18_080),
@@ -22,7 +28,7 @@ final class ManifestRuntimePortMappingTests: XCTestCase {
         )
 
         let mapping = ManifestRuntimeMapper.map(
-            HostwrightManifest(version: 2, project: "demo", services: [service])
+            HostwrightManifest(version: 3, project: "demo", services: [service])
         )
 
         XCTAssertTrue(mapping.issues.isEmpty)
@@ -51,6 +57,7 @@ final class ManifestRuntimePortMappingTests: XCTestCase {
         let service = HostwrightService(
             name: "api",
             image: "example.invalid/api:local",
+            resources: Self.executableResources,
             publishedPorts: [
                 HostwrightPublishedPort(
                     host: HostwrightPortSpan(start: 18_080, end: 18_082),
@@ -62,7 +69,7 @@ final class ManifestRuntimePortMappingTests: XCTestCase {
         )
 
         let mapping = ManifestRuntimeMapper.map(
-            HostwrightManifest(version: 2, project: "demo", services: [service])
+            HostwrightManifest(version: 3, project: "demo", services: [service])
         )
 
         XCTAssertTrue(mapping.issues.isEmpty)
@@ -98,6 +105,7 @@ final class ManifestRuntimePortMappingTests: XCTestCase {
         let service = HostwrightService(
             name: "api",
             image: "example.invalid/api:local",
+            resources: Self.executableResources,
             publishedPorts: [
                 HostwrightPublishedPort(
                     target: HostwrightPortSpan(start: 8_080, end: 8_082),
@@ -107,7 +115,7 @@ final class ManifestRuntimePortMappingTests: XCTestCase {
         )
 
         let mapping = ManifestRuntimeMapper.map(
-            HostwrightManifest(version: 2, project: "demo", services: [service])
+            HostwrightManifest(version: 3, project: "demo", services: [service])
         )
 
         XCTAssertTrue(mapping.issues.isEmpty)
@@ -143,6 +151,7 @@ final class ManifestRuntimePortMappingTests: XCTestCase {
         let service = HostwrightService(
             name: "api",
             image: "example.invalid/api:local",
+            resources: Self.executableResources,
             publishedPorts: [
                 HostwrightPublishedPort(
                     target: HostwrightPortSpan(start: 8_080),
@@ -152,7 +161,7 @@ final class ManifestRuntimePortMappingTests: XCTestCase {
         )
 
         let mapping = ManifestRuntimeMapper.map(
-            HostwrightManifest(version: 2, project: "demo", services: [service])
+            HostwrightManifest(version: 3, project: "demo", services: [service])
         )
 
         XCTAssertTrue(mapping.issues.contains {
@@ -174,6 +183,7 @@ final class ManifestRuntimePortMappingTests: XCTestCase {
         let service = HostwrightService(
             name: "api",
             image: "example.invalid/api:local",
+            resources: Self.executableResources,
             publishedPorts: [
                 HostwrightPublishedPort(
                     host: HostwrightPortSpan(start: 18_080),
@@ -186,7 +196,7 @@ final class ManifestRuntimePortMappingTests: XCTestCase {
         )
 
         let mapping = ManifestRuntimeMapper.map(
-            HostwrightManifest(version: 2, project: "demo", services: [service])
+            HostwrightManifest(version: 3, project: "demo", services: [service])
         )
 
         XCTAssertEqual(
@@ -210,6 +220,7 @@ final class ManifestRuntimePortMappingTests: XCTestCase {
         let service = HostwrightService(
             name: "api",
             image: "example.invalid/api:local",
+            resources: Self.executableResources,
             publishedPorts: [
                 HostwrightPublishedPort(
                     host: HostwrightPortSpan(start: 18_080),
@@ -222,7 +233,7 @@ final class ManifestRuntimePortMappingTests: XCTestCase {
         )
 
         let mapping = ManifestRuntimeMapper.map(
-            HostwrightManifest(version: 2, project: "demo", services: [service])
+            HostwrightManifest(version: 3, project: "demo", services: [service])
         )
 
         XCTAssertTrue(mapping.issues.isEmpty)
@@ -247,7 +258,7 @@ final class ManifestRuntimePortMappingTests: XCTestCase {
             bonjourDiscovery: false
         )
         let manifest = HostwrightManifest(
-            version: 2,
+            version: 3,
             project: "demo",
             imagePolicy: nil,
             imageTrust: nil,
@@ -259,6 +270,7 @@ final class ManifestRuntimePortMappingTests: XCTestCase {
                 HostwrightService(
                     name: "api",
                     image: "example.invalid/api:local",
+                    resources: Self.executableResources,
                     ports: ["8080:8080"]
                 ),
             ]
@@ -286,10 +298,11 @@ final class ManifestRuntimePortMappingTests: XCTestCase {
         let service = HostwrightService(
             name: "api",
             image: "example.invalid/api:local",
+            resources: Self.executableResources,
             ports: ["8080:8080"]
         )
         let manifest = HostwrightManifest(
-            version: 2,
+            version: 3,
             project: "demo",
             imagePolicy: nil,
             imageTrust: nil,
@@ -329,11 +342,12 @@ final class ManifestRuntimePortMappingTests: XCTestCase {
         let service = HostwrightService(
             name: "api",
             image: "example.invalid/api:local",
+            resources: Self.executableResources,
             ports: ["8080:8080"]
         )
         let mapping = ManifestRuntimeMapper.map(
             HostwrightManifest(
-                version: 2,
+                version: 3,
                 project: "demo",
                 imagePolicy: nil,
                 imageTrust: nil,
@@ -361,11 +375,12 @@ final class ManifestRuntimePortMappingTests: XCTestCase {
         let service = HostwrightService(
             name: "api",
             image: "example.invalid/api:local",
+            resources: Self.executableResources,
             ports: ["18080:8080"]
         )
 
         let mapping = ManifestRuntimeMapper.map(
-            HostwrightManifest(version: 2, project: "demo", services: [service])
+            HostwrightManifest(version: 3, project: "demo", services: [service])
         )
 
         XCTAssertTrue(mapping.issues.isEmpty)
@@ -387,11 +402,12 @@ final class ManifestRuntimePortMappingTests: XCTestCase {
         let service = HostwrightService(
             name: "api",
             image: "example.invalid/api:local",
+            resources: Self.executableResources,
             ports: ["not-a-port"]
         )
 
         let mapping = ManifestRuntimeMapper.map(
-            HostwrightManifest(version: 2, project: "demo", services: [service])
+            HostwrightManifest(version: 3, project: "demo", services: [service])
         )
 
         XCTAssertTrue(mapping.issues.contains {
@@ -405,6 +421,7 @@ final class ManifestRuntimePortMappingTests: XCTestCase {
         let service = HostwrightService(
             name: "api",
             image: "example.invalid/api:local",
+            resources: Self.executableResources,
             publishedSockets: [
                 HostwrightPublishedSocket(
                     containerPath: "/run/api.sock"
@@ -419,7 +436,7 @@ final class ManifestRuntimePortMappingTests: XCTestCase {
         let root = "/tmp/hostwright-gate06-sockets"
         let first = ManifestRuntimeMapper.map(
             HostwrightManifest(
-                version: 2,
+                version: 3,
                 project: "demo",
                 services: [service]
             ),
@@ -429,7 +446,7 @@ final class ManifestRuntimePortMappingTests: XCTestCase {
         )
         let second = ManifestRuntimeMapper.map(
             HostwrightManifest(
-                version: 2,
+                version: 3,
                 project: "demo",
                 services: [service]
             ),
@@ -455,6 +472,7 @@ final class ManifestRuntimePortMappingTests: XCTestCase {
         let service = HostwrightService(
             name: "api",
             image: "example.invalid/api:local",
+            resources: Self.executableResources,
             publishedSockets: [
                 HostwrightPublishedSocket(
                     hostName: "api.sock",
@@ -464,7 +482,7 @@ final class ManifestRuntimePortMappingTests: XCTestCase {
         )
         let mapping = ManifestRuntimeMapper.map(
             HostwrightManifest(
-                version: 2,
+                version: 3,
                 project: "demo",
                 services: [service]
             ),

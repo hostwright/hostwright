@@ -4,7 +4,7 @@ import XCTest
 final class MaintenanceManifestTests: XCTestCase {
     func testRecurringAndOneShotWindowsRoundTripCanonically() throws {
         let source = """
-        version: 2
+        version: 3
         project: demo
         maintenance:
           timezone: America/New_York
@@ -29,6 +29,9 @@ final class MaintenanceManifestTests: XCTestCase {
         services:
           api:
             image: local/api:latest
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
         """
 
         let manifest = try ManifestValidator.validated(source)
@@ -44,7 +47,7 @@ final class MaintenanceManifestTests: XCTestCase {
 
     func testMaintenanceRejectsAmbiguousUnsafeAndUnconfigurableWindows() {
         let invalid = """
-        version: 2
+        version: 3
         project: demo
         maintenance:
           timezone: Not/AZone

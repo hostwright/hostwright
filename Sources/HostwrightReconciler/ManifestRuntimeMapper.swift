@@ -38,7 +38,8 @@ public enum ManifestRuntimeMapper {
         projectResourceUUID: String? = nil,
         bindMountBaseDirectory: String? = nil,
         unixSocketRootDirectory: String? = nil,
-        namedVolumeSources: [String: String] = [:]
+        namedVolumeSources: [String: String] = [:],
+        schedulerAdmissionValidated: Bool = false
     ) -> ManifestRuntimeMappingResult {
         let projectName = manifest.project ?? ""
         let resolvedProjectUUID = projectResourceUUID ??
@@ -75,6 +76,7 @@ public enum ManifestRuntimeMapper {
                         bindMountBaseDirectory: bindMountBaseDirectory,
                         unixSocketRootDirectory: resolvedSocketRoot,
                         namedVolumeSources: namedVolumeSources,
+                        schedulerAdmissionValidated: schedulerAdmissionValidated,
                         issues: &issues
                     )
                 }
@@ -103,6 +105,7 @@ public enum ManifestRuntimeMapper {
         bindMountBaseDirectory: String?,
         unixSocketRootDirectory: String?,
         namedVolumeSources: [String: String],
+        schedulerAdmissionValidated: Bool,
         issues: inout [PlanIssue]
     ) -> DesiredRuntimeService {
         let identity = RuntimeServiceIdentity(
@@ -115,6 +118,24 @@ public enum ManifestRuntimeMapper {
             identity: identity,
             issues: &issues
         )
+        appendUnsupportedResourceIssues(
+            service.resources,
+            identity: identity,
+            issues: &issues
+        )
+        if !schedulerAdmissionValidated {
+            appendUnsupportedSchedulingIssues(
+                service.scheduling,
+                identity: identity,
+                issues: &issues
+            )
+        } else {
+            appendUnsupportedRuntimeClaimIssues(
+                service.scheduling,
+                identity: identity,
+                issues: &issues
+            )
+        }
         let ports = service.publishedPorts.flatMap {
             map($0, identity: identity, issues: &issues)
         }
@@ -209,8 +230,8 @@ public enum ManifestRuntimeMapper {
             image: service.image ?? "",
             platformOperatingSystem: service.platform.os.rawValue,
             platformArchitecture: service.platform.architecture.rawValue,
-            cpuCount: service.resources?.cpus,
-            memoryBytes: service.resources?.memory.flatMap(parseSizeBytes),
+            cpuCount: service.resources?.limits?.cpus,
+            memoryBytes: service.resources?.limits?.memory.flatMap(parseSizeBytes),
             userID: service.user,
             groupID: service.group,
             workingDirectory: service.workdir,
@@ -287,6 +308,168 @@ public enum ManifestRuntimeMapper {
             )
             return nil
         }
+    }
+
+    private static func appendUnsupportedResourceIssues(
+        _ resources: HostwrightResources?,
+        identity: RuntimeServiceIdentity,
+        issues: inout [PlanIssue]
+    ) {
+        guard let resources else {
+            appendUnsupported(
+                "resources",
+                message: "Executable services must declare explicit CPU and memory requests and limits before runtime mutation.",
+                identity: identity,
+                issues: &issues
+            )
+            return
+        }
+        guard let limits = resources.limits else {
+            appendUnsupported(
+                "resources.limits",
+                message: "Executable services must declare explicit CPU and memory limits before runtime mutation.",
+                identity: identity,
+                issues: &issues
+            )
+            return
+        }
+        let requiredQuantities: [(String, Bool)] = [
+            ("resources.requests.cpus", resources.requests.cpus != nil),
+            ("resources.requests.memory", resources.requests.memory != nil),
+            ("resources.limits.cpus", limits.cpus != nil),
+            ("resources.limits.memory", limits.memory != nil),
+        ]
+        for (key, declared) in requiredQuantities where !declared {
+            appendUnsupported(
+                key,
+                message: "Executable services must declare CPU and memory on both resource sides before runtime mutation.",
+                identity: identity,
+                issues: &issues
+            )
+        }
+        let quantitySets: [(String, HostwrightResourceSet)] = [
+            ("requests", resources.requests),
+            ("limits", limits)
+        ]
+        for (setName, values) in quantitySets {
+            if let cpus = values.cpus, cpus <= 0 {
+                appendUnsupported(
+                    "resources.\(setName).cpus",
+                    message: "Resource CPU values must be positive before runtime mutation.",
+                    identity: identity,
+                    issues: &issues
+                )
+            }
+            if let memory = values.memory, parseSizeBytes(memory) == nil {
+                appendUnsupported(
+                    "resources.\(setName).memory",
+                    message: "Resource memory must use a normalized bounded byte quantity.",
+                    identity: identity,
+                    issues: &issues
+                )
+            }
+        }
+
+        // Requests are scheduler accounting inputs. Only hard limits are
+        // runtime-enforcement claims at this mapper boundary.
+        if limits.disk != nil {
+            appendUnsupported(
+                "resources.limits.disk",
+                message: "Disk resource quantities are not enforceable by the selected runtime boundary.",
+                identity: identity,
+                issues: &issues
+            )
+        }
+        if limits.io != nil {
+            appendUnsupported(
+                "resources.limits.io",
+                message: "I/O resource quantities are not enforceable by the selected runtime boundary.",
+                identity: identity,
+                issues: &issues
+            )
+        }
+        if limits.network != nil {
+            appendUnsupported(
+                "resources.limits.network",
+                message: "Network resource quantities are not enforceable by the selected runtime boundary.",
+                identity: identity,
+                issues: &issues
+            )
+        }
+        if limits.process != nil {
+            appendUnsupported(
+                "resources.limits.process",
+                message: "Process resource limits are not enforceable by the selected runtime boundary.",
+                identity: identity,
+                issues: &issues
+            )
+        }
+    }
+
+    private static func appendUnsupportedSchedulingIssues(
+        _ scheduling: HostwrightSchedulingPolicy?,
+        identity: RuntimeServiceIdentity,
+        issues: inout [PlanIssue]
+    ) {
+        guard let scheduling, !scheduling.isEmpty else { return }
+        let fields: [(String, Bool)] = [
+            ("priority", scheduling.priority != 0),
+            ("requiredAffinity", !scheduling.requiredAffinity.isEmpty),
+            ("preferredAffinity", !scheduling.preferredAffinity.isEmpty),
+            ("requiredAntiAffinity", !scheduling.requiredAntiAffinity.isEmpty),
+            ("preferredAntiAffinity", !scheduling.preferredAntiAffinity.isEmpty),
+            ("topologySpread", !scheduling.topologySpread.isEmpty),
+            ("tolerations", !scheduling.tolerations.isEmpty),
+            ("disruption", scheduling.disruption != nil),
+            ("preemption", scheduling.preemption != .disabled),
+            ("provider", scheduling.provider != nil),
+            ("acceleratorClaims", !scheduling.acceleratorClaims.isEmpty),
+        ]
+        for (field, isPresent) in fields where isPresent {
+            appendUnsupported(
+                "scheduling.\(field)",
+                message: "Scheduling policy field '\(field)' must be admitted by the scheduler before runtime mutation.",
+                identity: identity,
+                issues: &issues
+            )
+        }
+    }
+
+    private static func appendUnsupportedRuntimeClaimIssues(
+        _ scheduling: HostwrightSchedulingPolicy?,
+        identity: RuntimeServiceIdentity,
+        issues: inout [PlanIssue]
+    ) {
+        guard let scheduling, !scheduling.isEmpty else { return }
+        let fields: [(String, Bool)] = [
+            ("provider", scheduling.provider != nil),
+            ("acceleratorClaims", !scheduling.acceleratorClaims.isEmpty),
+        ]
+        for (field, isPresent) in fields where isPresent {
+            appendUnsupported(
+                "scheduling.\(field)",
+                message: "Scheduling claim '\(field)' is not enforceable by the selected runtime boundary.",
+                identity: identity,
+                issues: &issues
+            )
+        }
+    }
+
+    private static func appendUnsupported(
+        _ key: String,
+        message: String,
+        identity: RuntimeServiceIdentity,
+        issues: inout [PlanIssue]
+    ) {
+        issues.append(
+            PlanIssue(
+                kind: .unsupportedFeature,
+                severity: .blocker,
+                identity: identity,
+                message: message,
+                stableDetailKey: key
+            )
+        )
     }
 
     private static func map(

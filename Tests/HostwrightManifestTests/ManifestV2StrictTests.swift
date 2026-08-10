@@ -2,7 +2,7 @@ import XCTest
 @testable import HostwrightManifest
 
 final class ManifestV2StrictTests: XCTestCase {
-    func testCompleteManifestV2SchemaParsesValidatesAndRoundTripsCanonically() throws {
+    func testCompleteManifestV3SchemaParsesValidatesAndRoundTripsCanonically() throws {
         let manifest = try ManifestValidator.validated(Self.completeManifest)
         let web = try XCTUnwrap(manifest.services.first { $0.name == "web" })
         let worker = try XCTUnwrap(manifest.services.first { $0.name == "worker" })
@@ -10,7 +10,13 @@ final class ManifestV2StrictTests: XCTestCase {
         XCTAssertEqual(web.replicas, 1)
         XCTAssertEqual(worker.replicas, 3)
         XCTAssertEqual(web.platform, HostwrightPlatform(os: .linux, architecture: .amd64))
-        XCTAssertEqual(web.resources, HostwrightResources(cpus: 2, memory: "512MiB"))
+        XCTAssertEqual(
+            web.resources,
+            HostwrightResources(
+                requests: HostwrightResourceSet(cpus: 2, memory: "512MiB"),
+                limits: HostwrightResourceSet(cpus: 4, memory: "1GiB")
+            )
+        )
         XCTAssertEqual(web.user, 1000)
         XCTAssertEqual(web.group, 1000)
         XCTAssertEqual(web.workdir, "/app")
@@ -75,7 +81,7 @@ final class ManifestV2StrictTests: XCTestCase {
     func testRejectsDuplicateKeysAtNestedLevelsWithSourceLocation() {
         assertFailure(
             """
-            version: 2
+            version: 3
             project: demo
             volumes:
               cache-data:
@@ -95,14 +101,14 @@ final class ManifestV2StrictTests: XCTestCase {
     func testRejectsAnchorsAliasesMergeKeysAndCustomTags() {
         for source in [
             """
-            version: 2
+            version: 3
             project: demo
             services: &services
               api:
                 image: local/demo:latest
             """,
             """
-            version: 2
+            version: 3
             project: demo
             services:
               api: &api
@@ -110,14 +116,14 @@ final class ManifestV2StrictTests: XCTestCase {
               worker: *api
             """,
             """
-            version: 2
+            version: 3
             project: demo
             services: !custom
               api:
                 image: local/demo:latest
             """,
             """
-            version: 2
+            version: 3
             project: demo
             services:
               api:
@@ -130,12 +136,12 @@ final class ManifestV2StrictTests: XCTestCase {
 
     func testRejectsMultipleDocumentsAmbiguousScalarsAndUnknownFields() {
         assertFailure(
-            "version: 2\nproject: one\nservices: {}\n---\nversion: 2\nproject: two\nservices: {}\n",
+            "version: 3\nproject: one\nservices: {}\n---\nversion: 3\nproject: two\nservices: {}\n",
             contains: "another document"
         )
         assertFailure(
             """
-            version: 2
+            version: 3
             project: demo
             services:
               api:
@@ -148,7 +154,7 @@ final class ManifestV2StrictTests: XCTestCase {
         )
         assertFailure(
             """
-            version: 2
+            version: 3
             project: demo
             services:
               api:
@@ -170,14 +176,14 @@ final class ManifestV2StrictTests: XCTestCase {
 
         let nested = String(repeating: "[", count: 70) + #""x""# + String(repeating: "]", count: 70)
         assertFailure(
-            "version: 2\nproject: demo\nservices:\n  api:\n    image: local/demo:latest\n    command: \(nested)\n",
+            "version: 3\nproject: demo\nservices:\n  api:\n    image: local/demo:latest\n    command: \(nested)\n",
             code: "HW-MANIFEST-003",
             contains: "maximum depth"
         )
 
         let values = Array(repeating: "x", count: ManifestParser.maximumExpandedNodes).joined(separator: ",")
         assertFailure(
-            "version: 2\nproject: demo\nservices:\n  api:\n    image: local/demo:latest\n    command: [\(values)]\n",
+            "version: 3\nproject: demo\nservices:\n  api:\n    image: local/demo:latest\n    command: [\(values)]\n",
             code: "HW-MANIFEST-003",
             contains: "expanded node count"
         )
@@ -190,23 +196,26 @@ final class ManifestV2StrictTests: XCTestCase {
             XCTAssertTrue(error is CancellationError)
         }
         assertFailure(
-            "version: 2\nproject: demo\nservices:\n  api:\n    image: [",
+            "version: 3\nproject: demo\nservices:\n  api:\n    image: [",
             contains: "Invalid YAML"
         )
     }
 
     func testLegacyHealthMigratesToTypedLivenessDeterministically() throws {
         let source = """
-        version: 2
+        version: 3
         project: demo
         services:
           api:
             image: local/demo:latest
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
             health:
               command: ["/usr/bin/check", "--ready"]
               interval: 7s
         """
-        let preview = try ManifestMigrator.previewV2(source)
+        let preview = try ManifestMigrator.previewV3(source)
 
         XCTAssertEqual(preview.changes, [.migrateLegacyHealth])
         XCTAssertFalse(preview.migratedManifest.contains("\n    health:"))
@@ -219,7 +228,7 @@ final class ManifestV2StrictTests: XCTestCase {
     func testTypedMountObjectsParseValidateAndRoundTripCanonically() throws {
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: demo
             volumes:
               cache-data:
@@ -227,6 +236,9 @@ final class ManifestV2StrictTests: XCTestCase {
             services:
               api:
                 image: local/demo:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 volumes:
                   - type: bind
                     source: ./data
@@ -254,11 +266,14 @@ final class ManifestV2StrictTests: XCTestCase {
     func testTypedMountObjectsRejectUnknownFieldsAndInvalidTmpfsMode() {
         assertFailure(
             """
-            version: 2
+            version: 3
             project: demo
             services:
               api:
                 image: local/demo:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 volumes:
                   - type: bind
                     source: ./data
@@ -271,11 +286,14 @@ final class ManifestV2StrictTests: XCTestCase {
 
         assertFailure(
             """
-            version: 2
+            version: 3
             project: demo
             services:
               api:
                 image: local/demo:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 volumes:
                   - type: tmpfs
                     target: /tmp
@@ -289,7 +307,7 @@ final class ManifestV2StrictTests: XCTestCase {
     func testTopLevelVolumesParseValidateAndRoundTripCanonically() throws {
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: demo
             volumes:
               archive:
@@ -305,6 +323,9 @@ final class ManifestV2StrictTests: XCTestCase {
             services:
               api:
                 image: local/demo:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 volumes:
                   - type: volume
                     source: cache
@@ -340,7 +361,7 @@ final class ManifestV2StrictTests: XCTestCase {
     func testTopLevelVolumesRejectUnsupportedFieldsInvalidValuesAndReservedLabels() {
         assertFailure(
             """
-            version: 2
+            version: 3
             project: demo
             volumes:
               cache:
@@ -355,7 +376,7 @@ final class ManifestV2StrictTests: XCTestCase {
         )
         assertFailure(
             """
-            version: 2
+            version: 3
             project: demo
             volumes:
               cache:
@@ -370,7 +391,7 @@ final class ManifestV2StrictTests: XCTestCase {
         )
         assertFailure(
             """
-            version: 2
+            version: 3
             project: demo
             volumes:
               cache:
@@ -384,7 +405,7 @@ final class ManifestV2StrictTests: XCTestCase {
         )
         assertFailure(
             """
-            version: 2
+            version: 3
             project: demo
             volumes:
               cache:
@@ -403,7 +424,7 @@ final class ManifestV2StrictTests: XCTestCase {
     func testVolumeMountMustReferenceDeclaredTopLevelVolumeButUnusedDeclarationsAreAllowed() throws {
         let valid = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: demo
             volumes:
               cache:
@@ -413,6 +434,9 @@ final class ManifestV2StrictTests: XCTestCase {
             services:
               api:
                 image: local/demo:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 volumes:
                   - type: volume
                     source: cache
@@ -423,7 +447,7 @@ final class ManifestV2StrictTests: XCTestCase {
 
         assertFailure(
             """
-            version: 2
+            version: 3
             project: demo
             volumes:
               cache:
@@ -431,6 +455,9 @@ final class ManifestV2StrictTests: XCTestCase {
             services:
               api:
                 image: local/demo:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 volumes:
                   - type: volume
                     source: missing
@@ -445,13 +472,18 @@ final class ManifestV2StrictTests: XCTestCase {
         XCTAssertNoThrow(
             try ManifestValidator.validated(
                 """
-                version: 2
+                version: 3
                 project: demo
                 services:
                   api:
                     image: local/demo:latest
                     resources:
-                      memory: "18446744073709551615B"
+                      requests:
+                        cpus: 1
+                        memory: "18446744073709551615B"
+                      limits:
+                        cpus: 1
+                        memory: "18446744073709551615B"
                     shmSize: "16777215TiB"
                 """
             )
@@ -461,16 +493,19 @@ final class ManifestV2StrictTests: XCTestCase {
     func testSizeValidationRejectsUInt64ParsingAndMultiplicationOverflow() {
         for source in [
             """
-            version: 2
+            version: 3
             project: demo
             services:
               api:
                 image: local/demo:latest
                 resources:
-                  memory: "18446744073709551616B"
+                  requests:
+                    memory: "18446744073709551616B"
+                  limits:
+                    memory: "18446744073709551616B"
             """,
             """
-            version: 2
+            version: 3
             project: demo
             services:
               api:
@@ -486,14 +521,232 @@ final class ManifestV2StrictTests: XCTestCase {
         }
     }
 
+    func testV3ResourcesRequireNonEmptyMatchingDimensionsAndCPUMemory() throws {
+        assertFailure(
+            """
+            version: 3
+            project: demo
+            services:
+              api:
+                image: local/demo:latest
+                resources: {}
+            """,
+            contains: "resources.requests must declare at least one quantity",
+            requireSource: false
+        )
+        assertFailure(
+            """
+            version: 3
+            project: demo
+            services:
+              api:
+                image: local/demo:latest
+                resources:
+                  requests:
+                    cpus: 2
+                  limits:
+                    memory: 1GiB
+            """,
+            contains: "resources.limits.cpus must be declared when the other side declares it",
+            requireSource: false
+        )
+        assertFailure(
+            """
+            version: 3
+            project: demo
+            services:
+              api:
+                image: local/demo:latest
+                resources:
+                  requests:
+                    cpus: 2
+                  limits:
+                    cpus: 3
+                    memory: 1GiB
+            """,
+            contains: "resources.requests.memory must be declared when the other side declares it",
+            requireSource: false
+        )
+
+        assertFailure(
+            """
+            version: 3
+            project: demo
+            services:
+              api:
+                image: local/demo:latest
+                resources:
+                  requests:
+                    memory: 512MiB
+                  limits:
+                    memory: 1GiB
+            """,
+            contains: "resources.requests.cpus must be declared",
+            requireSource: false
+        )
+        XCTAssertNoThrow(
+            try ManifestValidator.validated(
+                """
+                version: 3
+                project: demo
+                services:
+                  api:
+                    image: local/demo:latest
+                    resources:
+                      requests:
+                        cpus: 1
+                        memory: 512MiB
+                      limits:
+                        cpus: 1
+                        memory: 1GiB
+                """
+            )
+        )
+    }
+
+    func testV3FlatResourcesAreRejectedBeforeValidation() {
+        assertFailure(
+            """
+            version: 3
+            project: demo
+            services:
+              api:
+                image: local/demo:latest
+                resources:
+                  cpus: 2
+                  memory: 1GiB
+            """,
+            contains: "Flat resources.cpus/resources.memory are legacy input",
+            requireSource: false
+        )
+        assertFailure(
+            """
+            version: 3
+            project: demo
+            services:
+              api:
+                image: local/demo:latest
+                resources:
+                  cpus: 2
+                  requests:
+                    cpus: 2
+                  limits:
+                    cpus: 2
+            """,
+            contains: "resources cannot mix legacy flat cpus/memory with nested requests/limits",
+            requireSource: false
+        )
+    }
+
+    func testV3ResourceComparisonAndSchedulingDiagnosticsUseActionableFields() {
+        assertFailure(
+            """
+            version: 3
+            project: demo
+            services:
+              api:
+                image: local/demo:latest
+                resources:
+                  requests:
+                    cpus: 4
+                    memory: 512MiB
+                  limits:
+                    cpus: 2
+                    memory: 512MiB
+            """,
+            contains: "resources.requests.cpus must not exceed resources.limits.cpus",
+            requireSource: false
+        )
+        XCTAssertNoThrow(
+            try ManifestValidator.validated(
+                """
+                version: 3
+                project: demo
+                services:
+                  api:
+                    image: local/demo:latest
+                    resources:
+                      requests: {cpus: 1, memory: 512MiB}
+                      limits: {cpus: 1, memory: 512MiB}
+                    scheduling:
+                      requiredAffinity:
+                        - key: topology.zone
+                          operator: exists
+                      requiredAntiAffinity:
+                        - key: topology.zone
+                          operator: exists
+                """
+            )
+        )
+    }
+
+    func testSchedulingIsTheOnlyProviderAndAcceleratorClaimSource() {
+        assertFailure(
+            """
+            version: 3
+            project: demo
+            services:
+              api:
+                image: local/demo:latest
+                resources:
+                  requests:
+                    cpus: 1
+                    provider: apple-container-cli
+                  limits:
+                    cpus: 1
+                    provider: apple-container-cli
+            """,
+            contains: "Unsupported service field 'provider'",
+            path: "$.services.api.resources.requests.provider"
+        )
+        assertFailure(
+            """
+            version: 3
+            project: demo
+            services:
+              api:
+                image: local/demo:latest
+                resources:
+                  requests:
+                    cpus: 1
+                    acceleratorClaims:
+                      - name: gpu
+                  limits:
+                    cpus: 1
+                    acceleratorClaims:
+                      - name: gpu
+            """,
+            contains: "Unsupported service field 'acceleratorClaims'",
+            path: "$.services.api.resources.requests.acceleratorClaims"
+        )
+        assertFailure(
+            """
+            version: 3
+            project: demo
+            services:
+              api:
+                image: local/demo:latest
+                scheduling:
+                  acceleratorClaims:
+                    - name: gpu
+                    - name: gpu
+            """,
+            contains: "scheduling.acceleratorClaims must not contain duplicate claim names",
+            requireSource: false
+        )
+    }
+
     func testValidationRejectsDuplicateFixedLocalhostPortAcrossServices() {
         assertFailure(
             """
-            version: 2
+            version: 3
             project: demo
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - "8080:8080"
               worker:
@@ -509,7 +762,7 @@ final class ManifestV2StrictTests: XCTestCase {
     func testValidationRejectsFixedLocalhostPortWithMultipleReplicas() {
         assertFailure(
             """
-            version: 2
+            version: 3
             project: demo
             services:
               api:
@@ -526,7 +779,7 @@ final class ManifestV2StrictTests: XCTestCase {
     func testValidationRejectsInvalidBoundsAndCrossFieldCombinations() {
         assertFailure(
             """
-            version: 2
+            version: 3
             project: demo
             services:
               api:
@@ -535,8 +788,12 @@ final class ManifestV2StrictTests: XCTestCase {
                 platform:
                   architecture: arm64
                 resources:
-                  cpus: 0
-                  memory: 512MB
+                  requests:
+                    cpus: 0
+                    memory: 512MB
+                  limits:
+                    cpus: 1
+                    memory: 512MiB
                 rosetta: true
                 labels:
                   dev.hostwright.resource-uuid: forbidden
@@ -552,11 +809,14 @@ final class ManifestV2StrictTests: XCTestCase {
     func testValidationRejectsInvalidStructuredPortDeclarations() {
         assertFailure(
             """
-            version: 2
+            version: 3
             project: demo
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - bind: localhost
                     host: "18080-18082"
@@ -569,11 +829,14 @@ final class ManifestV2StrictTests: XCTestCase {
 
         assertFailure(
             """
-            version: 2
+            version: 3
             project: demo
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - bind: 127.0.0.1
                     host: 80
@@ -585,11 +848,14 @@ final class ManifestV2StrictTests: XCTestCase {
 
         assertFailure(
             """
-            version: 2
+            version: 3
             project: demo
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - bind: 127.0.0.1
                     host: "18080-18082"
@@ -603,11 +869,14 @@ final class ManifestV2StrictTests: XCTestCase {
     func testProbePortsUseStructuredTargetPorts() throws {
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: demo
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - bind: 127.0.0.1
                     host: 18080
@@ -626,11 +895,14 @@ final class ManifestV2StrictTests: XCTestCase {
     func testDynamicPublishedPortRangeIsAcceptedAndCanonical() throws {
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: demo
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - target: "8080-8082"
                     protocol: udp
@@ -709,7 +981,7 @@ final class ManifestV2StrictTests: XCTestCase {
     }
 
     private static let completeManifest = """
-    version: 2
+    version: 3
     project: full-v2
     imagePolicy: allow-tags
     services:
@@ -719,8 +991,12 @@ final class ManifestV2StrictTests: XCTestCase {
           os: linux
           architecture: amd64
         resources:
-          cpus: 2
-          memory: 512MiB
+          requests:
+            cpus: 2
+            memory: 512MiB
+          limits:
+            cpus: 4
+            memory: 1GiB
         user: 1000
         group: 1000
         workdir: /app
@@ -772,10 +1048,16 @@ final class ManifestV2StrictTests: XCTestCase {
         shmSize: 64MiB
       db:
         image: local/db:latest
+        resources:
+          requests: {cpus: 1, memory: 512MiB}
+          limits: {cpus: 1, memory: 512MiB}
         restart:
           policy: unless-stopped
       worker:
         image: local/worker:latest
+        resources:
+          requests: {cpus: 1, memory: 512MiB}
+          limits: {cpus: 1, memory: 512MiB}
         replicas: 3
     """
 }

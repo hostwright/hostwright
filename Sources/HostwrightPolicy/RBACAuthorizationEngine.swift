@@ -207,6 +207,12 @@ public final class RBACAuthorizationEngine: @unchecked Sendable {
     guard subcommand == nil || localControlIntent == nil else {
       throw RBACAuthorizationError.invalidTarget
     }
+    let isSchedulerOperation = request.operation.hasPrefix("scheduler.")
+    if isSchedulerOperation {
+      // Scheduler reads are never global: the daemon wire contract supplies
+      // the authoritative top-level project scope before this mapping runs.
+      guard project != nil else { throw RBACAuthorizationError.invalidTarget }
+    }
 
     let resourceKind: RBACResource
     var verb: RBACVerb
@@ -218,6 +224,9 @@ public final class RBACAuthorizationEngine: @unchecked Sendable {
       default: throw RBACAuthorizationError.invalidTarget
       }
     case "plan": (resourceKind, verb) = (.project, .plan)
+    case "scheduler.plan", "scheduler.simulate": (resourceKind, verb) = (.project, .plan)
+    case "scheduler.status", "scheduler.explain": (resourceKind, verb) = (.project, .get)
+    case "scheduler.apply": (resourceKind, verb) = (.project, .update)
     case "status": (resourceKind, verb) = (.project, .get)
     case "events": (resourceKind, verb) = (.observability, .list)
     case "recovery":
@@ -298,6 +307,9 @@ public final class RBACAuthorizationEngine: @unchecked Sendable {
     case "plugin.revoke": (resourceKind, verb) = (.plugin, .admin)
     case "plugin.uninstall": (resourceKind, verb) = (.plugin, .delete)
     default: (resourceKind, verb) = (.daemon, .admin)
+    }
+    if isSchedulerOperation {
+      guard declaredMutation == nil else { throw RBACAuthorizationError.invalidTarget }
     }
     if declaredMutation == true {
       switch verb {

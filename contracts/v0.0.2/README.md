@@ -2,8 +2,8 @@
 
 These files are executable compatibility fixtures for the contracts locked in Phase 01. Tests decode them with production types/parsers; changing a file or model requires a reviewed contract decision, migration/compatibility update, and refreshed consumer evidence.
 
-- `versions.json`: product/release and Manifest, Control API, Runtime Provider API, Storage Provider API, Network Provider SPI, plugin ABI, and state schema versions.
-- `manifest.yaml`: smallest accepted explicit Manifest v2 application.
+- `versions.json`: product/release and Manifest, Control API, Runtime Provider API, Storage Provider API, Network Provider SPI, plugin ABI, and state schema v23 versions.
+- `manifest.yaml`: smallest accepted explicit Manifest v3 application.
 - `control-plan-request.json`: smallest accepted Control API v2 plan request.
 - `control-plan-response.json`: stable Control API v2 response envelope.
 - `runtime-provider-metadata.json`: Runtime Provider API v2 capability metadata.

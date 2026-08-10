@@ -2,6 +2,7 @@ import Foundation
 import XCTest
 
 @testable import HostwrightControlPlane
+@testable import HostwrightManifest
 @testable import HostwrightPolicy
 @testable import HostwrightRuntime
 @testable import HostwrightState
@@ -251,6 +252,161 @@ final class WorkloadProfilePolicyEngineTests: XCTestCase {
           "filesystem.readOnlyRoot", "identity.allowRoot", "identity.runAsGroup",
           "identity.runAsUser", "images.requireDigest", "resources.cpu", "resources.memoryMiB",
         ]))
+      }
+    }
+  }
+
+  func testManifestAdmissionUsesLimitsAndSchedulingClaimsAsProfileCeilings() throws {
+    try withFixture { fixture in
+      let manifestProfile = profile(
+        "manifest",
+        resources: ResourceProfile(processCount: 2),
+        runtime: RuntimeProfile(allowedProviders: ["provider-a"]),
+        accelerators: AcceleratorsProfile(allowed: ["gpu"])
+      )
+      let resolution = WorkloadProfileResolution(
+        profile: manifestProfile,
+        profileSHA256: "profile",
+        inheritance: [manifestProfile.identifier],
+        sourceDigests: ["profile"]
+      )
+      let validResources = HostwrightResources(
+        requests: HostwrightResourceSet(cpus: 1, process: 1),
+        limits: HostwrightResourceSet(cpus: 2, process: 2)
+      )
+      let validScheduling = HostwrightSchedulingPolicy(
+        provider: "provider-a",
+        acceleratorClaims: [HostwrightAcceleratorClaim(name: "gpu")]
+      )
+
+      XCTAssertNoThrow(
+        try fixture.engine.validateManifestAdmission(
+          resources: validResources, scheduling: validScheduling, resolution: resolution)
+      )
+      XCTAssertThrowsError(
+        try fixture.engine.validateManifestAdmission(
+          resources: HostwrightResources(
+            requests: HostwrightResourceSet(process: 3),
+            limits: HostwrightResourceSet(process: 3)
+          ),
+          scheduling: validScheduling,
+          resolution: resolution
+        )
+      ) { error in
+        XCTAssertEqual(error as? WorkloadProfilePolicyError, .workloadViolation(["resources.processCount"]))
+      }
+      XCTAssertThrowsError(
+        try fixture.engine.validateManifestAdmission(
+          resources: validResources,
+          scheduling: HostwrightSchedulingPolicy(
+            provider: "provider-b",
+            acceleratorClaims: [HostwrightAcceleratorClaim(name: "neural")]
+          ),
+          resolution: resolution
+        )
+      ) { error in
+        XCTAssertEqual(
+          error as? WorkloadProfilePolicyError,
+          .workloadViolation(["accelerators.allowed", "runtime.allowedProviders"])
+        )
+      }
+    }
+  }
+
+  func testManifestAdmissionReasonsAreSortedAndStableAcrossClaimOrder() throws {
+    try withFixture { fixture in
+      let manifestProfile = profile(
+        "manifest-reasons",
+        resources: ResourceProfile(processCount: 2),
+        runtime: RuntimeProfile(allowedProviders: ["provider-a"]),
+        accelerators: AcceleratorsProfile(allowed: ["gpu"])
+      )
+      let resolution = WorkloadProfileResolution(
+        profile: manifestProfile,
+        profileSHA256: "profile-reasons",
+        inheritance: [manifestProfile.identifier],
+        sourceDigests: ["profile-reasons"]
+      )
+      let resources = HostwrightResources(
+        requests: HostwrightResourceSet(process: 3),
+        limits: HostwrightResourceSet(process: 3)
+      )
+
+      let first = HostwrightSchedulingPolicy(
+        provider: "provider-b",
+        acceleratorClaims: [
+          HostwrightAcceleratorClaim(name: "neural"),
+          HostwrightAcceleratorClaim(name: "gpu"),
+        ]
+      )
+      let second = HostwrightSchedulingPolicy(
+        provider: "provider-b",
+        acceleratorClaims: [
+          HostwrightAcceleratorClaim(name: "gpu"),
+          HostwrightAcceleratorClaim(name: "neural"),
+        ]
+      )
+
+      func reasons(for scheduling: HostwrightSchedulingPolicy) -> [String]? {
+        do {
+          try fixture.engine.validateManifestAdmission(
+            resources: resources, scheduling: scheduling, resolution: resolution)
+          return nil
+        } catch let error as WorkloadProfilePolicyError {
+          guard case .workloadViolation(let reasons) = error else { return nil }
+          return reasons
+        } catch {
+          return nil
+        }
+      }
+
+      let expected = [
+        "accelerators.allowed",
+        "resources.processCount",
+        "runtime.allowedProviders",
+      ]
+      XCTAssertEqual(reasons(for: first), expected)
+      XCTAssertEqual(reasons(for: second), expected)
+    }
+  }
+
+  func testProfileCPUMemoryCeilingsApplyToRuntimeLimitValues() throws {
+    try withFixture { fixture in
+      let constrainedProfile = profile(
+        "runtime-limits",
+        filesystem: FilesystemProfile(readOnlyRoot: false, denyHostRoot: true),
+        resources: ResourceProfile(cpu: 2, memoryMiB: 256)
+      )
+      let resolution = WorkloadProfileResolution(
+        profile: constrainedProfile,
+        profileSHA256: "runtime-limits",
+        inheritance: [constrainedProfile.identifier],
+        sourceDigests: ["runtime-limits"]
+      )
+      let snapshot = snapshot(provider: .appleContainerCLI, features: [])
+      let atLimit = DesiredRuntimeService(
+        identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"),
+        image: "example.invalid/api:latest",
+        cpuCount: 2,
+        memoryBytes: 256 * 1_024 * 1_024
+      )
+      XCTAssertNoThrow(
+        try fixture.engine.validateWorkload(atLimit, resolution: resolution, snapshot: snapshot)
+      )
+
+      let aboveLimit = DesiredRuntimeService(
+        identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "api"),
+        image: "example.invalid/api:latest",
+        cpuCount: 3,
+        memoryBytes: 512 * 1_024 * 1_024
+      )
+      XCTAssertThrowsError(
+        try fixture.engine.validateWorkload(aboveLimit, resolution: resolution, snapshot: snapshot)
+      ) { error in
+        XCTAssertEqual(
+          error as? WorkloadProfilePolicyError,
+          .workloadViolation(["resources.cpu", "resources.memoryMiB"])
+        )
       }
     }
   }

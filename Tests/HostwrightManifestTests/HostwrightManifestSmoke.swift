@@ -7,8 +7,8 @@ final class HostwrightManifestTests: XCTestCase {
     func testValidManifestParsesAndValidates() throws {
         let manifest = try ManifestValidator.validated(Self.validManifest)
 
-        XCTAssertEqual(manifest.version, 2)
-        XCTAssertEqual(manifest.effectiveVersion, 2)
+        XCTAssertEqual(manifest.version, 3)
+        XCTAssertEqual(manifest.effectiveVersion, 3)
         XCTAssertNil(manifest.imagePolicy)
         XCTAssertEqual(manifest.effectiveImagePolicy, .allowTags)
         XCTAssertEqual(manifest.project, "api-local")
@@ -45,11 +45,14 @@ final class HostwrightManifestTests: XCTestCase {
     func testStructuredPortsParseAndValidate() throws {
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: demo
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - bind: 127.0.0.1
                     host: 18080
@@ -78,11 +81,14 @@ final class HostwrightManifestTests: XCTestCase {
     func testSecretEnvironmentReferencesParseAndValidate() throws {
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 env:
                   APP_ENV: development
                 secretEnv:
@@ -124,7 +130,7 @@ final class HostwrightManifestTests: XCTestCase {
     func testSecretEnvironmentReferenceFailuresAreRedactedAndListSupportedShapes() {
         let privatePath = "/Users/dev/private/customer-a/secret.env"
         let text = """
-        version: 2
+        version: 3
         project: api-local
         services:
           api:
@@ -163,7 +169,7 @@ final class HostwrightManifestTests: XCTestCase {
         for (index, reference) in references.enumerated() {
             assertManifestFailure(
                 """
-                version: 2
+                version: 3
                 project: api-local
                 services:
                   api:
@@ -179,11 +185,14 @@ final class HostwrightManifestTests: XCTestCase {
     func testQuotedScalarsAndInlineArraysPreserveCommasAndEscapes() throws {
         let manifest = try ManifestValidator.validated(
             #"""
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 command: ["python", "print(a,b)"]
                 env:
                   JSON_DOC: '{"a":1}'
@@ -212,7 +221,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         XCTAssertNil(parsed.version)
         XCTAssertEqual(parsed.effectiveVersion, HostwrightManifest.legacyVersion)
-        assertManifestFailure(text, code: "HW-MANIFEST-003", contains: "must declare version: 2")
+        assertManifestFailure(text, code: "HW-MANIFEST-003", contains: "must declare version: 3")
     }
 
     func testExplicitOlderAndNewerManifestVersionsFailClosed() {
@@ -225,19 +234,19 @@ final class HostwrightManifestTests: XCTestCase {
                 image: ghcr.io/example/api:latest
             """,
             code: "HW-MANIFEST-003",
-            contains: "older than supported version 2"
+            contains: "older than supported version 3"
         )
 
         assertManifestFailure(
             """
-            version: 3
+            version: 4
             project: api-local
             services:
               api:
                 image: ghcr.io/example/api:latest
             """,
             code: "HW-MANIFEST-003",
-            contains: "newer than supported version 2"
+            contains: "newer than supported version 3"
         )
     }
 
@@ -245,12 +254,15 @@ final class HostwrightManifestTests: XCTestCase {
         let digest = String(repeating: "a", count: 64)
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             services:
               api:
                 image: ghcr.io/example/api@sha256:\(digest)
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """
         )
 
@@ -261,19 +273,22 @@ final class HostwrightManifestTests: XCTestCase {
         XCTAssertNoThrow(
             try ManifestValidator.validated(
                 """
-                version: 2
+                version: 3
                 project: api-local
                 imagePolicy: allow-tags
                 services:
                   api:
                     image: ghcr.io/example/api:latest
+                    resources:
+                      requests: {cpus: 1, memory: 512MiB}
+                      limits: {cpus: 1, memory: 512MiB}
                 """
             )
         )
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             services:
@@ -287,7 +302,7 @@ final class HostwrightManifestTests: XCTestCase {
     func testImageDigestSyntaxFailsClosedWithoutRegistryLookup() {
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
@@ -298,7 +313,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
@@ -309,7 +324,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
@@ -320,7 +335,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: content-trust
             services:
@@ -332,7 +347,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imagePolicy: allow-tags
@@ -345,7 +360,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: content-trust
             imagePolicy: require-digest
@@ -361,7 +376,7 @@ final class HostwrightManifestTests: XCTestCase {
         let digest = String(repeating: "a", count: 64)
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageTrust:
@@ -380,6 +395,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:\(digest)
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """
         )
 
@@ -400,7 +418,7 @@ final class HostwrightManifestTests: XCTestCase {
     func testImageTrustValidationFailsClosedForCrossFieldAndAuthorityRules() {
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imageTrust:
               threshold: 1
@@ -417,7 +435,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageTrust:
@@ -435,7 +453,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageTrust:
@@ -454,7 +472,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageTrust:
@@ -479,7 +497,7 @@ final class HostwrightManifestTests: XCTestCase {
     func testImageTrustValidationRejectsTypeSpecificFieldsPathsAndDates() {
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageTrust:
@@ -497,7 +515,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageTrust:
@@ -518,7 +536,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageTrust:
@@ -538,7 +556,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageTrust:
@@ -560,7 +578,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageTrust:
@@ -583,7 +601,7 @@ final class HostwrightManifestTests: XCTestCase {
     func testImageTrustParserRejectsDuplicateAndUnknownTopLevelFields() {
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageTrust:
@@ -608,7 +626,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageTrust:
@@ -630,7 +648,7 @@ final class HostwrightManifestTests: XCTestCase {
         let digest = String(repeating: "a", count: 64)
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageSBOM:
@@ -642,6 +660,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:\(digest)
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """
         )
 
@@ -661,7 +682,7 @@ final class HostwrightManifestTests: XCTestCase {
     func testImageSBOMValidationFailsClosedForDigestVersionAndFormats() {
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imageSBOM:
               requirement: optional
@@ -676,12 +697,11 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageSBOM:
-              version: 2
-              requirement: optional
+              version: 3              requirement: optional
               formats:
                 - spdx-json
             services:
@@ -693,7 +713,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageSBOM:
@@ -708,7 +728,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageSBOM:
@@ -728,7 +748,7 @@ final class HostwrightManifestTests: XCTestCase {
     func testImageSBOMParserRejectsDuplicateUnknownAndInvalidEnums() {
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageSBOM:
@@ -748,7 +768,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageSBOM:
@@ -764,7 +784,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageSBOM:
@@ -780,7 +800,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageSBOM:
@@ -800,7 +820,7 @@ final class HostwrightManifestTests: XCTestCase {
         let digest = String(repeating: "a", count: 64)
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageTrust:
@@ -830,6 +850,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:\(digest)
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """
         )
 
@@ -857,7 +880,7 @@ final class HostwrightManifestTests: XCTestCase {
     func testImageVulnerabilityAcceptsExactBoundaryValues() throws {
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageTrust:
@@ -892,7 +915,7 @@ final class HostwrightManifestTests: XCTestCase {
         maximumPolicy.maximumDatabaseAgeSeconds =
             HostwrightImageVulnerabilityPolicy.maximumMaximumDatabaseAgeSeconds
         let maximumManifest = HostwrightManifest(
-            version: 2,
+            version: 3,
             project: "api-local",
             imagePolicy: .requireDigest,
             imageTrust: manifest.imageTrust,
@@ -928,12 +951,12 @@ final class HostwrightManifestTests: XCTestCase {
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
             """,
-            contains: "imageVulnerability is supported only in manifest version 2"
+            contains: "imageVulnerability is supported only in manifest version 3"
         )
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imageVulnerability:
               severityThreshold: high
@@ -953,7 +976,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageVulnerability:
@@ -1001,7 +1024,7 @@ final class HostwrightManifestTests: XCTestCase {
             allowlist: entries
         )
         let manifest = HostwrightManifest(
-            version: 2,
+            version: 3,
             project: "api-local",
             imagePolicy: .requireDigest,
             imageTrust: trust,
@@ -1010,7 +1033,11 @@ final class HostwrightManifestTests: XCTestCase {
             services: [
                 HostwrightService(
                     name: "api",
-                    image: "ghcr.io/example/api@sha256:\(String(repeating: "a", count: 64))"
+                    image: "ghcr.io/example/api@sha256:\(String(repeating: "a", count: 64))",
+                    resources: HostwrightResources(
+                        requests: HostwrightResourceSet(cpus: 1, memory: "512MiB"),
+                        limits: HostwrightResourceSet(cpus: 1, memory: "512MiB")
+                    )
                 )
             ]
         )
@@ -1041,7 +1068,7 @@ final class HostwrightManifestTests: XCTestCase {
 
     func testImageVulnerabilityRejectsInvalidEnumsUnknownFieldsAndDuplicateEntries() {
         let prefix = """
-        version: 2
+        version: 3
         project: api-local
         imagePolicy: require-digest
         imageTrust:
@@ -1139,7 +1166,7 @@ final class HostwrightManifestTests: XCTestCase {
         let digest = String(repeating: "a", count: 64)
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageProvenance:
@@ -1164,6 +1191,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:\(digest)
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """
         )
 
@@ -1220,7 +1250,7 @@ final class HostwrightManifestTests: XCTestCase {
             requireReproducible: false
         )
         let manifest = HostwrightManifest(
-            version: 2,
+            version: 3,
             project: "api-local",
             imagePolicy: .requireDigest,
             imageTrust: nil,
@@ -1230,7 +1260,11 @@ final class HostwrightManifestTests: XCTestCase {
             services: [
                 HostwrightService(
                     name: "api",
-                    image: "ghcr.io/example/api@sha256:\(String(repeating: "a", count: 64))"
+                    image: "ghcr.io/example/api@sha256:\(String(repeating: "a", count: 64))",
+                    resources: HostwrightResources(
+                        requests: HostwrightResourceSet(cpus: 1, memory: "512MiB"),
+                        limits: HostwrightResourceSet(cpus: 1, memory: "512MiB")
+                    )
                 )
             ]
         )
@@ -1245,7 +1279,7 @@ final class HostwrightManifestTests: XCTestCase {
     func testImageProvenanceFailsClosedForGatesBoundsAndSignerRules() {
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imageProvenance:
               requirement: required
@@ -1280,11 +1314,11 @@ final class HostwrightManifestTests: XCTestCase {
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
             """,
-            contains: "imageProvenance is supported only in manifest version 2"
+            contains: "imageProvenance is supported only in manifest version 3"
         )
 
         let invalidPolicy = HostwrightImageProvenancePolicy(
-            version: 2,
+            version: 3,
             requirement: .required,
             builderIDs: [],
             buildTypes: ["file:///tmp/build", "file:///tmp/build"],
@@ -1305,7 +1339,7 @@ final class HostwrightManifestTests: XCTestCase {
             requireReproducible: true
         )
         let manifest = HostwrightManifest(
-            version: 2,
+            version: 3,
             project: "api-local",
             imagePolicy: .requireDigest,
             imageTrust: nil,
@@ -1383,7 +1417,7 @@ final class HostwrightManifestTests: XCTestCase {
           requireReproducible: true
         """
         let prefix = """
-        version: 2
+        version: 3
         project: api-local
         imagePolicy: require-digest
         """
@@ -1464,7 +1498,7 @@ final class HostwrightManifestTests: XCTestCase {
     func testMissingImageFailsValidation() {
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
@@ -1478,7 +1512,7 @@ final class HostwrightManifestTests: XCTestCase {
     func testMalformedPortFailsValidation() {
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
@@ -1493,7 +1527,7 @@ final class HostwrightManifestTests: XCTestCase {
     func testFlagLikeImagesFailWhileCommandArgumentsRemainExecutable() throws {
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
@@ -1504,7 +1538,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
@@ -1515,11 +1549,14 @@ final class HostwrightManifestTests: XCTestCase {
 
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 command: ["--flag"]
             """
         )
@@ -1530,11 +1567,14 @@ final class HostwrightManifestTests: XCTestCase {
         XCTAssertNoThrow(
             try ManifestValidator.validated(
                 """
-                version: 2
+                version: 3
                 project: api-local
                 services:
                   api:
                     image: ghcr.io/example/api:latest
+                    resources:
+                      requests: {cpus: 1, memory: 512MiB}
+                      limits: {cpus: 1, memory: 512MiB}
                     env:
                       AUTH_MODE: local
                       KEYCLOAK_URL: http://localhost:8080
@@ -1546,7 +1586,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
@@ -1559,7 +1599,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
@@ -1572,7 +1612,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
@@ -1585,7 +1625,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
@@ -1598,7 +1638,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
@@ -1613,7 +1653,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
@@ -1627,7 +1667,7 @@ final class HostwrightManifestTests: XCTestCase {
         for rootEquivalent in ["/:/host:ro", "//:/host:ro", "/./:/host:ro", "/data/..:/host:ro"] {
             assertManifestFailure(
                 """
-                version: 2
+                version: 3
                 project: api-local
                 services:
                   api:
@@ -1641,7 +1681,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
@@ -1673,7 +1713,7 @@ final class HostwrightManifestTests: XCTestCase {
         assertManifestFailure(
             """
             apiVersion: hostwright.dev/v1
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
@@ -1685,7 +1725,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
@@ -1698,7 +1738,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
@@ -1713,7 +1753,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
@@ -1730,7 +1770,7 @@ final class HostwrightManifestTests: XCTestCase {
     func testPhase08RestartBudgetsParseValidateAndRoundTripCanonically() throws {
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: api-local
             restartBudget:
               maxAttempts: 24
@@ -1780,11 +1820,14 @@ final class HostwrightManifestTests: XCTestCase {
     func testPhase08RolloutStableObservationParsesValidatesAndRoundTrips() throws {
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: rollout-local
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 probes:
                   readiness:
                     exec: ["/bin/check-ready"]
@@ -1805,7 +1848,7 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: rollout-local
             services:
               api:
@@ -1829,7 +1872,7 @@ final class HostwrightManifestTests: XCTestCase {
         for fields in invalidFields {
             assertManifestFailure(
                 """
-                version: 2
+                version: 3
                 project: api-local
                 services:
                   api:
@@ -1847,7 +1890,7 @@ final class HostwrightManifestTests: XCTestCase {
         ] {
             assertManifestFailure(
                 """
-                version: 2
+                version: 3
                 project: api-local
                 services:
                   api:
@@ -1861,7 +1904,7 @@ final class HostwrightManifestTests: XCTestCase {
         }
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             restartBudget:
               maxAttempts: 1001
@@ -1877,7 +1920,7 @@ final class HostwrightManifestTests: XCTestCase {
         for field in ["dns", "dns_search", "domainname", "hostname", "network_mode", "aliases", "expose", "extra_hosts"] {
             assertManifestFailure(
                 """
-                version: 2
+                version: 3
                 project: api-local
                 services:
                   api:
@@ -1904,7 +1947,7 @@ final class HostwrightManifestTests: XCTestCase {
         for examplePath in examplePaths {
             let manifestText = try read(examplePath, root: root)
             let manifest = try ManifestValidator.validated(manifestText)
-            XCTAssertEqual(manifest.version, 2, examplePath)
+            XCTAssertEqual(manifest.version, 3, examplePath)
             XCTAssertFalse(manifestText.contains("apiVersion"), examplePath)
             XCTAssertFalse(manifestText.contains("depends_on"), examplePath)
             XCTAssertFalse(manifestText.contains("deploy:"), examplePath)
@@ -2284,7 +2327,7 @@ final class HostwrightManifestTests: XCTestCase {
         XCTAssertEqual(
             Set(serviceProperties.keys),
             [
-                "image", "replicas", "platform", "resources", "user", "group", "workdir",
+                "image", "replicas", "platform", "resources", "scheduling", "user", "group", "workdir",
                 "entrypoint", "command", "init", "dependsOn", "env", "secretEnv", "labels",
                 "ports", "hostAccess", "networks", "volumes", "health", "probes",
                 "networkPolicy", "restart", "update", "hooks",
@@ -2540,12 +2583,15 @@ final class HostwrightManifestTests: XCTestCase {
     }
 
     private static let validManifest = """
-    version: 2
+    version: 3
     project: api-local
 
     services:
       api:
         image: ghcr.io/example/api:latest
+        resources:
+          requests: {cpus: 1, memory: 512MiB}
+          limits: {cpus: 1, memory: 512MiB}
         ports:
           - "8080:8080"
         health:

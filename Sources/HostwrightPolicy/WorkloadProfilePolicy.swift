@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import HostwrightControlPlane
+import HostwrightManifest
 import HostwrightRuntime
 import HostwrightState
 
@@ -246,6 +247,40 @@ public struct WorkloadProfilePolicyEngine: Sendable {
     if deniedOptions.contains("shared-memory") && service.sharedMemoryBytes != nil {
       violations.append("runtime.shared-memory")
     }
+    guard violations.isEmpty else {
+      throw WorkloadProfilePolicyError.workloadViolation(Array(Set(violations)).sorted())
+    }
+  }
+
+  public func validateManifestAdmission(
+    resources: HostwrightResources?,
+    scheduling: HostwrightSchedulingPolicy?,
+    resolution: WorkloadProfileResolution
+  ) throws {
+    let profile = resolution.profile
+    var violations: [String] = []
+
+    if let processCeiling = profile.resources?.processCount {
+      let claimedProcessCount = resources?.limits?.process ?? resources?.requests.process
+      if let claimedProcessCount, claimedProcessCount > processCeiling {
+        violations.append("resources.processCount")
+      }
+    }
+
+    if let provider = scheduling?.provider {
+      let allowedProviders = Set(profile.runtime.allowedProviders)
+      if !allowedProviders.isEmpty && !allowedProviders.contains("default") &&
+          !allowedProviders.contains(provider) {
+        violations.append("runtime.allowedProviders")
+      }
+    }
+
+    let allowedAccelerators = Set(profile.accelerators.allowed)
+    let claims = scheduling?.acceleratorClaims ?? []
+    if claims.contains(where: { !allowedAccelerators.contains($0.name) }) {
+      violations.append("accelerators.allowed")
+    }
+
     guard violations.isEmpty else {
       throw WorkloadProfilePolicyError.workloadViolation(Array(Set(violations)).sorted())
     }

@@ -319,6 +319,11 @@ public struct CLIControlRoute: Equatable, Sendable {
         switch first {
         case "--version": return "version"
         case "--help", "-h": return "help"
+        case "scheduler":
+            guard arguments.count >= 2, !arguments[1].hasPrefix("-") else {
+                return first
+            }
+            return "scheduler.\(arguments[1])"
         default: return first
         }
     }
@@ -422,6 +427,8 @@ public struct CLIControlRoute: Equatable, Sendable {
             return true
         case .diagnostics:
             return false
+        case .scheduler(let options):
+            return options.action == .apply
         case .registry(let options):
             switch options.action {
             case .status:

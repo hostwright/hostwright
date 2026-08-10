@@ -522,7 +522,7 @@ final class HostwrightDaemonControlServiceTests: XCTestCase {
       timestamp: "2026-08-02T00:00:00Z"
     )
     let configPath = home.appendingPathComponent("hostwright.yaml")
-    try Data("version: 2\nproject: daemon-control-tests\nservices: {}\n".utf8).write(to: configPath)
+    try Data("version: 3\nproject: daemon-control-tests\nservices: {}\n".utf8).write(to: configPath)
     try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configPath.path)
     let configuration = DaemonConfiguration(
       configPath: configPath.path,

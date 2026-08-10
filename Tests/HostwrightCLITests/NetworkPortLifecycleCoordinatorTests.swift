@@ -793,7 +793,7 @@ private func makeFixture(
         manifestHash: digest("a"),
         desiredGeneration: 1,
         manifest: HostwrightManifest(
-            version: 2,
+            version: 3,
             project: projectName,
             services: []
         ),

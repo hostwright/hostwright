@@ -17,6 +17,113 @@ private struct TestPersistedMutationBinding: Codable {
 }
 
 final class PersistentControlAuditIntegrationTests: XCTestCase {
+  func testFrozenAuthenticationAcceptsExistingRevisionsAndGatesSchedulerReads() throws {
+    let root = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = SQLiteStateStore(path: root.appendingPathComponent("state.sqlite").path)
+    try store.migrate()
+    let repository = ControlRequestRepository(store: store, now: fixedNow)
+    let authorizerCalls = InvocationCounter()
+    let handlerCalls = InvocationCounter()
+    let server = try makeServer(
+      store: store,
+      repository: repository,
+      recorder: RecordingAuditRecorder(),
+      mutatingOperations: [],
+      authorizer: { _, _, _ in
+        authorizerCalls.increment()
+        return RBACDecision(
+          effect: .allow, ruleIdentifiers: ["test.allow"], reasonCode: "authorization.allowed")
+      },
+      handler: { _, request, _ in
+        handlerCalls.increment()
+        return ControlResponseEnvelope(
+          // The server must echo the request revision, even when a legacy
+          // handler constructs its response with the frozen default.
+          requestID: request.requestID, status: .completed, reasonCode: .completed)
+      })
+    let session = try start(server: server)
+    defer { session.closeClientAndWait() }
+
+    try completeAuthentication(descriptor: session.client)
+
+    let previousRequest = ControlRequestEnvelope(
+      protocolRevision: .previous,
+      requestID: "existing-previous",
+      operation: "health.get",
+      timeoutMilliseconds: 1_000)
+    try write(previousRequest, descriptor: session.client)
+    let previousResponse = try readResponse(descriptor: session.client)
+    XCTAssertEqual(previousResponse.status, .completed)
+    XCTAssertEqual(previousResponse.protocolRevision, .previous)
+
+    let currentRequest = ControlRequestEnvelope(
+      protocolRevision: .current,
+      requestID: "existing-current",
+      operation: "health.get",
+      timeoutMilliseconds: 1_000)
+    try write(currentRequest, descriptor: session.client)
+    let currentResponse = try readResponse(descriptor: session.client)
+    XCTAssertEqual(currentResponse.status, .completed)
+    XCTAssertEqual(currentResponse.protocolRevision, .current)
+    XCTAssertEqual(authorizerCalls.value, 2)
+    XCTAssertEqual(handlerCalls.value, 2)
+
+    let schedulerInput: ControlPlaneJSONValue = .object([
+      "pendingWorkloads": .array([]),
+      "nodes": .array([]),
+    ])
+    let schedulerBody: ControlPlaneJSONValue = .object([
+      "projectID": .string("project-a"),
+      "input": schedulerInput,
+    ])
+    let oldSchedulerRequest = ControlRequestEnvelope(
+      protocolRevision: .previous,
+      requestID: "scheduler-previous",
+      operation: "scheduler.plan",
+      timeoutMilliseconds: 1_000,
+      body: schedulerBody)
+    try write(oldSchedulerRequest, descriptor: session.client)
+    let oldSchedulerResponse = try readResponse(descriptor: session.client)
+    XCTAssertEqual(oldSchedulerResponse.status, .rejected)
+    XCTAssertEqual(oldSchedulerResponse.reasonCode, .unsupportedProtocolRevision)
+    XCTAssertEqual(oldSchedulerResponse.protocolRevision, .previous)
+    XCTAssertEqual(oldSchedulerResponse.error?.code, "schedulerProtocolRevisionRequired")
+    XCTAssertEqual(authorizerCalls.value, 2)
+    XCTAssertEqual(handlerCalls.value, 2)
+
+    let malformedSchedulerRequest = ControlRequestEnvelope(
+      protocolRevision: .current,
+      requestID: "scheduler-malformed",
+      operation: "scheduler.simulate",
+      timeoutMilliseconds: 1_000,
+      body: .object([
+        "projectID": .string("project-a"),
+        "input": schedulerInput,
+        "unexpected": .bool(true),
+      ]))
+    try write(malformedSchedulerRequest, descriptor: session.client)
+    let malformedResponse = try readResponse(descriptor: session.client)
+    XCTAssertEqual(malformedResponse.status, .rejected)
+    XCTAssertEqual(malformedResponse.reasonCode, .invalidRequest)
+    XCTAssertEqual(malformedResponse.error?.code, "schedulerInvalidRequest")
+    XCTAssertEqual(authorizerCalls.value, 2)
+    XCTAssertEqual(handlerCalls.value, 2)
+
+    let currentSchedulerRequest = ControlRequestEnvelope(
+      protocolRevision: .current,
+      requestID: "scheduler-current",
+      operation: "scheduler.simulate",
+      timeoutMilliseconds: 1_000,
+      body: schedulerBody)
+    try write(currentSchedulerRequest, descriptor: session.client)
+    let currentSchedulerResponse = try readResponse(descriptor: session.client)
+    XCTAssertEqual(currentSchedulerResponse.status, .completed)
+    XCTAssertEqual(currentSchedulerResponse.protocolRevision, .current)
+    XCTAssertEqual(authorizerCalls.value, 3)
+    XCTAssertEqual(handlerCalls.value, 3)
+  }
+
   func testDeniedMutationIsAuditedBeforeDurabilityAndNeverInvokesHandler() throws {
     let root = try temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: root) }
@@ -402,6 +509,10 @@ final class PersistentControlAuditIntegrationTests: XCTestCase {
       ControlFrameCodec.read(kind: .frame, descriptor: descriptor, deadline: try deadline())
     )
     XCTAssertFalse(challenge.credentialProofRequired)
+    XCTAssertEqual(challenge.protocolRevision, .previous)
+    XCTAssertEqual(
+      challenge.protocolLabel,
+      ControlProtocolCompatibility.frozenAuthenticationProtocolLabel)
     try ControlFrameCodec.write(
       try ControlPlaneCanonicalJSON.encode(ControlAuthenticationResponse()),
       kind: .request,

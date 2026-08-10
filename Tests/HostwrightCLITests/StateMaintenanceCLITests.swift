@@ -306,7 +306,7 @@ final class StateMaintenanceCLITests: XCTestCase {
 
     private var retentionManifest: String {
         """
-        version: 2
+        version: 3
         project: demo
         retention:
           recoveryHorizon: 60s

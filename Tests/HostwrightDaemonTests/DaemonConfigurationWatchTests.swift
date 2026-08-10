@@ -186,7 +186,7 @@ final class DaemonConfigurationWatchTests: XCTestCase {
     }
 
     private static let validManifest = """
-    version: 2
+    version: 3
     project: gate3
     services: {}
 

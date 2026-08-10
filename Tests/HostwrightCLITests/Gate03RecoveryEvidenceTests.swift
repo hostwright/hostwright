@@ -9,7 +9,7 @@ final class Gate03RecoveryStateEvidenceTests: XCTestCase {
         try withStore { store in
             let manifest = try ManifestValidator.validated(
                 """
-                version: 2
+                version: 3
                 project: sample
                 services:
                   api:

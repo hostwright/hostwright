@@ -42,8 +42,11 @@ final class AppleContainerAdapterInventoryTests: XCTestCase {
         )
 
         let observed = try await adapter.observe(desiredState: state)
+        let inventory = try await adapter.inventory()
 
         XCTAssertEqual(observed.capabilitySHA256?.count, 64)
+        XCTAssertEqual(inventory.authority, .appleContainerCLIRuntimeList)
+        XCTAssertTrue(inventory.isAuthoritative)
         XCTAssertEqual(observed.services.count, 1)
         let service = try XCTUnwrap(observed.services.first)
         XCTAssertEqual(service.identity, identity)

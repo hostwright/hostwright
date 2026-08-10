@@ -6,6 +6,8 @@ import HostwrightControlTransport
 import HostwrightCore
 
 public struct HostwrightCommandTransportEnvironment: @unchecked Sendable {
+    public typealias BoundedRequestFileRead = @Sendable (String, Int) throws -> Data
+    public typealias BoundedStandardInputRead = @Sendable (Int) throws -> Data
     public typealias PersistentSend = @Sendable (
         String,
         ControlRequestEnvelope
@@ -30,6 +32,8 @@ public struct HostwrightCommandTransportEnvironment: @unchecked Sendable {
     public var authorizationScope: AuthorizationScope
     public var requestID: @Sendable () -> String
     public var workingDirectory: @Sendable () throws -> String
+    public var readRequestFile: BoundedRequestFileRead
+    public var readStandardInput: BoundedStandardInputRead
 
     public init(
         socketPath: @escaping @Sendable () throws -> String,
@@ -42,6 +46,12 @@ public struct HostwrightCommandTransportEnvironment: @unchecked Sendable {
         requestID: @escaping @Sendable () -> String,
         workingDirectory: @escaping @Sendable () throws -> String = {
             FileManager.default.currentDirectoryPath
+        },
+        readRequestFile: @escaping BoundedRequestFileRead = { path, maximumBytes in
+            try hostwrightReadBoundedRequestFile(path: path, maximumBytes: maximumBytes)
+        },
+        readStandardInput: @escaping BoundedStandardInputRead = { maximumBytes in
+            try hostwrightReadBoundedStandardInput(maximumBytes: maximumBytes)
         }
     ) {
         self.socketPath = socketPath
@@ -51,6 +61,8 @@ public struct HostwrightCommandTransportEnvironment: @unchecked Sendable {
         self.authorizationScope = authorizationScope
         self.requestID = requestID
         self.workingDirectory = workingDirectory
+        self.readRequestFile = readRequestFile
+        self.readStandardInput = readStandardInput
     }
 
     public static let live = HostwrightCommandTransportEnvironment(
@@ -148,7 +160,11 @@ public enum HostwrightCommandRunner {
                 preconditionFailure("local presentation returned before transport dispatch")
             case .bootstrapAPI:
                 let response = try environment.bootstrapSend(
-                    try request(route: route, requestID: requestID)
+                    try request(
+                        route: route,
+                        requestID: requestID,
+                        environment: environment
+                    )
                 )
                 return try result(response: response, output: output)
             case .persistentControlAPI:
@@ -157,9 +173,21 @@ public enum HostwrightCommandRunner {
                 case .unary:
                     let response = try environment.persistentSend(
                         socketPath,
-                        try request(route: route, requestID: requestID)
+                        try request(
+                            route: route,
+                            requestID: requestID,
+                            environment: environment
+                        )
                     )
-                    if case .plugin = try CLICommand.parse(arguments: route.arguments),
+                    let command = try CLICommand.parse(arguments: route.arguments)
+                    if case .scheduler(let options) = command {
+                        return try schedulerResult(
+                            response: response,
+                            operation: route.operation,
+                            output: options.output
+                        )
+                    }
+                    if case .plugin = command,
                        response.status == .completed, response.reasonCode == .completed,
                        let value = response.result {
                         let data = try ControlPlaneCanonicalJSON.encode(value)
@@ -185,9 +213,24 @@ public enum HostwrightCommandRunner {
 
     private static func request(
         route: CLIControlRoute,
-        requestID: String
+        requestID: String,
+        environment: HostwrightCommandTransportEnvironment
     ) throws -> ControlRequestEnvelope {
         let command = try CLICommand.parse(arguments: route.arguments)
+        if case .scheduler(let options) = command {
+            return ControlRequestEnvelope(
+                protocolRevision: .current,
+                requestID: requestID,
+                operation: route.operation,
+                timeoutMilliseconds: ControlPlaneContract.maximumUnaryDeadlineMilliseconds,
+                idempotencyKey: route.mutating ? requestID : nil,
+                body: try schedulerRequestBody(
+                    options: options,
+                    route: route,
+                    environment: environment
+                )
+            )
+        }
         if case .plugin(let options) = command {
             return ControlRequestEnvelope(
                 requestID: requestID,
@@ -204,6 +247,59 @@ public enum HostwrightCommandRunner {
             idempotencyKey: route.mutating ? requestID : nil,
             body: route.requestBody()
         )
+    }
+
+    private static func schedulerRequestBody(
+        options: SchedulerCLIOptions,
+        route: CLIControlRoute,
+        environment: HostwrightCommandTransportEnvironment
+    ) throws -> ControlPlaneJSONValue {
+        let maximumBytes = SchedulerControlWireContract.maximumInputBytes
+        let data: Data
+        switch options.requestSource {
+        case .file(let path):
+            let resolvedPath: String
+            if path.hasPrefix("/") {
+                resolvedPath = URL(fileURLWithPath: path).standardizedFileURL.path
+            } else if let workingDirectory = route.workingDirectory {
+                resolvedPath = URL(
+                    fileURLWithPath: workingDirectory,
+                    isDirectory: true
+                ).appendingPathComponent(path).standardizedFileURL.path
+            } else {
+                resolvedPath = URL(fileURLWithPath: path).standardizedFileURL.path
+            }
+            data = try environment.readRequestFile(resolvedPath, maximumBytes)
+        case .standardInput:
+            data = try environment.readStandardInput(maximumBytes)
+        }
+
+        guard !data.isEmpty, data.count <= maximumBytes else {
+            throw HostwrightDiagnostic(
+                code: .controlAPIInvalid,
+                message: "The scheduler request must be non-empty JSON within the bounded Control API input limit."
+            )
+        }
+        do {
+            try Phase09StrictDecoder.validateNoDuplicateKeys(data)
+            let body = try JSONDecoder().decode(ControlPlaneJSONValue.self, from: data)
+            switch options.action {
+            case .plan, .simulate:
+                _ = try SchedulerControlWireContract.scopedInputData(from: body)
+            case .status, .explain:
+                _ = try SchedulerControlWireContract.decisionReference(from: body)
+            case .apply:
+                _ = try SchedulerControlWireContract.applyData(from: body)
+            }
+            return body
+        } catch let diagnostic as HostwrightDiagnostic {
+            throw diagnostic
+        } catch {
+            throw HostwrightDiagnostic(
+                code: .controlAPIInvalid,
+                message: "The scheduler request JSON does not match the selected Control 2.2 operation."
+            )
+        }
     }
 
     private static func pluginBody(_ options: PluginCLIOptions) throws -> ControlPlaneJSONValue {
@@ -259,6 +355,27 @@ public enum HostwrightCommandRunner {
         }
     }
 
+    private static func schedulerResult(
+        response: ControlResponseEnvelope,
+        operation: String,
+        output: CLIOutputFormat
+    ) throws -> CLIRunResult {
+        guard response.status == .completed,
+              response.reasonCode == .completed,
+              response.error == nil,
+              let value = response.result else {
+            return try result(response: response, output: output)
+        }
+        let data = try ControlPlaneCanonicalJSON.encode(value)
+        let canonicalJSON = String(decoding: data, as: UTF8.self)
+        if output == .json {
+            return CLIRunResult(standardOutput: canonicalJSON + "\n")
+        }
+        return CLIRunResult(
+            standardOutput: "Scheduler operation: \(operation)\nStatus: completed\nResult:\n\(canonicalJSON)\n"
+        )
+    }
+
     private static func result(
         response: ControlResponseEnvelope,
         output: CLIOutputFormat
@@ -286,4 +403,78 @@ public enum HostwrightCommandRunner {
             message: response.error?.message ?? "The Control API request was rejected safely."
         )
     }
+}
+
+@usableFromInline
+internal func hostwrightReadBoundedRequestFile(
+    path: String,
+    maximumBytes: Int
+) throws -> Data {
+    guard maximumBytes > 0, maximumBytes < Int.max else {
+        throw HostwrightDiagnostic(
+            code: .controlAPIInvalid,
+            message: "The scheduler request input limit is invalid."
+        )
+    }
+    let handle: FileHandle
+    do {
+        handle = try FileHandle(forReadingFrom: URL(fileURLWithPath: path))
+    } catch {
+        throw HostwrightDiagnostic(
+            code: .controlAPIInvalid,
+            message: "The scheduler request file could not be opened safely."
+        )
+    }
+    defer { handle.closeFile() }
+    return try hostwrightReadBoundedHandle(handle, maximumBytes: maximumBytes)
+}
+
+@usableFromInline
+internal func hostwrightReadBoundedStandardInput(maximumBytes: Int) throws -> Data {
+    try hostwrightReadBoundedHandle(
+        FileHandle.standardInput,
+        maximumBytes: maximumBytes
+    )
+}
+
+private func hostwrightReadBoundedHandle(
+    _ handle: FileHandle,
+    maximumBytes: Int
+) throws -> Data {
+    guard maximumBytes > 0, maximumBytes < Int.max else {
+        throw HostwrightDiagnostic(
+            code: .controlAPIInvalid,
+            message: "The scheduler request input limit is invalid."
+        )
+    }
+    var data = Data()
+    do {
+        while data.count <= maximumBytes {
+            let remaining = maximumBytes + 1 - data.count
+            guard let chunk = try handle.read(upToCount: remaining), !chunk.isEmpty else {
+                break
+            }
+            data.append(chunk)
+        }
+    } catch let diagnostic as HostwrightDiagnostic {
+        throw diagnostic
+    } catch {
+        throw HostwrightDiagnostic(
+            code: .controlAPIInvalid,
+            message: "The scheduler request could not be read safely."
+        )
+    }
+    guard !data.isEmpty else {
+        throw HostwrightDiagnostic(
+            code: .controlAPIInvalid,
+            message: "The scheduler request must be non-empty JSON."
+        )
+    }
+    guard data.count <= maximumBytes else {
+        throw HostwrightDiagnostic(
+            code: .controlAPIInvalid,
+            message: "The scheduler request exceeds the bounded Control API input limit."
+        )
+    }
+    return data
 }

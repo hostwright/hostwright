@@ -405,7 +405,7 @@ final class LocalControlAPIIntegrationTests: XCTestCase {
 
     private var validManifest: String {
         """
-        version: 2
+        version: 3
         project: demo
         services:
           api:

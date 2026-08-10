@@ -11,10 +11,13 @@ import HostwrightControlTransport
 import HostwrightCore
 import HostwrightDaemonCore
 import HostwrightExtensions
+import HostwrightHealth
 import HostwrightPolicy
 import HostwrightRegistry
 import HostwrightRuntime
+import HostwrightScheduler
 import HostwrightState
+import Synchronization
 
 final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sendable {
   private let configuration: DaemonConfiguration
@@ -146,6 +149,112 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
       auditRecorder: auditTrail
     )
     let requestRepository = ControlRequestRepository(store: store)
+    let schedulerRepository = store.schedulerAdmissions
+    let schedulerPressureCoordinator = SchedulerPressureAuthorityCoordinator(
+      probe: SchedulerMacOSHostPressureProbe(),
+      repository: schedulerRepository,
+      clock: { Date() }
+    )
+    let schedulerRuntimeMetadata = try Self.waitForSchedulerRuntime {
+      await commandEnvironment.runtimeAdapter().metadata()
+    }
+    let schedulerRuntimeVersion = try Self.waitForSchedulerRuntime {
+      try await commandEnvironment.runtimeAdapter().runtimeVersion()
+    }
+    let schedulerAuthorityProvider = Self.makeSchedulerAuthorityProvider(
+      store: store,
+      repository: schedulerRepository,
+      configPath: configuration.configPath,
+      pressureCoordinator: schedulerPressureCoordinator,
+      runtimeMetadata: schedulerRuntimeMetadata,
+      runtimeVersion: schedulerRuntimeVersion
+    )
+    let schedulerLifecycleReconciler = UnattendedLifecycleReconciler(
+      environment: commandEnvironment
+    )
+    let schedulerManifestPath = configuration.configPath
+    let schedulerStateDatabasePath = configuration.stateDatabasePath
+    let schedulerMaximumParallelism = configuration.maximumParallelism
+    let schedulerRuntimeMutation: SchedulerControlOperations.RuntimeMutation = {
+      reservation,
+      preemptionIntent in
+      let result = try Self.waitForSchedulerRuntime {
+        try await schedulerLifecycleReconciler
+          .executeAuthorizedSchedulerReservation(
+            manifestPath: schedulerManifestPath,
+            stateDatabasePath: schedulerStateDatabasePath,
+            reservation: reservation,
+            preemptionIntent: preemptionIntent,
+            maximumParallelism: schedulerMaximumParallelism
+          )
+      }
+      guard result.status.isSuccessfulIteration else {
+        throw SchedulerControlOperationError.runtimeMutationFailed
+      }
+      return try Self.controlPlaneValue(result)
+    }
+    let schedulerPreemptionMutation: SchedulerControlOperations.PreemptionMutation = {
+      intent in
+      let reservations = try intent.proposal.victims.map { victim in
+        guard let reservation = try schedulerRepository.activeReservation(
+          workloadID: victim.workloadID,
+          projectUUID: intent.projectID
+        ) else {
+          throw SchedulerControlOperationError.preemptionExecutionUnavailable
+        }
+        guard reservation.nodeID == victim.nodeID,
+              reservation.resources == victim.allocation,
+              reservation.ownerSubjectID == victim.subjectID else {
+          throw SchedulerControlOperationError.preemptionExecutionUnavailable
+        }
+        return reservation
+      }
+      let result = try Self.waitForSchedulerRuntime {
+        try await schedulerLifecycleReconciler
+          .executeAuthorizedSchedulerVictims(
+            manifestPath: schedulerManifestPath,
+            stateDatabasePath: schedulerStateDatabasePath,
+            intent: intent,
+            reservations: reservations,
+            maximumParallelism: schedulerMaximumParallelism
+          )
+      }
+      guard result.status.isSuccessfulIteration else {
+        throw SchedulerControlOperationError.runtimeMutationFailed
+      }
+      let inventory = try Self.waitForSchedulerRuntime {
+        try await commandEnvironment.runtimeAdapter().inventory()
+      }
+      let evidence = try Self.schedulerPreemptionFenceEvidence(
+        intent: intent,
+        reservations: reservations,
+        inventory: inventory,
+        verifiedAt: ISO8601DateFormatter().string(from: Date()),
+        planSHA256: result.planSHA256
+      )
+      return SchedulerControlOperations.PreemptionExecutionResult(
+        fenceEvidence: evidence,
+        mutation: try Self.controlPlaneValue(result)
+      )
+    }
+    let schedulerRuntimeInventoryCache = SchedulerRuntimeInventoryCache()
+    let schedulerRuntimeObservation: SchedulerStartupRecoveryCoordinator.RuntimeObservationProvider = {
+      reservation in
+      let inventory = try schedulerRuntimeInventoryCache.load {
+        try Self.waitForSchedulerRuntime {
+          try await commandEnvironment.runtimeAdapter().inventory()
+        }
+      }
+      return try Self.schedulerRuntimeObservation(
+        reservation: reservation,
+        inventory: inventory
+      )
+    }
+    _ = try SchedulerStartupRecoveryCoordinator(
+      repository: schedulerRepository,
+      observe: schedulerRuntimeObservation,
+      now: { ISO8601DateFormatter().string(from: Date()) }
+    ).recover()
     _ = try Self.recoverInterruptedUnaryRequests(
       repository: requestRepository,
       auditRecorder: auditTrail,
@@ -257,7 +366,11 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
       "admission.exception.delete",
     ]).union(WorkloadProfileControlOperations.mutatingOperations)
       .union(PluginControlOperations.mutatingOperations)
+      .union(SchedulerControlOperations.mutatingOperations)
     let mutationClassifier: PersistentControlConnectionServer.MutationClassifier = { request in
+      if SchedulerControlOperations.isReadOnly(operation: request.operation) {
+        return false
+      }
       if try CLIControlRoute.validateStreamPreparation(request: request) != nil {
         return false
       }
@@ -392,7 +505,12 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
           admissionAdministration: admissionAdministration,
           admissionEngine: admissionEngine, profileRepository: store.workloadProfiles,
           profileAdministration: profileAdministration, profileEngine: profileEngine,
-          pluginRuntime: pluginRuntime)
+          pluginRuntime: pluginRuntime,
+          schedulerRepository: schedulerRepository,
+          schedulerAuthorityProvider: schedulerAuthorityProvider,
+          schedulerPressureCoordinator: schedulerPressureCoordinator,
+          schedulerRuntimeMutation: schedulerRuntimeMutation,
+          schedulerPreemptionMutation: schedulerPreemptionMutation)
       }
     )
     lock.lock()
@@ -405,6 +523,163 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
         listener: listener,
         server: server,
         stateStoreConfiguration: connectionStateStoreConfiguration
+      )
+    }
+  }
+
+  private static func makeSchedulerAuthorityProvider(
+    store: SQLiteStateStore,
+    repository: SchedulerAdmissionRepository,
+    configPath: String,
+    pressureCoordinator: SchedulerPressureAuthorityCoordinator,
+    runtimeMetadata: RuntimeAdapterMetadata,
+    runtimeVersion: String
+  ) -> SchedulerControlOperations.AuthorityProvider {
+    { projectIdentifier, decision, input in
+      let project: SchedulerProjectAuthoritySnapshot
+      if HostwrightResourceUUID.isValid(projectIdentifier) {
+        guard let resolved = try repository.projectAuthority(
+          forResourceUUID: projectIdentifier
+        ) else {
+          throw SchedulerControlOperationError.authorityUnavailable
+        }
+        project = resolved
+      } else {
+        guard let resolved = try repository.projectAuthority(
+          forProjectID: projectIdentifier
+        ) else {
+          throw SchedulerControlOperationError.authorityUnavailable
+        }
+        project = resolved
+      }
+      let configData = try Data(contentsOf: URL(fileURLWithPath: configPath))
+      let configDigest = SHA256.hash(data: configData)
+        .map { String(format: "%02x", $0) }.joined()
+      let profileDigest = SHA256.hash(
+        data: try ControlPlaneCanonicalJSON.encode(store.workloadProfiles.listProfiles())
+      ).map { String(format: "%02x", $0) }.joined()
+      let lifecyclePlanDigest = project.manifestDigest
+      let formatter = ISO8601DateFormatter()
+      let now = Date()
+      let createdAt = formatter.string(from: now)
+      let expiresAt = formatter.string(from: now.addingTimeInterval(300))
+
+      let bindings: [SchedulerDecisionWorkloadBinding]
+      if let input {
+        let workloads = Dictionary(uniqueKeysWithValues: input.pendingWorkloads.map {
+          ($0.workloadID, $0)
+        })
+        bindings = try decision.workloadDecisions
+          .filter { $0.outcome != .unschedulable }
+          .map { workloadDecision in
+            guard let workload = workloads[workloadDecision.workloadID],
+                  let nodeID = workloadDecision.chosenNodeID
+                    ?? workloadDecision.preemption?.nodeID else {
+              throw SchedulerControlOperationError.authorityUnavailable
+            }
+            guard let capacity = try repository.nodeCapacity(nodeID: nodeID) else {
+              throw SchedulerControlOperationError.authorityUnavailable
+            }
+            guard let pressure = try repository.hostPressure(nodeID: nodeID) else {
+              throw SchedulerControlOperationError.pressureUnavailable
+            }
+            guard ![.critical, .unknown, .unavailable]
+              .contains(pressure.posture.pressure) else {
+              throw SchedulerControlOperationError.pressureUnavailable
+            }
+            guard let ownership = try store.ownership.loadAll().first(where: {
+              $0.resourceType == "container" &&
+                $0.resourceUUID == workload.workloadID.uuidString.lowercased() &&
+                $0.projectResourceUUID == project.resourceUUID.lowercased() &&
+                $0.projectID == project.projectID &&
+                $0.projectGeneration == project.manifestVersion &&
+                RuntimeProviderBinding.stableID(for: $0.runtimeAdapter) ==
+                  runtimeMetadata.providerID &&
+                $0.serviceName != nil &&
+                RuntimeManagedResourceIdentity.isSupportedIdentifier($0.resourceIdentifier) &&
+                HostwrightResourceUUID.isValid($0.resourceUUID) &&
+                HostwrightResourceUUID.isValid($0.fencingToken)
+            }),
+              let serviceName = ownership.serviceName,
+              let ownershipProjectUUID = ownership.projectResourceUUID else {
+              throw SchedulerControlOperationError.authorityUnavailable
+            }
+            let runtimeOwnership = try SchedulerRuntimeOwnershipBinding(
+              resourceIdentifier: ownership.resourceIdentifier,
+              resourceType: ownership.resourceType,
+              resourceUUID: ownership.resourceUUID,
+              resourceGeneration: Int64(ownership.resourceGeneration),
+              projectUUID: ownershipProjectUUID,
+              projectName: project.projectName,
+              projectGeneration: Int64(ownership.projectGeneration),
+              serviceName: serviceName,
+              instanceName: nil,
+              identityVersion: ownership.identityVersion,
+              providerID: runtimeMetadata.providerID,
+              providerAPIVersion: runtimeMetadata.providerAPIVersion,
+              providerVersion: runtimeVersion,
+              providerGeneration: Int64(ownership.providerGeneration),
+              fencingToken: ownership.fencingToken
+            )
+            return try SchedulerDecisionWorkloadBinding(
+              workloadID: workload.workloadID,
+              nodeID: nodeID,
+              resources: workloadDecision.capacityExplanation?.chargedCapacity
+                ?? workload.requirements.request,
+              capacityDigest: capacity.capacityDigest,
+              capacityGeneration: capacity.generation,
+              ownerSubjectID: workload.subjectID,
+              projectUUID: project.resourceUUID,
+              runtimeOwnership: runtimeOwnership
+            )
+          }
+      } else {
+        guard let artifact = try repository.decisionArtifact(id: decision.decisionID) else {
+          throw SchedulerControlOperationError.authorityUnavailable
+        }
+        bindings = artifact.workloadBindings
+      }
+
+      if input == nil {
+        _ = try pressureCoordinator.refresh(
+          nodeIDs: bindings.map(\.nodeID)
+        )
+      }
+
+      let authorities = try Dictionary(uniqueKeysWithValues: bindings.map { binding in
+        guard let pressure = try repository.hostPressure(nodeID: binding.nodeID) else {
+          throw SchedulerControlOperationError.pressureUnavailable
+        }
+        guard ![.critical, .unknown, .unavailable]
+          .contains(pressure.posture.pressure) else {
+          throw SchedulerControlOperationError.pressureUnavailable
+        }
+        guard let capacity = try repository.nodeCapacity(nodeID: binding.nodeID) else {
+          throw SchedulerControlOperationError.authorityUnavailable
+        }
+        let fence = try repository.fencingState(nodeID: binding.nodeID)
+        let authority = try SchedulerAdmissionCurrentAuthority(
+          nodeCapacityDigest: capacity.capacityDigest,
+          nodeCapacityGeneration: capacity.generation,
+          configDigest: configDigest,
+          profileDigest: profileDigest,
+          lifecyclePlanDigest: lifecyclePlanDigest,
+          expectedNodeEpoch: fence.nodeEpoch,
+          expectedPressureGeneration: pressure.generation,
+          expectedPressureEvidenceDigest: pressure.evidenceDigest,
+          expectedPressurePosture: pressure.posture.pressure,
+          leaseCreatedAt: createdAt,
+          leaseExpiresAt: expiresAt
+        )
+        return (binding.workloadID, authority)
+      })
+      return SchedulerControlAuthoritySnapshot(
+        projectUUID: project.resourceUUID.lowercased(),
+        configDigest: configDigest,
+        profileDigest: profileDigest,
+        lifecyclePlanDigest: lifecyclePlanDigest,
+        workloadBindings: bindings,
+        currentAuthorities: authorities
       )
     }
   }
@@ -545,7 +820,12 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
     profileRepository: WorkloadProfileRepository,
     profileAdministration: WorkloadProfileAdministrationService,
     profileEngine: WorkloadProfilePolicyEngine,
-    pluginRuntime: PluginControlRuntime
+    pluginRuntime: PluginControlRuntime,
+    schedulerRepository: SchedulerAdmissionRepository,
+    schedulerAuthorityProvider: @escaping SchedulerControlOperations.AuthorityProvider,
+    schedulerPressureCoordinator: SchedulerPressureAuthorityCoordinator,
+    schedulerRuntimeMutation: @escaping SchedulerControlOperations.RuntimeMutation,
+    schedulerPreemptionMutation: @escaping SchedulerControlOperations.PreemptionMutation
   ) throws -> ControlResponseEnvelope {
     if let route = try CLIControlRoute.validateStreamPreparation(request: request) {
       let preparation = try streamSources.prepare(
@@ -563,6 +843,26 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
     if let response = try CLIControlCommandExecutor.execute(
       request: request,
       environment: commandEnvironment
+    ) {
+      return response
+    }
+    if let response = SchedulerControlOperations.handle(
+      request: request,
+      repository: schedulerRepository,
+      subjectID: peer.binding.subject.identifier,
+      now: { ISO8601DateFormatter().string(from: Date()) },
+      authorityProvider: schedulerAuthorityProvider,
+      projectResolver: { projectID in
+        if HostwrightResourceUUID.isValid(projectID) {
+          return projectID.lowercased()
+        }
+        return try schedulerRepository.projectResourceUUID(forProjectID: projectID)
+      },
+      runtimeMutation: schedulerRuntimeMutation,
+      pressureRefresher: { input in
+        try schedulerPressureCoordinator.refresh(input: input)
+      },
+      preemptionMutation: schedulerPreemptionMutation
     ) {
       return response
     }
@@ -711,6 +1011,239 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
     )
   }
 
+  private static func schedulerDigest(_ fields: [String]) -> String {
+    SHA256.hash(data: Data(fields.joined(separator: "\u{1f}").utf8))
+      .map { String(format: "%02x", $0) }
+      .joined()
+  }
+
+  private static func schedulerRuntimeFenceToken(
+    _ reservation: SchedulerReservationRecord
+  ) -> String {
+    let operationKey = SHA256.hash(
+      data: Data([
+        "scheduler-up",
+        reservation.decisionID.uuidString.lowercased(),
+        reservation.reservationID.uuidString.lowercased(),
+        reservation.fencingToken.stableKey,
+      ].joined(separator: "|").utf8)
+    )
+    .map { String(format: "%02x", $0) }
+    .joined()
+    return HostwrightResourceUUID.legacy(
+      kind: "lifecycle-fencing",
+      identifier: operationKey
+    )
+  }
+
+  static func schedulerRuntimeObservation(
+    reservation: SchedulerReservationRecord,
+    inventory: RuntimeInventory
+  ) throws -> SchedulerRuntimeObservation {
+    let digest = inventory.semanticSHA256
+    guard let expected = reservation.runtimeOwnership,
+          inventory.isAuthoritative,
+          inventory.machine.state == .running,
+          !inventory.machine.operatingSystem.isEmpty,
+          !inventory.machine.architecture.isEmpty,
+          !inventory.machine.runtimeVersion.isEmpty,
+          !inventory.machine.services.isEmpty,
+          inventory.machine.services.allSatisfy({
+            !$0.required && $0.state != .unknown ||
+              ($0.required && $0.state == .running)
+          }),
+          inventory.machine.services.contains(where: {
+            $0.required && $0.state == .running
+          }) else {
+      return try SchedulerRuntimeObservation(
+        state: .unknown,
+        evidenceDigest: digest
+      )
+    }
+
+    let expectedResourceUUID = expected.resourceUUID.lowercased()
+    let expectedIdentifier = expected.resourceIdentifier
+    let candidates = inventory.containers.filter { container in
+      let labels = Dictionary(uniqueKeysWithValues: container.labels.map {
+        ($0.key, $0.value)
+      })
+      return container.name == expectedIdentifier ||
+        labels[RuntimeManagedResourceIdentity.resourceIdentifierLabel] == expectedIdentifier ||
+        labels[RuntimeManagedResourceIdentity.resourceUUIDLabel]?.lowercased() ==
+          expectedResourceUUID ||
+        container.ownership?.resourceUUID.lowercased() == expectedResourceUUID
+    }
+    guard candidates.count <= 1 else {
+      return try SchedulerRuntimeObservation(
+        state: .unknown,
+        evidenceDigest: digest
+      )
+    }
+    guard let candidate = candidates.first else {
+      return try SchedulerRuntimeObservation(
+        state: .absent,
+        evidenceDigest: digest
+      )
+    }
+    let labels = Dictionary(uniqueKeysWithValues: candidate.labels.map {
+      ($0.key, $0.value)
+    })
+    let identity = RuntimeManagedResourceIdentity.identity(from: labels)
+    let lifecycleFence = Self.schedulerRuntimeFenceToken(reservation)
+    guard candidate.ownership?.resourceUUID.lowercased() == expectedResourceUUID,
+          candidate.ownership?.projectUUID.lowercased() == expected.projectUUID,
+          candidate.ownership?.resourceGeneration == Int(expected.resourceGeneration),
+          candidate.ownership?.projectGeneration == Int(expected.projectGeneration),
+          candidate.ownership?.providerID == expected.providerID,
+          candidate.ownership?.providerGeneration == Int(expected.providerGeneration),
+          labels[RuntimeManagedResourceIdentity.managedLabel] == "true",
+          labels[RuntimeManagedResourceIdentity.identityVersionLabel] ==
+            String(expected.identityVersion),
+          identity?.projectName == expected.projectName,
+          identity?.serviceName == expected.serviceName,
+          identity?.instanceName == expected.instanceName,
+          labels[RuntimeManagedResourceIdentity.resourceIdentifierLabel] == expectedIdentifier,
+          labels[RuntimeManagedResourceIdentity.resourceUUIDLabel]?.lowercased() == expectedResourceUUID,
+          labels[RuntimeManagedResourceIdentity.projectUUIDLabel]?.lowercased() == expected.projectUUID,
+          labels[RuntimeManagedResourceIdentity.resourceGenerationLabel] ==
+            String(expected.resourceGeneration),
+          labels[RuntimeManagedResourceIdentity.projectGenerationLabel] ==
+            String(expected.projectGeneration),
+          labels[RuntimeManagedResourceIdentity.providerIDLabel] == expected.providerID.rawValue,
+          labels[RuntimeManagedResourceIdentity.providerGenerationLabel] ==
+            String(expected.providerGeneration),
+          labels[RuntimeManagedResourceIdentity.fencingTokenLabel] == lifecycleFence,
+          candidate.ownership?.fencingToken == lifecycleFence,
+          inventory.machine.runtimeVersion == expected.providerVersion else {
+      return try SchedulerRuntimeObservation(
+        state: .unknown,
+        evidenceDigest: digest
+      )
+    }
+    let state: SchedulerRuntimeObservationState
+    switch candidate.lifecycle {
+    case .running:
+      guard candidate.health.availability == .available,
+            candidate.health.state == .healthy else {
+        return try SchedulerRuntimeObservation(
+          state: .unknown,
+          evidenceDigest: digest
+        )
+      }
+      state = .present
+    case .missing:
+      state = .absent
+    case .created, .stopped, .exited, .failed, .unknown:
+      state = .unknown
+    }
+    return try SchedulerRuntimeObservation(
+      state: state,
+      evidenceDigest: digest
+    )
+  }
+
+  static func schedulerPreemptionFenceEvidence(
+    intent: SchedulerPreemptionIntentRecord,
+    reservations: [SchedulerReservationRecord],
+    inventory: RuntimeInventory,
+    verifiedAt: String,
+    planSHA256: String
+  ) throws -> [SchedulerFenceEvidence] {
+    let ordered = reservations.sorted {
+      ($0.workloadID.uuidString.lowercased(),
+       $0.reservationID.uuidString.lowercased()) <
+      ($1.workloadID.uuidString.lowercased(),
+       $1.reservationID.uuidString.lowercased())
+    }
+    guard ordered.count == intent.proposal.victims.count,
+          Set(ordered.map(\.workloadID)) ==
+            Set(intent.proposal.victims.map(\.workloadID)) else {
+      throw SchedulerControlOperationError.preemptionExecutionUnavailable
+    }
+
+    var evidence: [SchedulerFenceEvidence] = []
+    evidence.reserveCapacity(ordered.count)
+    for reservation in ordered {
+      let observation = try schedulerRuntimeObservation(
+        reservation: reservation,
+        inventory: inventory
+      )
+      guard observation.state == .absent else {
+        throw SchedulerControlOperationError.preemptionExecutionUnavailable
+      }
+      let evidenceDigest = schedulerDigest([
+        "scheduler-victim-absence",
+        intent.intentID.uuidString.lowercased(),
+        reservation.reservationID.uuidString.lowercased(),
+        reservation.workloadID.uuidString.lowercased(),
+        reservation.fencingToken.stableKey,
+        verifiedAt,
+        planSHA256,
+        observation.evidenceDigest,
+      ])
+      evidence.append(
+        try SchedulerFenceEvidence(
+          token: reservation.fencingToken,
+          reservationID: reservation.reservationID,
+          workloadID: reservation.workloadID,
+          evidenceDigest: evidenceDigest,
+          verifiedAt: verifiedAt
+        )
+      )
+    }
+    return evidence
+  }
+
+  static func waitForSchedulerRuntime<T: Sendable>(
+    timeoutNanoseconds: UInt64 = schedulerRuntimeMaximumWaitNanoseconds,
+    pollNanoseconds: UInt64 = schedulerRuntimePollNanoseconds,
+    _ operation: @escaping @Sendable () async throws -> T
+  ) throws -> T {
+    guard timeoutNanoseconds > 0,
+          timeoutNanoseconds <= schedulerRuntimeMaximumWaitNanoseconds,
+          pollNanoseconds > 0,
+          pollNanoseconds <= timeoutNanoseconds else {
+      throw SchedulerRuntimeWaitError.invalidLimit
+    }
+    let semaphore = DispatchSemaphore(value: 0)
+    let box = SchedulerRuntimeResultBox<T>()
+    let child = Task {
+      do {
+        box.store(.success(try await operation()))
+      } catch {
+        box.store(.failure(error))
+      }
+      semaphore.signal()
+    }
+    let start = DispatchTime.now().uptimeNanoseconds
+    let (deadline, overflow) = start.addingReportingOverflow(timeoutNanoseconds)
+    guard !overflow else {
+      child.cancel()
+      throw SchedulerRuntimeWaitError.invalidLimit
+    }
+    while true {
+      if Task.isCancelled {
+        child.cancel()
+        throw SchedulerRuntimeWaitError.cancelled
+      }
+      let now = DispatchTime.now().uptimeNanoseconds
+      guard now < deadline else {
+        child.cancel()
+        throw SchedulerRuntimeWaitError.timedOut
+      }
+      let remaining = deadline - now
+      let waitNanoseconds = min(remaining, pollNanoseconds)
+      if semaphore.wait(
+        timeout: .now() + .nanoseconds(Int(waitNanoseconds))
+      ) == .success {
+        guard let result = box.load() else {
+          throw SchedulerRuntimeWaitError.missingResult
+        }
+        return try result.get()
+      }
+    }
+  }
+
   private static func failure(
     requestID: String,
     reason: ControlReasonCode,
@@ -723,5 +1256,70 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
       reasonCode: reason,
       error: SanitizedError(code: code, message: message)
     )
+  }
+}
+
+let schedulerRuntimeMaximumWaitNanoseconds: UInt64 = 30_000_000_000
+let schedulerRuntimePollNanoseconds: UInt64 = 5_000_000
+
+enum SchedulerRuntimeWaitError: Error, Equatable {
+  case cancelled
+  case timedOut
+  case invalidLimit
+  case missingResult
+  case runtimeUnavailable
+}
+
+private final class SchedulerRuntimeResultBox<T: Sendable>: Sendable {
+  private let result = Mutex<Result<T, Error>?>(nil)
+
+  func store(_ result: Result<T, Error>) {
+    self.result.withLock { value in
+      value = result
+    }
+  }
+
+  func load() -> Result<T, Error>? {
+    result.withLock { $0 }
+  }
+}
+
+private final class SchedulerRuntimeInventoryCache: Sendable {
+  private enum State: Sendable {
+    case idle
+    case loading
+    case loaded(RuntimeInventory)
+    case failed
+  }
+
+  private let state = Mutex<State>(.idle)
+
+  func load(_ loader: () throws -> RuntimeInventory) throws -> RuntimeInventory {
+    let mode = state.withLock { state -> State in
+      switch state {
+      case .idle:
+        state = .loading
+        return .loading
+      case .loading, .failed, .loaded:
+        return state
+      }
+    }
+    switch mode {
+    case .loaded(let inventory):
+      return inventory
+    case .loading:
+      break
+    case .idle, .failed:
+      throw SchedulerRuntimeWaitError.runtimeUnavailable
+    }
+
+    do {
+      let value = try loader()
+      state.withLock { $0 = .loaded(value) }
+      return value
+    } catch {
+      state.withLock { $0 = .failed }
+      throw error
+    }
   }
 }

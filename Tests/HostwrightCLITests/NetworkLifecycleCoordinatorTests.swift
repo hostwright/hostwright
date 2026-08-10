@@ -13,7 +13,7 @@ final class NetworkLifecycleCoordinatorTests: XCTestCase {
         throws
     {
         let manifest = HostwrightManifest(
-            version: 2,
+            version: 3,
             project: "status-ingress",
             imagePolicy: nil,
             imageTrust: nil,
@@ -112,7 +112,7 @@ final class NetworkLifecycleCoordinatorTests: XCTestCase {
             manifestPath: "hostwright.yaml",
             stateDatabasePath: "state.sqlite",
             manifest: HostwrightManifest(
-                version: 2,
+                version: 3,
                 project: "status-ingress",
                 services: []
             ),
@@ -175,7 +175,7 @@ final class NetworkLifecycleCoordinatorTests: XCTestCase {
             manifestPath: "hostwright.yaml",
             stateDatabasePath: fixture.store.path,
             manifest: HostwrightManifest(
-                version: 2,
+                version: 3,
                 project: "network-coordinator",
                 services: []
             ),
@@ -1141,7 +1141,7 @@ private func seedProject(
         manifestHash: digest("a"),
         desiredGeneration: 1,
         manifest: HostwrightManifest(
-            version: 2,
+            version: 3,
             project: "network-coordinator",
             services: []
         ),

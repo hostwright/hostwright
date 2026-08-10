@@ -712,7 +712,7 @@ final class DaemonControlStreamSourcesTests: XCTestCase {
     let manifest = root.appendingPathComponent("hostwright.yaml")
     try Data(
       """
-      version: 2
+      version: 3
       project: stream-tests
       services:
         api:

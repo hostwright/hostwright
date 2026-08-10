@@ -9,6 +9,7 @@ public final class PersistentControlClientSession: @unchecked Sendable {
     let resumed: Bool
   }
   private let descriptor: Int32
+  private let sessionProtocolRevision: ControlProtocolRevision
   private let condition = NSCondition()
   private let writerLock = NSLock()
   private let readerQueue = DispatchQueue(label: "dev.hostwright.control.client-reader")
@@ -26,15 +27,18 @@ public final class PersistentControlClientSession: @unchecked Sendable {
   private var terminalReceivedStreams: Set<String> = []
   private var acceptedStreamSources: [String: ControlStreamSource] = [:]
   private var pendingStreamOpens: [String: PendingStreamOpen] = [:]
+  private var streamRevisions: [String: ControlProtocolRevision] = [:]
   private var bufferedStreamFrameCount = 0
   private var closed = false
   private var writeHalfClosed = false
 
   init(
     descriptor: Int32,
+    protocolRevision: ControlProtocolRevision = .previous,
     frameWriter: @escaping ControlFrameWriteOperation = defaultControlFrameWrite
   ) {
     self.descriptor = descriptor
+    self.sessionProtocolRevision = protocolRevision
     self.frameWriter = frameWriter
   }
 
@@ -46,7 +50,9 @@ public final class PersistentControlClientSession: @unchecked Sendable {
 
   public func send(_ request: ControlRequestEnvelope) throws -> ControlResponseEnvelope {
     try request.validate()
-    guard request.protocolRevision == .current, let timeout = request.timeoutMilliseconds else {
+    guard let requestRevision = request.protocolRevision,
+      ControlProtocolCompatibility.supportsRequestRevision(requestRevision),
+      let timeout = request.timeoutMilliseconds else {
       throw PersistentControlClientError.invalidResponse
     }
     try condition.withLock {
@@ -75,7 +81,11 @@ public final class PersistentControlClientSession: @unchecked Sendable {
         close()
         throw error
       }
-      return try waitForResponse(requestID: request.requestID, deadline: deadline)
+      let response = try waitForResponse(requestID: request.requestID, deadline: deadline)
+      guard response.protocolRevision == requestRevision else {
+        throw PersistentControlClientError.invalidResponse
+      }
+      return response
     } catch {
       condition.withLock {
         waitingRequestIDs.remove(request.requestID)
@@ -92,11 +102,17 @@ public final class PersistentControlClientSession: @unchecked Sendable {
     streamID: String,
     request: ControlStreamOpenRequest,
     cursor: String? = nil,
-    initialCredit: Int = 16
+    initialCredit: Int = 16,
+    protocolRevision: ControlProtocolRevision? = nil
   ) throws {
     try request.validate()
+    let streamRevision = protocolRevision ?? sessionProtocolRevision
+    guard ControlProtocolCompatibility.supportsStreamRevision(streamRevision) else {
+      throw PersistentControlClientError.invalidResponse
+    }
     let payload = try ControlStreamFrameContract.value(request)
     let frame = StreamFrame(
+      protocolRevision: streamRevision,
       streamID: streamID,
       sequence: 1,
       cursor: cursor,
@@ -126,6 +142,7 @@ public final class PersistentControlClientSession: @unchecked Sendable {
           streamFrames[streamID] = []
           inputCredits[streamID] = 0
           outputCredits[streamID] = initialCredit
+          streamRevisions[streamID] = streamRevision
           pendingStreamOpens[streamID] = PendingStreamOpen(
             source: request.source,
             heartbeatMilliseconds: request.heartbeatMilliseconds,
@@ -331,6 +348,9 @@ public final class PersistentControlClientSession: @unchecked Sendable {
           guard let current = clientSequences[streamID], current < UInt64.max else {
             throw PersistentControlClientError.invalidResponse
           }
+          guard let streamRevision = streamRevisions[streamID] else {
+            throw PersistentControlClientError.invalidResponse
+          }
           if kind == .cancel {
             guard cancelledStreams.insert(streamID).inserted else {
               throw PersistentControlClientError.invalidResponse
@@ -358,6 +378,7 @@ public final class PersistentControlClientSession: @unchecked Sendable {
           }
           let reserved = current + 1
           let frame = StreamFrame(
+            protocolRevision: streamRevision,
             streamID: streamID,
             sequence: reserved,
             cursor: cursor,
@@ -487,6 +508,9 @@ public final class PersistentControlClientSession: @unchecked Sendable {
         let frame = try ControlStreamFrameContract.decode(data)
         try ControlStreamFrameContract.validate(frame, direction: .serverToClient)
         try condition.withLock {
+          guard streamRevisions[frame.streamID] == frame.protocolRevision else {
+            throw PersistentControlClientError.invalidResponse
+          }
           guard let previous = serverSequences[frame.streamID],
             frame.sequence == previous + 1,
             var queue = streamFrames[frame.streamID],
@@ -580,6 +604,7 @@ public final class PersistentControlClientSession: @unchecked Sendable {
     terminalReceivedStreams.remove(streamID)
     acceptedStreamSources.removeValue(forKey: streamID)
     pendingStreamOpens.removeValue(forKey: streamID)
+    streamRevisions.removeValue(forKey: streamID)
     if let queued = streamFrames.removeValue(forKey: streamID) {
       bufferedStreamFrameCount -= queued.count
     }

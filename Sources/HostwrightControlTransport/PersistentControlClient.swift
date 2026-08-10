@@ -65,7 +65,9 @@ public struct PersistentControlClient: Sendable {
 
   public func send(_ request: ControlRequestEnvelope) throws -> ControlResponseEnvelope {
     try request.validate()
-    guard request.protocolRevision == .current, let timeout = request.timeoutMilliseconds else {
+    guard let requestRevision = request.protocolRevision,
+      ControlProtocolCompatibility.supportsRequestRevision(requestRevision),
+      let timeout = request.timeoutMilliseconds else {
       throw PersistentControlClientError.invalidResponse
     }
     let pinned = try pinSocket()
@@ -128,7 +130,8 @@ public struct PersistentControlClient: Sendable {
       ]
     )
     try response.validate()
-    guard response.requestID == request.requestID else {
+    guard response.requestID == request.requestID,
+      response.protocolRevision == requestRevision else {
       throw PersistentControlClientError.invalidResponse
     }
     return response
@@ -171,7 +174,8 @@ public struct PersistentControlClient: Sendable {
         descriptor: descriptor,
         deadline: handshakeDeadline
       )
-      let session = PersistentControlClientSession(descriptor: descriptor)
+      let session = PersistentControlClientSession(
+        descriptor: descriptor, protocolRevision: challenge.protocolRevision)
       session.start()
       return session
     } catch {
@@ -214,7 +218,8 @@ public struct PersistentControlClient: Sendable {
     pinned: PinnedControlSocket
   ) throws {
     let identity = try DarwinCurrentControlCodeIdentity.inspect()
-    guard challenge.socketDevice == pinned.socket.device,
+    guard challenge.protocolRevision == .previous,
+      challenge.socketDevice == pinned.socket.device,
       challenge.socketInode == pinned.socket.inode,
       challenge.peerUID == UInt32(geteuid()),
       challenge.peerGID == UInt32(getegid()),

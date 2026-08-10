@@ -12,6 +12,37 @@ import HostwrightSecrets
 import HostwrightState
 import HostwrightStorage
 
+private let lifecycleSchedulerAuthorityUnavailableMessage =
+    "scheduler-authority-unavailable: lifecycle mutation requires a persisted Control 2.2 scheduler placement decision and fenced reservation; manifest-only admission is not executable. No runtime mutation was attempted."
+
+private func requireLifecycleSchedulerAuthority(
+    for options: LifecycleCLIOptions
+) throws {
+    guard !options.dryRun,
+          [.up, .run, .start, .restart, .update].contains(options.command) else {
+        return
+    }
+    throw RuntimeAdapterError.mutationUnavailableByPolicy(
+        lifecycleSchedulerAuthorityUnavailableMessage
+    )
+}
+
+typealias LifecycleSchedulerAuthorityValidator = @Sendable (
+    HostwrightManifest,
+    LifecycleCompiledCommand,
+    LifecycleCommandPreparation,
+    LifecycleCLIOptions
+) throws -> Void
+
+func defaultLifecycleSchedulerAuthorityValidator(
+    _: HostwrightManifest,
+    _: LifecycleCompiledCommand,
+    _: LifecycleCommandPreparation,
+    options: LifecycleCLIOptions
+) throws {
+    try requireLifecycleSchedulerAuthority(for: options)
+}
+
 func lifecycleStorageQuiescenceProof(
     inventory: RuntimeInventory,
     preparation: LifecycleCommandPreparation,
@@ -61,10 +92,16 @@ func lifecycleStorageQuiescenceProof(
 struct LifecycleLiveDriver: LifecycleCommandDriving {
     let environment: CLIEnvironment
     let options: LifecycleCLIOptions
+    let schedulerAuthorityValidator: LifecycleSchedulerAuthorityValidator
 
-    init(environment: CLIEnvironment, options: LifecycleCLIOptions) {
+    init(
+        environment: CLIEnvironment,
+        options: LifecycleCLIOptions,
+        schedulerAuthorityValidator: @escaping LifecycleSchedulerAuthorityValidator = defaultLifecycleSchedulerAuthorityValidator
+    ) {
         self.environment = environment
         self.options = options
+        self.schedulerAuthorityValidator = schedulerAuthorityValidator
     }
 
     func prepare(options: LifecycleCLIOptions) throws -> LifecycleCommandPreparation {
@@ -98,6 +135,12 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             projectID: projectID,
             fallbackBindings: []
         )
+        // Placement semantics are admitted by the canonical scheduler bridge;
+        // this mapper only translates the already-admitted runtime boundary.
+        _ = try ManifestSchedulerAdmissionBridge.map(
+            manifest: manifest,
+            subjectID: "owner"
+        )
         var mapping = ManifestRuntimeMapper.map(
             manifest,
             projectResourceUUID: initialProjectResourceUUID,
@@ -108,7 +151,8 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
                     manifest: manifest,
                     projectResourceUUID: initialProjectResourceUUID,
                     providerRootURL: environment.storageProviderRootURL()
-                )
+                ),
+            schedulerAdmissionValidated: true
         )
         try ServiceTunnelLifecycleCoordinator
             .validateLiveCredentialPrerequisites(
@@ -150,7 +194,8 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
                         projectResourceUUID: projectResourceUUID,
                         providerRootURL:
                             environment.storageProviderRootURL()
-                    )
+                    ),
+                schedulerAdmissionValidated: true
             )
             resourceBindings = try lifecycleBindings(
                 store: store,
@@ -349,6 +394,12 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             adapter: adapter,
             store: store,
             manifest: validated.manifest
+        )
+        try schedulerAuthorityValidator(
+            validated.manifest,
+            compiled,
+            preparation,
+            options
         )
         let recoverySnapshot: DesiredStateRecoverySnapshot?
         if compiled.plan.command == .update {
@@ -6979,10 +7030,26 @@ private func lifecyclePreflightDesiredExecution(
             guard resolution.profileSHA256 == expectedSHA256 else {
                 throw WorkloadProfilePolicyError.workloadViolation(["profileHash"])
             }
+            for service in manifest.services {
+                try profileEngine.validateManifestAdmission(
+                    resources: service.resources,
+                    scheduling: service.scheduling,
+                    resolution: resolution
+                )
+            }
             for service in preparation.desiredState.services {
                 try profileEngine.validateWorkload(
                     service, resolution: resolution, snapshot: capability)
             }
+            try ManifestSchedulerAdmissionBridge.admit(
+                manifest: manifest,
+                subjectID: "owner",
+                profileResolution: resolution
+            )
+        } catch let error as ManifestSchedulerAdmissionError {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                "Scheduler admission failed: \(error.stableKey). No runtime mutation was attempted."
+            )
         } catch WorkloadProfilePolicyError.providerMismatch(let provider) {
             throw RuntimeAdapterError.mutationUnavailableByPolicy(
                 "Workload profile provider mismatch: \(provider). No runtime mutation was attempted."
@@ -6998,6 +7065,17 @@ private func lifecyclePreflightDesiredExecution(
         } catch {
             throw RuntimeAdapterError.mutationUnavailableByPolicy(
                 "The selected workload profile cannot be enforced exactly by the desired workload and runtime provider. No runtime mutation was attempted."
+            )
+        }
+    } else {
+        do {
+            try ManifestSchedulerAdmissionBridge.admit(
+                manifest: manifest,
+                subjectID: "owner"
+            )
+        } catch let error as ManifestSchedulerAdmissionError {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                "Scheduler admission failed: \(error.stableKey). No runtime mutation was attempted."
             )
         }
     }

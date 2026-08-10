@@ -16,12 +16,19 @@ import HostwrightStorage
 
 public enum HostwrightCLI {
     public static let starterManifest = """
-    version: 2
+    version: 3
     project: api-local
 
     services:
       api:
         image: ghcr.io/example/api:latest
+        resources:
+          requests:
+            cpus: 1
+            memory: 512MiB
+          limits:
+            cpus: 1
+            memory: 512MiB
         ports:
           - "8080:8080"
         env:
@@ -33,6 +40,13 @@ public enum HostwrightCLI {
           policy: on-failure
       redis:
         image: redis:7
+        resources:
+          requests:
+            cpus: 1
+            memory: 256MiB
+          limits:
+            cpus: 1
+            memory: 256MiB
         ports:
           - "6379:6379"
 
@@ -199,7 +213,7 @@ public enum HostwrightCLI {
         let supported = Set([
             "apply", "benchmark", "capabilities", "cleanup", "daemon", "diagnostics", "down",
             "doctor", "events", "extension", "help", "image", "init", "interactive",
-            "lifecycle", "logs", "metrics", "network", "paths", "plan", "recovery", "registry",
+            "lifecycle", "logs", "metrics", "network", "paths", "plan", "recovery", "registry", "scheduler",
             "observability", "restart", "rm", "run", "runtime", "secret", "start", "state", "status",
             "stop", "storage", "traces", "up", "update", "validate", "version"
         ])
@@ -411,7 +425,7 @@ public enum HostwrightCLI {
             ).run()
         case .migrateManifestPreview(let path, let output):
             let source = try hostwrightReadManifestText(path: path, environment: environment)
-            let preview = try ManifestMigrator.previewV2(source)
+            let preview = try ManifestMigrator.previewV3(source)
             return CLIRunResult(
                 standardOutput: output == .json
                     ? CLIJSON.manifestMigrationPreview(preview)
@@ -554,6 +568,14 @@ public enum HostwrightCLI {
                 environment: environment,
                 output: output
             )
+        case .scheduler(let options):
+            return diagnosticFailure(
+                HostwrightDiagnostic(
+                    code: .controlAPIUnavailable,
+                    message: "Scheduler commands require the authenticated persistent Control API; local scheduler execution is unavailable."
+                ),
+                output: options.output
+            )
         }
     }
 
@@ -654,6 +676,7 @@ public enum HostwrightCLI {
       hostwright plan [path] [--output text|json] [--team-profile <path>]
       hostwright status [path] [--state-db <path>] [--output text|json] [--runtime-provider auto|apple-cli|containerization]
       hostwright apply [path] [--state-db <path>] --confirm-plan <hash> [--runtime-provider auto|apple-cli|containerization] [--team-profile <path> --approval-record <path>]
+      hostwright scheduler status|plan|simulate|explain|apply (--request <path>|--stdin) [--json|--output text|json]
       hostwright up [path] [--service <name>] [--state-db <path>] (--dry-run|--confirm-plan <hash>) [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--parallelism <1-32>] [--json|--output text|json]
       hostwright down [path] [--service <name>] [--state-db <path>] (--dry-run|--confirm-plan <hash>) [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--parallelism <1-32>] [--json|--output text|json]
       hostwright run [path] --service <name> [--state-db <path>] (--dry-run|--confirm-plan <hash>) [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--parallelism <1-32>] [--json|--output text|json]
@@ -712,7 +735,7 @@ public enum HostwrightCLI {
     registry provenance generates and verifies exact-image DSSE-wrapped in-toto/SLSA v1 build attestations, persists immutable Gate 6 graph evidence, and resolves signing keys only through typed secret-provider references.
     image mutations use the Apple CLI provider, durable intent, structured post-operation digest verification, exact ownership, and exact rollback/cleanup. Containerization image mutations report unavailable before effects.
     recovery inspects durable lifecycle groups; resume and rollback require the exact group UUID and persisted plan hash.
-    migrate preview validates and prints an in-memory v1-to-v2 conversion; it never writes the source file.
+    migrate preview validates and prints an in-memory v1/v2-to-v3 conversion; it never writes the source file.
     init writes hostwright.yaml only when absent.
     import-stack reads a narrow safe stack-file subset and prints converted hostwright.yaml; it does not write files, observe runtime, or imply Compose parity.
     CLI plan output is deterministic but does not perform live runtime observation.

@@ -29,6 +29,7 @@ public final class ControlStreamSessionState: @unchecked Sendable {
   private struct State {
     let incarnation: UInt64
     let request: ControlStreamOpenRequest
+    let protocolRevision: ControlProtocolRevision
     var availableCredit: Int
     var lastClientSequence: UInt64
     var lastServerSequence: UInt64
@@ -67,6 +68,7 @@ public final class ControlStreamSessionState: @unchecked Sendable {
       streams[frame.streamID] = State(
         incarnation: incarnation,
         request: request,
+        protocolRevision: frame.protocolRevision,
         availableCredit: frame.credit!,
         lastClientSequence: frame.sequence,
         lastServerSequence: 0,
@@ -88,6 +90,9 @@ public final class ControlStreamSessionState: @unchecked Sendable {
     return try lock.withLock {
       guard var state = streams[frame.streamID], !state.terminal else {
         throw ControlStreamSessionError.unknownStream
+      }
+      guard frame.protocolRevision == state.protocolRevision else {
+        throw ControlStreamSessionError.invalidTransition
       }
       guard !state.cancelled else {
         throw ControlStreamSessionError.invalidTransition
@@ -139,6 +144,9 @@ public final class ControlStreamSessionState: @unchecked Sendable {
     return try lock.withLock {
       guard var state = streams[frame.streamID] else { return nil }
       guard state.incarnation == expectedIncarnation else { return nil }
+      guard frame.protocolRevision == state.protocolRevision else {
+        throw ControlStreamSessionError.invalidTransition
+      }
       guard !state.terminal, !state.cancelled,
         frame.sequence == state.lastClientSequence + 1
       else { throw ControlStreamSessionError.invalidSequence }
@@ -150,6 +158,7 @@ public final class ControlStreamSessionState: @unchecked Sendable {
       }
       state.terminal = true
       let terminal = StreamFrame(
+        protocolRevision: state.protocolRevision,
         streamID: frame.streamID,
         sequence: state.lastServerSequence + 1,
         kind: .end
@@ -193,6 +202,7 @@ public final class ControlStreamSessionState: @unchecked Sendable {
       }
       let next = state.lastServerSequence + 1
       let frame = StreamFrame(
+        protocolRevision: state.protocolRevision,
         streamID: streamID,
         sequence: next,
         cursor: cursor,

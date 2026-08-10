@@ -644,6 +644,39 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertTrue(result.standardOutput.contains("it is not sandboxed"))
     }
 
+    func testMigratePreviewConvertsLegacyFlatResourcesToV3WithoutWritingSource() {
+        let source = """
+        version: 2
+        project: demo
+        services:
+          api:
+            image: local/demo:latest
+            resources: {cpus: 2, memory: 512MiB}
+        """
+        let files = FileBox(files: [HostwrightIdentity.manifestFileName: source])
+
+        let textResult = HostwrightCLI.run(
+            arguments: ["migrate", "preview", HostwrightIdentity.manifestFileName],
+            environment: environment(files: files)
+        )
+
+        XCTAssertEqual(textResult.exitCode, 0)
+        XCTAssertTrue(textResult.standardOutput.contains("version: 3"))
+        XCTAssertTrue(textResult.standardOutput.contains("requests:"))
+        XCTAssertTrue(textResult.standardOutput.contains("limits:"))
+        XCTAssertEqual(files.files[HostwrightIdentity.manifestFileName], source)
+
+        let jsonResult = HostwrightCLI.run(
+            arguments: [
+                "migrate", "preview", HostwrightIdentity.manifestFileName, "--json"
+            ],
+            environment: environment(files: files)
+        )
+        XCTAssertEqual(jsonResult.exitCode, 0)
+        XCTAssertTrue(jsonResult.standardOutput.contains(#""targetVersion":3"#))
+        XCTAssertTrue(jsonResult.standardOutput.contains("legacy flat resource fields"))
+    }
+
     func testExtensionCheckJSONErrorUsesStableCodeAndDoesNotCreateState() throws {
         let missingDeclaration = "/tmp/hostwright-extension-missing-\(UUID().uuidString).json"
         let result = HostwrightCLI.run(
@@ -688,7 +721,7 @@ final class HostwrightCLITests: XCTestCase {
 
         XCTAssertEqual(result.exitCode, 0)
         XCTAssertEqual(result.standardError, "")
-        XCTAssertTrue(result.standardOutput.contains("version: 2\nproject: demo"))
+        XCTAssertTrue(result.standardOutput.contains("version: 3\nproject: demo"))
         XCTAssertTrue(result.standardOutput.contains("image: ghcr.io/example/api:latest"))
         XCTAssertTrue(result.standardOutput.contains("env:\n      APP_ENV: development"))
         XCTAssertNil(files.files[HostwrightIdentity.manifestFileName])
@@ -790,7 +823,7 @@ final class HostwrightCLITests: XCTestCase {
         let files = FileBox(
             files: [
                 HostwrightIdentity.manifestFileName: """
-                version: 2
+                version: 3
                 project: api-local
                 services:
                   api:
@@ -815,7 +848,7 @@ final class HostwrightCLITests: XCTestCase {
         let files = FileBox(
             files: [
                 HostwrightIdentity.manifestFileName: """
-                version: 2
+                version: 3
                 project: api-local
                 services:
                   api:
@@ -1105,7 +1138,7 @@ final class HostwrightCLITests: XCTestCase {
 
         let invalidManifest = HostwrightCLI.run(
             arguments: ["plan", "--output", "json"],
-            environment: environment(files: FileBox(files: [HostwrightIdentity.manifestFileName: "version: 2\nproject: demo\nservices: {}\n"]))
+            environment: environment(files: FileBox(files: [HostwrightIdentity.manifestFileName: "version: 3\nproject: demo\nservices: {}\n"]))
         )
 
         XCTAssertEqual(invalidManifest.exitCode, CLIExitCode.validation.rawValue)
@@ -1380,7 +1413,7 @@ final class HostwrightCLITests: XCTestCase {
         try withTemporaryDatabase { databasePath in
             let serviceName = "0123456789abcdef0123456789abcdef"
             let manifestText = """
-            version: 2
+            version: 3
             project: v2-a-b
             services:
               \(serviceName):
@@ -2097,7 +2130,7 @@ final class HostwrightCLITests: XCTestCase {
     func testStatusReportsMultipleReplicasWithoutDuplicateKeyFailure() throws {
         try withTemporaryDatabase { databasePath in
             let manifest = """
-            version: 2
+            version: 3
             project: demo
             services:
               api:
@@ -3299,7 +3332,7 @@ final class HostwrightCLITests: XCTestCase {
     func testApplyExecutesWithOriginalSecretEnvAndRedactsSurfaces() throws {
         try withTemporaryDatabase { databasePath in
             let manifest = """
-            version: 2
+            version: 3
             project: demo
             services:
               api:
@@ -3362,7 +3395,7 @@ final class HostwrightCLITests: XCTestCase {
     func testApplyIdempotencyBlocksDuplicateSecretPlanBeforeSecretResolution() throws {
         try withTemporaryDatabase { databasePath in
             let manifest = """
-            version: 2
+            version: 3
             project: demo
             services:
               api:
@@ -3398,7 +3431,7 @@ final class HostwrightCLITests: XCTestCase {
     func testApplyFailsClosedWhenSecretReferenceBackendIsUnavailable() throws {
         try withTemporaryDatabase { databasePath in
             let manifest = """
-            version: 2
+            version: 3
             project: demo
             services:
               api:
@@ -3828,7 +3861,7 @@ final class HostwrightCLITests: XCTestCase {
 
     private var singleServiceManifest: String {
         """
-        version: 2
+        version: 3
         project: demo
         services:
           api:
@@ -3844,7 +3877,7 @@ final class HostwrightCLITests: XCTestCase {
 
     private var restartableServiceManifest: String {
         """
-        version: 2
+        version: 3
         project: demo
         services:
           api:
@@ -3859,7 +3892,7 @@ final class HostwrightCLITests: XCTestCase {
 
     private var managedRestartHealthManifest: String {
         """
-        version: 2
+        version: 3
         project: demo
         services:
           api:
@@ -3877,7 +3910,7 @@ final class HostwrightCLITests: XCTestCase {
 
     private var twoServiceManifest: String {
         """
-        version: 2
+        version: 3
         project: demo
         services:
           api:

@@ -75,7 +75,7 @@ final class SecretRecoveryCommandTests: XCTestCase {
         try withFixture { fixture in
             let itemID = fixture.manager.seed(
                 reference: fixture.reference,
-                version: 2
+                version: 3
             )
             let journal = try fixture.persistInterrupted(
                 operation: "delete",
@@ -145,7 +145,7 @@ final class SecretRecoveryCommandTests: XCTestCase {
         try withFixture { fixture in
             let itemID = fixture.manager.seed(
                 reference: fixture.reference,
-                version: 2
+                version: 3
             )
             let journal = try fixture.persistInterrupted(
                 operation: "update",
@@ -332,7 +332,7 @@ final class SecretRecoveryCommandTests: XCTestCase {
             let intendedDeleteID = UUID()
             let replacementDeleteID = fixture.manager.seed(
                 reference: fixture.reference,
-                version: 2
+                version: 3
             )
             let deleteJournal = try fixture.persistInterrupted(
                 operation: "delete",

@@ -27,7 +27,7 @@ final class HostwrightDaemonCoreTests: XCTestCase {
                 instanceLock: ScriptedDaemonLock(),
                 readConfig: { _ in
                     """
-                    version: 2
+                    version: 3
                     project: demo
                     services:
                       api:
@@ -79,7 +79,7 @@ final class HostwrightDaemonCoreTests: XCTestCase {
                 instanceLock: ScriptedDaemonLock(),
                 readConfig: { _ in
                     """
-                    version: 2
+                    version: 3
                     project: demo
                     services:
                       api:
@@ -233,7 +233,7 @@ final class HostwrightDaemonCoreTests: XCTestCase {
             let databasePath = directory.appendingPathComponent("state.sqlite").path
             let driver = ScriptedDaemonReconciliationDriver()
             let manifest = """
-            version: 2
+            version: 3
             project: demo
             maintenance:
               timezone: UTC
@@ -283,7 +283,7 @@ final class HostwrightDaemonCoreTests: XCTestCase {
             let databasePath = directory.appendingPathComponent("state.sqlite").path
             let driver = ScriptedDaemonReconciliationDriver()
             let manifest = """
-            version: 2
+            version: 3
             project: demo
             maintenance:
               timezone: UTC
@@ -512,7 +512,7 @@ final class HostwrightDaemonCoreTests: XCTestCase {
         try await withTemporaryDirectory { directory in
             let databasePath = directory.appendingPathComponent("state.sqlite").path
             let manifest = """
-            version: 2
+            version: 3
             project: demo
             services:
               api:
@@ -784,7 +784,7 @@ final class HostwrightDaemonCoreTests: XCTestCase {
         try await withTemporaryDirectory { directory in
             let databasePath = directory.appendingPathComponent("state.sqlite").path
             let manifestText = """
-            version: 2
+            version: 3
             project: demo
             restartBudget:
               maxAttempts: 1
@@ -1548,7 +1548,7 @@ final class HostwrightDaemonCoreTests: XCTestCase {
                 reconciliationDriver: ScriptedDaemonReconciliationDriver(),
                 clock: ManualDaemonClock(),
                 instanceLock: ScriptedDaemonLock(),
-                readConfig: { _ in "version: 2\nproject: demo\nservices: {}\n" },
+                readConfig: { _ in "version: 3\nproject: demo\nservices: {}\n" },
                 idGenerator: ids.next
             )
 
@@ -1648,7 +1648,7 @@ final class HostwrightDaemonCoreTests: XCTestCase {
                     defer { reads += 1 }
                     return reads == 0
                         ? Self.singleServiceManifest
-                        : "version: 2\nproject: demo\nservices: {}\n"
+                        : "version: 3\nproject: demo\nservices: {}\n"
                 },
                 idGenerator: DeterministicIDs().next
             )
@@ -1763,7 +1763,7 @@ final class HostwrightDaemonCoreTests: XCTestCase {
     }
 
     private static let singleServiceManifest = """
-    version: 2
+    version: 3
     project: demo
     services:
       api:
@@ -1773,7 +1773,7 @@ final class HostwrightDaemonCoreTests: XCTestCase {
     """
 
     private static let healthRestartManifest = """
-    version: 2
+    version: 3
     project: demo
     services:
       api:

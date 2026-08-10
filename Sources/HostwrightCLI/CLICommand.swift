@@ -223,6 +223,35 @@ public struct SupportBundleCLIOptions: Equatable, Sendable {
     }
 }
 
+public enum SchedulerCLIAction: String, CaseIterable, Equatable, Sendable {
+    case status
+    case plan
+    case simulate
+    case explain
+    case apply
+}
+
+public enum SchedulerCLIRequestSource: Equatable, Sendable {
+    case file(path: String)
+    case standardInput
+}
+
+public struct SchedulerCLIOptions: Equatable, Sendable {
+    public let action: SchedulerCLIAction
+    public let requestSource: SchedulerCLIRequestSource
+    public let output: CLIOutputFormat
+
+    public init(
+        action: SchedulerCLIAction,
+        requestSource: SchedulerCLIRequestSource,
+        output: CLIOutputFormat
+    ) {
+        self.action = action
+        self.requestSource = requestSource
+        self.output = output
+    }
+}
+
 public enum CLICommand: Equatable, Sendable {
     case version
     case capabilities(output: CLIOutputFormat)
@@ -283,6 +312,7 @@ public enum CLICommand: Equatable, Sendable {
     case extensionCheck(declarationPath: String, executablePath: String, output: CLIOutputFormat)
     case plugin(options: PluginCLIOptions)
     case doctor(stateDatabasePath: String?, output: CLIOutputFormat)
+    case scheduler(options: SchedulerCLIOptions)
     case help
 
     public static func parse(arguments: [String]) throws -> CLICommand {
@@ -362,6 +392,8 @@ public enum CLICommand: Equatable, Sendable {
             return try extensionCommand(arguments: arguments)
         case "doctor":
             return try doctorCommand(arguments: arguments)
+        case "scheduler":
+            return try schedulerCommand(arguments: arguments)
         default:
             throw CLIUsageError("Unknown command '\(first)'.")
         }
@@ -531,7 +563,7 @@ public enum CLICommand: Equatable, Sendable {
         }
         if let serviceName,
            serviceName.range(of: "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$", options: .regularExpression) == nil {
-            throw CLIUsageError("restart-budget --service requires a Manifest v2 service name.")
+            throw CLIUsageError("restart-budget --service requires a Manifest v3 service name.")
         }
         let action: RestartBudgetCLIAction
         if verb == "status" {
@@ -2349,6 +2381,82 @@ public enum CLICommand: Equatable, Sendable {
             }
         }
         return .doctor(stateDatabasePath: stateDatabasePath, output: output)
+    }
+
+    private static func schedulerCommand(arguments: [String]) throws -> CLICommand {
+        guard arguments.count >= 2,
+              let action = SchedulerCLIAction(rawValue: arguments[1]) else {
+            throw CLIUsageError(
+                "scheduler requires status, plan, simulate, explain, or apply."
+            )
+        }
+
+        var requestSource: SchedulerCLIRequestSource?
+        var output: CLIOutputFormat = .text
+        var outputSelected = false
+        var index = 2
+
+        while index < arguments.count {
+            switch arguments[index] {
+            case "--request":
+                guard requestSource == nil else {
+                    throw CLIUsageError("scheduler accepts exactly one request source.")
+                }
+                guard index + 1 < arguments.count else {
+                    throw CLIUsageError("scheduler requires a value after --request.")
+                }
+                let path = arguments[index + 1].trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !path.isEmpty, path != "-", !path.hasPrefix("-") else {
+                    throw CLIUsageError(
+                        "scheduler --request requires a non-empty path; use --stdin for standard input."
+                    )
+                }
+                requestSource = .file(path: path)
+                index += 2
+            case "--stdin":
+                guard requestSource == nil else {
+                    throw CLIUsageError("scheduler accepts exactly one request source.")
+                }
+                requestSource = .standardInput
+                index += 1
+            case "--json":
+                guard !outputSelected else {
+                    throw CLIUsageError("scheduler output format may be selected only once.")
+                }
+                output = .json
+                outputSelected = true
+                index += 1
+            case "--output":
+                guard !outputSelected else {
+                    throw CLIUsageError("scheduler output format may be selected only once.")
+                }
+                output = try parseOutputValue(
+                    arguments: arguments,
+                    index: index,
+                    commandName: "scheduler"
+                )
+                outputSelected = true
+                index += 2
+            default:
+                throw CLIUsageError(
+                    "scheduler \(action.rawValue) does not support argument '\(arguments[index])'."
+                )
+            }
+        }
+
+        guard let requestSource else {
+            throw CLIUsageError(
+                "scheduler \(action.rawValue) requires exactly one of --request <path> or --stdin."
+            )
+        }
+
+        return .scheduler(
+            options: SchedulerCLIOptions(
+                action: action,
+                requestSource: requestSource,
+                output: output
+            )
+        )
     }
 
     private static func benchmarkCommand(arguments: [String]) throws -> CLICommand {

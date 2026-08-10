@@ -242,7 +242,7 @@ struct LifecycleCommandRunnerTests {
 
     @Test
     func unattendedReconciliationUsesTheExactSharedPlanAndSagaOnce() async throws {
-        let manifest = "version: 2\nproject: demo\nservices:\n  api:\n    image: example.invalid/api:latest\n"
+        let manifest = "version: 3\nproject: demo\nservices:\n  api:\n    image: example.invalid/api:latest\n"
         let prepared = try preparation(desired: [service()])
         let driver = ScriptedLifecycleCommandDriver(preparation: prepared)
         let reconciler = UnattendedLifecycleReconciler(
@@ -287,7 +287,7 @@ struct LifecycleCommandRunnerTests {
         )
         defer { try? FileManager.default.removeItem(at: directory) }
         let manifest = """
-        version: 2
+        version: 3
         project: demo
         maintenance:
           timezone: UTC
@@ -301,6 +301,9 @@ struct LifecycleCommandRunnerTests {
         services:
           api:
             image: example.invalid/api:latest
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
         """
         let policy = try #require(ManifestValidator.validated(manifest).maintenance)
         let admission = try DaemonMaintenanceAdmission(
@@ -354,7 +357,7 @@ struct LifecycleCommandRunnerTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let databasePath = directory.appendingPathComponent("state.sqlite").path
         let manifest = """
-        version: 2
+        version: 3
         project: demo
         maintenance:
           timezone: UTC
@@ -368,6 +371,9 @@ struct LifecycleCommandRunnerTests {
         services:
           api:
             image: example.invalid/api:latest
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
         """
         let policy = try #require(ManifestValidator.validated(manifest).maintenance)
         let policySHA = MaintenanceWindowEvaluator.policySHA256(policy)
@@ -444,7 +450,7 @@ struct LifecycleCommandRunnerTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let databasePath = directory.appendingPathComponent("state.sqlite").path
         let manifest = """
-        version: 2
+        version: 3
         project: demo
         maintenance:
           timezone: UTC
@@ -459,6 +465,9 @@ struct LifecycleCommandRunnerTests {
         services:
           api:
             image: example.invalid/api:latest
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
         """
         let policy = try #require(ManifestValidator.validated(manifest).maintenance)
         let policySHA = MaintenanceWindowEvaluator.policySHA256(policy)
@@ -603,7 +612,7 @@ struct LifecycleCommandRunnerTests {
         let databasePath = directory.appendingPathComponent("state.sqlite").path
         let store = SQLiteStateStore(path: databasePath)
         try store.migrate()
-        let manifest = "version: 2\nproject: demo\nservices:\n  api:\n    image: example.invalid/api:latest\n"
+        let manifest = "version: 3\nproject: demo\nservices:\n  api:\n    image: example.invalid/api:latest\n"
         let prepared = try preparation(desired: [service()])
         let driver = ScriptedLifecycleCommandDriver(
             preparation: prepared,
@@ -697,7 +706,7 @@ struct LifecycleCommandRunnerTests {
 
     @Test
     func unattendedReconciliationReportsAnEmptySharedDAGAsConverged() async throws {
-        let manifest = "version: 2\nproject: demo\nservices:\n  api:\n    image: example.invalid/api:latest\n"
+        let manifest = "version: 3\nproject: demo\nservices:\n  api:\n    image: example.invalid/api:latest\n"
         let desired = service()
         let observed = ObservedRuntimeService(
             identity: desired.identity,
@@ -735,7 +744,7 @@ struct LifecycleCommandRunnerTests {
 
     @Test
     func unattendedReconciliationDefersAnEmptyBudgetSelectionWithoutExecution() async throws {
-        let manifest = "version: 2\nproject: demo\nservices:\n  api:\n    image: example.invalid/api:latest\n"
+        let manifest = "version: 3\nproject: demo\nservices:\n  api:\n    image: example.invalid/api:latest\n"
         let driver = ScriptedLifecycleCommandDriver(
             preparation: try preparation(desired: [service()])
         )
@@ -765,7 +774,7 @@ struct LifecycleCommandRunnerTests {
 
     @Test
     func unattendedReconciliationReportsVerificationOnlyDAGAsConverged() async throws {
-        let manifest = "version: 2\nproject: demo\nservices:\n  api:\n    image: example.invalid/api:latest\n"
+        let manifest = "version: 3\nproject: demo\nservices:\n  api:\n    image: example.invalid/api:latest\n"
         let desired = service(probes: allProbes())
         let observed = ObservedRuntimeService(
             identity: desired.identity,
@@ -805,7 +814,7 @@ struct LifecycleCommandRunnerTests {
 
     @Test
     func unattendedReconciliationRejectsChangedManifestBytesBeforePlanning() async throws {
-        let approved = "version: 2\nproject: demo\nservices:\n  api:\n    image: approved\n"
+        let approved = "version: 3\nproject: demo\nservices:\n  api:\n    image: approved\n"
         let changed = approved.replacingOccurrences(of: "approved", with: "changed")
         let driver = ScriptedLifecycleCommandDriver(
             preparation: try preparation(desired: [service()])
@@ -835,7 +844,7 @@ struct LifecycleCommandRunnerTests {
 
     @Test
     func unattendedReconciliationRejectsChangedPolicyTargetBeforeExecution() async throws {
-        let manifest = "version: 2\nproject: demo\nservices:\n  api:\n    image: approved\n"
+        let manifest = "version: 3\nproject: demo\nservices:\n  api:\n    image: approved\n"
         let manifestPath = "/private/tmp/hostwright.yaml"
         let policyPath = "/private/tmp/hostwright-policy.pem"
         let manifestDigest = SHA256.hash(data: Data(manifest.utf8))
@@ -913,7 +922,7 @@ struct LifecycleCommandRunnerTests {
 
     @Test
     func unattendedReconciliationHonorsCancellationBeforePlanning() async throws {
-        let manifest = "version: 2\nproject: demo\nservices:\n  api:\n    image: approved\n"
+        let manifest = "version: 3\nproject: demo\nservices:\n  api:\n    image: approved\n"
         let driver = ScriptedLifecycleCommandDriver(
             preparation: try preparation(desired: [service()])
         )

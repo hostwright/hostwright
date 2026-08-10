@@ -20,7 +20,7 @@ final class ControlPlaneContractTests: XCTestCase {
 
   func testFrozenVersionsAndLimits() throws {
     XCTAssertEqual(ControlPlaneContract.apiVersion, 2)
-    XCTAssertEqual(ControlProtocolRevision.allCases.map(\.rawValue), ["2.0", "2.1"])
+    XCTAssertEqual(ControlProtocolRevision.allCases.map(\.rawValue), ["2.0", "2.1", "2.2"])
     XCTAssertEqual(
       [
         ControlPlaneContract.maximumRequestBytes, ControlPlaneContract.maximumResponseOrFrameBytes,
@@ -68,6 +68,11 @@ final class ControlPlaneContractTests: XCTestCase {
       socketDevice: 3, socketInode: 5, peer: peer, credentialProofRequired: true
     )
     let challengeData = try challenge.canonicalData()
+    XCTAssertEqual(challenge.protocolRevision, .previous)
+    XCTAssertEqual(
+      challenge.protocolLabel,
+      ControlProtocolCompatibility.frozenAuthenticationProtocolLabel
+    )
     XCTAssertLessThanOrEqual(challengeData.count, ControlPlaneContract.maximumResponseOrFrameBytes)
     XCTAssertEqual(try ControlAuthenticationWireContract.decodeChallenge(challengeData), challenge)
     let unpersistableGeneration = ControlPeerCredentialChallenge(
@@ -263,6 +268,79 @@ final class ControlPlaneContractTests: XCTestCase {
       try ControlRequestEnvelope(
         requestID: "r", operation: "plan", timeoutMilliseconds: 1, idempotencyKey: ""
       ).validate())
+  }
+
+  func testAdditiveRevisionCompatibilityKeepsAuthenticationFrozen() throws {
+    XCTAssertTrue(ControlProtocolCompatibility.supportsRequestRevision(.previous))
+    XCTAssertTrue(ControlProtocolCompatibility.supportsRequestRevision(.current))
+    XCTAssertFalse(ControlProtocolCompatibility.supportsRequestRevision(.legacy))
+    XCTAssertEqual(
+      ControlProtocolCompatibility.requiredRevision(for: "scheduler.plan"), .current)
+    XCTAssertEqual(
+      ControlProtocolCompatibility.requiredRevision(for: "health.get"), nil)
+
+    XCTAssertNoThrow(try ControlRequestEnvelope(
+      protocolRevision: .previous, requestID: "previous", operation: "health.get",
+      timeoutMilliseconds: 1).validate())
+    XCTAssertNoThrow(try ControlRequestEnvelope(
+      protocolRevision: .current, requestID: "current", operation: "health.get",
+      timeoutMilliseconds: 1).validate())
+    XCTAssertThrowsError(try ControlRequestEnvelope(
+      protocolRevision: .legacy, requestID: "legacy", operation: "health.get",
+      timeoutMilliseconds: 1).validate())
+    XCTAssertThrowsError(try ControlRequestEnvelope(
+      protocolRevision: nil, requestID: "scheduler", operation: "scheduler.plan").validate())
+
+    XCTAssertNoThrow(try ControlResponseEnvelope(
+      protocolRevision: .current, requestID: "current", status: .completed,
+      reasonCode: .completed).validate())
+    XCTAssertNoThrow(try StreamFrame(
+      protocolRevision: .current, streamID: "current", sequence: 1, kind: .heartbeat).validate())
+  }
+
+  func testSchedulerWireBodyRequiresBoundedProjectScope() throws {
+    let input: ControlPlaneJSONValue = .object([
+      "pendingWorkloads": .array([]),
+      "nodes": .array([]),
+    ])
+    let scoped = try SchedulerControlWireContract.scopedInputData(from: .object([
+      "projectID": .string("project-a"),
+      "input": input,
+    ]))
+    XCTAssertEqual(scoped.projectID, "project-a")
+    XCTAssertThrowsError(try SchedulerControlWireContract.scopedInputData(from: .object([
+      "input": input,
+    ])))
+    XCTAssertThrowsError(try SchedulerControlWireContract.scopedInputData(from: .object([
+      "projectID": .string("project-a"),
+      "input": input,
+      "unknown": .bool(true),
+    ])))
+    XCTAssertThrowsError(try SchedulerControlWireContract.scopedInputData(from: .object([
+      "projectID": .string("project a"),
+      "input": input,
+    ])))
+    XCTAssertThrowsError(try SchedulerControlWireContract.scopedInputData(from: .object([
+      "projectID": .string(String(repeating: "p", count: 129)),
+      "input": input,
+    ])))
+    XCTAssertThrowsError(try SchedulerControlWireContract.scopedInputData(from: .object([
+      "projectID": .string("project-a"),
+      "input": .object([
+        "pendingWorkloads": .array([]),
+        "nodes": .array([]),
+        "inputDigest": .string(
+          String(repeating: "d", count: SchedulerControlWireContract.maximumInputBytes)),
+      ]),
+    ])))
+    XCTAssertThrowsError(try Phase09StrictDecoder.validateNoDuplicateKeys(
+      Data("{\"input\":{\"nodes\":[],\"nodes\":[]}}".utf8)))
+    let deepArray = String(repeating: "[", count: 129) + "0"
+      + String(repeating: "]", count: 129)
+    let deepObject = String(repeating: "{\"x\":", count: 129) + "0"
+      + String(repeating: "}", count: 129)
+    XCTAssertThrowsError(try Phase09StrictDecoder.validateNoDuplicateKeys(Data(deepArray.utf8)))
+    XCTAssertThrowsError(try Phase09StrictDecoder.validateNoDuplicateKeys(Data(deepObject.utf8)))
   }
 
   func testResponseAndStreamConsistency() throws {

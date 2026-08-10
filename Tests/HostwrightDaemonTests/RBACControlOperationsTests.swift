@@ -130,6 +130,116 @@ final class RBACControlOperationsTests: XCTestCase {
     }
   }
 
+  func testSchedulerReadsUseTopLevelProjectScopeForRBACAllowAndDeny() throws {
+    try withFixture(subjects: ["project-reader"]) { fixture in
+      _ = try fixture.repository.createCustomRole(
+        RBACRoleRecord(
+          roleID: "project-scheduler-reader",
+          builtIn: false,
+          rules: [RBACRule(
+            identifier: "project-scheduler-plan",
+            effect: .allow,
+            resources: [.project],
+            verbs: [.plan],
+            scope: .init(kind: .project, identifier: "project-a")
+          )],
+          createdBySubjectID: "owner",
+          createdAt: timestamp,
+          updatedAt: timestamp
+        ),
+        actorSubjectID: "owner",
+        timestamp: timestamp
+      )
+      _ = try fixture.repository.createBinding(
+        RBACBindingRecord(
+          bindingID: "project-scheduler-reader-binding",
+          subjectID: "project-reader",
+          roleID: "project-scheduler-reader",
+          scope: .init(kind: .global),
+          createdBySubjectID: "owner",
+          createdAt: timestamp,
+          updatedAt: timestamp
+        )
+      )
+      let reader = fixture.withPeer(
+        subjectID: "project-reader", codeHash: String(repeating: "b", count: 40))
+      let input: ControlPlaneJSONValue = .object([
+        "pendingWorkloads": .array([]),
+        "nodes": .array([]),
+      ])
+      let allowed = ControlRequestEnvelope(
+        protocolRevision: .current,
+        requestID: "scheduler-project-a",
+        operation: "scheduler.plan",
+        timeoutMilliseconds: 1_000,
+        body: .object(["projectID": .string("project-a"), "input": input])
+      )
+      let target = try RBACAuthorizationEngine.target(for: allowed)
+      XCTAssertEqual(target.resource, .project)
+      XCTAssertEqual(target.verb, .plan)
+      XCTAssertEqual(target.projectIdentifier, "project-a")
+      let allowDecision = try fixture.authorizer.authorize(
+        subject: reader.peer.binding.subject, request: allowed, at: now)
+      XCTAssertEqual(allowDecision.effect, .allow)
+
+      let denied = ControlRequestEnvelope(
+        protocolRevision: .current,
+        requestID: "scheduler-project-b",
+        operation: "scheduler.simulate",
+        timeoutMilliseconds: 1_000,
+        body: .object(["projectID": .string("project-b"), "input": input])
+      )
+      let denyDecision = try fixture.authorizer.authorize(
+        subject: reader.peer.binding.subject, request: denied, at: now)
+      XCTAssertEqual(denyDecision.effect, .deny)
+      XCTAssertEqual(denyDecision.reasonCode, "authorization.no-allow")
+
+      let missingProject = ControlRequestEnvelope(
+        protocolRevision: .current,
+        requestID: "scheduler-missing-project",
+        operation: "scheduler.plan",
+        timeoutMilliseconds: 1_000,
+        body: .object(["input": input])
+      )
+      XCTAssertThrowsError(try RBACAuthorizationEngine.target(for: missingProject)) { error in
+        XCTAssertEqual(error as? RBACAuthorizationError, .invalidTarget)
+      }
+
+      let operationVerbs: [(String, RBACVerb)] = [
+        ("scheduler.status", .get),
+        ("scheduler.explain", .get),
+        ("scheduler.apply", .update),
+      ]
+      for (operation, verb) in operationVerbs {
+        let scoped = ControlRequestEnvelope(
+          protocolRevision: .current,
+          requestID: "(operation)-scope",
+          operation: operation,
+          timeoutMilliseconds: 1_000,
+          body: .object(["projectID": .string("project-a")])
+        )
+        let mapped = try RBACAuthorizationEngine.target(for: scoped)
+        XCTAssertEqual(mapped.resource, .project)
+        XCTAssertEqual(mapped.verb, verb)
+        XCTAssertEqual(mapped.projectIdentifier, "project-a")
+      }
+
+      let inconsistentMutation = ControlRequestEnvelope(
+        protocolRevision: .current,
+        requestID: "scheduler-apply-mutating-field",
+        operation: "scheduler.apply",
+        timeoutMilliseconds: 1_000,
+        body: .object([
+          "projectID": .string("project-a"),
+          "mutating": .bool(true),
+        ])
+      )
+      XCTAssertThrowsError(try RBACAuthorizationEngine.target(for: inconsistentMutation)) { error in
+        XCTAssertEqual(error as? RBACAuthorizationError, .invalidTarget)
+      }
+    }
+  }
+
   func testOwnerCanCreateListAndRevokeDelegation() throws {
     try withFixture(subjects: ["delegate"]) { fixture in
       let delegation = RBACDelegation(

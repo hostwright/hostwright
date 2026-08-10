@@ -43,7 +43,7 @@ final class Phase01ContractCLITests: XCTestCase {
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(result.standardOutput.utf8)) as? [String: Any])
         XCTAssertEqual(object["kind"] as? String, "manifestMigrationPreview")
         XCTAssertEqual(object["sourceVersion"] as? Int, 1)
-        XCTAssertEqual(object["targetVersion"] as? Int, 2)
-        XCTAssertTrue((object["migratedManifest"] as? String)?.hasPrefix("version: 2") == true)
+        XCTAssertEqual(object["targetVersion"] as? Int, 3)
+        XCTAssertTrue((object["migratedManifest"] as? String)?.hasPrefix("version: 3") == true)
     }
 }

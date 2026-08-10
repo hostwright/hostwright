@@ -77,7 +77,7 @@ final class LifecycleImageTrustPreflightTests: XCTestCase {
         throws
     {
         try withFixture { fixture in
-            let source = "version: 2\nproject: demo\n"
+            let source = "version: 3\nproject: demo\n"
             let first = try lifecycleManifestSHA256(
                 text: source,
                 manifest: fixture.manifest
@@ -265,7 +265,7 @@ final class LifecycleImageTrustPreflightTests: XCTestCase {
             "sha256:" + String(repeating: "a", count: 64)
         let reference = "registry.example.com/team/api@\(digest)"
         let manifest = HostwrightManifest(
-            version: 2,
+            version: 3,
             project: "demo",
             imagePolicy: .requireDigest,
             imageTrust: HostwrightImageTrustPolicy(

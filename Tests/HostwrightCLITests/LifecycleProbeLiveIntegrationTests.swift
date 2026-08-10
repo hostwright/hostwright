@@ -1125,7 +1125,7 @@ private struct ProbeLiveFixture {
             manifestHash: String(repeating: "a", count: 64),
             desiredGeneration: 1,
             manifest: HostwrightManifest(
-                version: 2,
+                version: 3,
                 project: desired.identity.projectName,
                 services: [
                     HostwrightService(

@@ -178,7 +178,7 @@ final class RegistryTrustExecutionTests: XCTestCase {
         }
         XCTAssertEqual(chmod(cosignPath, 0o700), 0)
         let manifest = """
-        version: 2
+        version: 3
         project: demo
         imagePolicy: require-digest
         imageTrust:

@@ -3,6 +3,46 @@ import XCTest
 @testable import HostwrightControlTransport
 
 final class ControlStreamSessionStateTests: XCTestCase {
+  func testCurrentStreamRevisionIsEchoedAndCannotBeCrossed() throws {
+    let state = ControlStreamSessionState()
+    _ = try state.open(openFrame(streamID: "current", protocolRevision: .current))
+    let acceptance = try state.makeServerFrame(
+      streamID: "current",
+      kind: .open,
+      payload: try ControlStreamFrameContract.value(
+        ControlStreamAcceptance(
+          source: .events, resumed: false, heartbeatMilliseconds: 15_000,
+          inputCredit: 0, auditHealth: .healthy
+        )
+      )
+    )
+    XCTAssertEqual(acceptance.protocolRevision, .current)
+    XCTAssertThrowsError(
+      try state.receiveClientControl(
+        StreamFrame(
+          protocolRevision: .previous,
+          streamID: "current",
+          sequence: 2,
+          kind: .ack,
+          credit: 1
+        )
+      )
+    ) { error in
+      XCTAssertEqual(error as? ControlStreamSessionError, .invalidTransition)
+    }
+    XCTAssertNoThrow(
+      try state.receiveClientControl(
+        StreamFrame(
+          protocolRevision: .current,
+          streamID: "current",
+          sequence: 2,
+          kind: .ack,
+          credit: 1
+        )
+      )
+    )
+  }
+
   func testEnforcesThirtyTwoActiveStreamsAndRejectsDuplicateIDs() throws {
     let state = ControlStreamSessionState()
     for index in 1...ControlPlaneContract.maximumStreams {
@@ -212,9 +252,11 @@ final class ControlStreamSessionStateTests: XCTestCase {
 
   private func openFrame(
     streamID: String,
-    credit: Int = 1
+    credit: Int = 1,
+    protocolRevision: ControlProtocolRevision = .previous
   ) throws -> StreamFrame {
     StreamFrame(
+      protocolRevision: protocolRevision,
       streamID: streamID,
       sequence: 1,
       kind: .open,

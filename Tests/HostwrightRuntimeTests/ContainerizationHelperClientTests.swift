@@ -118,7 +118,13 @@ final class ContainerizationHelperClientTests: XCTestCase {
         let imageEvidence = try await client.localImageEvidence("example.local/demo:latest")
         let usage = try await client.resourceUsage("demo")
         let logs = try await client.logs("demo", lineLimit: 100)
-        XCTAssertEqual(observed.semanticSHA256, try inventory().semanticSHA256)
+        let expectedAuthoritativeInventory = try RuntimeInventoryBuilder.markRuntimeListAuthoritative(
+            inventory(),
+            source: .appleContainerizationRuntimeList
+        )
+        XCTAssertEqual(observed.authority, .appleContainerizationRuntimeList)
+        XCTAssertTrue(observed.isAuthoritative)
+        XCTAssertEqual(observed.semanticSHA256, expectedAuthoritativeInventory.semanticSHA256)
         XCTAssertEqual(
             imageEvidence.descriptorDigest,
             "sha256:\(String(repeating: "a", count: 64))"

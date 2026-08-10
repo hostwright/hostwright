@@ -303,7 +303,7 @@ final class CLIControlAuthorizationScopeTests: XCTestCase {
 
         let manifestPath = root.appendingPathComponent("hostwright.yaml").path
         let manifestText = """
-        version: 2
+        version: 3
         project: scope-tests
         services:
           api:

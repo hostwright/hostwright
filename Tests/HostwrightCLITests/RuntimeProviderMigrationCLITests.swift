@@ -203,7 +203,7 @@ private struct RuntimeProviderMigrationCLIFixture {
 
     init(directory: URL) throws {
         let manifestText = """
-        version: 2
+        version: 3
         project: sample
         services:
           api:

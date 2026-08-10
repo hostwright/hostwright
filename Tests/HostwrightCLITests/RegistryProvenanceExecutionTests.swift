@@ -505,7 +505,7 @@ final class RegistryProvenanceExecutionTests: XCTestCase {
         publicKeyPath: String
     ) -> String {
         """
-        version: 2
+        version: 3
         project: demo
         imagePolicy: require-digest
         imageProvenance:

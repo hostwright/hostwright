@@ -134,7 +134,7 @@ private struct Fixture {
         manifestPath = root.appendingPathComponent("hostwright.yaml").path
         databasePath = root.appendingPathComponent("state.sqlite").path
         try """
-        version: 2
+        version: 3
         project: demo
         maintenance:
           timezone: UTC

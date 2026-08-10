@@ -691,7 +691,7 @@ private func withLiveFixture(
     let manifestPath = directory.appendingPathComponent("hostwright.yaml").path
     let databasePath = directory.appendingPathComponent("state.sqlite").path
     let manifestText = """
-    version: 2
+    version: 3
     project: demo
     imagePolicy: allow-tags
     services:

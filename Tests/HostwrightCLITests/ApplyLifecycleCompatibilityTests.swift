@@ -286,7 +286,7 @@ private struct ApplyCompatibilityFixture {
 
     func writeInputs() throws {
         try """
-        version: 2
+        version: 3
         project: demo
         services:
           api:

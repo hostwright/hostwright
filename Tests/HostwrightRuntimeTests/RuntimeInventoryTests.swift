@@ -124,6 +124,28 @@ final class RuntimeInventoryTests: XCTestCase {
         XCTAssertNotEqual(first.semanticSHA256, changed.semanticSHA256)
     }
 
+    func testBuilderIsIncompleteAndAuthorityIsAHashBoundMaterialBit() throws {
+        let incomplete = try build()
+        XCTAssertEqual(incomplete.authority, .incomplete)
+        XCTAssertFalse(incomplete.isAuthoritative)
+
+        let authoritative = try RuntimeInventoryBuilder.markRuntimeListAuthoritative(
+            incomplete,
+            source: .appleContainerCLIRuntimeList
+        )
+        XCTAssertEqual(authoritative.authority, .appleContainerCLIRuntimeList)
+        XCTAssertTrue(authoritative.isAuthoritative)
+        XCTAssertNotEqual(incomplete.semanticSHA256, authoritative.semanticSHA256)
+        XCTAssertThrowsError(
+            try RuntimeInventoryBuilder.markRuntimeListAuthoritative(
+                incomplete,
+                source: .incomplete
+            )
+        ) { error in
+            XCTAssertEqual(error as? RuntimeInventoryError, .invalidAuthority)
+        }
+    }
+
     func testSemanticDigestExcludesVolatileUsageWhileRetainingSamples() throws {
         let first = try build(
             containers: [

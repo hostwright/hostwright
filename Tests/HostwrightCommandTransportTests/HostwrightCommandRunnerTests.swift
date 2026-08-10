@@ -134,7 +134,7 @@ final class HostwrightCommandRunnerTests: XCTestCase {
         let manifestPath = root.appendingPathComponent("hostwright.yaml").path
         let composePath = root.appendingPathComponent("compose.yaml").path
         let manifest = """
-        version: 2
+        version: 3
         project: parity
         services:
           api:

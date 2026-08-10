@@ -1750,7 +1750,7 @@ private func makeDNSFixture(
         manifestHash: dnsTestDigest("a"),
         desiredGeneration: 1,
         manifest: HostwrightManifest(
-            version: 2,
+            version: 3,
             project: "dns-coordinator",
             services: []
         ),

@@ -260,7 +260,7 @@ final class DaemonControlStreamAuthorizationPipelineTests: XCTestCase {
     }
     let manifest = try ManifestValidator.validated(
       """
-      version: 2
+      version: 3
       project: probe
       services:
         probe:

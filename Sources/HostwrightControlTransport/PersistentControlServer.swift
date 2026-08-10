@@ -524,6 +524,55 @@ public struct PersistentControlConnectionServer: Sendable {
       monotonicNow: monotonicNow
     )
     try deadline.assertActive()
+    guard let requestRevision = originalRequest.protocolRevision else {
+      throw PersistentControlServerError.invalidRequest
+    }
+    if !ControlProtocolCompatibility.acceptsRequest(
+      operation: originalRequest.operation,
+      revision: requestRevision
+    ) {
+      return (
+        ControlResponseEnvelope(
+          protocolRevision: requestRevision,
+          requestID: originalRequest.requestID,
+          status: .rejected,
+          reasonCode: .unsupportedProtocolRevision,
+          error: SanitizedError(
+            code: "schedulerProtocolRevisionRequired",
+            message: "This scheduler read requires control protocol revision 2.2."
+          )
+        ),
+        deadline
+      )
+    }
+    if SchedulerControlOperation(rawValue: originalRequest.operation) != nil {
+      do {
+        switch SchedulerControlOperation(rawValue: originalRequest.operation) {
+        case .plan, .simulate:
+          _ = try SchedulerControlWireContract.scopedInputData(from: originalRequest.body)
+        case .status, .explain:
+          _ = try SchedulerControlWireContract.decisionReference(from: originalRequest.body)
+        case .apply:
+          _ = try SchedulerControlWireContract.applyData(from: originalRequest.body)
+        case nil:
+          throw ContractValidationError.invalid("scheduler operation")
+        }
+      } catch {
+        return (
+          ControlResponseEnvelope(
+            protocolRevision: requestRevision,
+            requestID: originalRequest.requestID,
+            status: .rejected,
+            reasonCode: .invalidRequest,
+            error: SanitizedError(
+              code: "schedulerInvalidRequest",
+              message: "The scheduler operation was rejected safely."
+            )
+          ),
+          deadline
+        )
+      }
+    }
     let prepared = try requestPreparer(peer, originalRequest)
     defer { prepared.cleanup() }
     var effectivePrepared: PersistentControlPreparedRequest?
@@ -574,6 +623,7 @@ public struct PersistentControlConnectionServer: Sendable {
     guard authorization.effect == .allow else {
       return (
         ControlResponseEnvelope(
+          protocolRevision: requestRevision,
           requestID: request.requestID,
           status: .rejected,
           reasonCode: .unauthorized,
@@ -608,6 +658,7 @@ public struct PersistentControlConnectionServer: Sendable {
         )
         return (
           ControlResponseEnvelope(
+            protocolRevision: requestRevision,
             requestID: request.requestID, status: .rejected,
             reasonCode: .admissionDenied,
             error: SanitizedError(
@@ -628,6 +679,7 @@ public struct PersistentControlConnectionServer: Sendable {
       guard evaluated.allowed else {
         return (
           ControlResponseEnvelope(
+            protocolRevision: requestRevision,
             requestID: request.requestID, status: .rejected,
             reasonCode: .admissionDenied,
             error: SanitizedError(
@@ -667,6 +719,7 @@ public struct PersistentControlConnectionServer: Sendable {
       guard effectiveAuthorization.effect == .allow else {
         return (
           ControlResponseEnvelope(
+            protocolRevision: requestRevision,
             requestID: request.requestID, status: .rejected,
             reasonCode: .unauthorized,
             error: SanitizedError(
@@ -690,6 +743,7 @@ public struct PersistentControlConnectionServer: Sendable {
             evaluationDigestSHA256: evaluated.evaluationDigestSHA256))
         return (
           ControlResponseEnvelope(
+            protocolRevision: requestRevision,
             requestID: request.requestID, status: .completed,
             reasonCode: .completed, result: result),
           deadline)
@@ -726,7 +780,8 @@ public struct PersistentControlConnectionServer: Sendable {
       do {
         switch try requestRepository.recordOrReplay(submission) {
         case .replayed(let record):
-          let replay = try Self.replayResponse(record)
+          let replay = try Self.replayResponse(
+            record, expectedRevision: requestRevision)
           if record.status == .accepted {
             try recordAudit(
               peer: peer,
@@ -788,6 +843,7 @@ public struct PersistentControlConnectionServer: Sendable {
         )
         return (
           ControlResponseEnvelope(
+            protocolRevision: requestRevision,
             requestID: request.requestID,
             status: .rejected,
             reasonCode: .idempotencyConflict,
@@ -809,6 +865,7 @@ public struct PersistentControlConnectionServer: Sendable {
       }
     } catch {
       response = ControlResponseEnvelope(
+        protocolRevision: requestRevision,
         requestID: request.requestID,
         status: .error,
         reasonCode: .internalError,
@@ -818,6 +875,7 @@ public struct PersistentControlConnectionServer: Sendable {
         )
       )
     }
+    response = Self.echo(response, protocolRevision: requestRevision)
     if isMutation {
       guard let durableMutationOperationReference else {
         throw PersistentControlServerError.persistenceFailed
@@ -829,7 +887,7 @@ public struct PersistentControlConnectionServer: Sendable {
       }
       response = ControlResponseEnvelope(
         apiVersion: response.apiVersion,
-        protocolRevision: response.protocolRevision,
+        protocolRevision: requestRevision,
         requestID: response.requestID,
         status: response.status,
         reasonCode: response.reasonCode,
@@ -986,7 +1044,8 @@ public struct PersistentControlConnectionServer: Sendable {
       ]
     )
     try request.validate()
-    guard request.protocolRevision == .current,
+    guard let protocolRevision = request.protocolRevision,
+      ControlProtocolCompatibility.supportsRequestRevision(protocolRevision),
       request.requestID.range(
         of: "^[A-Za-z0-9._:-]{1,128}$", options: .regularExpression) != nil,
       request.operation.range(
@@ -1024,12 +1083,34 @@ public struct PersistentControlConnectionServer: Sendable {
       from: ControlPlaneCanonicalJSON.encode(value))
   }
 
-  private static func replayResponse(_ record: ControlRequestRecord) throws
+  private static func echo(
+    _ response: ControlResponseEnvelope,
+    protocolRevision: ControlProtocolRevision
+  ) -> ControlResponseEnvelope {
+    ControlResponseEnvelope(
+      apiVersion: response.apiVersion,
+      protocolRevision: protocolRevision,
+      requestID: response.requestID,
+      status: response.status,
+      reasonCode: response.reasonCode,
+      operationRef: response.operationRef,
+      result: response.result,
+      error: response.error
+    )
+  }
+
+  private static func replayResponse(
+    _ record: ControlRequestRecord,
+    expectedRevision: ControlProtocolRevision
+  ) throws
     -> ControlResponseEnvelope
   {
     if let canonical = record.responseCanonicalJSON {
       let response = try JSONDecoder().decode(ControlResponseEnvelope.self, from: canonical)
       try response.validate()
+      guard response.protocolRevision == expectedRevision else {
+        throw PersistentControlServerError.persistenceFailed
+      }
       guard try ControlPlaneCanonicalJSON.encode(response) == canonical else {
         throw PersistentControlServerError.persistenceFailed
       }
@@ -1052,6 +1133,7 @@ public struct PersistentControlConnectionServer: Sendable {
       reason = .internalError
     }
     return ControlResponseEnvelope(
+      protocolRevision: expectedRevision,
       requestID: record.requestID,
       status: status,
       reasonCode: reason,

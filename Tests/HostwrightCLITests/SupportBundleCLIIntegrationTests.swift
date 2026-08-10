@@ -579,7 +579,7 @@ final class SupportBundleCLIIntegrationTests: XCTestCase {
         try withStore { root, store in
             let manifest = root.appendingPathComponent("private-manifest.yaml")
             let manifestText = """
-            version: 2
+            version: 3
             project: private-project-name
             imagePolicy: require-digest
             services:

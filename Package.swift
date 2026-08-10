@@ -197,10 +197,12 @@ let package = Package(
                 "HostwrightCore",
                 "HostwrightDaemonCore",
                 "HostwrightExtensions",
+                "HostwrightHealth",
                 "HostwrightObservability",
                 "HostwrightPolicy",
                 "HostwrightRegistry",
                 "HostwrightRuntime",
+                "HostwrightScheduler",
                 "HostwrightState"
             ]
         ),
@@ -738,8 +740,10 @@ let package = Package(
                 "HostwrightCommandTransport",
                 "HostwrightDaemon",
                 "HostwrightDaemonCore",
+                "HostwrightHealth",
                 "HostwrightManifest",
                 "HostwrightRuntime",
+                "HostwrightScheduler",
                 "HostwrightState"
             ]
         ),

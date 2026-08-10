@@ -61,7 +61,8 @@ public enum ContractValidationError: Error, Equatable, Sendable {
 
 public enum ControlProtocolRevision: String, Codable, CaseIterable, Sendable {
   case legacy = "2.0"
-  case current = "2.1"
+  case previous = "2.1"
+  case current = "2.2"
 }
 
 public enum ControlResponseStatus: String, Codable, CaseIterable, Sendable {
@@ -202,10 +203,10 @@ public struct ControlPeerCredentialChallenge: Codable, Equatable, Sendable {
     credentialProofRequired: Bool
   ) {
     apiVersion = ControlPlaneContract.apiVersion
-    protocolRevision = .current
+    protocolRevision = .previous
     kind = .challenge
     self.credentialProofRequired = credentialProofRequired
-    protocolLabel = "hostwright-control-credential-proof-v2.1"
+    protocolLabel = ControlProtocolCompatibility.frozenAuthenticationProtocolLabel
     self.subjectID = subjectID
     self.serverNonce = serverNonce
     self.daemonGeneration = daemonGeneration
@@ -220,9 +221,10 @@ public struct ControlPeerCredentialChallenge: Codable, Equatable, Sendable {
   }
 
   public func validate() throws {
-    guard apiVersion == ControlPlaneContract.apiVersion, protocolRevision == .current,
+    guard apiVersion == ControlPlaneContract.apiVersion,
+      protocolRevision == ControlProtocolCompatibility.frozenAuthenticationRevision,
       kind == .challenge,
-      protocolLabel == "hostwright-control-credential-proof-v2.1",
+      protocolLabel == ControlProtocolCompatibility.frozenAuthenticationProtocolLabel,
       Self.safeIdentifier(subjectID, maximumLength: 128),
       (16...128).contains(serverNonce.utf8.count),
       let nonce = Data(base64Encoded: serverNonce),
@@ -258,7 +260,7 @@ public struct ControlAuthenticationResponse: Codable, Equatable, Sendable {
 
   public init(credentialProof: ControlPeerCredentialProof? = nil) {
     apiVersion = ControlPlaneContract.apiVersion
-    protocolRevision = .current
+    protocolRevision = .previous
     kind = .response
     credentialID = credentialProof?.credentialID
     signatureDERBase64 = credentialProof?.signatureDERBase64
@@ -274,7 +276,9 @@ public struct ControlAuthenticationResponse: Codable, Equatable, Sendable {
 
   public func validate(for challenge: ControlPeerCredentialChallenge) throws {
     try challenge.validate()
-    guard apiVersion == ControlPlaneContract.apiVersion, protocolRevision == .current,
+    try ControlProtocolCompatibility.validateAuthenticationRevision(protocolRevision)
+    guard apiVersion == ControlPlaneContract.apiVersion,
+      protocolRevision == challenge.protocolRevision,
       kind == .response,
       (credentialID == nil) == (signatureDERBase64 == nil),
       challenge.credentialProofRequired == (credentialID != nil)
@@ -333,7 +337,7 @@ public struct ControlRequestEnvelope: Codable, Equatable, Sendable {
 
   public init(
     apiVersion: Int = ControlPlaneContract.apiVersion,
-    protocolRevision: ControlProtocolRevision? = .current, requestID: String, operation: String,
+    protocolRevision: ControlProtocolRevision? = .previous, requestID: String, operation: String,
     timeoutMilliseconds: Int? = nil, idempotencyKey: String? = nil,
     body: ControlPlaneJSONValue? = nil
   ) {
@@ -354,10 +358,14 @@ public struct ControlRequestEnvelope: Codable, Equatable, Sendable {
       throw ContractValidationError.required("request identifier or operation")
     }
     if protocolRevision == nil {
-      guard timeoutMilliseconds == nil, idempotencyKey == nil, body == nil else {
+      guard ControlProtocolCompatibility.requiredRevision(for: operation) == nil,
+        timeoutMilliseconds == nil, idempotencyKey == nil, body == nil else {
         throw ContractValidationError.invalid("legacy v2.1 field")
       }
       return
+    }
+    guard ControlProtocolCompatibility.supportsRequestRevision(protocolRevision!) else {
+      throw ContractValidationError.unsupportedVersion("control protocol revision")
     }
     guard let timeoutMilliseconds,
       (1...ControlPlaneContract.maximumUnaryDeadlineMilliseconds).contains(timeoutMilliseconds)
@@ -387,7 +395,7 @@ public struct ControlResponseEnvelope: Codable, Equatable, Sendable {
   public let result: ControlPlaneJSONValue?
   public let error: SanitizedError?
   public init(
-    apiVersion: Int = 2, protocolRevision: ControlProtocolRevision = .current, requestID: String,
+    apiVersion: Int = 2, protocolRevision: ControlProtocolRevision = .previous, requestID: String,
     status: ControlResponseStatus, reasonCode: ControlReasonCode, operationRef: String? = nil,
     result: ControlPlaneJSONValue? = nil, error: SanitizedError? = nil
   ) {
@@ -401,7 +409,9 @@ public struct ControlResponseEnvelope: Codable, Equatable, Sendable {
     self.error = error
   }
   public func validate() throws {
-    guard apiVersion == 2, protocolRevision == .current, !requestID.isEmpty else {
+    guard apiVersion == 2,
+      ControlProtocolCompatibility.supportsResponseRevision(protocolRevision),
+      !requestID.isEmpty else {
       throw ContractValidationError.unsupportedVersion("control response")
     }
     switch status {
@@ -613,7 +623,7 @@ public struct StreamFrame: Codable, Equatable, Sendable {
   public let payload: ControlPlaneJSONValue?
   public let error: SanitizedError?
   public init(
-    apiVersion: Int = 2, protocolRevision: ControlProtocolRevision = .current, streamID: String,
+    apiVersion: Int = 2, protocolRevision: ControlProtocolRevision = .previous, streamID: String,
     sequence: UInt64, cursor: String? = nil, kind: StreamFrameKind, credit: Int? = nil,
     payload: ControlPlaneJSONValue? = nil, error: SanitizedError? = nil
   ) {
@@ -628,7 +638,9 @@ public struct StreamFrame: Codable, Equatable, Sendable {
     self.error = error
   }
   public func validate() throws {
-    guard apiVersion == 2, protocolRevision == .current, !streamID.isEmpty, sequence > 0 else {
+    guard apiVersion == 2,
+      ControlProtocolCompatibility.supportsStreamRevision(protocolRevision),
+      !streamID.isEmpty, sequence > 0 else {
       throw ContractValidationError.invalid("stream frame")
     }
     if let credit, credit < 0 { throw ContractValidationError.outOfBounds("credit") }
@@ -656,6 +668,7 @@ public enum Phase09StrictDecoder {
     _ type: T.Type, from data: Data, allowedKeys: Set<String>, requiredKeys: Set<String>,
     decoder: JSONDecoder = JSONDecoder()
   ) throws -> T {
+    try validateNoDuplicateKeys(data)
     let keys = try topLevelKeys(data)
     var seen = Set<String>()
     guard keys.allSatisfy({ seen.insert($0).inserted }) else {
@@ -669,6 +682,11 @@ public enum Phase09StrictDecoder {
       throw ContractValidationError.required("top-level key")
     }
     return try decoder.decode(T.self, from: data)
+  }
+
+  public static func validateNoDuplicateKeys(_ data: Data) throws {
+    var scanner = DuplicateJSONKeyScanner(data: data)
+    try scanner.scan()
   }
 
   private static func topLevelKeys(_ data: Data) throws -> [String] {
@@ -766,5 +784,163 @@ public enum Phase09StrictDecoder {
     ws()
     guard i == bytes.count else { throw ContractValidationError.invalid("trailing JSON") }
     return result
+  }
+}
+
+private struct DuplicateJSONKeyScanner {
+  private static let maximumDepth = 128
+  private static let maximumNodes = 100_000
+  private let bytes: [UInt8]
+  private var index = 0
+  private var depth = 0
+  private var nodeCount = 0
+
+  init(data: Data) {
+    bytes = Array(data)
+  }
+
+  mutating func scan() throws {
+    try whitespace()
+    try value()
+    try whitespace()
+    guard index == bytes.count else {
+      throw ContractValidationError.invalid("trailing JSON")
+    }
+  }
+
+  private mutating func whitespace() throws {
+    while index < bytes.count, [9, 10, 13, 32].contains(bytes[index]) {
+      index += 1
+    }
+  }
+
+  private mutating func value() throws {
+    try whitespace()
+    guard index < bytes.count else {
+      throw ContractValidationError.invalid("JSON value")
+    }
+    nodeCount += 1
+    guard nodeCount <= Self.maximumNodes else {
+      throw ContractValidationError.outOfBounds("JSON node count")
+    }
+    switch bytes[index] {
+    case 34:
+      _ = try string()
+    case 123:
+      try object()
+    case 91:
+      try array()
+    case 116:
+      try literal("true")
+    case 102:
+      try literal("false")
+    case 110:
+      try literal("null")
+    case 45, 48...57:
+      try number()
+    default:
+      throw ContractValidationError.invalid("JSON value")
+    }
+  }
+
+  private mutating func object() throws {
+    try enterContainer()
+    defer { depth -= 1 }
+    try consume(123)
+    var keys = Set<String>()
+    try whitespace()
+    if try consumeIfPresent(125) { return }
+    while true {
+      try whitespace()
+      let key = try string()
+      guard keys.insert(key).inserted else {
+        throw ContractValidationError.invalid("duplicate JSON key")
+      }
+      try whitespace()
+      try consume(58)
+      try value()
+      try whitespace()
+      if try consumeIfPresent(125) { return }
+      try consume(44)
+    }
+  }
+
+  private mutating func array() throws {
+    try enterContainer()
+    defer { depth -= 1 }
+    try consume(91)
+    try whitespace()
+    if try consumeIfPresent(93) { return }
+    while true {
+      try value()
+      try whitespace()
+      if try consumeIfPresent(93) { return }
+      try consume(44)
+    }
+  }
+
+  private mutating func string() throws -> String {
+    guard index < bytes.count, bytes[index] == 34 else {
+      throw ContractValidationError.invalid("JSON string")
+    }
+    let start = index
+    index += 1
+    var escaped = false
+    while index < bytes.count {
+      let byte = bytes[index]
+      if escaped {
+        escaped = false
+      } else if byte == 92 {
+        escaped = true
+      } else if byte == 34 {
+        let data = Data(bytes[start...index])
+        index += 1
+        guard let value = try? JSONDecoder().decode(String.self, from: data) else {
+          throw ContractValidationError.invalid("JSON string")
+        }
+        return value
+      } else if byte < 0x20 {
+        throw ContractValidationError.invalid("JSON string")
+      }
+      index += 1
+    }
+    throw ContractValidationError.invalid("JSON string")
+  }
+
+  private mutating func literal(_ literal: String) throws {
+    let value = Array(literal.utf8)
+    guard bytes[index...].starts(with: value) else {
+      throw ContractValidationError.invalid("JSON literal")
+    }
+    index += value.count
+  }
+
+  private mutating func number() throws {
+    let start = index
+    while index < bytes.count,
+      ![9, 10, 13, 32, 44, 93, 125].contains(bytes[index]) {
+      index += 1
+    }
+    guard index > start else { throw ContractValidationError.invalid("JSON number") }
+  }
+
+  private mutating func consume(_ expected: UInt8) throws {
+    guard try consumeIfPresent(expected) else {
+      throw ContractValidationError.invalid("JSON structure")
+    }
+  }
+
+  private mutating func consumeIfPresent(_ expected: UInt8) throws -> Bool {
+    try whitespace()
+    guard index < bytes.count, bytes[index] == expected else { return false }
+    index += 1
+    return true
+  }
+
+  private mutating func enterContainer() throws {
+    guard depth < Self.maximumDepth else {
+      throw ContractValidationError.outOfBounds("JSON nesting depth")
+    }
+    depth += 1
   }
 }

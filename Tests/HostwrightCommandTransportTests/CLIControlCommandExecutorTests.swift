@@ -56,7 +56,7 @@ final class CLIControlCommandExecutorTests: XCTestCase {
     func testDeclaredAuthorizationScopeMismatchRejectsBeforeCLIExecution() throws {
         let capture = LogCapture()
         let manifest = """
-        version: 2
+        version: 3
         project: executor-scope
         services:
           api:
@@ -89,7 +89,7 @@ final class CLIControlCommandExecutorTests: XCTestCase {
     func testRelativeManifestIsResolvedAgainstAuthenticatedClientContext() throws {
         let capture = LogCapture()
         let manifest = """
-        version: 2
+        version: 3
         project: relative-context
         services:
           api:
@@ -125,14 +125,14 @@ final class CLIControlCommandExecutorTests: XCTestCase {
 
     func testPreparedCommandExecutesTheExactAuthorizedManifestSnapshot() throws {
         let authorized = """
-        version: 2
+        version: 3
         project: authorized-snapshot
         services:
           api:
             image: ghcr.io/example/api:latest
         """
         let swapped = """
-        version: 2
+        version: 3
         project: swapped-after-authorization
         services:
           api:

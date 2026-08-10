@@ -598,7 +598,7 @@ final class RegistrySBOMExecutionTests: XCTestCase {
         subject: OCIContentDigest
     ) -> String {
         """
-        version: 2
+        version: 3
         project: demo
         imagePolicy: require-digest
         imageSBOM:

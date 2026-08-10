@@ -28,7 +28,22 @@ public enum RuntimeInventoryError: Error, Equatable, Sendable {
     case duplicateOwnershipUUID
     case invalidHealth
     case invalidMachineState
+    case invalidAuthority
     case encodingFailed
+}
+
+/// Provenance for the container inventory snapshot. The ordinary builder is
+/// deliberately incomplete: only an adapter that has completed the runtime's
+/// documented list operation may promote a normalized snapshot to an
+/// authoritative source.
+public enum RuntimeInventoryAuthority: String, Codable, Equatable, Hashable, Sendable {
+    case incomplete
+    case appleContainerCLIRuntimeList = "apple-container-cli-runtime-list"
+    case appleContainerizationRuntimeList = "apple-containerization-runtime-list"
+
+    public var isAuthoritative: Bool {
+        self != .incomplete
+    }
 }
 
 public struct RuntimeInventoryLabel: Codable, Equatable, Hashable, Sendable {
@@ -509,7 +524,12 @@ public struct RuntimeInventory: Equatable, Sendable {
     public let images: [RuntimeInventoryImage]
     public let networks: [RuntimeInventoryNetwork]
     public let volumes: [RuntimeInventoryVolume]
+    public let authority: RuntimeInventoryAuthority
     public let semanticSHA256: String
+
+    public var isAuthoritative: Bool {
+        authority.isAuthoritative
+    }
 
     fileprivate init(
         machine: RuntimeInventoryMachine,
@@ -517,6 +537,7 @@ public struct RuntimeInventory: Equatable, Sendable {
         images: [RuntimeInventoryImage],
         networks: [RuntimeInventoryNetwork],
         volumes: [RuntimeInventoryVolume],
+        authority: RuntimeInventoryAuthority,
         semanticSHA256: String
     ) {
         self.machine = machine
@@ -524,6 +545,7 @@ public struct RuntimeInventory: Equatable, Sendable {
         self.images = images
         self.networks = networks
         self.volumes = volumes
+        self.authority = authority
         self.semanticSHA256 = semanticSHA256
     }
 }
@@ -541,6 +563,51 @@ public enum RuntimeInventoryBuilder {
                 throw CancellationError()
             }
         }
+    ) throws -> RuntimeInventory {
+        try build(
+            machine: machine,
+            containers: containers,
+            images: images,
+            networks: networks,
+            volumes: volumes,
+            redactionPolicy: redactionPolicy,
+            cancellationCheck: cancellationCheck,
+            authority: .incomplete
+        )
+    }
+
+    /// Promotes a fully normalized snapshot after a production adapter has
+    /// successfully executed and parsed its complete runtime list operation.
+    /// This remains module-internal so callers cannot assert authority merely
+    /// by selecting an enum case.
+    static func markRuntimeListAuthoritative(
+        _ inventory: RuntimeInventory,
+        source: RuntimeInventoryAuthority
+    ) throws -> RuntimeInventory {
+        guard source.isAuthoritative else {
+            throw RuntimeInventoryError.invalidAuthority
+        }
+        return try build(
+            machine: inventory.machine,
+            containers: inventory.containers,
+            images: inventory.images,
+            networks: inventory.networks,
+            volumes: inventory.volumes,
+            redactionPolicy: .default,
+            cancellationCheck: {},
+            authority: source
+        )
+    }
+
+    private static func build(
+        machine: RuntimeInventoryMachine,
+        containers: [RuntimeInventoryContainer],
+        images: [RuntimeInventoryImage],
+        networks: [RuntimeInventoryNetwork],
+        volumes: [RuntimeInventoryVolume],
+        redactionPolicy: RuntimeRedactionPolicy,
+        cancellationCheck: () throws -> Void,
+        authority: RuntimeInventoryAuthority
     ) throws -> RuntimeInventory {
         try cancellationCheck()
         guard containers.count <= RuntimeInventoryLimits.maximumContainers,
@@ -573,6 +640,7 @@ public enum RuntimeInventoryBuilder {
 
         try cancellationCheck()
         let payload = RuntimeInventorySemanticPayload(
+            authority: authority,
             machine: semantic.machine,
             containers: semantic.containers.map(excludingVolatileUsage),
             images: semantic.images,
@@ -596,6 +664,7 @@ public enum RuntimeInventoryBuilder {
             images: normalized.images,
             networks: normalized.networks,
             volumes: normalized.volumes,
+            authority: authority,
             semanticSHA256: digest
         )
     }
@@ -1155,6 +1224,7 @@ private struct RuntimeInventoryNormalizedParts {
 }
 
 private struct RuntimeInventorySemanticPayload: Codable {
+    let authority: RuntimeInventoryAuthority
     let machine: RuntimeInventoryMachine
     let containers: [RuntimeInventoryContainer]
     let images: [RuntimeInventoryImage]

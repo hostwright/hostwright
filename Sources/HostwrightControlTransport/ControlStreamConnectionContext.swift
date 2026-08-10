@@ -70,6 +70,7 @@ final class ControlStreamConnectionContext: @unchecked Sendable {
       }
     } catch ControlStreamSessionError.streamLimit {
       try write(StreamFrame(
+        protocolRevision: frame.protocolRevision,
         streamID: frame.streamID,
         sequence: 1,
         kind: .error,

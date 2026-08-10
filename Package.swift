@@ -47,6 +47,10 @@ let package = Package(
             targets: ["HostwrightXPCProviderService"]
         ),
         .executable(
+            name: "hostwright-accelerator-service",
+            targets: ["HostwrightAcceleratorService"]
+        ),
+        .executable(
             name: "hostwright-xpc-provider-qualification",
             targets: ["HostwrightXPCProviderQualificationTool"]
         ),
@@ -104,6 +108,10 @@ let package = Package(
         .library(name: "HostwrightDaemonCore", targets: ["HostwrightDaemonCore"]),
         .library(name: "HostwrightHealth", targets: ["HostwrightHealth"]),
         .library(name: "HostwrightAccelerator", targets: ["HostwrightAccelerator"]),
+        .library(
+            name: "HostwrightAcceleratorXPC",
+            targets: ["HostwrightAcceleratorXPC"]
+        ),
         .library(name: "HostwrightImport", targets: ["HostwrightImport"]),
         .library(name: "HostwrightExtensions", targets: ["HostwrightExtensions"]),
         .library(name: "HostwrightNetworking", targets: ["HostwrightNetworking"]),
@@ -383,6 +391,13 @@ let package = Package(
         .target(name: "HostwrightScheduler"),
         .target(name: "HostwrightAccelerator"),
         .target(
+            name: "HostwrightAcceleratorXPC",
+            dependencies: ["HostwrightAccelerator", "HostwrightCore"],
+            linkerSettings: [
+                .linkedFramework("Security")
+            ]
+        ),
+        .target(
             name: "HostwrightDaemonCore",
             dependencies: [
                 "HostwrightCore",
@@ -469,6 +484,14 @@ let package = Package(
         .executableTarget(
             name: "HostwrightXPCProviderService",
             dependencies: ["HostwrightXPCProvider"]
+        ),
+        .executableTarget(
+            name: "HostwrightAcceleratorService",
+            dependencies: [
+                "HostwrightAcceleratorXPC",
+                "HostwrightCore",
+                "HostwrightState"
+            ]
         ),
         .executableTarget(
             name: "HostwrightXPCProviderQualificationTool",
@@ -770,6 +793,19 @@ let package = Package(
             dependencies: ["HostwrightHealth"],
             resources: [
                 .process("Fixtures")
+            ]
+        ),
+        .testTarget(
+            name: "HostwrightAcceleratorTests",
+            dependencies: ["HostwrightAccelerator"]
+        ),
+        .testTarget(
+            name: "HostwrightAcceleratorXPCTests",
+            dependencies: [
+                "HostwrightAccelerator",
+                "HostwrightAcceleratorXPC",
+                "HostwrightCore",
+                "HostwrightState"
             ]
         ),
         .testTarget(

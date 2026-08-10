@@ -1,0 +1,155 @@
+{
+  "schema": "hostwright.phase09.gate13.compatibility-matrix.v1",
+  "gate": 13,
+  "version": "v1",
+  "testCount": 20,
+  "cellOrder": [1, 2, 3, 4, 5, 6],
+  "structuredResult": {
+    "format": "xunit-v1",
+    "exactSelectorBinding": true,
+    "consoleTextIsNonEvidence": true
+  },
+  "compatibilitySurface": {
+    "schemaMigrations": [17, 18, 19, 20, 21],
+    "verifiedBackupAndRollbackRefusal": true,
+    "checksumAndFutureSchemaRejection": true,
+    "envelopeRevisions": ["2.0", "2.1"],
+    "replayAndIdempotencyConflicts": true,
+    "cliTransportParity": true,
+    "aggregateContractAndVersionDecode": true
+  },
+  "tests": [
+    {
+      "id": "g13-01",
+      "cell": 1,
+      "category": "schema-migration",
+      "selector": "PluginSchemaV21MigrationTests/testV20UpgradeCreatesExactPluginSchemaAndVerifiedRollbackRestoresV20"
+    },
+    {
+      "id": "g13-02",
+      "cell": 1,
+      "category": "schema-migration",
+      "selector": "PluginSchemaV21MigrationTests/testV21MigrationChecksumTamperingFailsClosedWithoutFurtherWrites"
+    },
+    {
+      "id": "g13-03",
+      "cell": 1,
+      "category": "schema-migration",
+      "selector": "HostwrightStateIntegrationTests/testMigrationHistoryGapsFailBeforeReadVersionQueryOrMigration"
+    },
+    {
+      "id": "g13-04",
+      "cell": 1,
+      "category": "schema-migration",
+      "selector": "ControlPlaneContractTests/testAuditAndMigrationContracts"
+    },
+    {
+      "id": "g13-05",
+      "cell": 2,
+      "category": "backup-rollback",
+      "selector": "StateMaintenanceTests/testIntegrityAndVerifiedOnlineBackupRoundTrip"
+    },
+    {
+      "id": "g13-06",
+      "cell": 2,
+      "category": "backup-rollback",
+      "selector": "StateMaintenanceTests/testConfirmedRestoreIsBoundToCurrentStateAndClearsRebuildableProjections"
+    },
+    {
+      "id": "g13-07",
+      "cell": 2,
+      "category": "backup-rollback",
+      "selector": "StateMaintenanceTests/testRestoreConfirmationRefusesStateChangedAfterDryRun"
+    },
+    {
+      "id": "g13-08",
+      "cell": 2,
+      "category": "backup-rollback",
+      "selector": "StateMaintenanceTests/testRestoreRejectsASelectedBackupChangedAfterConfirmationBeforeCopy"
+    },
+    {
+      "id": "g13-09",
+      "cell": 3,
+      "category": "checksum-future-schema",
+      "selector": "StateMaintenanceTests/testBackupRefusesLockedAndFutureSchemaSourcesWithoutPublishingArtifacts"
+    },
+    {
+      "id": "g13-10",
+      "cell": 3,
+      "category": "checksum-future-schema",
+      "selector": "StateMaintenanceTests/testCatalogDetectsTamperedBackupWithoutSilentlyDroppingIt"
+    },
+    {
+      "id": "g13-11",
+      "cell": 3,
+      "category": "checksum-future-schema",
+      "selector": "ControlPlaneContractTests/testEveryGoldenStrictlyDecodesAndRejectsUnknownFields"
+    },
+    {
+      "id": "g13-12",
+      "cell": 4,
+      "category": "envelope-replay-conflict",
+      "selector": "ControlPlaneContractTests/testClientEnvelopeHasNoIdentityAndLegacyRevisionCompatibility"
+    },
+    {
+      "id": "g13-13",
+      "cell": 4,
+      "category": "envelope-replay-conflict",
+      "selector": "ControlRequestRepositoryTests/testExactReplayReturnsPriorRecordAndDigestConflictIsRejected"
+    },
+    {
+      "id": "g13-14",
+      "cell": 4,
+      "category": "envelope-replay-conflict",
+      "selector": "ControlRequestRepositoryTests/testTerminalResponsePersistsExactlyAcrossReopenAndRejectsMismatchedEnvelope"
+    },
+    {
+      "id": "g13-15",
+      "cell": 4,
+      "category": "envelope-replay-conflict",
+      "selector": "ControlRequestRepositoryTests/testStreamOperationRejectsCompetingRequestDigestAndOperationIdentity"
+    },
+    {
+      "id": "g13-16",
+      "cell": 5,
+      "category": "cli-transport-parity",
+      "selector": "ControlPlaneContractTests/testFrozenCLIParityInventory"
+    },
+    {
+      "id": "g13-17",
+      "cell": 5,
+      "category": "cli-transport-parity",
+      "selector": "CLIControlRouteTests/testFrozenParityInventoryRoutesEveryTopLevelCommand"
+    },
+    {
+      "id": "g13-18",
+      "cell": 5,
+      "category": "cli-transport-parity",
+      "selector": "CLIControlRouteTests/testEveryNestedParsedActionHasExactTextAndJSONRouteParity"
+    },
+    {
+      "id": "g13-19",
+      "cell": 5,
+      "category": "cli-transport-parity",
+      "selector": "CLIControlStreamClientParityTests/testCommandRunnerExecUsesTheRealStreamClientAndPreservesOutputExitAndHalfClose"
+    },
+    {
+      "id": "g13-20",
+      "cell": 6,
+      "category": "aggregate-contract-decode",
+      "selector": "ControlPlaneContractTests/testResponseAndStreamConsistency"
+    }
+  ],
+  "formalPrerequisites": {
+    "phase08CompletionCommit": "exact lowercase 40-hex commit supplied out of band",
+    "phase08CompletionReceipt": "immutable receipt with sourceCommit and finalEvidenceDigest",
+    "passedGates": [8, 9, 10, 11, 12],
+    "cmsVerified": true,
+    "ancestryCommand": "git merge-base --is-ancestor <exact-phase08-commit> HEAD"
+  },
+  "diagnostic": {
+    "claim": "none",
+    "qualifying": false,
+    "fixtureSubstitution": false
+  }
+}

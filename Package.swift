@@ -217,6 +217,10 @@ let package = Package(
                 "HostwrightState"
             ]
         ),
+        // Qualification-only continuity tooling is intentionally not exposed as a product.
+        .executableTarget(
+            name: "HostwrightPhase09QualificationTool"
+        ),
         .executableTarget(
             name: "HostwrightStorageProviderHelper",
             dependencies: [
@@ -681,6 +685,10 @@ let package = Package(
                 "HostwrightRuntimeConformanceTool",
                 "HostwrightState"
             ]
+        ),
+        .testTarget(
+            name: "HostwrightPhase09QualificationToolTests",
+            dependencies: ["HostwrightPhase09QualificationTool"]
         ),
         .testTarget(
             name: "HostwrightStateTests",

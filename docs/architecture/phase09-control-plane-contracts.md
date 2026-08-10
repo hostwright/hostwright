@@ -432,3 +432,214 @@ stream RBAC, effective-intent admission, workload/runtime authority, and
 restart/recovery tests in its single immutable six-cell root. Any later change
 to these stream fixtures, limits, direction rules, cancellation modes, or
 durable lifecycle semantics invalidates Gate 8 and every downstream consumer.
+
+## Downstream qualification and closure contracts
+
+Gates 13–16 have dedicated fail-closed dispatch paths in the shared Phase 09
+qualification harness. The shared entry point retains the Gate 1 skeleton and
+routes only the dedicated commands for Gates 13–16; an absent or unexpected
+dedicated script is an error, never an implicit qualification.
+
+Gate 13 is the ancestry and compatibility boundary. Its diagnostic path may
+report the local compatibility matrix, but formal preparation requires an
+exact immutable Phase 08 completion receipt and an ancestry proof against the
+current Phase 09 source. The qualification path consumes the receipt and
+immutable evidence digests only; it does not inspect a Phase 08 checkout,
+branch worktree, process, runtime, or mutable state.
+
+Gate 14 consumes a passed, CMS-verified Gate 13 bundle and binds the exact
+500-execution aggregate matrix plus its security and resilience checks. A
+diagnostic aggregate result has `claim: "none"`; it cannot be promoted to
+formal evidence by the dispatcher or by a fixture substitution.
+
+Gate 15 is the single continuous macOS qualification. It binds current Gates
+1–14 evidence, signed/notarized identities, owned-resource ledgers, and the
+same-process continuous-time sample chain. A failed or interrupted root is
+retained and cannot be resumed with a replacement process or partial elapsed
+time.
+
+Gate 16 is local closure verification in
+[`phase09-gate16-qualification.sh`](../../scripts/phase09-gate16-qualification.sh).
+The shared router resolves every command from its own canonical Phase 09 path,
+rejects symlink and protected-worktree boundary crossings, and validates the
+worktree before dispatching contract, diagnose, prepare, run, status, or
+finalize. Gate 16 `diagnose` emits non-qualifying canonical JSON; `run 16` and
+`status 16` are explicit read-only local state/preflight reports with
+`claim: "none"`. They never execute closure, create evidence, or perform a
+public action; the router forwards even missing or invalid `finalize 16`
+receipt arguments to Gate 16 after its repository boundary is valid, so the
+Gate 16 failure-freeze trap can run. Only valid receipts can publish
+`final-v1`.
+
+`prepare` requires the fixed Gate 15 qualification parent and an exact
+lowercase UUID root, then binds current HEAD, source, configuration,
+toolchain, dependency, manifest, checksum, and CMS digests. The Gate 15
+manifest and every transitive manifest must carry the current source,
+configuration, toolchain, and dependency digests plus the exact signing
+identity, signing fingerprint, embedded certificate SHA-256, and Team ID;
+formal mode accepts only passed/formal, non-test manifests and sealed receipts,
+including every transitive dependency record. Each dependency receipt and
+manifest must carry the complete canonical marker profile (`formal: true`,
+`formalClaim: true`, `testMode: false`, `qualifying: true`, `status: passed`,
+`sealed: true`); missing, unknown, contradictory, legacy/schema-bypass, and
+nested nonformal/test markers fail closed. Gate 16 applies the same exact marker
+set to final-v1 and reused evidence before CMS sealing/publication. Their
+dependency documents must match those fields. Gate 16 verifies CMS first,
+extracts the certificate
+actually embedded in the verified CMS, and compares its identity, SHA-1
+fingerprint, certificate SHA-256, and Team ID to the pins. Identity-list
+presence is not evidence. The Gate 15 ownership ledger
+has an exact header and schema; every ledgered resource kind (temporary
+root/file, socket, process, container, XPC, launchd, and Keychain) must have a
+structured absence receipt at closure. Unknown or ignored kinds, live
+discovery, and the Gate 15 `cmsVerified` boolean are never trusted.
+
+`finalize` imports only a fixed local receipt export. It requires exactly PR
+#206 with the declared head/base/merge SHAs, required verification labels,
+the exact check names without duplicates, an approved review, every Phase 09
+child state, an evidence comment, cleanup records, and a terminal hard-stop;
+each PR, review, comment, issue, cleanup, absence, and hard-stop record is
+bound to PR #206, the head SHA, and the merge SHA. Timestamps are strict UTC
+values, including every `observedAt`, and form one strictly increasing total
+order. The merge proof must contain exactly two parents in base-then-head
+order. Prepared manifests and closure plans are authenticated before
+finalization, and the receipt PR body and evidence comment must equal the
+generated files byte-for-byte as well as by digest. Any failure freezes the
+root permanently and disallows a retry. The finalize EXIT freeze trap is
+installed immediately after a valid prepared root is recognized and before
+receipt argument/path validation, including missing or invalid receipt paths.
+
+Sealing is staged: preparation cryptographically seals the prepared manifest,
+closure plan, generated PR body, generated evidence comment, and their binding
+with the pinned signer. Finalization builds a complete private `final-v1`
+directory containing the authoritative terminal manifest, receipts,
+cleanup/hard-stop records, preseal index, checksums, CMS, and extracted signer
+metadata. CMS sign, certificate extraction, round-trip verification, and all
+staged checks must pass before one directory rename publishes `final-v1`; the
+root-level manifest remains `prepared` until that rename. Closure, dependency,
+manifest, and prepared-binding digests are rebuilt after final bindings are
+added, then the prepared and final checksum/CMS relationships are reverified
+against the exact staged bytes. The active finalization lock and owned temporary
+artifacts are cleaned and verified before the one atomic rename; a durable
+terminal lock remains to prevent concurrent reuse. Every JSON record
+inside `final-v1` directly carries the same `sourceCommit`/`headCommit`,
+`mergeCommit`, and `prNumber: 206`; exact binding, preseal artifact-digest,
+and seal-reference checks run before atomic publication. There are no
+sequential final artifact moves. `finalization_completed` is set only after the
+atomic rename succeeds; no fallible cleanup or verification is required after
+publication. A cleanup failure freezes the root before any passed `final-v1`
+can be visible and permanently disallows retry. Test mode uses
+private deterministic fixtures and a test CMS envelope, reports `test-passed`
+only inside `final-v1` with `claim: "none"`, and cannot create formal or live
+evidence.
+
+The script performs only local validation and sealing work, including roadmap
+`validate`, `self-test`, and `check-pr`; it does not execute network,
+GitHub/public-action, `enforce-closure`, push, commit, merge, label/comment,
+branch-delete, tag, or release operations. Any remote review, transition, or
+repository operation remains coordinator-only and requires fresh explicit
+maintainer approval after the exact generated plan is inspected.
+
+These downstream paths are qualification infrastructure and do not alter the
+Control API, migration, plugin, signing, or runtime product claims above.
+
+## Gate 9 → Gate 8 release-time handoff
+
+This section is an execution runbook, not qualification evidence. It is
+intentionally not executable while the retained Phase 08 runtime owns the
+Apple Container service. The Phase 08 owner must first provide an explicit
+release boundary and the exact current runtime, project, and process
+identifiers. Every preflight failure is a stop condition; no command below
+deletes, stops, restarts, or recreates a Phase 08 resource.
+
+### Read-only release preflight
+
+Run the following from the Phase 09 checkout only, after the Phase 08 release
+boundary has been announced. Replace the two `P08_*` values only with the
+identifiers in that release receipt; do not broaden them into cleanup patterns.
+
+```bash
+set -euo pipefail
+export P09_REPO=/Users/dev/Documents/hostwright-phase09
+export P09_QUAL=/Volumes/T9/hostwright/qualification
+export P08_RUNTIME_ID=hostwright-v2-p08-soa-web-27cc4ed52496a1ebce99ec8846250834
+export P08_PROJECT_ID=p08-soak-d785738e
+
+cd "$P09_REPO"
+test "$(git branch --show-current)" = feat/v0.0.2-phase-09
+test "$(/bin/realpath "$(git rev-parse --show-toplevel)")" = "$P09_REPO"
+test -z "$(git status --porcelain --untracked-files=all -- . ':(exclude)tmp')"
+test -d "$P09_QUAL" && test ! -L "$P09_QUAL"
+test ! -e "$P09_QUAL/.phase09-gate09-active-v1"
+test ! -e "$P09_QUAL/.phase09-gate08-active-v1"
+
+# Read-only Apple Container inventory. An unavailable inventory is fail-closed.
+container list --all --format json | /usr/bin/jq -e \
+  --arg id "$P08_RUNTIME_ID" --arg project "$P08_PROJECT_ID" \
+  'all(.[];
+    .id != $id and
+    (.configuration.labels["dev.hostwright.project"] // "") != $project and
+    ((.configuration.labels["dev.hostwright.project"] // "")
+      | startswith("p08-soak-") | not))'
+
+# Read-only process inventory. A match is a stop, never a cleanup instruction.
+if /bin/ps -axo pid=,command= | /usr/bin/grep -E '[h]ostwright-v2-p08-|[p]08-soak-'; then
+  exit 75
+fi
+```
+
+The clean-branch check is deliberate: `prepare` binds `HEAD`, the
+working-tree digest, configuration, and toolchain, and live qualification
+rejects a dirty source tree. The active-lock checks are also deliberate. A
+preserved lock from a failed root is evidence, not permission to remove it; the
+qualification owner must perform any separately authorized stale-lock
+disposition while preserving the original root. This handoff supplies no
+delete or lock-removal command.
+
+### Gate 9, then Gate 8
+
+After the preflight succeeds, allocate a new root for each gate. Never reuse a
+failed or partially prepared root, and do not set
+`HOSTWRIGHT_PHASE09_HARNESS_TESTING` for a live attempt.
+
+```bash
+export P09_GATE9_UUID="$(/usr/bin/uuidgen | /usr/bin/tr '[:upper:]' '[:lower:]')"
+export HOSTWRIGHT_PHASE09_GATE_ROOT="$P09_QUAL/phase09-gate09-$P09_GATE9_UUID"
+/bin/mkdir -m 700 "$HOSTWRIGHT_PHASE09_GATE_ROOT"
+/bin/bash scripts/phase09-gate09-qualification.sh prepare 9
+/bin/bash scripts/phase09-gate09-qualification.sh run 9
+```
+
+Gate 9 runs its six cells serially. A non-zero result freezes progress: retain
+the root, active-run marker, parent lock, failure receipt, and diagnostics;
+do not rerun that root, remove its lock, or start Gate 8. A successful result
+is usable only when the script has produced a passed manifest, checksum, and
+CMS sidecar and has released its active-run and parent locks. The derived
+Gate 9 live root is
+`/Volumes/T9/hostwright/qualification/.p09g9-${P09_GATE9_UUID:0:17}`; the
+script's ownership ledger is the only authority for cleanup of its process,
+container, Keychain, and files.
+
+Only after those post-Gate-9 conditions are verified, allocate a distinct Gate
+8 root and run the same two commands with gate 8:
+
+```bash
+test "$(/usr/bin/jq -r .gate "$HOSTWRIGHT_PHASE09_GATE_ROOT/manifest-v1.json")" = 9
+test "$(/usr/bin/jq -r .status "$HOSTWRIGHT_PHASE09_GATE_ROOT/manifest-v1.json")" = passed
+test -s "$HOSTWRIGHT_PHASE09_GATE_ROOT/evidence-v1.sha256"
+test -s "$HOSTWRIGHT_PHASE09_GATE_ROOT/evidence-v1.cms"
+test ! -e "$HOSTWRIGHT_PHASE09_GATE_ROOT/active-run-v1"
+test ! -e "$P09_QUAL/.phase09-gate09-active-v1"
+test ! -e "/Volumes/T9/hostwright/qualification/.p09g9-${P09_GATE9_UUID:0:17}"
+
+export P09_GATE8_UUID="$(/usr/bin/uuidgen | /usr/bin/tr '[:upper:]' '[:lower:]')"
+export HOSTWRIGHT_PHASE09_GATE_ROOT="$P09_QUAL/phase09-gate08-$P09_GATE8_UUID"
+/bin/mkdir -m 700 "$HOSTWRIGHT_PHASE09_GATE_ROOT"
+/bin/bash scripts/phase09-gate08-qualification.sh prepare 8
+/bin/bash scripts/phase09-gate08-qualification.sh run 8
+```
+
+Gate 8 has the same immutable-failure rule and its derived live root is
+`/Volumes/T9/hostwright/qualification/.p09g8-${P09_GATE8_UUID:0:17}`. Do not
+advance to Gate 11 from this handoff: Gate 11 remains separately blocked until
+`HOSTWRIGHT_NOTARY_PROFILE` and its expected Keychain credential are available.

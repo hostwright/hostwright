@@ -4,6 +4,8 @@ set -euo pipefail
 readonly harness_schema='hostwright.phase09.qualification.manifest.v1'
 readonly harness_version='Phase 09 qualification harness contract v1'
 readonly live_qualification_parent='/Volumes/T9/hostwright/qualification'
+readonly router_repository_path='/Users/dev/Documents/hostwright-phase09'
+readonly router_protected_repository_path='/Users/dev/Documents/hostwright'
 readonly ownership_header=$'recorded_at\ttype\tidentifier\tpath\tdevice\tinode\tidentity'
 readonly state_header=$'gate\tcell\tstatus\tsource_digest\tconfig_digest\ttoolchain_digest\tstarted_at\tfinished_at\tstdout_sha256\tstderr_sha256'
 
@@ -19,6 +21,9 @@ root_lock_created=0
 gate_lock_created=0
 qualification_started_at=''
 run_succeeded=0
+router_script_invocation="${BASH_SOURCE[0]}"
+router_script_path=''
+router_repo_root=''
 
 die() {
   printf '%s\n' "$1" >&2
@@ -63,14 +68,40 @@ Gate 16 — 100.00% — U/I/L/M/S/R — aggregate merge and closure
 EOF
 }
 
+validate_router_boundary() {
+  local invocation canonical directory
+  if [[ "$router_script_invocation" == /* ]]; then
+    invocation="$router_script_invocation"
+  else
+    invocation="$PWD/$router_script_invocation"
+  fi
+  [[ -f "$invocation" && ! -L "$invocation" ]] \
+    || die 'Phase 09 qualification router invocation must not cross a symlink boundary.' 66
+  canonical="$(/bin/realpath "$invocation")" \
+    || die 'Phase 09 qualification router cannot resolve its own path.' 66
+  directory="$(dirname "$canonical")"
+  [[ ! -L "$directory" && "$(/bin/realpath "$directory")" == "$directory" ]] \
+    || die 'Phase 09 qualification router directory must be canonical and non-symlinked.' 66
+  [[ "$canonical" == "$router_repository_path/scripts/phase09-gate-qualification.sh" ]] \
+    || die 'Phase 09 qualification router is outside the canonical Phase 09 repository.' 66
+  router_script_path="$canonical"
+  router_repo_root="$(/bin/realpath "$directory/..")" \
+    || die 'Phase 09 qualification router repository cannot be resolved.' 66
+  [[ "$router_repo_root" == "$router_repository_path" \
+    && "$router_repo_root" != "$router_protected_repository_path" ]] \
+    || die 'Phase 09 qualification router refuses a protected or unexpected repository path.' 66
+}
+
 validate_worktree() {
   local branch top
-  branch="$(git branch --show-current)"
-  top="$(/bin/realpath "$(git rev-parse --show-toplevel)")"
+  validate_router_boundary
+  branch="$(git -C "$router_repo_root" branch --show-current)"
+  top="$(/bin/realpath "$(git -C "$router_repo_root" rev-parse --show-toplevel)")"
   [[ "$branch" == 'feat/v0.0.2-phase-09' ]] \
     || die 'Phase 09 qualification requires branch feat/v0.0.2-phase-09.' 66
-  [[ "$top" != '/Users/dev/Documents/hostwright' ]] \
-    || die 'Phase 09 qualification refuses the protected source worktree path.' 66
+  [[ "$top" == "$router_repo_root" && "$top" != "$router_protected_repository_path" ]] \
+    || die 'Phase 09 qualification requires the canonical isolated Phase 09 worktree.' 66
+  cd "$router_repo_root"
 }
 
 validate_gate() {
@@ -92,6 +123,42 @@ qualification_parent() {
 
 require_configured_gate() {
   [[ "$gate" == 1 ]] || die "Gate $gate has no configured qualification cells; fail closed." 69
+}
+
+is_dedicated_gate() {
+  [[ "$1" =~ ^(1[3-6])$ ]]
+}
+
+dedicated_gate_script() {
+  case "$1" in
+    13) printf '%s\n' "$router_repo_root/scripts/phase09-gate13-qualification.sh" ;;
+    14) printf '%s\n' "$router_repo_root/scripts/phase09-gate14-qualification.sh" ;;
+    15) printf '%s\n' "$router_repo_root/scripts/phase09-gate15-qualification.sh" ;;
+    16) printf '%s\n' "$router_repo_root/scripts/phase09-gate16-qualification.sh" ;;
+    *) die "Gate $1 has no dedicated qualification dispatcher." 69 ;;
+  esac
+}
+
+dispatch_dedicated_gate() {
+  local command="$1" selected_gate="$2" script
+  script="$(dedicated_gate_script "$selected_gate")"
+  [[ -f "$script" && ! -L "$script" && "$(/bin/realpath "$script")" == "$script" ]] \
+    || die "Gate $selected_gate dedicated qualification harness is unavailable; fail closed." 69
+  cd "$router_repo_root"
+  case "$command" in
+    contract|diagnose)
+      exec /bin/bash "$script" "$command"
+      ;;
+    prepare|run|status)
+      exec /bin/bash "$script" "$command" "$selected_gate"
+      ;;
+    finalize)
+      exec /bin/bash "$script" "$command" "$selected_gate" "${3:-}"
+      ;;
+    *)
+      die "Dedicated Gate $selected_gate does not support command $command." 64
+      ;;
+  esac
 }
 
 validate_evidence_root() {
@@ -158,6 +225,11 @@ toolchain_digest() {
 }
 
 toolchain_report() {
+  if [[ "${HOSTWRIGHT_PHASE09_HARNESS_TESTING:-}" == '1' ]]; then
+    printf '%s\n' 'ProductName: Phase 09 qualification harness test mode'
+    printf '%s\n' 'ProductVersion: deterministic-no-runtime-probes'
+    return
+  fi
   {
     /usr/bin/sw_vers
     xcodebuild -version
@@ -169,7 +241,7 @@ toolchain_report() {
     probe_command 'notarytool' xcrun notarytool --version
     probe_command 'stapler' xcrun stapler --version
     probe_command 'swift-format' xcrun swift-format --version
-    probe_command 'codesigning identity availability' security find-identity -p codesigning -v
+    printf '%s\n' 'CMS signer identity is validated from the verified CMS certificate; no identity-list query is evidence.'
     if [[ -n "${HOSTWRIGHT_NOTARY_PROFILE:-}" ]]; then
       printf '%s\n' 'HOSTWRIGHT_NOTARY_PROFILE=available'
     else
@@ -350,6 +422,10 @@ probe_command() {
 }
 
 run_prerequisite_probe() {
+  if [[ "${HOSTWRIGHT_PHASE09_HARNESS_TESTING:-}" == '1' ]]; then
+    toolchain_report
+    return
+  fi
   printf '%s\n' 'Phase 09 Gate 1 prerequisite probe: read-only; unavailable tooling is recorded, not inferred.'
   probe_command 'macOS' /usr/bin/sw_vers
   probe_command 'architecture' /usr/bin/uname -m
@@ -361,7 +437,6 @@ run_prerequisite_probe() {
   probe_command 'notarytool' xcrun notarytool --version
   probe_command 'stapler' xcrun stapler --version
   probe_command 'swift-format' xcrun swift-format --version
-  probe_command 'codesigning identity availability' security find-identity -p codesigning -v
   if [[ -n "${HOSTWRIGHT_NOTARY_PROFILE:-}" ]]; then
     printf '%s\n' 'HOSTWRIGHT_NOTARY_PROFILE=available'
   else
@@ -511,16 +586,33 @@ cleanup_plan() {
 }
 
 main() {
-  [[ "$#" -ge 1 ]] || die 'usage: phase09-gate-qualification.sh <contract|prepare|run|record-owned|cleanup-plan> ...' 64
+  [[ "$#" -ge 1 ]] || die 'usage: phase09-gate-qualification.sh <contract|diagnose|prepare|run|status|finalize|record-owned|cleanup-plan> ...' 64
+  validate_worktree
   case "$1" in
     contract)
-      [[ "$#" == 1 ]] || die 'contract accepts no arguments.' 64
-      contract
+      if [[ "$#" == 1 ]]; then
+        contract
+      elif [[ "$#" == 2 ]]; then
+        validate_gate "$2"
+        is_dedicated_gate "$gate" \
+          || die 'contract accepts no arguments for non-dedicated gates.' 64
+        dispatch_dedicated_gate contract "$gate"
+      else
+        die 'contract accepts no arguments, or one dedicated gate.' 64
+      fi
+      ;;
+    diagnose)
+      [[ "$#" == 2 ]] || die 'usage: diagnose <gate>.' 64
+      validate_gate "$2"
+      is_dedicated_gate "$gate" \
+        || die "Gate $gate has no diagnostic dispatcher; fail closed." 69
+      dispatch_dedicated_gate diagnose "$gate"
       ;;
     prepare)
       [[ "$#" == 2 ]] || die 'usage: prepare <gate>.' 64
-      validate_worktree
       validate_gate "$2"
+      is_dedicated_gate "$gate" && dispatch_dedicated_gate prepare "$gate"
+      validate_worktree
       require_configured_gate
       validate_evidence_root
       require_empty_root
@@ -530,11 +622,28 @@ main() {
       ;;
     run)
       [[ "$#" == 2 ]] || die 'usage: run <gate>.' 64
-      validate_worktree
       validate_gate "$2"
+      is_dedicated_gate "$gate" && dispatch_dedicated_gate run "$gate"
+      validate_worktree
       validate_evidence_root
       collect_digests
       run_gate
+      ;;
+    status)
+      [[ "$#" == 2 ]] || die 'usage: status <gate>.' 64
+      validate_gate "$2"
+      is_dedicated_gate "$gate" \
+        || die "Gate $gate has no status dispatcher; fail closed." 69
+      dispatch_dedicated_gate status "$gate"
+      ;;
+    finalize)
+      [[ "$#" == 2 || "$#" == 3 ]] || die 'usage: finalize <gate> <fixed-schema receipts JSON>.' 64
+      validate_gate "$2"
+      is_dedicated_gate "$gate" \
+        || die "Gate $gate has no finalization dispatcher; fail closed." 69
+      [[ "$#" == 3 || "$gate" == 16 ]] \
+        || die 'usage: finalize <gate> <fixed-schema receipts JSON>.' 64
+      dispatch_dedicated_gate finalize "$gate" "${3:-}"
       ;;
     record-owned)
       [[ "$#" == 6 ]] || die 'usage: record-owned <gate> <type> <identifier> <path-or-> <identity>.' 64

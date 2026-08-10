@@ -68,6 +68,88 @@ final class Phase09QualificationHarnessTests: XCTestCase {
     XCTAssertTrue(bad.stderr.contains("gate must be an integer from 1 through 16"))
   }
 
+  func testDedicatedGateRoutingCoversGatesThirteenThroughSixteen() throws {
+    let source = try String(contentsOf: harness, encoding: .utf8)
+    XCTAssertTrue(source.contains("is_dedicated_gate"))
+    XCTAssertTrue(source.contains("dedicated_gate_script"))
+    XCTAssertTrue(source.contains("dispatch_dedicated_gate"))
+    for gate in 13...16 {
+      let name = String(format: "scripts/phase09-gate%02d-qualification.sh", gate)
+      XCTAssertTrue(source.contains(name), "missing dedicated routing for Gate \(gate)")
+    }
+    XCTAssertTrue(source.contains("dispatch_dedicated_gate prepare \"$gate\""))
+    XCTAssertTrue(source.contains("dispatch_dedicated_gate run \"$gate\""))
+    XCTAssertTrue(source.contains("dispatch_dedicated_gate status \"$gate\""))
+    XCTAssertTrue(source.contains("dispatch_dedicated_gate finalize \"$gate\" \"${3:-}\""))
+    XCTAssertTrue(source.contains("\"$#\" == 2 || \"$#\" == 3"))
+    XCTAssertFalse(source.contains("find-identity"))
+    XCTAssertTrue(source.contains("no identity-list query is evidence"))
+
+    let gate16 = try String(contentsOf: repository.appendingPathComponent("scripts/phase09-gate16-qualification.sh"), encoding: .utf8)
+    XCTAssertTrue(gate16.contains("run()"))
+    XCTAssertTrue(gate16.contains("status()"))
+    XCTAssertTrue(gate16.contains("mode:\"read-only\""))
+    XCTAssertTrue(gate16.contains("finalizationRequiresExplicitReceipts:true"))
+
+    let routedRun = try run(arguments: ["run", "16"], environment: ["HOSTWRIGHT_PHASE09_GATE_ROOT": ""])
+    XCTAssertEqual(routedRun.status, 0, routedRun.stderr)
+    XCTAssertTrue(routedRun.stdout.contains("hostwright.phase09.gate16.status.v1"), routedRun.stdout)
+    let routedStatus = try run(arguments: ["status", "16"], environment: ["HOSTWRIGHT_PHASE09_GATE_ROOT": ""])
+    XCTAssertEqual(routedStatus.status, 0, routedStatus.stderr)
+    XCTAssertTrue(routedStatus.stdout.contains("\"operation\":\"status\""), routedStatus.stdout)
+
+    let unexpected = try run(arguments: ["diagnose", "12"])
+    XCTAssertNotEqual(unexpected.status, 0)
+    XCTAssertTrue(unexpected.stderr.contains("no diagnostic dispatcher"), unexpected.stderr)
+  }
+
+  func testRouterDispatchesMissingGate16ReceiptToTheGate16FreezeTrap() throws {
+    try withEvidenceParent { parent, parentEnvironment in
+      let root = try makeEvidenceRoot(parent: parent, gate: 16)
+      let gate16Environment = try environment(
+        for: root, parent: parent, parentEnvironment: parentEnvironment)
+      try writeJSON(["status": "prepared"], to: root.appendingPathComponent("manifest-v1.json"))
+
+      let result = try run(arguments: ["finalize", "16"], environment: gate16Environment)
+      XCTAssertNotEqual(result.status, 0, result.stderr)
+      XCTAssertTrue(result.stderr.contains("usage: finalize 16"), result.stderr)
+      XCTAssertEqual(try manifestStatus(at: root), "failed")
+      XCTAssertTrue(
+        FileManager.default.fileExists(atPath: root.appendingPathComponent("finalization-frozen-v1").path))
+      XCTAssertTrue(
+        FileManager.default.fileExists(atPath: root.appendingPathComponent("failure-v1.tsv").path))
+
+      let invalidRoot = try makeEvidenceRoot(parent: parent, gate: 16)
+      let invalidEnvironment = try environment(
+        for: invalidRoot, parent: parent, parentEnvironment: parentEnvironment)
+      try writeJSON(["status": "prepared"], to: invalidRoot.appendingPathComponent("manifest-v1.json"))
+      let invalid = try run(
+        arguments: ["finalize", "16", parent.appendingPathComponent("missing-receipts.json").path],
+        environment: invalidEnvironment)
+      XCTAssertNotEqual(invalid.status, 0, invalid.stderr)
+      XCTAssertTrue(invalid.stderr.contains("canonical regular files"), invalid.stderr)
+      XCTAssertEqual(try manifestStatus(at: invalidRoot), "failed")
+      XCTAssertTrue(
+        FileManager.default.fileExists(atPath: invalidRoot.appendingPathComponent("finalization-frozen-v1").path))
+    }
+  }
+
+  func testRouterUsesItsCanonicalRepositoryBoundaryForContractDispatch() throws {
+    let source = try String(contentsOf: harness, encoding: .utf8)
+    for required in [
+      "router_repository_path", "router_protected_repository_path", "validate_router_boundary",
+      "router_script_path", "router_repo_root", "git -C \"$router_repo_root\"",
+      "cd \"$router_repo_root\"", "! -L \"$script\"",
+    ] {
+      XCTAssertTrue(source.contains(required), "missing router boundary invariant: \(required)")
+    }
+
+    let outsideRepository = FileManager.default.temporaryDirectory
+    let result = try run(arguments: ["contract"], currentDirectory: outsideRepository)
+    XCTAssertEqual(result.status, 0, result.stderr)
+    XCTAssertTrue(result.stdout.contains("Phase 09 qualification harness contract v1"))
+  }
+
   func testOwnershipRecordingIsLedgerOnlyAndCleanupIsAPlan() throws {
     try withEvidenceRoot(gate: 1) { root, environment in
       XCTAssertEqual(try run(arguments: ["prepare", "1"], environment: environment).status, 0)
@@ -234,14 +316,16 @@ final class Phase09QualificationHarnessTests: XCTestCase {
     return (try JSONSerialization.jsonObject(with: manifest) as? [String: Any])?["status"] as? String
   }
 
-  private func run(arguments: [String], environment: [String: String] = [:]) throws -> ShellResult {
+  private func run(
+    arguments: [String], environment: [String: String] = [:], currentDirectory: URL? = nil
+  ) throws -> ShellResult {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/bin/bash")
     process.arguments = [harness.path] + arguments
     var values = ProcessInfo.processInfo.environment
     environment.forEach { values[$0.key] = $0.value }
     process.environment = values
-    process.currentDirectoryURL = repository
+    process.currentDirectoryURL = currentDirectory ?? repository
     let stdout = Pipe()
     let stderr = Pipe()
     process.standardOutput = stdout
@@ -256,6 +340,11 @@ final class Phase09QualificationHarnessTests: XCTestCase {
 
   private func data(at url: URL) throws -> Data {
     try Data(contentsOf: url)
+  }
+
+  private func writeJSON(_ object: Any, to url: URL) throws {
+    try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]).write(to: url)
+    try setPermissions(of: url, to: 0o600)
   }
 
   private func permissions(of url: URL) throws -> Int {

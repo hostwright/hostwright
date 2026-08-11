@@ -1502,7 +1502,7 @@ fault_receipt_path() {
 fault_receipt_valid() {
   local sequence="$1"
   local label="$2"
-  local receipt row material recorded_sha computed_sha config_sha
+  local receipt row material recorded_sha computed_sha config_sha receipt_source_commit
   receipt="$(fault_receipt_path "$sequence" "$label")"
   [[ -f "$receipt" && ! -L "$receipt" \
       && "$(stat -f '%Lp' "$receipt")" == 600 \
@@ -1515,7 +1515,10 @@ fault_receipt_valid() {
   material="${row%$'\t'*}"
   computed_sha="$(printf '%s' "$material" | sha256_text)"
   config_sha="$(sha256 "$HOSTWRIGHT_PHASE08_SOAK_ROOT/hostwright.yaml")"
-  [[ "$material" == "$checkpoint_schema_version"$'\t'"$qualification_id"$'\t'"$sequence"$'\t'"$label"$'\t'"$HOSTWRIGHT_PHASE08_SOAK_SOURCE_COMMIT"$'\t'"$hostwright_sha"$'\t'"$daemon_sha"$'\t'"$host_identity_sha"$'\t'"$resource_identifier"$'\t'"$resource_uuid"$'\t'"$project_name"$'\t'"$config_sha"$'\t'"$previous_checkpoint_sha256" \
+  receipt_source_commit="$(printf '%s\n' "$row" | awk -F '\t' '{ print $5 }')"
+  [[ "$receipt_source_commit" =~ ^[a-f0-9]{40}$ ]] \
+    && source_commit_is_allowed "$receipt_source_commit" \
+    && [[ "$material" == "$checkpoint_schema_version"$'\t'"$qualification_id"$'\t'"$sequence"$'\t'"$label"$'\t'"$receipt_source_commit"$'\t'"$hostwright_sha"$'\t'"$daemon_sha"$'\t'"$host_identity_sha"$'\t'"$resource_identifier"$'\t'"$resource_uuid"$'\t'"$project_name"$'\t'"$config_sha"$'\t'"$previous_checkpoint_sha256" \
       && "$recorded_sha" == "$computed_sha" ]]
 }
 
@@ -1556,18 +1559,40 @@ run_checkpointed_fault() {
 }
 
 has_pending_expected_workload_fault() {
+  local sequence="${1:-}"
   awk -F '\t' -v stop="workload-stop-injected resource=$resource_identifier" \
-      -v recovered="workload-recovered resource=$resource_identifier" '
+      -v recovered="workload-recovered resource=$resource_identifier" \
+      -v pending_sequence="$sequence" \
+      -v consumed="workload-restart-hold-release-consumed sequence=$sequence " \
+      -v ready="workload-resume-recovery-ready sequence=$sequence " '
     index($2, stop) == 1 { stopLine = NR }
     index($2, recovered) == 1 { recoveredLine = NR }
+    pending_sequence != "" && index($2, consumed) == 1 { consumedLine = NR }
+    pending_sequence != "" && index($2, ready) == 1 { readyLine = NR }
     $2 == "failure" {
       failureLine = NR
-      expectedFailure = ($3 == "The exact soak workload did not converge to running within three minutes." || $3 == "The exact soak workload did not converge during its bounded intentional-fault recovery window.")
+      if ($3 == "The exact soak workload did not converge to running within three minutes." || $3 == "The exact soak workload did not converge during its bounded intentional-fault recovery window.") {
+        expectedFailureLine = NR
+      }
     }
     END {
-      exit(stopLine > recoveredLine && failureLine > stopLine && expectedFailure ? 0 : 1)
+      pending = stopLine > recoveredLine && (consumedLine > stopLine || readyLine > stopLine || (expectedFailureLine > stopLine && failureLine == expectedFailureLine))
+      exit(pending ? 0 : 1)
     }
   ' "$evidence_file"
+}
+
+run_workload_fault_checkpoint() {
+  local sequence="$1"
+  if [[ "$resume_expected_workload_fault" == 1 ]]; then
+    [[ "$sequence" == "$((cumulative_samples + 1))" && $((sequence % 72)) == 0 ]] \
+      || die 'Resumed workload recovery does not match the exact scheduled sequence.' 75
+    run_checkpointed_fault "$sequence" workload verify_running
+    record "workload-recovered resource=$resource_identifier sequence=$sequence resumed=true"
+    resume_expected_workload_fault=0
+    return
+  fi
+  run_checkpointed_fault "$sequence" workload inject_workload_fault "$sequence"
 }
 
 run_scheduled_faults() {
@@ -1577,7 +1602,7 @@ run_scheduled_faults() {
   fi
   if (( sequence % 72 == 0 )); then
     run_checkpointed_fault "$sequence" pressure inject_pressure
-    run_checkpointed_fault "$sequence" workload inject_workload_fault "$sequence"
+    run_workload_fault_checkpoint "$sequence"
   fi
   if (( sequence % 144 == 0 )); then
     run_checkpointed_fault "$sequence" daemon inject_daemon_fault
@@ -1837,11 +1862,14 @@ prepare_resume() {
   validate_root
   configure_authority_paths
   load_qualification_state
-  local phase checkpointed_project
+  local phase checkpointed_project pending_sequence
   phase="$(latest_state_value phase)"
   [[ "$phase" == resumable || "$phase" == running || "$phase" == prepared ]] \
     || die 'Only a prepared or resumable cumulative qualification can continue.' 75
-  if has_pending_expected_workload_fault; then
+  pending_sequence=$((cumulative_samples + 1))
+  if has_pending_expected_workload_fault "$pending_sequence"; then
+    [[ $((pending_sequence % 72)) == 0 ]] \
+      || die 'Pending workload recovery does not match a scheduled fault sequence.' 75
     resume_expected_workload_fault=1
   fi
   validate_checkpoint_chain
@@ -1872,7 +1900,9 @@ run_qualification_segment() {
   chmod 600 "$HOSTWRIGHT_PHASE08_SOAK_ROOT/segment-${segment_id}-pre-runtime-inventory.json"
   start_daemon
   if [[ "$resume_expected_workload_fault" == 1 ]]; then
-    verify_running workload-fault "$((cumulative_samples + 1))"
+    local recovery_sequence=$((cumulative_samples + 1))
+    verify_running workload-fault "$recovery_sequence"
+    record "workload-resume-recovery-ready sequence=$recovery_sequence resource=$resource_identifier"
   else
     verify_running
   fi

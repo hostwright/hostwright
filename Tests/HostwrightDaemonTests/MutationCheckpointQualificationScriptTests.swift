@@ -293,18 +293,22 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
               $'2026-08-11T08:54:57Z\tworkload-stop-injected resource=hostwright-v2-p08-soa-web-27cc4ed52496a1ebce99ec8846250834' \
               $'2026-08-11T08:58:32Z\tfailure\tThe exact soak workload did not converge to running within three minutes.' \
               > "$evidence_file"
-            has_pending_expected_workload_fault
+            has_pending_expected_workload_fault 648
             printf '%s\n' $'2026-08-11T09:00:00Z\tfailure\tThe exact soak workload status could not be read during running verification.' \
               >> "$evidence_file"
-            if has_pending_expected_workload_fault; then
+            if has_pending_expected_workload_fault 648; then
               exit 75
             fi
             printf '%s\n' $'2026-08-11T09:01:00Z\tfailure\tThe exact soak workload did not converge during its bounded intentional-fault recovery window.' \
               >> "$evidence_file"
-            has_pending_expected_workload_fault
+            has_pending_expected_workload_fault 648
+            printf '%s\n' $'2026-08-11T09:02:00Z\tfailure\tA later unrelated harness failure.' \
+              $'2026-08-11T09:02:01Z\tworkload-resume-recovery-ready sequence=648 resource=hostwright-v2-p08-soa-web-27cc4ed52496a1ebce99ec8846250834' \
+              >> "$evidence_file"
+            has_pending_expected_workload_fault 648
             printf '%s\n' $'2026-08-11T09:05:00Z\tworkload-recovered resource=hostwright-v2-p08-soa-web-27cc4ed52496a1ebce99ec8846250834' \
               >> "$evidence_file"
-            if has_pending_expected_workload_fault; then
+            if has_pending_expected_workload_fault 648; then
               exit 75
             fi
             """#,
@@ -1275,7 +1279,10 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
             #"""
             source "$1"
             HOSTWRIGHT_PHASE08_SOAK_ROOT="$2"
-            HOSTWRIGHT_PHASE08_SOAK_SOURCE_COMMIT='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+            prior_source='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+            current_source='eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+            HOSTWRIGHT_PHASE08_SOAK_SOURCE_COMMIT="$prior_source"
+            source_commit_history="$prior_source"
             evidence_file="$2/evidence-v2.log"
             qualification_id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
             hostwright_sha='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
@@ -1294,7 +1301,13 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
               printf '%s\n' "$(( $(<"$test_root/counter") + 1 ))" > "$test_root/counter"
             }
             run_checkpointed_fault 72 pressure perform_fault
+            HOSTWRIGHT_PHASE08_SOAK_SOURCE_COMMIT="$current_source"
+            source_commit_history="$prior_source,$current_source"
             run_checkpointed_fault 72 pressure perform_fault
+            source_commit_history="$current_source"
+            if fault_receipt_valid 72 pressure; then
+              exit 75
+            fi
             printf 'count=%s\n' "$(<"$2/counter")"
             """#,
             arguments: [scriptURL.path, root.path]
@@ -1308,6 +1321,59 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
                 encoding: .utf8
             ).contains("fault-receipt-reused sequence=72 label=pressure")
         )
+    }
+
+    func testAggregateSoakFinalizesResumedWorkloadWithoutInjectingItAgain() throws {
+        let scriptURL = packageRoot().appendingPathComponent(
+            "scripts/phase08-soak-qualification.sh"
+        )
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-soak-resumed-workload-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let result = try runBash(
+            #"""
+            source "$1"
+            HOSTWRIGHT_PHASE08_SOAK_ROOT="$2"
+            HOSTWRIGHT_PHASE08_SOAK_SOURCE_COMMIT='eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+            source_commit_history='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+            evidence_file="$2/evidence-v2.log"
+            qualification_id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+            hostwright_sha='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+            daemon_sha='cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'
+            host_identity_sha='dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
+            resource_identifier='hostwright-v2-p08-soa-web-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+            resource_uuid='cccccccc-cccc-8ccc-8ccc-cccccccccccc'
+            project_name='p08-soak-test'
+            previous_checkpoint_sha256="$genesis_checkpoint_sha256"
+            cumulative_samples=647
+            resume_expected_workload_fault=1
+            mkdir "$2/fault-checkpoints-v1"
+            : > "$evidence_file"
+            printf 'fixture\n# soak-generation=648\n' > "$2/hostwright.yaml"
+            printf '0\n' > "$2/verify-count"
+            test_root="$2"
+            verify_running() {
+              printf '%s\n' "$(( $(<"$test_root/verify-count") + 1 ))" > "$test_root/verify-count"
+            }
+            inject_workload_fault() {
+              printf 'duplicate\n' > "$test_root/duplicate-stop"
+              return 75
+            }
+            run_workload_fault_checkpoint 648
+            run_workload_fault_checkpoint 648
+            [[ "$(<"$2/verify-count")" == 1 ]]
+            [[ ! -e "$2/duplicate-stop" ]]
+            [[ -f "$2/fault-checkpoints-v1/sequence-0648-workload.tsv" ]]
+            grep -Fq 'workload-recovered resource=hostwright-v2-p08-soa-web-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa sequence=648 resumed=true' "$evidence_file"
+            """#,
+            arguments: [scriptURL.path, root.path]
+        )
+
+        XCTAssertEqual(result.status, 0, result.output)
     }
 
     func testAggregateSoakRecoversPowerLossMarkerWithoutLosingCheckpoints() throws {

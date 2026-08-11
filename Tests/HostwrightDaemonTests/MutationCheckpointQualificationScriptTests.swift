@@ -137,6 +137,7 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
             "compaction-daemon-quiesce-requested",
             "compaction-daemon-quiesced",
             "compaction-daemon-resumed",
+            "daemon-stop-reap-escalated",
             "runner-exit-classified",
             "verify_exclusive_runtime_inventory",
             "runtimeInventorySHA256",
@@ -692,6 +693,139 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
                 contentsOf: root.appendingPathComponent("evidence-v2.log"),
                 encoding: .utf8
             ).contains("daemon-stopped generation=1")
+        )
+    }
+
+    func testAggregateSoakReapsLingeringDaemonAfterLoggedCleanShutdown() throws {
+        let scriptURL = packageRoot().appendingPathComponent(
+            "scripts/phase08-soak-qualification.sh"
+        )
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-soak-lingering-reap-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let result = try runBash(
+            #"""
+            source "$1"
+            HOSTWRIGHT_PHASE08_SOAK_ROOT="$2"
+            state_file="$2/state-v2.tsv"
+            evidence_file="$2/evidence-v2.log"
+            lifecycle="$2/lifecycle.log"
+            printf 'schemaVersion\t2\n' > "$state_file"
+            : > "$evidence_file"
+            : > "$lifecycle"
+            daemon_generation=61
+            daemon_pid=424242
+            daemon_mock_running=true
+            printf '%s\n' \
+              'hostwrightd foreground-dev loop stopped' \
+              'Iterations: 192' \
+              'Successful: 183' \
+              'Failed: 9' \
+              'Shutdown requested: true' \
+              > "$2/daemon-61.log"
+            daemon_process_running() {
+              [[ "$daemon_mock_running" == true ]]
+            }
+            kill() {
+              case "$1" in
+                -0) return 0 ;;
+                -TERM) printf 'TERM\n' >> "$lifecycle" ;;
+                -KILL)
+                  printf 'KILL\n' >> "$lifecycle"
+                  daemon_mock_running=false
+                  ;;
+                *) return 64 ;;
+              esac
+            }
+            sleep() { :; }
+            wait() {
+              printf 'WAIT\n' >> "$lifecycle"
+              return 137
+            }
+            stop_daemon
+            """#,
+            arguments: [scriptURL.path, root.path]
+        )
+
+        XCTAssertEqual(result.status, 0, result.output)
+        XCTAssertEqual(
+            try String(contentsOf: root.appendingPathComponent("lifecycle.log"), encoding: .utf8),
+            "TERM\nKILL\nWAIT\n"
+        )
+        let evidence = try String(
+            contentsOf: root.appendingPathComponent("evidence-v2.log"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(
+            evidence.contains(
+                "daemon-stop-reap-escalated generation=61 pid=424242 signal=KILL reason=clean-loop-stop"
+            )
+        )
+        XCTAssertTrue(evidence.contains("daemon-stopped generation=61 pid=424242"))
+    }
+
+    func testAggregateSoakRefusesToEscalateLingeringDaemonWithoutCleanShutdownProof() throws {
+        let scriptURL = packageRoot().appendingPathComponent(
+            "scripts/phase08-soak-qualification.sh"
+        )
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-soak-unsafe-reap-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let result = try runBash(
+            #"""
+            source "$1"
+            HOSTWRIGHT_PHASE08_SOAK_ROOT="$2"
+            state_file="$2/state-v2.tsv"
+            evidence_file="$2/evidence-v2.log"
+            lifecycle="$2/lifecycle.log"
+            printf 'schemaVersion\t2\n' > "$state_file"
+            : > "$evidence_file"
+            : > "$lifecycle"
+            daemon_generation=62
+            daemon_pid=434343
+            daemon_mock_running=true
+            printf '%s\n' 'hostwrightd foreground-dev loop stopped' > "$2/daemon-62.log"
+            daemon_process_running() {
+              [[ "$daemon_mock_running" == true ]]
+            }
+            kill() {
+              case "$1" in
+                -0) return 0 ;;
+                -TERM) printf 'TERM\n' >> "$lifecycle" ;;
+                -KILL)
+                  printf 'KILL\n' >> "$lifecycle"
+                  daemon_mock_running=false
+                  ;;
+                *) return 64 ;;
+              esac
+            }
+            sleep() { :; }
+            wait() {
+              printf 'WAIT\n' >> "$lifecycle"
+              return 137
+            }
+            stop_daemon
+            """#,
+            arguments: [scriptURL.path, root.path]
+        )
+
+        XCTAssertEqual(result.status, 70, result.output)
+        XCTAssertEqual(
+            try String(contentsOf: root.appendingPathComponent("lifecycle.log"), encoding: .utf8),
+            "TERM\n"
+        )
+        XCTAssertTrue(
+            result.output.contains(
+                "The exact foreground daemon did not stop after its bounded clean-shutdown reap."
+            )
         )
     }
 

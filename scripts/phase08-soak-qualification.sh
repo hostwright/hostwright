@@ -5,6 +5,8 @@ readonly duration_seconds=259200
 readonly sample_interval_seconds=300
 readonly expected_samples=864
 readonly compaction_attempt_limit=5
+readonly daemon_stop_grace_attempts=30
+readonly daemon_stop_escalation_attempts=5
 readonly power_evidence_version=1
 readonly qualification_schema_version=2
 readonly checkpoint_schema_version=1
@@ -561,19 +563,43 @@ daemon_process_running() {
   [[ -n "$process_state" && "$process_state" != Z* ]]
 }
 
-stop_daemon() {
-  if [[ -n "$daemon_pid" ]] && kill -0 "$daemon_pid" 2>/dev/null; then
-    if daemon_process_running; then
-      kill -TERM "$daemon_pid"
-    fi
-    local attempt=0
-    while daemon_process_running && [[ "$attempt" -lt 30 ]]; do
+daemon_shutdown_log_is_complete() {
+  local log_file="$HOSTWRIGHT_PHASE08_SOAK_ROOT/daemon-${daemon_generation}.log"
+  [[ "$daemon_generation" =~ ^[1-9][0-9]*$ && -f "$log_file" && ! -L "$log_file" ]] \
+    || return 1
+  /usr/bin/grep -Fqx 'hostwrightd foreground-dev loop stopped' "$log_file" \
+    && /usr/bin/grep -Fqx 'Shutdown requested: true' "$log_file"
+}
+
+wait_for_daemon_stop() {
+  local attempt=0
+  while daemon_process_running && [[ "$attempt" -lt "$daemon_stop_grace_attempts" ]]; do
+    sleep 1
+    attempt=$((attempt + 1))
+  done
+  if daemon_process_running; then
+    daemon_shutdown_log_is_complete || return 1
+    record "daemon-stop-reap-escalated generation=$daemon_generation pid=$daemon_pid signal=KILL reason=clean-loop-stop"
+    kill -KILL "$daemon_pid" 2>/dev/null || ! daemon_process_running || return 1
+    attempt=0
+    while daemon_process_running && [[ "$attempt" -lt "$daemon_stop_escalation_attempts" ]]; do
       sleep 1
       attempt=$((attempt + 1))
     done
-    daemon_process_running \
-      && die 'The exact foreground daemon did not stop after SIGTERM.'
-    wait "$daemon_pid" || true
+    daemon_process_running && return 1
+  fi
+  wait "$daemon_pid" 2>/dev/null || true
+}
+
+stop_daemon() {
+  if [[ -n "$daemon_pid" ]]; then
+    if kill -0 "$daemon_pid" 2>/dev/null && daemon_process_running; then
+      kill -TERM "$daemon_pid" 2>/dev/null \
+        || ! daemon_process_running \
+        || die 'The exact foreground daemon could not receive SIGTERM.'
+    fi
+    wait_for_daemon_stop \
+      || die 'The exact foreground daemon did not stop after its bounded clean-shutdown reap.'
     record "daemon-stopped generation=$daemon_generation pid=$daemon_pid"
   fi
   daemon_pid=''
@@ -1434,12 +1460,8 @@ runner_exit() {
     if daemon_process_running; then
       kill -TERM "$daemon_pid" 2>/dev/null
     fi
-    local attempt=0
-    while daemon_process_running && [[ "$attempt" -lt 30 ]]; do
-      sleep 1
-      attempt=$((attempt + 1))
-    done
-    wait "$daemon_pid" 2>/dev/null
+    wait_for_daemon_stop \
+      || record "daemon-stop-incomplete generation=$daemon_generation pid=$daemon_pid during=runner-exit"
   fi
   if [[ "$status" -ne 0 ]]; then
     if [[ "$status" == 130 || "$status" == 143 ]]; then

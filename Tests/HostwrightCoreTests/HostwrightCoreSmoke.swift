@@ -449,13 +449,16 @@ final class HostwrightCoreTests: XCTestCase {
 
         XCTAssertTrue(cli.contains("hostwright import-stack <path> [--output text|json]"))
         XCTAssertTrue(guide.contains("Status: Phase 28 import-only conversion."))
-        XCTAssertTrue(manifest.contains("`hostwright import-stack <path>` can convert a smaller stack-file subset"))
+        XCTAssertTrue(guide.contains("fails closed with structured validation diagnostics and emits no manifest text"))
+        XCTAssertTrue(manifest.contains("`hostwright import-stack <path>` can assess a smaller stack-file subset"))
+        XCTAssertTrue(manifest.contains("fails closed and emits no manifest text"))
         XCTAssertTrue(limitations.contains("The stack-file importer is also not a general YAML or Compose parser."))
+        XCTAssertTrue(limitations.contains("a missing manual resource mapping returns diagnostics and no manifest text"))
         XCTAssertTrue(policy.contains("Stack-file import uses local policy reason codes"))
         XCTAssertTrue(requirements.contains("HW-COMPAT-008"))
         XCTAssertTrue(acceptance.contains("Phase 28 Gate: Stack-File Import And Migration Tooling"))
         XCTAssertTrue(implementationPlan.contains("## Phase 28 Outputs"))
-        XCTAssertTrue(buildStatus.contains("Phase 28 adds import-only stack-file conversion"))
+        XCTAssertTrue(buildStatus.contains("Phase 28 adds fail-closed import-only stack-file assessment"))
         XCTAssertTrue(devlog.contains("No Docker Compose parity."))
 
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports Docker Compose"))

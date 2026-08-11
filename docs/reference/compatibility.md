@@ -52,7 +52,7 @@ Until their owning phase closes, unsupported manifest fields, provider capabilit
 - No silent telemetry.
 - No destructive garbage collection of unmanaged resources.
 
-Direct guest GPU/ANE access is not claimed without a supported Apple API. Phase 10 implements the user outcome through a signed authenticated host-native Metal/Core ML/MLX service and can add direct passthrough later only with public-API conformance evidence.
+Direct guest GPU/ANE access is not claimed without a supported Apple API. Phase 10's planned user outcome is a signed authenticated host-native Metal/Core ML/MLX service; that boundary remains unavailable until its required qualification closes. Direct passthrough can be considered later only with public-API conformance evidence.
 
 The implemented scheduler optimization and host-native accelerator slices remain unavailable pending converged G13-G15 aggregate, live, hardware, and security qualification. Direct guest passthrough remains blocked.
 

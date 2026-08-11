@@ -42,6 +42,7 @@ final class HostwrightImportTests: XCTestCase {
         XCTAssertEqual(resourceErrors.count, 2)
         XCTAssertTrue(resourceErrors.contains { $0.message.contains("api") })
         XCTAssertTrue(resourceErrors.contains { $0.message.contains("worker") })
+        XCTAssertTrue(resourceErrors.allSatisfy { $0.code == .manifestValidationFailed })
     }
 
     func testImportDiagnosticsAreDeterministic() {

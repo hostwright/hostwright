@@ -2,7 +2,7 @@
 
 Status: Phase 28 import-only conversion.
 
-`hostwright import-stack <path>` converts a narrow safe stack-file subset into `hostwright.yaml` text for review. It is non-mutating: it does not write files, create state, observe Apple container, contact registries, pull images, or execute runtime actions.
+`hostwright import-stack <path>` assesses a narrow safe stack-file subset and either emits a validated `hostwright.yaml` text for review or returns structured diagnostics. It is non-mutating: it does not write files, create state, observe Apple container, contact registries, pull images, or execute runtime actions.
 
 ## Command
 
@@ -30,7 +30,7 @@ The importer accepts:
 
 The converted output still runs through Hostwright manifest validation. Invalid names, missing images, unsafe ports, unsafe mounts, plaintext credential-like environment keys, and unsupported restart policies fail closed.
 
-Manifest v3 also requires explicit CPU and memory requests and limits for every executable service. The importer does not infer capacity from a stack file, so an otherwise supported stack without those declarations is returned as a reviewable validation failure; add bounded v3 resources manually before planning or applying it.
+Manifest v3 also requires explicit CPU and memory requests and limits for every executable service. The importer does not infer or translate capacity from a stack file. A stack input without a complete bounded v3 resource mapping therefore fails closed with structured validation diagnostics and emits no manifest text. Author the bounded v3 manifest manually before validating, planning, or applying it.
 
 ## Rejected Scope
 
@@ -51,10 +51,11 @@ These rejections are intentional. Import output does not imply Docker Compose co
 
 ## Safe Review Flow
 
-1. Run `hostwright import-stack compose.yaml > hostwright.yaml`.
-2. Review every converted image, port, volume, environment value, health check, and restart policy.
-3. Run `hostwright validate`.
-4. Run `hostwright plan`.
-5. Apply only through the secure selected state path and plan-hash confirmation gate. The Application Support default is used unless you deliberately pass `--state-db`.
+1. Run `hostwright import-stack compose.yaml` without redirecting a failure into `hostwright.yaml`.
+2. If it reports the required resource diagnostics, author a bounded Manifest v3 `resources.requests` and `resources.limits` block manually; the importer does not supply it.
+3. Review every resulting image, port, volume, environment value, health check, and restart policy.
+4. Run `hostwright validate`.
+5. Run `hostwright plan`.
+6. Apply only through the secure selected state path and plan-hash confirmation gate. The Application Support default is used unless you deliberately pass `--state-db`.
 
-`import-stack` itself never performs step 5.
+`import-stack` itself never performs step 6.

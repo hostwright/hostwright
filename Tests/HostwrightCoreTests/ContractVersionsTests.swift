@@ -106,6 +106,23 @@ final class ContractVersionsTests: XCTestCase {
             $0.reason.contains("pending") || $0.reason.contains("under implementation")
         })
 
+        guard let scheduler = report.capabilities.first(where: {
+            $0.identifier == "scheduler.optimization"
+        }), let hostNativeAccelerators = report.capabilities.first(where: {
+            $0.identifier == "accelerators.host-native"
+        }), let guestPassthrough = report.capabilities.first(where: {
+            $0.identifier == "accelerators.guest-passthrough"
+        }) else {
+            return XCTFail("Phase 10 scheduler and accelerator capability truth is missing.")
+        }
+        XCTAssertEqual(scheduler.state, .unavailable)
+        XCTAssertEqual(hostNativeAccelerators.state, .unavailable)
+        XCTAssertEqual(guestPassthrough.state, .blocked)
+        XCTAssertEqual(Set([scheduler.issue, hostNativeAccelerators.issue, guestPassthrough.issue]), Set([219]))
+        XCTAssertTrue(scheduler.reason.contains("G15"))
+        XCTAssertTrue(hostNativeAccelerators.reason.contains("G15"))
+        XCTAssertTrue(guestPassthrough.reason.contains("No supported public Apple API"))
+
         guard let ingress = report.capabilities.first(where: {
             $0.identifier == "networking.ingress"
         }) else {

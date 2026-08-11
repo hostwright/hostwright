@@ -1122,7 +1122,7 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
             }
             sleep() {
               sleep_count=$((sleep_count + 1))
-              if [[ "$sleep_count" -eq $((daemon_stop_grace_attempts + 1)) ]]; then
+              if [[ "$sleep_count" -eq $((daemon_stop_grace_attempts + 10)) ]]; then
                 printf '%s\n' 'Shutdown requested: true' >> "$daemon_log"
               fi
             }

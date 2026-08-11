@@ -768,6 +768,79 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
         XCTAssertTrue(evidence.contains("daemon-stopped generation=61 pid=424242"))
     }
 
+    func testAggregateSoakWaitsForDelayedCleanShutdownProofBeforeEscalating() throws {
+        let scriptURL = packageRoot().appendingPathComponent(
+            "scripts/phase08-soak-qualification.sh"
+        )
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-soak-delayed-proof-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let result = try runBash(
+            #"""
+            source "$1"
+            HOSTWRIGHT_PHASE08_SOAK_ROOT="$2"
+            state_file="$2/state-v2.tsv"
+            evidence_file="$2/evidence-v2.log"
+            lifecycle="$2/lifecycle.log"
+            printf 'schemaVersion\t2\n' > "$state_file"
+            : > "$evidence_file"
+            : > "$lifecycle"
+            daemon_generation=63
+            daemon_pid=444444
+            daemon_mock_running=true
+            sleep_count=0
+            daemon_log="$2/daemon-63.log"
+            printf '%s\n' 'hostwrightd foreground-dev loop stopped' > "$daemon_log"
+            daemon_process_running() {
+              [[ "$daemon_mock_running" == true ]]
+            }
+            kill() {
+              case "$1" in
+                -0) return 0 ;;
+                -TERM) printf 'TERM\n' >> "$lifecycle" ;;
+                -KILL)
+                  printf 'KILL\n' >> "$lifecycle"
+                  daemon_mock_running=false
+                  ;;
+                *) return 64 ;;
+              esac
+            }
+            sleep() {
+              sleep_count=$((sleep_count + 1))
+              if [[ "$sleep_count" -eq $((daemon_stop_grace_attempts + 1)) ]]; then
+                printf '%s\n' 'Shutdown requested: true' >> "$daemon_log"
+              fi
+            }
+            wait() {
+              printf 'WAIT\n' >> "$lifecycle"
+              return 137
+            }
+            stop_daemon
+            """#,
+            arguments: [scriptURL.path, root.path]
+        )
+
+        XCTAssertEqual(result.status, 0, result.output)
+        XCTAssertEqual(
+            try String(contentsOf: root.appendingPathComponent("lifecycle.log"), encoding: .utf8),
+            "TERM\nKILL\nWAIT\n"
+        )
+        let evidence = try String(
+            contentsOf: root.appendingPathComponent("evidence-v2.log"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(
+            evidence.contains(
+                "daemon-stop-reap-escalated generation=63 pid=444444 signal=KILL reason=clean-loop-stop"
+            )
+        )
+        XCTAssertTrue(evidence.contains("daemon-stopped generation=63 pid=444444"))
+    }
+
     func testAggregateSoakRefusesToEscalateLingeringDaemonWithoutCleanShutdownProof() throws {
         let scriptURL = packageRoot().appendingPathComponent(
             "scripts/phase08-soak-qualification.sh"

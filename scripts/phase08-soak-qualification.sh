@@ -6,6 +6,7 @@ readonly sample_interval_seconds=300
 readonly expected_samples=864
 readonly compaction_attempt_limit=5
 readonly daemon_stop_grace_attempts=30
+readonly daemon_stop_proof_attempts=5
 readonly daemon_stop_escalation_attempts=5
 readonly power_evidence_version=1
 readonly qualification_schema_version=2
@@ -578,15 +579,24 @@ wait_for_daemon_stop() {
     attempt=$((attempt + 1))
   done
   if daemon_process_running; then
-    daemon_shutdown_log_is_complete || return 1
-    record "daemon-stop-reap-escalated generation=$daemon_generation pid=$daemon_pid signal=KILL reason=clean-loop-stop"
-    kill -KILL "$daemon_pid" 2>/dev/null || ! daemon_process_running || return 1
     attempt=0
-    while daemon_process_running && [[ "$attempt" -lt "$daemon_stop_escalation_attempts" ]]; do
+    while daemon_process_running \
+        && ! daemon_shutdown_log_is_complete \
+        && [[ "$attempt" -lt "$daemon_stop_proof_attempts" ]]; do
       sleep 1
       attempt=$((attempt + 1))
     done
-    daemon_process_running && return 1
+    if daemon_process_running; then
+      daemon_shutdown_log_is_complete || return 1
+      record "daemon-stop-reap-escalated generation=$daemon_generation pid=$daemon_pid signal=KILL reason=clean-loop-stop"
+      kill -KILL "$daemon_pid" 2>/dev/null || ! daemon_process_running || return 1
+      attempt=0
+      while daemon_process_running && [[ "$attempt" -lt "$daemon_stop_escalation_attempts" ]]; do
+        sleep 1
+        attempt=$((attempt + 1))
+      done
+      daemon_process_running && return 1
+    fi
   fi
   wait "$daemon_pid" 2>/dev/null || true
 }

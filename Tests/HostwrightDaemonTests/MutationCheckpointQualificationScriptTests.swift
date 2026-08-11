@@ -104,6 +104,9 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
             "readonly sample_interval_seconds=300",
             "expected_samples=864",
             "compaction_attempt_limit=5",
+            "workload_recovery_attempt_limit=72",
+            "workload_recovery_sleep_seconds=5",
+            "running_status_failure_limit=3",
             "power_evidence_version=1",
             "qualification_schema_version=2",
             "checkpoint_schema_version=1",
@@ -144,6 +147,7 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
             "RuntimeQualificationRecoveryDriverTests",
             "RuntimeQualificationProcessControlTests",
             "container stop",
+            "restart-budget release",
             "--interval 4 --jitter 1",
             "final-rm-plan.json",
             "evidence-v2.sha256",
@@ -161,6 +165,309 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
         XCTAssertFalse(script.contains("/sbin/reboot"))
         XCTAssertFalse(script.contains("/sbin/shutdown"))
         XCTAssertFalse(script.contains("gh "))
+    }
+
+    func testAggregateSoakReleasesOnlyExactExpectedWorkloadHoldOnce() throws {
+        let scriptURL = packageRoot().appendingPathComponent(
+            "scripts/phase08-soak-qualification.sh"
+        )
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-soak-workload-hold-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let fakeHostwright = root.appendingPathComponent("hostwright")
+        try Data(
+            #"""
+            #!/usr/bin/env bash
+            set -euo pipefail
+            case "$1" in
+              status)
+                if [[ -f "$HOSTWRIGHT_TEST_RELEASED" ]]; then
+                  printf '%s\n' '{"actions":[],"services":[{"observed":{"lifecycle":"running","resourceIdentifier":"hostwright-v2-p08-soa-web-27cc4ed52496a1ebce99ec8846250834"}}]}'
+                else
+                  printf '%s\n' '{"actions":[{"executionAvailability":"unavailable","kind":"proposeStartStoppedService","reason":"Observed service is not running; crash-loop protection blocks managed start after 3/3 attempts.","resourceIdentifier":"hostwright-v2-p08-soa-web-27cc4ed52496a1ebce99ec8846250834"}],"services":[{"observed":{"lifecycle":"exited","resourceIdentifier":"hostwright-v2-p08-soa-web-27cc4ed52496a1ebce99ec8846250834"}}]}'
+                fi
+                ;;
+              restart-budget)
+                case "$2" in
+                  status)
+                    /usr/bin/jq -cn --arg db "$HOSTWRIGHT_TEST_ROOT/state.sqlite" '{released:false,restartBudgets:[{attemptCount:3,holdToken:"8fa82fd543ce2f58953212a98758568f1d4aa95732fd092ee5dbf103989de986",maxAttempts:3,projectAttemptCount:0,projectID:"project-p08-soak-d785738e",projectMaxAttempts:10,reasonClass:"process-exit",releaseGeneration:0,serviceName:"web",status:"crashLoopBlocked"}],schemaVersion:1,stateDatabasePath:$db}'
+                    ;;
+                  release)
+                    [[ " $* " == *" --project project-p08-soak-d785738e "* ]]
+                    [[ " $* " == *" --service web "* ]]
+                    [[ " $* " == *" --confirm-hold 8fa82fd543ce2f58953212a98758568f1d4aa95732fd092ee5dbf103989de986 "* ]]
+                    [[ ! -e "$HOSTWRIGHT_TEST_RELEASED" ]]
+                    printf 'release\n' >> "$HOSTWRIGHT_TEST_LIFECYCLE"
+                    : > "$HOSTWRIGHT_TEST_RELEASED"
+                    /usr/bin/jq -cn --arg db "$HOSTWRIGHT_TEST_ROOT/state.sqlite" '{released:true,restartBudgets:[{attemptCount:0,maxAttempts:3,projectAttemptCount:0,projectID:"project-p08-soak-d785738e",projectMaxAttempts:10,reasonClass:"operator-request",releaseGeneration:1,serviceName:"web",status:"active"}],schemaVersion:1,stateDatabasePath:$db}'
+                    ;;
+                  *) exit 64 ;;
+                esac
+                ;;
+              *) exit 64 ;;
+            esac
+            """#.utf8
+        ).write(to: fakeHostwright)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: fakeHostwright.path
+        )
+
+        let result = try runBash(
+            #"""
+            source "$1"
+            HOSTWRIGHT_PHASE08_SOAK_ROOT="$2"
+            HOSTWRIGHT_PHASE08_SOAK_HOSTWRIGHT="$3"
+            evidence_file="$2/evidence-v2.log"
+            : > "$evidence_file"
+            : > "$2/state.sqlite"
+            resource_identifier='hostwright-v2-p08-soa-web-27cc4ed52496a1ebce99ec8846250834'
+            resource_uuid='5a2ecf85-5730-82c6-ba84-8693f4df0a1d'
+            project_name='p08-soak-d785738e'
+            daemon_pid=''
+            container() {
+              [[ "$1" == stop && "$2" == "$resource_identifier" ]]
+              printf 'stop\n' >> "$HOSTWRIGHT_TEST_LIFECYCLE"
+            }
+            verify_exclusive_runtime_inventory() { :; }
+            sleep() { :; }
+            inject_workload_fault 648
+            """#,
+            arguments: [scriptURL.path, root.path, fakeHostwright.path],
+            environment: [
+                "HOSTWRIGHT_TEST_LIFECYCLE": root.appendingPathComponent("lifecycle").path,
+                "HOSTWRIGHT_TEST_RELEASED": root.appendingPathComponent("released").path,
+                "HOSTWRIGHT_TEST_ROOT": root.path
+            ]
+        )
+
+        XCTAssertEqual(result.status, 0, result.output)
+        XCTAssertEqual(
+            try String(contentsOf: root.appendingPathComponent("lifecycle"), encoding: .utf8),
+            "stop\nrelease\n"
+        )
+        let evidence = try String(
+            contentsOf: root.appendingPathComponent("evidence-v2.log"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(
+            evidence.contains(
+                "workload-restart-hold-release-consumed sequence=648 project=project-p08-soak-d785738e service=web"
+            )
+        )
+        XCTAssertTrue(
+            evidence.contains(
+                "workload-restart-hold-released sequence=648 project=project-p08-soak-d785738e service=web releaseGeneration=1"
+            )
+        )
+        XCTAssertTrue(
+            evidence.contains(
+                "workload-recovered resource=hostwright-v2-p08-soa-web-27cc4ed52496a1ebce99ec8846250834"
+            )
+        )
+    }
+
+    func testAggregateSoakRecognizesOnlyAnUnrecoveredWorkloadFaultForResume() throws {
+        let scriptURL = packageRoot().appendingPathComponent(
+            "scripts/phase08-soak-qualification.sh"
+        )
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-soak-pending-workload-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let result = try runBash(
+            #"""
+            source "$1"
+            evidence_file="$2/evidence-v2.log"
+            resource_identifier='hostwright-v2-p08-soa-web-27cc4ed52496a1ebce99ec8846250834'
+            printf '%s\n' \
+              $'2026-08-10T23:11:07Z\tworkload-stop-injected resource=hostwright-v2-p08-soa-web-27cc4ed52496a1ebce99ec8846250834' \
+              $'2026-08-10T23:11:16Z\tworkload-recovered resource=hostwright-v2-p08-soa-web-27cc4ed52496a1ebce99ec8846250834' \
+              $'2026-08-11T08:54:57Z\tworkload-stop-injected resource=hostwright-v2-p08-soa-web-27cc4ed52496a1ebce99ec8846250834' \
+              $'2026-08-11T08:58:32Z\tfailure\tThe exact soak workload did not converge to running within three minutes.' \
+              > "$evidence_file"
+            has_pending_expected_workload_fault
+            printf '%s\n' $'2026-08-11T09:00:00Z\tfailure\tThe exact soak workload status could not be read during running verification.' \
+              >> "$evidence_file"
+            if has_pending_expected_workload_fault; then
+              exit 75
+            fi
+            printf '%s\n' $'2026-08-11T09:01:00Z\tfailure\tThe exact soak workload did not converge during its bounded intentional-fault recovery window.' \
+              >> "$evidence_file"
+            has_pending_expected_workload_fault
+            printf '%s\n' $'2026-08-11T09:05:00Z\tworkload-recovered resource=hostwright-v2-p08-soa-web-27cc4ed52496a1ebce99ec8846250834' \
+              >> "$evidence_file"
+            if has_pending_expected_workload_fault; then
+              exit 75
+            fi
+            """#,
+            arguments: [scriptURL.path, root.path]
+        )
+
+        XCTAssertEqual(result.status, 0, result.output)
+    }
+
+    func testAggregateSoakDoesNotReleaseASecondHoldAfterInterruptedRecovery() throws {
+        let scriptURL = packageRoot().appendingPathComponent(
+            "scripts/phase08-soak-qualification.sh"
+        )
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-soak-consumed-hold-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let fakeHostwright = root.appendingPathComponent("hostwright")
+        try Data(
+            #"""
+            #!/usr/bin/env bash
+            set -euo pipefail
+            case "$1" in
+              status)
+                printf '%s\n' '{"actions":[{"executionAvailability":"unavailable","kind":"proposeStartStoppedService","reason":"Observed service is not running; crash-loop protection blocks managed start after 3/3 attempts.","resourceIdentifier":"hostwright-v2-p08-soa-web-27cc4ed52496a1ebce99ec8846250834"}],"services":[{"observed":{"lifecycle":"exited","resourceIdentifier":"hostwright-v2-p08-soa-web-27cc4ed52496a1ebce99ec8846250834"}}]}'
+                ;;
+              restart-budget)
+                printf 'unexpected restart-budget invocation\n' >> "$HOSTWRIGHT_TEST_LIFECYCLE"
+                exit 75
+                ;;
+              *) exit 64 ;;
+            esac
+            """#.utf8
+        ).write(to: fakeHostwright)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: fakeHostwright.path
+        )
+
+        let result = try runBash(
+            #"""
+            source "$1"
+            HOSTWRIGHT_PHASE08_SOAK_ROOT="$2"
+            HOSTWRIGHT_PHASE08_SOAK_HOSTWRIGHT="$3"
+            evidence_file="$2/evidence-v2.log"
+            resource_identifier='hostwright-v2-p08-soa-web-27cc4ed52496a1ebce99ec8846250834'
+            resource_uuid='5a2ecf85-5730-82c6-ba84-8693f4df0a1d'
+            project_name='p08-soak-d785738e'
+            daemon_pid=''
+            printf '%s\n' \
+              $'2026-08-11T09:00:00Z\tworkload-stop-injected resource=hostwright-v2-p08-soa-web-27cc4ed52496a1ebce99ec8846250834 sequence=648' \
+              $'2026-08-11T09:03:15Z\tworkload-restart-hold-release-consumed sequence=648 project=project-p08-soak-d785738e service=web holdTokenSHA256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa releaseGeneration=1' \
+              $'2026-08-11T09:06:00Z\tfailure\tThe exact soak workload did not converge during its bounded intentional-fault recovery window.' \
+              > "$evidence_file"
+            sleep() { :; }
+            verify_running workload-fault 648
+            """#,
+            arguments: [scriptURL.path, root.path, fakeHostwright.path],
+            environment: [
+                "HOSTWRIGHT_TEST_LIFECYCLE": root.appendingPathComponent("lifecycle").path
+            ]
+        )
+
+        XCTAssertEqual(result.status, 75, result.output)
+        XCTAssertTrue(result.output.contains("already consumed its one release"))
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: root.appendingPathComponent("lifecycle").path
+            )
+        )
+    }
+
+    func testAggregateSoakBoundsIntentionalWorkloadRecoveryPolling() throws {
+        let scriptURL = packageRoot().appendingPathComponent(
+            "scripts/phase08-soak-qualification.sh"
+        )
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-soak-workload-window-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let fakeHostwright = root.appendingPathComponent("hostwright")
+        try Data(
+            #"""
+            #!/usr/bin/env bash
+            set -euo pipefail
+            [[ "$1" == status ]]
+            printf '%s\n' '{"actions":[],"services":[{"observed":{"lifecycle":"exited","resourceIdentifier":"hostwright-v2-p08-soa-web-27cc4ed52496a1ebce99ec8846250834"}}]}'
+            """#.utf8
+        ).write(to: fakeHostwright)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: fakeHostwright.path
+        )
+
+        let result = try runBash(
+            #"""
+            source "$1"
+            HOSTWRIGHT_PHASE08_SOAK_ROOT="$2"
+            HOSTWRIGHT_PHASE08_SOAK_HOSTWRIGHT="$3"
+            evidence_file="$2/evidence-v2.log"
+            : > "$evidence_file"
+            resource_identifier='hostwright-v2-p08-soa-web-27cc4ed52496a1ebce99ec8846250834'
+            daemon_pid=''
+            sleep() { printf 'sleep\n' >> "$HOSTWRIGHT_TEST_SLEEPS"; }
+            verify_running workload-fault 648
+            """#,
+            arguments: [scriptURL.path, root.path, fakeHostwright.path],
+            environment: [
+                "HOSTWRIGHT_TEST_SLEEPS": root.appendingPathComponent("sleeps").path
+            ]
+        )
+
+        XCTAssertEqual(result.status, 70, result.output)
+        XCTAssertTrue(
+            result.output.contains(
+                "did not converge during its bounded intentional-fault recovery window"
+            )
+        )
+        let sleeps = try String(
+            contentsOf: root.appendingPathComponent("sleeps"),
+            encoding: .utf8
+        ).split(separator: "\n")
+        XCTAssertEqual(sleeps.count, 72)
+    }
+
+    func testAggregateSoakRecordsAndSecuresFaultCellFailure() throws {
+        let scriptURL = packageRoot().appendingPathComponent(
+            "scripts/phase08-soak-qualification.sh"
+        )
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-soak-fault-cell-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let result = try runBash(
+            #"""
+            source "$1"
+            HOSTWRIGHT_PHASE08_SOAK_ROOT="$2"
+            evidence_file="$2/evidence-v2.log"
+            : > "$evidence_file"
+            swift() {
+              printf 'focused failure\n'
+              return 42
+            }
+            status=0
+            run_fault_cell 'Selector.testFailure' 'focused-fault' || status=$?
+            [[ "$status" == 42 ]]
+            [[ "$(stat -f '%Lp' "$2/focused-fault.log")" == 600 ]]
+            grep -Fqx 'focused failure' "$2/focused-fault.log"
+            grep -Fq $'focused-fault-fail selector=Selector.testFailure status=42' "$evidence_file"
+            """#,
+            arguments: [scriptURL.path, root.path]
+        )
+
+        XCTAssertEqual(result.status, 0, result.output)
     }
 
     func testAggregateSoakRefusesExternalOrRemovableStorage() throws {

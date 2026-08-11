@@ -5,6 +5,9 @@ readonly duration_seconds=259200
 readonly sample_interval_seconds=300
 readonly expected_samples=864
 readonly compaction_attempt_limit=5
+readonly workload_recovery_attempt_limit=72
+readonly workload_recovery_sleep_seconds=5
+readonly running_status_failure_limit=3
 readonly daemon_stop_grace_attempts=30
 readonly daemon_stop_proof_attempts=5
 readonly daemon_stop_escalation_attempts=5
@@ -46,6 +49,7 @@ compaction_failure_message=''
 checkpoint_source_commit=''
 source_commit_history=''
 source_transition_required=0
+resume_expected_workload_fault=0
 
 die() {
   local message="$1"
@@ -67,10 +71,11 @@ contract() {
   printf '%s\n' 'The global Apple-container inventory must contain no other Hostwright-managed runtime before or throughout the run.'
   printf '%s\n' 'The clean source, executables, template, and private evidence root must remain on writable internal non-removable storage.'
   printf '%s\n' 'Configuration churn, bounded pressure, daemon/workload/helper/runtime faults, and all local observability sinks are exercised serially.'
+  printf '%s\n' 'An intentional workload fault has one bounded six-minute recovery window and may consume only one exact process-exit crash-loop hold release before failing closed.'
   printf '%s\n' 'A timestamp-bound real sleep then wake must occur inside a qualified segment; the runner never forces either transition.'
   printf '%s\n' 'Compaction quiesces the foreground daemon for the plan-confirm transaction and always restores a fresh daemon before returning.'
   printf '%s\n' 'Failure preserves evidence and exact resource identity; success performs confirmation-bound owned-only cleanup.'
-  printf '%s\n' 'No CI, GitHub, network listener, upload, reboot, logout, release, tag, tap, or website action is performed.'
+  printf '%s\n' 'No CI, GitHub, network listener, upload, reboot, logout, public release, tag, tap, or website action is performed.'
 }
 
 sha256() {
@@ -615,9 +620,107 @@ stop_daemon() {
   daemon_pid=''
 }
 
+workload_restart_hold_release_consumed() {
+  local sequence="$1"
+  awk -F '\t' -v prefix="workload-restart-hold-release-consumed sequence=$sequence " '
+    index($2, prefix) == 1 { consumed = 1 }
+    END { exit(consumed ? 0 : 1) }
+  ' "$evidence_file"
+}
+
+release_expected_workload_restart_hold() {
+  local sequence="$1"
+  local project_id="project-${project_name}"
+  local budget_json budget_count budget_status hold_token release_generation service_name
+  local release_json hold_token_sha256
+  [[ "$sequence" =~ ^[1-9][0-9]*$ && "$sequence" -le "$expected_samples" \
+      && "$project_id" =~ ^project-[A-Za-z0-9][A-Za-z0-9._-]{0,126}[A-Za-z0-9]$ ]] \
+    || die 'Expected workload restart-hold recovery has invalid identity.' 75
+  workload_restart_hold_release_consumed "$sequence" \
+    && die 'Expected workload restart-hold recovery already consumed its one release for this sequence.' 75
+  budget_json="$("$HOSTWRIGHT_PHASE08_SOAK_HOSTWRIGHT" restart-budget status \
+    --project "$project_id" --state-db "$HOSTWRIGHT_PHASE08_SOAK_ROOT/state.sqlite" \
+    --output json)" \
+    || die 'Expected workload restart-hold recovery could not inspect the exact restart budget.' 75
+  budget_count="$(printf '%s' "$budget_json" | /usr/bin/jq -er \
+    --arg project "$project_id" '
+      if .schemaVersion != 1 or .released != false then error("invalid restart budget envelope") else . end
+      | [.restartBudgets[] | select(.projectID == $project)] | length
+    ')" \
+    || die 'Expected workload restart-hold recovery found malformed restart-budget evidence.' 75
+  [[ "$budget_count" == 1 ]] \
+    || die 'Expected workload restart-hold recovery requires exactly one bound project budget.' 75
+  budget_status="$(printf '%s' "$budget_json" | /usr/bin/jq -er \
+    --arg project "$project_id" '.restartBudgets[] | select(.projectID == $project) | .status')"
+  case "$budget_status" in
+    active|backingOff|stablePending)
+      return 1
+      ;;
+    crashLoopBlocked) ;;
+    *)
+      die 'Expected workload restart-hold recovery refused a non-crash-loop hold.' 75
+      ;;
+  esac
+  read -r hold_token release_generation service_name < <(
+    printf '%s' "$budget_json" | /usr/bin/jq -er --arg project "$project_id" '
+      .restartBudgets[] | select(.projectID == $project)
+      | select(
+          .status == "crashLoopBlocked"
+          and .reasonClass == "process-exit"
+          and .attemptCount == .maxAttempts
+          and .maxAttempts > 0
+          and .projectAttemptCount <= .projectMaxAttempts
+          and (.holdToken | test("^[a-f0-9]{64}$"))
+          and (.releaseGeneration >= 0)
+          and (.serviceName | test("^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"))
+        )
+      | [.holdToken, (.releaseGeneration | tostring), .serviceName] | @tsv
+    '
+  ) || die 'Expected workload restart-hold recovery found conflicting hold evidence.' 75
+  [[ "$hold_token" =~ ^[a-f0-9]{64}$ && "$release_generation" =~ ^[0-9]+$ \
+      && "$service_name" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]] \
+    || die 'Expected workload restart-hold recovery found incomplete hold evidence.' 75
+  hold_token_sha256="$(printf '%s' "$hold_token" | sha256_text)"
+  record "workload-restart-hold-release-consumed sequence=$sequence project=$project_id service=$service_name holdTokenSHA256=$hold_token_sha256 releaseGeneration=$((release_generation + 1))"
+  release_json="$("$HOSTWRIGHT_PHASE08_SOAK_HOSTWRIGHT" restart-budget release \
+    --project "$project_id" --service "$service_name" --confirm-hold "$hold_token" \
+    --state-db "$HOSTWRIGHT_PHASE08_SOAK_ROOT/state.sqlite" --output json)" \
+    || die 'Expected workload restart-hold recovery could not release the exact confirmed hold.' 75
+  printf '%s' "$release_json" | /usr/bin/jq -e \
+    --arg project "$project_id" --arg service "$service_name" \
+    --argjson generation "$((release_generation + 1))" '
+      .schemaVersion == 1
+      and .released == true
+      and (.restartBudgets | length) == 1
+      and .restartBudgets[0].projectID == $project
+      and .restartBudgets[0].serviceName == $service
+      and .restartBudgets[0].status == "active"
+      and .restartBudgets[0].attemptCount == 0
+      and .restartBudgets[0].reasonClass == "operator-request"
+      and .restartBudgets[0].releaseGeneration == $generation
+      and (.restartBudgets[0] | has("holdToken") | not)
+    ' >/dev/null \
+    || die 'Expected workload restart-hold recovery could not verify the released generation.' 75
+  record "workload-restart-hold-released sequence=$sequence project=$project_id service=$service_name releaseGeneration=$((release_generation + 1))"
+}
+
 verify_running() {
-  local attempt=0 status_json lifecycle current_identifier
-  while [[ "$attempt" -lt 36 ]]; do
+  local recovery_mode="${1:-strict}"
+  local recovery_sequence="${2:-0}"
+  local attempt=0 attempt_limit=36 status_json lifecycle current_identifier blocked_actions
+  local hold_release_count=0 status_failure_count=0
+  case "$recovery_mode" in
+    strict) ;;
+    workload-fault)
+      [[ "$recovery_sequence" =~ ^[1-9][0-9]*$ && "$recovery_sequence" -le "$expected_samples" ]] \
+        || die 'Expected workload recovery requires its exact sequence.' 75
+      attempt_limit="$workload_recovery_attempt_limit"
+      ;;
+    *)
+      die 'The soak running-verification recovery mode is invalid.' 75
+      ;;
+  esac
+  while [[ "$attempt" -lt "$attempt_limit" ]]; do
     if [[ -n "$daemon_pid" ]] && ! daemon_process_running; then
       die 'The foreground daemon exited before healthy convergence.'
     fi
@@ -625,6 +728,7 @@ verify_running() {
         "$HOSTWRIGHT_PHASE08_SOAK_ROOT/hostwright.yaml" \
         --state-db "$HOSTWRIGHT_PHASE08_SOAK_ROOT/state.sqlite" \
         --runtime-provider apple-cli --output json 2>/dev/null)"; then
+      status_failure_count=0
       lifecycle="$(printf '%s' "$status_json" | /usr/bin/jq -er '.services[0].observed.lifecycle // empty' 2>/dev/null || true)"
       current_identifier="$(printf '%s' "$status_json" | /usr/bin/jq -er '.services[0].observed.resourceIdentifier // empty' 2>/dev/null || true)"
       if [[ "$lifecycle" == running && "$current_identifier" =~ $resource_identifier_pattern ]]; then
@@ -646,10 +750,35 @@ verify_running() {
         fi
         return
       fi
+      if [[ "$recovery_mode" == workload-fault && "$hold_release_count" == 0 ]]; then
+        blocked_actions="$(printf '%s' "$status_json" | /usr/bin/jq -er \
+          --arg id "$resource_identifier" '
+            [.actions[]? | select(
+              .kind == "proposeStartStoppedService"
+              and .executionAvailability == "unavailable"
+              and .resourceIdentifier == $id
+              and (.reason | contains("crash-loop protection blocks"))
+            )] | length
+          ' 2>/dev/null || true)"
+        [[ "$blocked_actions" == 0 || "$blocked_actions" == 1 ]] \
+          || die 'Expected workload recovery found ambiguous crash-loop actions.' 75
+        if [[ "$blocked_actions" == 1 ]]; then
+          if release_expected_workload_restart_hold "$recovery_sequence"; then
+            hold_release_count=1
+          fi
+        fi
+      fi
+    else
+      status_failure_count=$((status_failure_count + 1))
+      [[ "$status_failure_count" -lt "$running_status_failure_limit" ]] \
+        || die 'The exact soak workload status could not be read during running verification.' 69
     fi
-    sleep 5
+    sleep "$workload_recovery_sleep_seconds"
     attempt=$((attempt + 1))
   done
+  if [[ "$recovery_mode" == workload-fault ]]; then
+    die 'The exact soak workload did not converge during its bounded intentional-fault recovery window.'
+  fi
   die 'The exact soak workload did not converge to running within three minutes.'
 }
 
@@ -1426,6 +1555,21 @@ run_checkpointed_fault() {
   record "fault-receipt-committed sequence=$sequence label=$label sha256=$receipt_sha"
 }
 
+has_pending_expected_workload_fault() {
+  awk -F '\t' -v stop="workload-stop-injected resource=$resource_identifier" \
+      -v recovered="workload-recovered resource=$resource_identifier" '
+    index($2, stop) == 1 { stopLine = NR }
+    index($2, recovered) == 1 { recoveredLine = NR }
+    $2 == "failure" {
+      failureLine = NR
+      expectedFailure = ($3 == "The exact soak workload did not converge to running within three minutes." || $3 == "The exact soak workload did not converge during its bounded intentional-fault recovery window.")
+    }
+    END {
+      exit(stopLine > recoveredLine && failureLine > stopLine && expectedFailure ? 0 : 1)
+    }
+  ' "$evidence_file"
+}
+
 run_scheduled_faults() {
   local sequence="$1"
   if (( sequence % 12 == 0 )); then
@@ -1433,7 +1577,7 @@ run_scheduled_faults() {
   fi
   if (( sequence % 72 == 0 )); then
     run_checkpointed_fault "$sequence" pressure inject_pressure
-    run_checkpointed_fault "$sequence" workload inject_workload_fault
+    run_checkpointed_fault "$sequence" workload inject_workload_fault "$sequence"
   fi
   if (( sequence % 144 == 0 )); then
     run_checkpointed_fault "$sequence" daemon inject_daemon_fault
@@ -1484,10 +1628,11 @@ runner_exit() {
 }
 
 inject_workload_fault() {
+  local sequence="$1"
   container stop "$resource_identifier" >/dev/null
-  record "workload-stop-injected resource=$resource_identifier"
-  verify_running
-  record "workload-recovered resource=$resource_identifier"
+  record "workload-stop-injected resource=$resource_identifier sequence=$sequence"
+  verify_running workload-fault "$sequence"
+  record "workload-recovered resource=$resource_identifier sequence=$sequence"
 }
 
 inject_daemon_fault() {
@@ -1503,9 +1648,19 @@ run_fault_cell() {
   local selector="$1"
   local label="$2"
   local log_file="$HOSTWRIGHT_PHASE08_SOAK_ROOT/$label.log"
-  (umask 022 && swift test --filter "$selector") > "$log_file" 2>&1
+  local status=0
+  : > "$log_file"
   chmod 600 "$log_file"
-  record "$label-pass selector=$selector"
+  if (umask 022 && swift test --filter "$selector") > "$log_file" 2>&1; then
+    chmod 600 "$log_file"
+    record "$label-pass selector=$selector"
+    return
+  else
+    status=$?
+  fi
+  chmod 600 "$log_file"
+  record "$label-fail selector=$selector status=$status"
+  return "$status"
 }
 
 export_observability() {
@@ -1686,6 +1841,9 @@ prepare_resume() {
   phase="$(latest_state_value phase)"
   [[ "$phase" == resumable || "$phase" == running || "$phase" == prepared ]] \
     || die 'Only a prepared or resumable cumulative qualification can continue.' 75
+  if has_pending_expected_workload_fault; then
+    resume_expected_workload_fault=1
+  fi
   validate_checkpoint_chain
   recover_uncommitted_artifacts
   checkpointed_project="$project_name"
@@ -1713,7 +1871,11 @@ run_qualification_segment() {
     > "$HOSTWRIGHT_PHASE08_SOAK_ROOT/segment-${segment_id}-pre-runtime-inventory.json"
   chmod 600 "$HOSTWRIGHT_PHASE08_SOAK_ROOT/segment-${segment_id}-pre-runtime-inventory.json"
   start_daemon
-  verify_running
+  if [[ "$resume_expected_workload_fault" == 1 ]]; then
+    verify_running workload-fault "$((cumulative_samples + 1))"
+  else
+    verify_running
+  fi
   record "segment-runtime-ready id=$segment_id project=$project_name resource=$resource_identifier uuid=$resource_uuid"
 
   local next_sample now sequence

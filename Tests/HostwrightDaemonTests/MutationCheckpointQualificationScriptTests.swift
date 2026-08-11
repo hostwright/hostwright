@@ -318,6 +318,58 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
         XCTAssertEqual(result.status, 0, result.output)
     }
 
+    func testAggregateSoakDerivesPendingWorkloadSequenceAfterCheckpointValidation() throws {
+        let scriptURL = packageRoot().appendingPathComponent(
+            "scripts/phase08-soak-qualification.sh"
+        )
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-soak-pending-workload-sequence-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let result = try runBash(
+            #"""
+            source "$1"
+            HOSTWRIGHT_PHASE08_SOAK_ROOT="$2"
+            HOSTWRIGHT_PHASE08_SOAK_HOSTWRIGHT='/usr/bin/true'
+            project_name='p08-soak-test'
+            last_config_sha256='fixture-config'
+            test_root="$2"
+            validate_root() { :; }
+            configure_authority_paths() { :; }
+            load_qualification_state() { cumulative_samples=0; }
+            latest_state_value() {
+              [[ "$1" == phase ]]
+              printf 'resumable\n'
+            }
+            validate_checkpoint_chain() {
+              cumulative_samples=719
+              cumulative_seconds=215700
+              previous_checkpoint_sha256='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+            }
+            has_pending_expected_workload_fault() {
+              printf '%s\n' "$1" > "$test_root/pending-sequence"
+              return 0
+            }
+            recover_uncommitted_artifacts() { :; }
+            write_manifest() { :; }
+            sha256() { printf 'fixture-config\n'; }
+            validate_inputs() { :; }
+            commit_source_transition() { :; }
+            record() { :; }
+            : > "$2/hostwright.yaml"
+            prepare_resume
+            [[ "$(<"$2/pending-sequence")" == 720 ]]
+            [[ "$resume_expected_workload_fault" == 1 ]]
+            """#,
+            arguments: [scriptURL.path, root.path]
+        )
+
+        XCTAssertEqual(result.status, 0, result.output)
+    }
+
     func testAggregateSoakDoesNotReleaseASecondHoldAfterInterruptedRecovery() throws {
         let scriptURL = packageRoot().appendingPathComponent(
             "scripts/phase08-soak-qualification.sh"

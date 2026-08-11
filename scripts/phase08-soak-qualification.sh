@@ -1866,13 +1866,13 @@ prepare_resume() {
   phase="$(latest_state_value phase)"
   [[ "$phase" == resumable || "$phase" == running || "$phase" == prepared ]] \
     || die 'Only a prepared or resumable cumulative qualification can continue.' 75
+  validate_checkpoint_chain
   pending_sequence=$((cumulative_samples + 1))
   if has_pending_expected_workload_fault "$pending_sequence"; then
     [[ $((pending_sequence % 72)) == 0 ]] \
       || die 'Pending workload recovery does not match a scheduled fault sequence.' 75
     resume_expected_workload_fault=1
   fi
-  validate_checkpoint_chain
   recover_uncommitted_artifacts
   checkpointed_project="$project_name"
   write_manifest "$cumulative_samples"

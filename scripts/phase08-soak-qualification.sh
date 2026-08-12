@@ -204,7 +204,7 @@ validate_source_transition() {
   while IFS= read -r changed_path; do
     [[ -z "$changed_path" ]] && continue
     case "$changed_path" in
-      scripts/phase08-soak-qualification.sh|Tests/HostwrightDaemonTests/MutationCheckpointQualificationScriptTests.swift)
+      scripts/phase08-soak-qualification.sh|Tests/HostwrightDaemonTests/MutationCheckpointQualificationScriptTests.swift|Sources/HostwrightState/StateRetentionModels.swift|Sources/HostwrightState/StateRetentionService.swift|Tests/HostwrightStateTests/StateRetentionTests.swift|Sources/HostwrightCLI/CLICommand.swift|Sources/HostwrightCLI/StateMaintenanceCommand.swift|Sources/HostwrightCLI/HostwrightCLI.swift|Tests/HostwrightCLITests/StateMaintenanceCLITests.swift)
         ;;
       *)
         die "The source transition changed an out-of-scope path: $changed_path" 75
@@ -218,8 +218,12 @@ commit_source_transition() {
   validate_source_transition
   local prior_commit="$checkpoint_source_commit"
   local current_commit="$HOSTWRIGHT_PHASE08_SOAK_SOURCE_COMMIT"
-  local new_digest history
+  local new_digest new_hostwright_sha new_daemon_sha history
   new_digest="$(source_digest)"
+  new_hostwright_sha="$(sha256 "$HOSTWRIGHT_PHASE08_SOAK_HOSTWRIGHT")"
+  new_daemon_sha="$(sha256 "$HOSTWRIGHT_PHASE08_SOAK_DAEMON")"
+  [[ "$new_hostwright_sha" =~ ^[a-f0-9]{64}$ && "$new_daemon_sha" =~ ^[a-f0-9]{64}$ ]] \
+    || die 'The source-transition executable identities are malformed.' 75
   history="${source_commit_history:-$checkpoint_source_commit}"
   case ",$history," in
     *,$current_commit,*) die 'The source transition was already recorded.' 75 ;;
@@ -228,11 +232,15 @@ commit_source_transition() {
   append_state sourceCommitHistory "$history"
   append_state sourceCommit "$current_commit"
   append_state sourceDigest "$new_digest"
+  append_state hostwrightSHA256 "$new_hostwright_sha"
+  append_state daemonSHA256 "$new_daemon_sha"
   checkpoint_source_commit="$current_commit"
   source_commit_history="$history"
   source_sha="$new_digest"
+  hostwright_sha="$new_hostwright_sha"
+  daemon_sha="$new_daemon_sha"
   source_transition_required=0
-  record "source-transition-accepted prior=$prior_commit current=$current_commit sourceDigest=$new_digest"
+  record "source-transition-accepted prior=$prior_commit current=$current_commit sourceDigest=$new_digest hostwrightSHA256=$new_hostwright_sha daemonSHA256=$new_daemon_sha"
 }
 
 require_canonical_file() {
@@ -891,13 +899,20 @@ load_qualification_state() {
   if [[ "$checkpoint_source_commit" != "$HOSTWRIGHT_PHASE08_SOAK_SOURCE_COMMIT" ]]; then
     source_transition_required=1
   fi
+  local current_hostwright_sha current_daemon_sha
+  current_hostwright_sha="$(sha256 "$HOSTWRIGHT_PHASE08_SOAK_HOSTWRIGHT")"
+  current_daemon_sha="$(sha256 "$HOSTWRIGHT_PHASE08_SOAK_DAEMON")"
+  [[ "$current_hostwright_sha" =~ ^[a-f0-9]{64}$ && "$current_daemon_sha" =~ ^[a-f0-9]{64}$ ]] \
+    || die 'The resume executable identities are malformed.' 75
   if [[ "$source_transition_required" == 0 ]]; then
-    [[ "$source_sha" == "$(source_digest)" ]] \
-      || die 'Resume refused changed source digest.' 75
+    [[ "$source_sha" == "$(source_digest)" \
+        && "$hostwright_sha" == "$current_hostwright_sha" \
+        && "$daemon_sha" == "$current_daemon_sha" ]] \
+      || die 'Resume refused changed source digest or executable identity.' 75
+  else
+    validate_source_transition
   fi
-  [[ "$hostwright_sha" == "$(sha256 "$HOSTWRIGHT_PHASE08_SOAK_HOSTWRIGHT")" \
-      && "$daemon_sha" == "$(sha256 "$HOSTWRIGHT_PHASE08_SOAK_DAEMON")" \
-      && "$template_sha" == "$(sha256 "$HOSTWRIGHT_PHASE08_SOAK_CONFIG_TEMPLATE")" \
+  [[ "$template_sha" == "$(sha256 "$HOSTWRIGHT_PHASE08_SOAK_CONFIG_TEMPLATE")" \
       && "$host_identity_sha" == "$(current_host_identity)" \
       && "$(latest_state_value imageReference)" == "$HOSTWRIGHT_PHASE08_SOAK_IMAGE" \
       && "$(latest_state_value hostPort)" == "$HOSTWRIGHT_PHASE08_SOAK_HOST_PORT" ]] \
@@ -1257,13 +1272,25 @@ inject_pressure() {
 compact_state_attempts() {
   local sequence="$1"
   local attempt=1
+  local artifact_segment="${segment_id:-unbound}"
   compaction_failure_message=''
+  if [[ ! "$artifact_segment" =~ ^[a-z0-9-]+$ ]]; then
+    compaction_failure_message='The compaction artifact segment identity is malformed.'
+    return 75
+  fi
   while [[ "$attempt" -le "$compaction_attempt_limit" ]]; do
-    local prefix="$HOSTWRIGHT_PHASE08_SOAK_ROOT/compaction-${sequence}-attempt-${attempt}"
+    local prefix="$HOSTWRIGHT_PHASE08_SOAK_ROOT/compaction-${sequence}-segment-${artifact_segment}-attempt-${attempt}"
     local plan="${prefix}-plan.json"
     local plan_error="${prefix}-plan.error"
     local result="${prefix}-result.json"
     local result_error="${prefix}-result.error"
+    local artifact
+    for artifact in "$plan" "$plan_error" "$result" "$result_error"; do
+      if [[ -e "$artifact" || -L "$artifact" ]]; then
+        compaction_failure_message="A sealed compaction artifact already exists: ${artifact##*/}"
+        return 75
+      fi
+    done
     if ! "$HOSTWRIGHT_PHASE08_SOAK_HOSTWRIGHT" state compact \
         "$HOSTWRIGHT_PHASE08_SOAK_ROOT/hostwright.yaml" --dry-run \
         --state-db "$HOSTWRIGHT_PHASE08_SOAK_ROOT/state.sqlite" --output json \
@@ -1278,15 +1305,21 @@ compact_state_attempts() {
       return 0
     fi
 
-    local token status
+    local token evaluated_at status
     token="$(/usr/bin/jq -er '.confirmationToken' "$plan")" \
       || {
         compaction_failure_message="Soak compaction plan omitted its confirmation token at sequence $sequence attempt $attempt."
         return 70
       }
+    evaluated_at="$(/usr/bin/jq -er '.evaluatedAt' "$plan")" \
+      || {
+        compaction_failure_message="Soak compaction plan omitted its evaluation time at sequence $sequence attempt $attempt."
+        return 70
+      }
     status=0
     "$HOSTWRIGHT_PHASE08_SOAK_HOSTWRIGHT" state compact \
       "$HOSTWRIGHT_PHASE08_SOAK_ROOT/hostwright.yaml" --confirm-compact "$token" \
+      --evaluated-at "$evaluated_at" \
       --state-db "$HOSTWRIGHT_PHASE08_SOAK_ROOT/state.sqlite" --output json \
       > "$result" 2> "$result_error" || status=$?
     chmod 600 "$result" "$result_error"
@@ -1295,7 +1328,7 @@ compact_state_attempts() {
         compaction_failure_message='Confirmed soak compaction did not preserve healthy integrity.'
         return 70
       fi
-      record "compaction-pass sequence=$sequence attempt=$attempt"
+      record "compaction-pass sequence=$sequence attempt=$attempt evaluatedAt=$evaluated_at"
       return 0
     fi
     if [[ "$status" == 70 ]] \

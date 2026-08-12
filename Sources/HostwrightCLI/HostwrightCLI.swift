@@ -533,7 +533,7 @@ public enum HostwrightCLI {
       hostwright state recover [--state-db <path>] [--json|--output text|json]
       hostwright state retention <manifest> [--state-db <path>] [--json|--output text|json]
       hostwright state compact <manifest> --dry-run [--state-db <path>] [--json|--output text|json]
-      hostwright state compact <manifest> --confirm-compact <token> [--state-db <path>] [--json|--output text|json]
+      hostwright state compact <manifest> --confirm-compact <token> --evaluated-at <RFC3339> [--state-db <path>] [--json|--output text|json]
       hostwright secret create <keychain-reference> [--state-db <path>] [--json|--output text|json]
       hostwright secret update <keychain-reference> [--state-db <path>] [--json|--output text|json]
       hostwright secret list [--json|--output text|json]

@@ -127,6 +127,8 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
             "source_digest",
             "current_host_identity",
             "HOSTWRIGHT_PHASE08_SOAK_SOURCE_COMMIT",
+            "append_state hostwrightSHA256",
+            "append_state daemonSHA256",
             ".configuration.descriptor.digest",
             "require_internal_persistent_path",
             "RemovableMediaOrExternalDevice",
@@ -136,6 +138,8 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
             "traces inspect",
             "diagnostics support preview",
             "state compact",
+            "--evaluated-at",
+            ".evaluatedAt",
             "compaction-stale-plan",
             "compaction-daemon-quiesce-requested",
             "compaction-daemon-quiesced",
@@ -723,19 +727,22 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
             set -euo pipefail
             dry_run=false
             token=''
+            evaluated_at=''
             while [[ "$#" -gt 0 ]]; do
               case "$1" in
                 --dry-run) dry_run=true ;;
                 --confirm-compact) shift; token="$1" ;;
+                --evaluated-at) shift; evaluated_at="$1" ;;
               esac
               shift
             done
             if [[ "$dry_run" == true ]]; then
               attempt="$(( $(<"$HOSTWRIGHT_TEST_COUNTER") + 1 ))"
               printf '%s\n' "$attempt" > "$HOSTWRIGHT_TEST_COUNTER"
-              printf '{"executable":true,"confirmationToken":"token-%s"}\n' "$attempt"
+              printf '{"evaluatedAt":"2026-08-12T11:30:00Z","executable":true,"confirmationToken":"token-%s"}\n' "$attempt"
               exit 0
             fi
+            [[ "$evaluated_at" == 2026-08-12T11:30:00Z ]] || exit 64
             case "$token" in
               token-1|token-2)
                 printf '{"code":"HW-CLI-003","exitCode":70,"kind":"error"}\n' >&2
@@ -795,21 +802,21 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
             XCTAssertTrue(
                 FileManager.default.fileExists(
                     atPath: root.appendingPathComponent(
-                        "compaction-12-attempt-\(attempt)-plan.json"
+                        "compaction-12-segment-unbound-attempt-\(attempt)-plan.json"
                     ).path
                 )
             )
             XCTAssertTrue(
                 FileManager.default.fileExists(
                     atPath: root.appendingPathComponent(
-                        "compaction-12-attempt-\(attempt)-result.error"
+                        "compaction-12-segment-unbound-attempt-\(attempt)-result.error"
                     ).path
                 )
             )
         }
         let resultPayload = try String(
             contentsOf: root.appendingPathComponent(
-                "compaction-12-attempt-3-result.json"
+                "compaction-12-segment-unbound-attempt-3-result.json"
             ),
             encoding: .utf8
         )
@@ -840,19 +847,22 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
             set -euo pipefail
             dry_run=false
             token=''
+            evaluated_at=''
             while [[ "$#" -gt 0 ]]; do
               case "$1" in
                 --dry-run) dry_run=true ;;
                 --confirm-compact) shift; token="$1" ;;
+                --evaluated-at) shift; evaluated_at="$1" ;;
               esac
               shift
             done
             if [[ "$dry_run" == true ]]; then
               attempt="$(( $(<"$HOSTWRIGHT_TEST_COUNTER") + 1 ))"
               printf '%s\n' "$attempt" > "$HOSTWRIGHT_TEST_COUNTER"
-              printf '{"executable":true,"confirmationToken":"token-%s"}\n' "$attempt"
+              printf '{"evaluatedAt":"2026-08-12T11:30:00Z","executable":true,"confirmationToken":"token-%s"}\n' "$attempt"
               exit 0
             fi
+            [[ "$evaluated_at" == 2026-08-12T11:30:00Z ]] || exit 64
             printf '{"code":"HW-CLI-003","exitCode":70,"kind":"error"}\n' >&2
             exit 70
             """#.utf8
@@ -905,6 +915,120 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
         XCTAssertTrue(evidence.contains("Soak compaction exhausted 5 fresh confirmation attempts"))
     }
 
+    func testAggregateSoakCompactionRefusesToOverwriteSealedSegmentArtifact() throws {
+        let scriptURL = packageRoot().appendingPathComponent(
+            "scripts/phase08-soak-qualification.sh"
+        )
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-soak-compaction-sealed-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let sealedPlan = root.appendingPathComponent(
+            "compaction-48-segment-unbound-attempt-1-plan.json"
+        )
+        try Data("sealed\n".utf8).write(to: sealedPlan)
+
+        let result = try runBash(
+            #"""
+            source "$1"
+            HOSTWRIGHT_PHASE08_SOAK_ROOT="$2"
+            HOSTWRIGHT_PHASE08_SOAK_HOSTWRIGHT="$2/unused-hostwright"
+            evidence_file="$2/evidence-v1.log"
+            daemon_pid='daemon-before'
+            stop_daemon() {
+              printf 'stop\n' >> "$HOSTWRIGHT_TEST_LIFECYCLE"
+              daemon_pid=''
+            }
+            start_daemon() {
+              printf 'start\n' >> "$HOSTWRIGHT_TEST_LIFECYCLE"
+              daemon_pid='daemon-after'
+            }
+            verify_running() {
+              [[ "$daemon_pid" == daemon-after ]]
+            }
+            : > "$evidence_file"
+            compact_state 48
+            """#,
+            arguments: [scriptURL.path, root.path],
+            environment: [
+                "HOSTWRIGHT_TEST_LIFECYCLE": root.appendingPathComponent("lifecycle").path
+            ]
+        )
+
+        XCTAssertEqual(result.status, 75, result.output)
+        XCTAssertEqual(try String(contentsOf: sealedPlan, encoding: .utf8), "sealed\n")
+        XCTAssertEqual(
+            try String(contentsOf: root.appendingPathComponent("lifecycle"), encoding: .utf8),
+            "stop\nstart\n"
+        )
+        let evidence = try String(
+            contentsOf: root.appendingPathComponent("evidence-v1.log"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(evidence.contains("compaction-daemon-resumed sequence=48"))
+        XCTAssertTrue(evidence.contains("A sealed compaction artifact already exists"))
+    }
+
+    func testAggregateSoakSourceTransitionRebindsExecutableHashes() throws {
+        let scriptURL = packageRoot().appendingPathComponent(
+            "scripts/phase08-soak-qualification.sh"
+        )
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-soak-source-transition-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try Data("new-hostwright\n".utf8).write(
+            to: root.appendingPathComponent("hostwright")
+        )
+        try Data("new-daemon\n".utf8).write(
+            to: root.appendingPathComponent("hostwrightd")
+        )
+
+        let result = try runBash(
+            #"""
+            source "$1"
+            state_file="$2/state-v2.tsv"
+            evidence_file="$2/evidence-v2.log"
+            : > "$state_file"
+            : > "$evidence_file"
+            HOSTWRIGHT_PHASE08_SOAK_HOSTWRIGHT="$2/hostwright"
+            HOSTWRIGHT_PHASE08_SOAK_DAEMON="$2/hostwrightd"
+            HOSTWRIGHT_PHASE08_SOAK_SOURCE_COMMIT='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+            checkpoint_source_commit='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+            source_commit_history="$checkpoint_source_commit"
+            source_transition_required=1
+            hostwright_sha='old-hostwright'
+            daemon_sha='old-daemon'
+            validate_source_transition() { :; }
+            source_digest() { printf '%s\n' 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'; }
+            commit_source_transition
+            printf '%s\n%s\n%s\n' "$source_sha" "$hostwright_sha" "$daemon_sha"
+            """#,
+            arguments: [scriptURL.path, root.path]
+        )
+
+        XCTAssertEqual(result.status, 0, result.output)
+        let values = result.output.split(separator: "\n").map(String.init)
+        XCTAssertEqual(values.count, 3, result.output)
+        XCTAssertEqual(values[0], String(repeating: "c", count: 64))
+        XCTAssertNotEqual(values[1], "old-hostwright")
+        XCTAssertNotEqual(values[2], "old-daemon")
+        let state = try String(
+            contentsOf: root.appendingPathComponent("state-v2.tsv"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(state.contains("sourceCommit\tbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n"))
+        XCTAssertTrue(state.contains("sourceDigest\t\(values[0])\n"))
+        XCTAssertTrue(state.contains("hostwrightSHA256\t\(values[1])\n"))
+        XCTAssertTrue(state.contains("daemonSHA256\t\(values[2])\n"))
+    }
+
     func testAggregateSoakCompactionRestoresDaemonAfterConfirmationFailure() throws {
         let scriptURL = packageRoot().appendingPathComponent(
             "scripts/phase08-soak-qualification.sh"
@@ -922,16 +1046,19 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
             #!/usr/bin/env bash
             set -euo pipefail
             dry_run=false
+            evaluated_at=''
             while [[ "$#" -gt 0 ]]; do
               case "$1" in
                 --dry-run) dry_run=true ;;
+                --evaluated-at) shift; evaluated_at="$1" ;;
               esac
               shift
             done
             if [[ "$dry_run" == true ]]; then
-              printf '{"executable":true,"confirmationToken":"token-cancel"}\n'
+              printf '{"evaluatedAt":"2026-08-12T11:30:00Z","executable":true,"confirmationToken":"token-cancel"}\n'
               exit 0
             fi
+            [[ "$evaluated_at" == 2026-08-12T11:30:00Z ]] || exit 64
             printf '{"code":"HW-CLI-999","exitCode":75,"kind":"error"}\n' >&2
             exit 75
             """#.utf8

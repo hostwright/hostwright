@@ -50,6 +50,23 @@ checkpoint_source_commit=''
 source_commit_history=''
 source_transition_required=0
 resume_expected_workload_fault=0
+supervisor_root=''
+supervisor_lock_dir=''
+supervisor_receipt_file=''
+supervisor_lock_owner_file=''
+supervisor_runner_session="${HOSTWRIGHT_PHASE08_SOAK_SESSION:-hostwright-p08-soak-d785738e}"
+supervisor_session="${HOSTWRIGHT_PHASE08_SUPERVISOR_SESSION:-hostwright-p08-supervisor-d785738e}"
+supervisor_poll_seconds="${HOSTWRIGHT_PHASE08_SUPERVISOR_POLL_SECONDS:-5}"
+supervisor_checkpoint_wait_seconds="${HOSTWRIGHT_PHASE08_SUPERVISOR_CHECKPOINT_WAIT_SECONDS:-900}"
+supervisor_max_identical_failures=2
+supervisor_attempt=0
+supervisor_last_failure_signature=''
+supervisor_identical_failure_count=0
+supervisor_owner_acquired=0
+supervisor_root_created=0
+supervisor_startup_deadline=0
+supervisor_reclaimed_owner=''
+supervisor_attempt_log=''
 
 die() {
   local message="$1"
@@ -75,6 +92,8 @@ contract() {
   printf '%s\n' 'A timestamp-bound real sleep then wake must occur inside a qualified segment; the runner never forces either transition.'
   printf '%s\n' 'Compaction quiesces the foreground daemon for the plan-confirm transaction and always restores a fresh daemon before returning.'
   printf '%s\n' 'Failure preserves evidence and exact resource identity; success performs confirmation-bound owned-only cleanup.'
+  printf '%s\n' 'A local single-flight supervisor observes the exact runner, validates every resumable restart, acknowledges its first durable checkpoint, and circuit-breaks repeated identical failures.'
+  printf '%s\n' 'Supervisor owner locks and private receipts are fail-closed; integrity conflicts, wake gaps, and foreign runners never trigger a blind resume.'
   printf '%s\n' 'No CI, GitHub, network listener, upload, reboot, logout, public release, tag, tap, or website action is performed.'
 }
 
@@ -2073,6 +2092,517 @@ run_qualification_segment() {
     "$source_sha" "$cumulative_seconds" "$cumulative_samples" "$resource_identifier"
 }
 
+supervisor_configure_paths() {
+  validate_root
+  configure_authority_paths
+  supervisor_root="$HOSTWRIGHT_PHASE08_SOAK_ROOT/supervisor-v1"
+  supervisor_lock_dir="$supervisor_root/owner.lock"
+  supervisor_receipt_file="$supervisor_root/receipts-v1.tsv"
+  supervisor_lock_owner_file="$supervisor_lock_dir/owner-v1.tsv"
+  if [[ ! -e "$supervisor_root" ]]; then
+    if mkdir "$supervisor_root" 2>/dev/null; then
+      supervisor_root_created=1
+      chmod 700 "$supervisor_root"
+      durable_sync "$HOSTWRIGHT_PHASE08_SOAK_ROOT" \
+        || die 'The Phase 08 supervisor root could not be durably synchronized.' 74
+    elif [[ ! -d "$supervisor_root" ]]; then
+      die 'The Phase 08 supervisor root could not be created safely.' 75
+    fi
+  fi
+  private_directory_is_valid "$supervisor_root" \
+    || die 'The Phase 08 supervisor root is missing or unsafe.' 75
+}
+
+supervisor_initialize_receipts() {
+  if [[ ! -e "$supervisor_receipt_file" ]]; then
+    local receipt_next="${supervisor_receipt_file}.next.$$"
+    [[ ! -e "$receipt_next" && ! -L "$receipt_next" ]] \
+      || die 'A stale Phase 08 supervisor receipt write exists.' 75
+    printf 'epoch\tevent\tattempt\tsequence\tphase\tsignature\tdetail\n' > "$receipt_next"
+    chmod 600 "$receipt_next"
+    durable_sync "$receipt_next" \
+      || die 'The Phase 08 supervisor receipt ledger could not be initialized.' 74
+    mv "$receipt_next" "$supervisor_receipt_file"
+    durable_sync "$supervisor_receipt_file" \
+      || die 'The Phase 08 supervisor receipt ledger could not be committed.' 74
+  else
+    private_file_is_valid "$supervisor_receipt_file" \
+      || die 'The Phase 08 supervisor receipt ledger is missing or unsafe.' 75
+    supervisor_validate_receipts
+  fi
+}
+
+supervisor_validate_receipts() {
+  [[ "$(sed -n '1p' "$supervisor_receipt_file")" == $'epoch\tevent\tattempt\tsequence\tphase\tsignature\tdetail' ]] \
+    || die 'The Phase 08 supervisor receipt ledger header changed.' 75
+  awk -F '\t' '
+    NR == 1 { next }
+    NF != 7 { exit 1 }
+    $1 !~ /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$/ { exit 1 }
+    $2 !~ /^(supervisor-lock-acquired|supervisor-lock-reclaimed|supervisor-started|observer-checkpoint|resumable-exit|supervisor-circuit-breaker|resume-validated|resume-launched|first-checkpoint-acknowledged|first-checkpoint-missing|first-checkpoint-gap|first-checkpoint-timeout|failure-memory-reset|stale-run-recovered|supervisor-finished)$/ { exit 1 }
+    $3 !~ /^[0-9]+$/ || $4 !~ /^[0-9]+$/ { exit 1 }
+    $5 !~ /^[a-z-]+$/ { exit 1 }
+    $6 !~ /^(none|[A-Za-z0-9_.|=-]{1,256})$/ { exit 1 }
+    $7 ~ /[\t\n]/ || length($7) > 512 { exit 1 }
+  ' "$supervisor_receipt_file" \
+    || die 'The Phase 08 supervisor receipt ledger is malformed or truncated.' 75
+}
+
+supervisor_receipt() {
+  local event="$1"
+  local detail="${2:-}"
+  local sequence="${3:-$cumulative_samples}"
+  local phase="${4:-$(latest_state_value phase)}"
+  [[ "$event" =~ ^[a-z][a-z0-9-]{0,63}$ \
+      && "$detail" != *$'\t'* && "$detail" != *$'\n'* \
+      && "$sequence" =~ ^[0-9]+$ \
+      && "$phase" =~ ^[a-z-]+$ ]] \
+    || die 'The Phase 08 supervisor receipt was malformed.' 75
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$event" "$supervisor_attempt" \
+    "$sequence" "$phase" "${supervisor_last_failure_signature:-none}" "$detail" \
+    >> "$supervisor_receipt_file"
+  chmod 600 "$supervisor_receipt_file"
+  durable_sync "$supervisor_receipt_file" \
+    || die 'The Phase 08 supervisor receipt could not be durably synchronized.' 74
+}
+
+supervisor_acquire_lock() {
+  [[ "$supervisor_owner_acquired" == 0 ]] || die 'The Phase 08 supervisor lock was acquired twice.' 75
+  local lock_created=0
+  if mkdir "$supervisor_lock_dir" 2>/dev/null; then
+    lock_created=1
+  else
+    if supervisor_lock_is_live; then
+      die 'A Phase 08 supervisor is already active.' 75
+    fi
+    private_directory_is_valid "$supervisor_lock_dir" \
+      && private_file_is_valid "$supervisor_lock_owner_file" \
+      || die 'The Phase 08 supervisor lock has an unsafe shape.' 75
+    supervisor_reclaimed_owner="$supervisor_root/reclaimed-owner-$(date +%s)-$$"
+    [[ ! -e "$supervisor_reclaimed_owner" && ! -L "$supervisor_reclaimed_owner" ]] \
+      || die 'The stale Phase 08 supervisor owner evidence destination already exists.' 75
+    mv "$supervisor_lock_dir" "$supervisor_reclaimed_owner" 2>/dev/null \
+      || die 'The stale Phase 08 supervisor owner evidence could not be preserved.' 75
+    private_directory_is_valid "$supervisor_reclaimed_owner" \
+      && private_file_is_valid "$supervisor_reclaimed_owner/owner-v1.tsv" \
+      || die 'The preserved stale Phase 08 supervisor owner evidence is unsafe.' 75
+    mkdir "$supervisor_lock_dir" 2>/dev/null \
+      || die 'A Phase 08 supervisor acquired the lock during stale-lock recovery.' 75
+    lock_created=1
+  fi
+  chmod 700 "$supervisor_lock_dir"
+  {
+    printf 'schemaVersion\t1\n'
+    printf 'pid\t%s\n' "$$"
+    printf 'bootIdentity\t%s\n' "$(boot_identity)"
+    printf 'session\t%s\n' "$supervisor_session"
+    printf 'startEpoch\t%s\n' "$(date +%s)"
+  } > "$supervisor_lock_owner_file" || {
+    if [[ "$lock_created" == 1 ]]; then
+      rm -f "$supervisor_lock_owner_file" 2>/dev/null || true
+      rmdir "$supervisor_lock_dir" 2>/dev/null || true
+    fi
+    die 'The Phase 08 supervisor owner record could not be written safely.' 74
+  }
+  chmod 600 "$supervisor_lock_owner_file"
+  durable_sync "$supervisor_lock_owner_file" \
+    || die 'The Phase 08 supervisor owner lock could not be durably synchronized.' 74
+  durable_sync "$supervisor_lock_dir" \
+    || die 'The Phase 08 supervisor lock directory could not be durably synchronized.' 74
+  supervisor_owner_acquired=1
+  supervisor_initialize_receipts
+  supervisor_receipt supervisor-lock-acquired "pid=$$"
+  [[ -z "$supervisor_reclaimed_owner" ]] || supervisor_receipt supervisor-lock-reclaimed 'stale-owner-preserved'
+}
+
+supervisor_lock_is_live() {
+  [[ -d "$supervisor_lock_dir" && ! -L "$supervisor_lock_dir" \
+      && -f "$supervisor_lock_owner_file" && ! -L "$supervisor_lock_owner_file" \
+      && "$(stat -f '%Lp' "$supervisor_lock_dir" 2>/dev/null)" == 700 \
+      && "$(stat -f '%Lp' "$supervisor_lock_owner_file" 2>/dev/null)" == 600 ]] \
+    || return 1
+  local owner_pid owner_boot owner_session owner_command
+  owner_pid="$(awk -F '\t' '$1 == "pid" { print $2 }' "$supervisor_lock_owner_file")"
+  owner_boot="$(awk -F '\t' '$1 == "bootIdentity" { print $2 }' "$supervisor_lock_owner_file")"
+  owner_session="$(awk -F '\t' '$1 == "session" { print $2 }' "$supervisor_lock_owner_file")"
+  [[ "$owner_pid" =~ ^[1-9][0-9]*$ \
+      && "$owner_boot" =~ ^[a-f0-9]{64}$ \
+      && "$owner_session" == "$supervisor_session" ]] || return 1
+  [[ "$owner_pid" == "$$" && "$supervisor_owner_acquired" == 1 ]] && return 0
+  kill -0 "$owner_pid" 2>/dev/null || return 1
+  [[ "$owner_boot" == "$(boot_identity)" ]] \
+    || die 'The Phase 08 supervisor found a live owner from another boot.' 75
+  owner_command="$(/bin/ps -o command= -p "$owner_pid" 2>/dev/null || true)"
+  [[ "$owner_command" == *phase08-soak-qualification.sh\ supervise* ]] \
+    || die 'The Phase 08 supervisor found a foreign live owner.' 75
+}
+
+supervisor_lock_owned() {
+  [[ "$supervisor_owner_acquired" == 1 ]] || return 1
+  local owner_pid owner_boot owner_session owner_command
+  [[ -f "$supervisor_lock_owner_file" && ! -L "$supervisor_lock_owner_file" ]] || return 1
+  owner_pid="$(awk -F '\t' '$1 == "pid" { print $2 }' "$supervisor_lock_owner_file")"
+  owner_boot="$(awk -F '\t' '$1 == "bootIdentity" { print $2 }' "$supervisor_lock_owner_file")"
+  owner_session="$(awk -F '\t' '$1 == "session" { print $2 }' "$supervisor_lock_owner_file")"
+  owner_command="$(/bin/ps -o command= -p "$$" 2>/dev/null || true)"
+  [[ "$owner_pid" == "$$" \
+      && "$owner_boot" == "$(boot_identity)" \
+      && "$owner_session" == "$supervisor_session" \
+      && ( "$owner_command" == *phase08-soak-qualification.sh\ supervise* || "$supervisor_owner_acquired" == 1 ) ]]
+}
+
+supervisor_release_lock() {
+  [[ "$supervisor_owner_acquired" == 1 ]] || return 0
+  supervisor_lock_owned || return 0
+  supervisor_owner_acquired=0
+  rm -f "$supervisor_lock_owner_file" 2>/dev/null || true
+  rmdir "$supervisor_lock_dir" 2>/dev/null || true
+  durable_sync "$supervisor_root" 2>/dev/null || true
+}
+
+supervisor_runner_state() {
+  local owner_pid owner_boot owner_command
+  if [[ -d "$active_run_root" ]]; then
+    private_directory_is_valid "$active_run_root" \
+      && private_file_is_valid "$active_run_root/owner-v1.tsv" \
+      || die 'The Phase 08 supervisor found an unsafe active-run marker.' 75
+    owner_pid="$(awk -F '\t' '$1 == "pid" { print $2 }' "$active_run_root/owner-v1.tsv")"
+    owner_boot="$(awk -F '\t' '$1 == "bootIdentity" { print $2 }' "$active_run_root/owner-v1.tsv")"
+    [[ "$owner_pid" =~ ^[1-9][0-9]*$ ]] \
+      || die 'The Phase 08 supervisor found an unsafe active-run owner.' 75
+    if kill -0 "$owner_pid" 2>/dev/null; then
+      owner_command="$(/bin/ps -o command= -p "$owner_pid" 2>/dev/null || true)"
+      [[ "$owner_command" == *phase08-soak-qualification.sh* ]] \
+        || die 'The Phase 08 supervisor found a foreign live active-run owner.' 75
+      [[ "$owner_boot" == "$(boot_identity)" ]] \
+        || die 'The Phase 08 supervisor found a live active-run owner from another boot.' 75
+      return 0
+    fi
+  fi
+  if tmux has-session -t "$supervisor_runner_session" 2>/dev/null; then
+    local pane_pid pane_command
+    pane_pid="$(tmux display-message -p -t "$supervisor_runner_session" '#{pane_pid}' 2>/dev/null || true)"
+    pane_command="$(/bin/ps -o command= -p "$pane_pid" 2>/dev/null || true)"
+    if [[ "$pane_pid" =~ ^[1-9][0-9]*$ \
+        && "$pane_command" == *phase08-soak-qualification.sh\ resume* ]] \
+        && kill -0 "$pane_pid" 2>/dev/null; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
+supervisor_validate_guard() {
+  local pane_pid pane_command guard_count guard_pid
+  tmux has-session -t hostwright-phase-caffeinate 2>/dev/null \
+    || die 'The Phase 08 supervisor refused resume without the exact awake guard session.' 75
+  pane_pid="$(tmux display-message -p -t hostwright-phase-caffeinate '#{pane_pid}' 2>/dev/null || true)"
+  pane_command="$(/bin/ps -o command= -p "$pane_pid" 2>/dev/null || true)"
+  [[ "$pane_pid" =~ ^[1-9][0-9]*$ \
+      && "$pane_command" == '/usr/bin/caffeinate -dimsu' ]] \
+    || die 'The Phase 08 supervisor refused an awake guard with the wrong process identity.' 75
+  guard_count="$(pgrep -x caffeinate | wc -l | tr -d ' ')"
+  guard_pid="$(pgrep -x caffeinate || true)"
+  [[ "$guard_count" == 1 && "$guard_pid" == "$pane_pid" ]] \
+    || die 'The Phase 08 supervisor refused an ambiguous awake guard process set.' 75
+}
+
+supervisor_validate_sqlite() {
+  local database integrity foreign_keys
+  for database in \
+    "$HOSTWRIGHT_PHASE08_SOAK_ROOT/control-plane.sqlite" \
+    "$HOSTWRIGHT_PHASE08_SOAK_ROOT/hostwright.sqlite" \
+    "$HOSTWRIGHT_PHASE08_SOAK_ROOT/soak-qualification.sqlite" \
+    "$HOSTWRIGHT_PHASE08_SOAK_ROOT/state.sqlite"; do
+    [[ -f "$database" && ! -L "$database" ]] \
+      || die 'The Phase 08 supervisor found a missing SQLite store.' 75
+    integrity="$(sqlite_query_with_retry "$database" 'PRAGMA integrity_check;')" \
+      || die 'The Phase 08 supervisor could not read SQLite integrity.' 69
+    [[ "$integrity" == ok ]] \
+      || die 'The Phase 08 supervisor found a SQLite integrity conflict.' 75
+    foreign_keys="$(sqlite_query_with_retry "$database" 'SELECT count(*) FROM pragma_foreign_key_check;')" \
+      || die 'The Phase 08 supervisor could not read SQLite foreign keys.' 69
+    [[ "$foreign_keys" == 0 ]] \
+      || die 'The Phase 08 supervisor found a SQLite foreign-key conflict.' 75
+  done
+}
+
+supervisor_checkpoint_state_snapshot() {
+  awk -F '\t' '
+    $1 == "lastSequence" { sequence = $2 }
+    $1 == "qualifiedSeconds" { seconds = $2 }
+    $1 == "checkpointSHA256" { checkpoint = $2 }
+    $1 == "phase" { phase = $2 }
+    END { printf "%s\t%s\t%s\t%s\n", sequence, seconds, checkpoint, phase }
+  ' "$state_file"
+}
+
+supervisor_validate_observation() {
+  local observed_sequence="$1"
+  local observation_mode="${2:-active}"
+  local state_sequence state_seconds state_checkpoint state_phase inventory managed_count
+  local snapshot_before snapshot_after observation_attempt=1 observation_stable=0
+  [[ "$observation_mode" == active || "$observation_mode" == final ]] \
+    || die 'The Phase 08 supervisor observation mode is invalid.' 64
+  [[ "$observed_sequence" =~ ^[0-9]+$ ]] \
+    || die 'The Phase 08 supervisor observation sequence is invalid.' 64
+  validate_root
+  configure_authority_paths
+  load_qualification_state
+  while [[ "$observation_attempt" -le 3 ]]; do
+    snapshot_before="$(supervisor_checkpoint_state_snapshot)"
+    validate_checkpoint_chain read-only
+    snapshot_after="$(supervisor_checkpoint_state_snapshot)"
+    IFS=$'\t' read -r state_sequence state_seconds state_checkpoint state_phase \
+      <<< "$snapshot_after"
+    if [[ "$snapshot_before" == "$snapshot_after" \
+        && "$cumulative_samples" =~ ^[0-9]+$ \
+        && "$state_sequence" =~ ^[0-9]+$ \
+        && "$state_seconds" =~ ^[0-9]+$ \
+        && "$state_checkpoint" =~ ^[a-f0-9]{64}$ \
+        && "$state_sequence" -ge "$observed_sequence" \
+        && "$cumulative_samples" == "$state_sequence" \
+        && "$state_seconds" == "$((state_sequence * sample_interval_seconds))" \
+        && "$state_checkpoint" == "$previous_checkpoint_sha256" ]]; then
+      observation_stable=1
+      break
+    fi
+    if [[ "$state_sequence" =~ ^[0-9]+$ \
+        && "$cumulative_samples" =~ ^[0-9]+$ \
+        && "$state_sequence" -ge "$observed_sequence" \
+        && "$cumulative_samples" -ge "$observed_sequence" ]]; then
+      observation_attempt=$((observation_attempt + 1))
+      sleep 1
+      continue
+    fi
+    die 'The Phase 08 supervisor rejected a checkpoint sequence regression.' 75
+  done
+  [[ "$observation_stable" == 1 ]] \
+    || die 'The Phase 08 supervisor could not obtain one stable checkpoint observation.' 75
+  if [[ "$observation_mode" == final ]]; then
+    [[ "$state_phase" == passed && "$state_sequence" == "$expected_samples" ]] \
+      || die 'The Phase 08 supervisor refused to seal before the exact passed checkpoint budget.' 75
+  fi
+  inventory="$(container list --all --format json)" \
+    || die 'The Phase 08 supervisor could not read the exact runtime inventory.' 69
+  managed_count="$(printf '%s' "$inventory" | managed_runtime_count)" \
+    || die 'The Phase 08 supervisor found an invalid runtime inventory.' 75
+  if [[ "$observation_mode" == active ]]; then
+    verify_resume_runtime_inventory
+    [[ "$managed_count" == 1 ]] \
+      || die 'The Phase 08 supervisor requires exactly one retained managed runtime.' 75
+  else
+    [[ "$managed_count" == 0 || "$managed_count" == 1 ]] \
+      || die 'The Phase 08 supervisor found an ambiguous final runtime inventory.' 75
+    if [[ "$managed_count" == 1 ]]; then
+      verify_resume_runtime_inventory
+    fi
+  fi
+  supervisor_validate_sqlite
+  supervisor_validate_guard
+}
+
+supervisor_validate_before_resume() {
+  local phase
+  validate_root
+  configure_authority_paths
+  load_qualification_state
+  validate_checkpoint_chain read-only
+  phase="$(latest_state_value phase)"
+  [[ "$phase" == resumable ]] \
+    || die 'The Phase 08 supervisor refused a non-resumable runner exit.' 75
+  supervisor_runner_state && die 'The Phase 08 supervisor refused to duplicate an active runner.' 75
+  supervisor_validate_guard
+  supervisor_validate_sqlite
+  supervisor_validate_observation "$cumulative_samples"
+  validate_inputs resume
+  supervisor_receipt resume-validated "checkpoint=$previous_checkpoint_sha256" "$cumulative_samples" "$phase"
+}
+
+supervisor_launch_resume() {
+  local command
+  [[ "$supervisor_runner_session" != "$supervisor_session" ]] \
+    || die 'The Phase 08 supervisor and runner sessions must remain distinct.' 75
+  supervisor_attempt_log="$supervisor_root/attempt-$(printf '%04d' "$supervisor_attempt").log"
+  [[ ! -e "$supervisor_attempt_log" && ! -L "$supervisor_attempt_log" ]] \
+    || die 'The Phase 08 supervisor attempt log already exists.' 75
+  : > "$supervisor_attempt_log"
+  chmod 600 "$supervisor_attempt_log"
+  durable_sync "$supervisor_attempt_log" \
+    || die 'The Phase 08 supervisor attempt log could not be initialized.' 74
+  printf -v command \
+    'cd %q && exec env HOSTWRIGHT_PHASE08_SOAK_ROOT=%q HOSTWRIGHT_PHASE08_SOAK_HOSTWRIGHT=%q HOSTWRIGHT_PHASE08_SOAK_DAEMON=%q HOSTWRIGHT_PHASE08_SOAK_CONFIG_TEMPLATE=%q HOSTWRIGHT_PHASE08_SOAK_IMAGE=%q HOSTWRIGHT_PHASE08_SOAK_SOURCE_COMMIT=%q HOSTWRIGHT_PHASE08_SOAK_HOST_PORT=%q HOSTWRIGHT_PHASE08_SOAK_SESSION=%q /bin/bash %q resume >> %q 2>&1' \
+    "$PWD" "$HOSTWRIGHT_PHASE08_SOAK_ROOT" "$HOSTWRIGHT_PHASE08_SOAK_HOSTWRIGHT" \
+    "$HOSTWRIGHT_PHASE08_SOAK_DAEMON" "$HOSTWRIGHT_PHASE08_SOAK_CONFIG_TEMPLATE" \
+    "$HOSTWRIGHT_PHASE08_SOAK_IMAGE" "$HOSTWRIGHT_PHASE08_SOAK_SOURCE_COMMIT" \
+    "$HOSTWRIGHT_PHASE08_SOAK_HOST_PORT" "$supervisor_runner_session" \
+    "$PWD/scripts/phase08-soak-qualification.sh" "$supervisor_attempt_log"
+  tmux new-session -d -s "$supervisor_runner_session" "$command" \
+    || die 'The Phase 08 supervisor could not launch the canonical cumulative resume.' 69
+  supervisor_receipt resume-launched "session=$supervisor_runner_session" "$cumulative_samples" resumable
+}
+
+supervisor_note_failure() {
+  local signature="$1"
+  local phase="$(latest_state_value phase)"
+  if [[ "$signature" == "$supervisor_last_failure_signature" ]]; then
+    supervisor_identical_failure_count=$((supervisor_identical_failure_count + 1))
+  else
+    supervisor_last_failure_signature="$signature"
+    supervisor_identical_failure_count=1
+  fi
+  supervisor_receipt resumable-exit "count=$supervisor_identical_failure_count" "$cumulative_samples" "$phase"
+  if [[ "$supervisor_identical_failure_count" -ge "$supervisor_max_identical_failures" ]]; then
+    supervisor_receipt supervisor-circuit-breaker "signature=$signature" "$cumulative_samples" "$phase"
+    die 'The Phase 08 supervisor circuit breaker refused repeated identical resumable failures.' 75
+  fi
+}
+
+supervisor_failure_signature() {
+  local exit_code failure_message message_sha
+  exit_code="$(latest_state_value runnerExitCode)"
+  failure_message="$(awk -F '\t' '$2 == "failure" { message = $3 } END { print message }' "$evidence_file")"
+  [[ "$exit_code" =~ ^[0-9]+$ ]] || exit_code=unknown
+  [[ -n "$failure_message" ]] || failure_message=unknown
+  message_sha="$(printf '%s' "$failure_message" | /usr/bin/shasum -a 256 | awk '{ print $1 }')"
+  [[ "$message_sha" =~ ^[a-f0-9]{64}$ ]] \
+    || die 'The Phase 08 supervisor failure signature could not be normalized.' 75
+  printf '%s|%s|%s' "$exit_code" "$cumulative_samples" "$message_sha"
+}
+
+supervisor_restore_failure_memory() {
+  local restored_signature restored_count
+  supervisor_last_failure_signature=''
+  supervisor_identical_failure_count=0
+  read -r restored_signature restored_count < <(
+    awk -F '\t' '
+      $2 == "failure-memory-reset" { signature = "none"; count = 0 }
+      $2 == "resumable-exit" {
+        signature = $6
+        split($7, parts, "=")
+        if (parts[1] == "count") count = parts[2]
+      }
+      END {
+        if (signature == "") signature = "none"
+        print signature, count + 0
+      }
+    ' "$supervisor_receipt_file"
+  )
+  if [[ -n "$restored_signature" && "$restored_signature" != none ]]; then
+    supervisor_last_failure_signature="$restored_signature"
+    [[ "$restored_count" =~ ^[0-9]+$ ]] \
+      || die 'The Phase 08 supervisor failure memory is malformed.' 75
+    supervisor_identical_failure_count="$restored_count"
+  fi
+}
+
+supervisor_record_progress_reset() {
+  supervisor_last_failure_signature=''
+  supervisor_identical_failure_count=0
+  supervisor_receipt failure-memory-reset 'validated-durable-progress' "$cumulative_samples" "$(latest_state_value phase)"
+}
+
+supervisor_wait_for_first_checkpoint() {
+  local prior_sequence="$1"
+  local elapsed=0 current_sequence phase
+  while [[ "$elapsed" -lt "$supervisor_checkpoint_wait_seconds" ]]; do
+    current_sequence="$(latest_state_value lastSequence)"
+    [[ "$current_sequence" =~ ^[0-9]+$ ]] || current_sequence="$prior_sequence"
+    if [[ "$current_sequence" -gt "$prior_sequence" ]]; then
+      supervisor_validate_observation "$current_sequence"
+      current_sequence="$cumulative_samples"
+      supervisor_receipt first-checkpoint-acknowledged "sequence=$current_sequence" "$current_sequence" "$(latest_state_value phase)"
+      return 0
+    fi
+    phase="$(latest_state_value phase)"
+    if ! supervisor_runner_state; then
+      if [[ "$phase" == resumable || "$phase" == passed ]]; then
+        supervisor_receipt first-checkpoint-missing "sequence=$current_sequence" "$current_sequence" "$phase"
+        return 1
+      fi
+      supervisor_receipt first-checkpoint-gap "sequence=$current_sequence" "$current_sequence" "$phase"
+    fi
+    sleep "$supervisor_poll_seconds"
+    elapsed=$((elapsed + supervisor_poll_seconds))
+  done
+  supervisor_receipt first-checkpoint-timeout "sequence=$prior_sequence" "$prior_sequence" "$(latest_state_value phase)"
+  return 75
+}
+
+supervise_soak() {
+  trap 'supervisor_release_lock' EXIT
+  trap 'supervisor_release_lock; exit 143' TERM
+  trap 'supervisor_release_lock; exit 130' INT
+  supervisor_configure_paths
+  configure_authority_paths
+  load_qualification_state
+  validate_checkpoint_chain read-only
+  supervisor_acquire_lock
+  supervisor_initialize_receipts
+  local initial_phase
+  initial_phase="$(latest_state_value phase)"
+  if [[ "$initial_phase" == passed ]]; then
+    supervisor_validate_observation "$(latest_state_value lastSequence)" final
+  else
+    supervisor_validate_observation "$(latest_state_value lastSequence)" active
+  fi
+  supervisor_restore_failure_memory
+  supervisor_receipt supervisor-started "runnerSession=$supervisor_runner_session"
+  supervisor_startup_deadline=0
+  local last_observed_sequence=-1 last_observed_phase='' phase signature
+  while :; do
+    phase="$(latest_state_value phase)"
+    cumulative_samples="$(latest_state_value lastSequence)"
+    [[ "$cumulative_samples" =~ ^[0-9]+$ ]] || die 'The Phase 08 supervisor found an invalid checkpoint sequence.' 75
+    cumulative_seconds=$((cumulative_samples * sample_interval_seconds))
+    [[ "$last_observed_sequence" == -1 || "$cumulative_samples" -ge "$last_observed_sequence" ]] \
+      || die 'The Phase 08 supervisor rejected a checkpoint sequence regression.' 75
+    if [[ "$cumulative_samples" != "$last_observed_sequence" || "$phase" != "$last_observed_phase" ]]; then
+      if [[ "$last_observed_sequence" != -1 && "$cumulative_samples" -gt "$last_observed_sequence" ]]; then
+        supervisor_validate_observation "$cumulative_samples"
+        supervisor_record_progress_reset
+        phase="$(latest_state_value phase)"
+      fi
+      supervisor_receipt observer-checkpoint "phase=$phase" "$cumulative_samples" "$phase"
+      last_observed_sequence="$cumulative_samples"
+      last_observed_phase="$phase"
+    fi
+    if [[ "$phase" == passed ]]; then
+      supervisor_validate_observation "$cumulative_samples" final
+      break
+    fi
+    if supervisor_runner_state; then
+      sleep "$supervisor_poll_seconds"
+      continue
+    fi
+    if [[ "$phase" == running && -d "$active_run_root" ]]; then
+      recover_active_run_marker
+      phase="$(latest_state_value phase)"
+      supervisor_receipt stale-run-recovered "phase=$phase" "$cumulative_samples" "$phase"
+    fi
+    [[ "$phase" == resumable ]] \
+      || die 'The Phase 08 supervisor found an absent runner without resumable evidence.' 75
+    supervisor_validate_before_resume
+    signature="$(supervisor_failure_signature)"
+    supervisor_note_failure "$signature"
+    supervisor_attempt=$((supervisor_attempt + 1))
+    supervisor_startup_deadline=$(( $(date +%s) + 60 ))
+    supervisor_launch_resume
+    if supervisor_wait_for_first_checkpoint "$cumulative_samples"; then
+      :
+    else
+      local wait_status=$?
+      [[ "$wait_status" == 75 ]] \
+        || continue
+      die 'The Phase 08 supervisor did not observe the first durable checkpoint after resume.' 75
+    fi
+  done
+  [[ "$(latest_state_value phase)" == passed ]] \
+    || die 'The Phase 08 supervisor stopped before the exact Gate 16 sample budget.' 75
+  supervisor_receipt supervisor-finished "sequence=$cumulative_samples" "$cumulative_samples" "$(latest_state_value phase)"
+}
+
 run_soak() {
   local mode="${1:-new}"
   if [[ "$mode" == new ]]; then
@@ -2129,29 +2659,33 @@ qualification_status() {
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
 case "${1:-}" in
   contract)
-    [[ "$#" == 1 ]] || die 'Usage: phase08-soak-qualification.sh contract|preflight|run|resume|status' 64
+    [[ "$#" == 1 ]] || die 'Usage: phase08-soak-qualification.sh contract|preflight|run|resume|supervise|status' 64
     contract
     ;;
   preflight)
-    [[ "$#" == 1 ]] || die 'Usage: phase08-soak-qualification.sh contract|preflight|run|resume|status' 64
+    [[ "$#" == 1 ]] || die 'Usage: phase08-soak-qualification.sh contract|preflight|run|resume|supervise|status' 64
     validate_inputs new
     printf 'Phase 08 aggregate soak preflight passed source=%s root=%s\n' \
       "$(source_digest)" "$HOSTWRIGHT_PHASE08_SOAK_ROOT"
     ;;
   run)
-    [[ "$#" == 1 ]] || die 'Usage: phase08-soak-qualification.sh contract|preflight|run|resume|status' 64
+    [[ "$#" == 1 ]] || die 'Usage: phase08-soak-qualification.sh contract|preflight|run|resume|supervise|status' 64
     run_soak new
     ;;
   resume)
-    [[ "$#" == 1 ]] || die 'Usage: phase08-soak-qualification.sh contract|preflight|run|resume|status' 64
+    [[ "$#" == 1 ]] || die 'Usage: phase08-soak-qualification.sh contract|preflight|run|resume|supervise|status' 64
     run_soak resume
     ;;
+  supervise)
+    [[ "$#" == 1 ]] || die 'Usage: phase08-soak-qualification.sh contract|preflight|run|resume|supervise|status' 64
+    supervise_soak
+    ;;
   status)
-    [[ "$#" == 1 ]] || die 'Usage: phase08-soak-qualification.sh contract|preflight|run|resume|status' 64
+    [[ "$#" == 1 ]] || die 'Usage: phase08-soak-qualification.sh contract|preflight|run|resume|supervise|status' 64
     qualification_status
     ;;
   *)
-    die 'Usage: phase08-soak-qualification.sh contract|preflight|run|resume|status' 64
+    die 'Usage: phase08-soak-qualification.sh contract|preflight|run|resume|supervise|status' 64
     ;;
 esac
 fi

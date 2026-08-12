@@ -1711,6 +1711,495 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
         )
     }
 
+    func testAggregateSoakSupervisorRefusesConcurrentOwner() throws {
+        let scriptURL = packageRoot().appendingPathComponent(
+            "scripts/phase08-soak-qualification.sh"
+        )
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-soak-supervisor-owner-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let result = try runBash(
+            #"""
+            source "$1"
+            HOSTWRIGHT_PHASE08_SOAK_ROOT="$2"
+            validate_root() { :; }
+            cumulative_samples=0
+            latest_state_value() { printf 'prepared\n'; }
+            supervisor_configure_paths
+            mkdir "$supervisor_lock_dir"
+            chmod 700 "$supervisor_lock_dir"
+            printf 'schemaVersion\t1\n' > "$supervisor_lock_owner_file"
+            chmod 600 "$supervisor_lock_owner_file"
+            supervisor_lock_is_live() { return 0; }
+            supervisor_acquire_lock
+            """#,
+            arguments: [scriptURL.path, root.path]
+        )
+
+        XCTAssertEqual(result.status, 75, result.output)
+        XCTAssertTrue(result.output.contains("supervisor is already active"))
+    }
+
+    func testAggregateSoakSupervisorPreservesStaleOwnerWhenReclaiming() throws {
+        let scriptURL = packageRoot().appendingPathComponent(
+            "scripts/phase08-soak-qualification.sh"
+        )
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-soak-supervisor-reclaim-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let result = try runBash(
+            #"""
+            source "$1"
+            HOSTWRIGHT_PHASE08_SOAK_ROOT="$2"
+            validate_root() { :; }
+            cumulative_samples=0
+            latest_state_value() { printf 'prepared\n'; }
+            supervisor_configure_paths
+            mkdir "$supervisor_lock_dir"
+            chmod 700 "$supervisor_lock_dir"
+            printf 'stale-owner-evidence\n' > "$supervisor_lock_owner_file"
+            chmod 600 "$supervisor_lock_owner_file"
+            supervisor_lock_is_live() { return 1; }
+            supervisor_acquire_lock
+            supervisor_lock_owned
+            grep -R -Fq 'stale-owner-evidence' "$supervisor_root"/reclaimed-*
+            supervisor_release_lock
+            """#,
+            arguments: [scriptURL.path, root.path]
+        )
+
+        XCTAssertEqual(result.status, 0, result.output)
+    }
+
+    func testAggregateSoakSupervisorRejectsCorruptReceiptLedger() throws {
+        let scriptURL = packageRoot().appendingPathComponent(
+            "scripts/phase08-soak-qualification.sh"
+        )
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-soak-supervisor-receipt-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let result = try runBash(
+            #"""
+            source "$1"
+            HOSTWRIGHT_PHASE08_SOAK_ROOT="$2"
+            validate_root() { :; }
+            supervisor_configure_paths
+            printf 'truncated\treceipt\n' > "$supervisor_receipt_file"
+            chmod 600 "$supervisor_receipt_file"
+            supervisor_initialize_receipts
+            """#,
+            arguments: [scriptURL.path, root.path]
+        )
+
+        XCTAssertEqual(result.status, 75, result.output)
+        XCTAssertTrue(result.output.contains("receipt"))
+    }
+
+    func testAggregateSoakSupervisorRestoresProgressResetAcrossRestart() throws {
+        let scriptURL = packageRoot().appendingPathComponent(
+            "scripts/phase08-soak-qualification.sh"
+        )
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-soak-supervisor-reset-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let result = try runBash(
+            #"""
+            source "$1"
+            HOSTWRIGHT_PHASE08_SOAK_ROOT="$2"
+            validate_root() { :; }
+            supervisor_configure_paths
+            {
+              printf 'epoch\tevent\tattempt\tsequence\tphase\tsignature\tdetail\n'
+              printf '2026-08-12T00:00:00Z\tresumable-exit\t1\t10\tresumable\texit70-seq10\tcount=1\n'
+              printf '2026-08-12T00:05:00Z\tfailure-memory-reset\t1\t11\trunning\tnone\tvalidated-durable-progress\n'
+            } > "$supervisor_receipt_file"
+            chmod 600 "$supervisor_receipt_file"
+            supervisor_last_failure_signature='stale'
+            supervisor_identical_failure_count=9
+            supervisor_restore_failure_memory
+            [[ -z "$supervisor_last_failure_signature" ]]
+            [[ "$supervisor_identical_failure_count" == 0 ]]
+            """#,
+            arguments: [scriptURL.path, root.path]
+        )
+
+        XCTAssertEqual(result.status, 0, result.output)
+    }
+
+    func testAggregateSoakSupervisorCircuitBreaksRepeatedNoProgressFailure() throws {
+        let scriptURL = packageRoot().appendingPathComponent(
+            "scripts/phase08-soak-qualification.sh"
+        )
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-soak-supervisor-breaker-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let result = try runBash(
+            #"""
+            source "$1"
+            HOSTWRIGHT_PHASE08_SOAK_ROOT="$2"
+            validate_root() { :; }
+            supervisor_configure_paths
+            supervisor_initialize_receipts
+            cumulative_samples=20
+            latest_state_value() { printf 'resumable\n'; }
+            supervisor_note_failure 'exit70-sequence20'
+            supervisor_note_failure 'exit70-sequence20'
+            """#,
+            arguments: [scriptURL.path, root.path]
+        )
+
+        XCTAssertEqual(result.status, 75, result.output)
+        XCTAssertTrue(result.output.contains("circuit breaker"))
+        let receipts = try String(
+            contentsOf: root.appendingPathComponent("supervisor-v1/receipts-v1.tsv"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(receipts.contains("\tsupervisor-circuit-breaker\t"))
+        XCTAssertTrue(receipts.contains("\tcount=2\n"))
+    }
+
+    func testAggregateSoakSupervisorPersistsNormalizedRealFailureSignature() throws {
+        let scriptURL = packageRoot().appendingPathComponent(
+            "scripts/phase08-soak-qualification.sh"
+        )
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-soak-supervisor-signature-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let result = try runBash(
+            #"""
+            source "$1"
+            HOSTWRIGHT_PHASE08_SOAK_ROOT="$2"
+            validate_root() { :; }
+            supervisor_configure_paths
+            supervisor_initialize_receipts
+            cumulative_samples=42
+            evidence_file="$2/evidence-v2.log"
+            printf '2026-08-12T00:00:00Z\tfailure\tforeground daemon did not stop after SIGTERM (status 70).\n' > "$evidence_file"
+            latest_state_value() {
+              case "$1" in
+                runnerExitCode) printf '70\n' ;;
+                phase) printf 'resumable\n' ;;
+              esac
+            }
+            signature="$(supervisor_failure_signature)"
+            [[ "$signature" =~ ^70\|42\|[a-f0-9]{64}$ ]]
+            supervisor_note_failure "$signature"
+            supervisor_validate_receipts
+            supervisor_last_failure_signature=''
+            supervisor_identical_failure_count=0
+            supervisor_restore_failure_memory
+            [[ "$supervisor_last_failure_signature" == "$signature" ]]
+            [[ "$supervisor_identical_failure_count" == 1 ]]
+            """#,
+            arguments: [scriptURL.path, root.path]
+        )
+
+        XCTAssertEqual(result.status, 0, result.output)
+    }
+
+    func testAggregateSoakSupervisorAcknowledgesOnlyValidatedCheckpoint() throws {
+        let scriptURL = packageRoot().appendingPathComponent(
+            "scripts/phase08-soak-qualification.sh"
+        )
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-soak-supervisor-checkpoint-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let passing = try runBash(
+            #"""
+            source "$1"
+            HOSTWRIGHT_PHASE08_SOAK_ROOT="$2"
+            test_root="$2"
+            supervisor_checkpoint_wait_seconds=1
+            supervisor_poll_seconds=1
+            latest_state_value() {
+              case "$1" in
+                lastSequence) printf '11\n' ;;
+                phase) printf 'running\n' ;;
+              esac
+            }
+            supervisor_validate_observation() {
+              [[ "$1" == 11 ]]
+              printf 'validated\n' > "$test_root/validated"
+            }
+            supervisor_receipt() { printf '%s\n' "$1" >> "$test_root/events"; }
+            supervisor_wait_for_first_checkpoint 10
+            grep -Fqx validated "$2/validated"
+            grep -Fqx first-checkpoint-acknowledged "$2/events"
+            """#,
+            arguments: [scriptURL.path, root.path]
+        )
+        XCTAssertEqual(passing.status, 0, passing.output)
+
+        let failing = try runBash(
+            #"""
+            source "$1"
+            HOSTWRIGHT_PHASE08_SOAK_ROOT="$2"
+            test_root="$2"
+            supervisor_checkpoint_wait_seconds=1
+            supervisor_poll_seconds=1
+            latest_state_value() {
+              case "$1" in
+                lastSequence) printf '11\n' ;;
+                phase) printf 'running\n' ;;
+              esac
+            }
+            supervisor_validate_observation() { die 'synthetic checkpoint conflict' 75; }
+            supervisor_receipt() { printf '%s\n' "$1" >> "$test_root/rejected-events"; }
+            supervisor_wait_for_first_checkpoint 10
+            """#,
+            arguments: [scriptURL.path, root.path]
+        )
+        XCTAssertEqual(failing.status, 75, failing.output)
+        let rejectedEvents = root.appendingPathComponent("rejected-events")
+        if FileManager.default.fileExists(atPath: rejectedEvents.path) {
+            XCTAssertFalse(
+                try String(contentsOf: rejectedEvents, encoding: .utf8)
+                    .contains("first-checkpoint-acknowledged")
+            )
+        }
+    }
+
+    func testAggregateSoakSupervisorAcceptsOnlyStableMonotonicObservation() throws {
+        let scriptURL = packageRoot().appendingPathComponent(
+            "scripts/phase08-soak-qualification.sh"
+        )
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-soak-supervisor-monotonic-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let passing = try runBash(
+            #"""
+            source "$1"
+            HOSTWRIGHT_PHASE08_SOAK_ROOT="$2"
+            state_file="$2/state-v2.tsv"
+            test_root="$2"
+            printf '0\n' > "$test_root/snapshot-count"
+            validate_root() { :; }
+            configure_authority_paths() { :; }
+            load_qualification_state() { :; }
+            validate_checkpoint_chain() {
+              cumulative_samples=11
+              cumulative_seconds=3300
+              previous_checkpoint_sha256='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+            }
+            supervisor_checkpoint_state_snapshot() {
+              count="$(cat "$test_root/snapshot-count")"
+              count=$((count + 1))
+              printf '%s\n' "$count" > "$test_root/snapshot-count"
+              if [[ "$count" == 1 ]]; then
+                printf '10\t3000\taaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\trunning\n'
+              else
+                printf '11\t3300\tbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\trunning\n'
+              fi
+            }
+            container() { printf '[]\n'; }
+            managed_runtime_count() { printf '1\n'; }
+            verify_resume_runtime_inventory() { :; }
+            supervisor_validate_sqlite() { :; }
+            supervisor_validate_guard() { :; }
+            supervisor_validate_observation 10
+            [[ "$cumulative_samples" == 11 ]]
+            [[ "$(cat "$test_root/snapshot-count")" -ge 4 ]]
+            """#,
+            arguments: [scriptURL.path, root.path]
+        )
+        XCTAssertEqual(passing.status, 0, passing.output)
+
+        let failing = try runBash(
+            #"""
+            source "$1"
+            HOSTWRIGHT_PHASE08_SOAK_ROOT="$2"
+            state_file="$2/state-v2.tsv"
+            validate_root() { :; }
+            configure_authority_paths() { :; }
+            load_qualification_state() { :; }
+            validate_checkpoint_chain() {
+              cumulative_samples=11
+              cumulative_seconds=3300
+              previous_checkpoint_sha256='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+            }
+            supervisor_checkpoint_state_snapshot() {
+              printf '11\t3300\tbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\trunning\n'
+            }
+            container() { printf '[]\n'; }
+            managed_runtime_count() { printf '1\n'; }
+            verify_resume_runtime_inventory() { :; }
+            supervisor_validate_sqlite() { :; }
+            supervisor_validate_guard() { :; }
+            supervisor_validate_observation 12
+            """#,
+            arguments: [scriptURL.path, root.path]
+        )
+        XCTAssertEqual(failing.status, 75, failing.output)
+        XCTAssertTrue(failing.output.contains("checkpoint sequence regression"))
+    }
+
+    func testAggregateSoakSupervisorDoesNotLaunchAcrossIntegrityConflict() throws {
+        let scriptURL = packageRoot().appendingPathComponent(
+            "scripts/phase08-soak-qualification.sh"
+        )
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-soak-supervisor-integrity-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let result = try runBash(
+            #"""
+            source "$1"
+            HOSTWRIGHT_PHASE08_SOAK_ROOT="$2"
+            cumulative_samples=10
+            validate_root() { :; }
+            configure_authority_paths() { :; }
+            load_qualification_state() { :; }
+            validate_checkpoint_chain() { :; }
+            latest_state_value() {
+              case "$1" in
+                phase) printf 'resumable\n' ;;
+                *) printf '10\n' ;;
+              esac
+            }
+            supervisor_runner_state() { return 1; }
+            supervisor_validate_guard() { :; }
+            supervisor_validate_sqlite() { die 'synthetic SQLite integrity conflict' 75; }
+            supervisor_validate_observation() { :; }
+            validate_inputs() { :; }
+            supervisor_receipt() { :; }
+            supervisor_launch_resume() { printf 'launched\n' > "$2/launched"; }
+            supervisor_validate_before_resume
+            supervisor_launch_resume
+            """#,
+            arguments: [scriptURL.path, root.path]
+        )
+
+        XCTAssertEqual(result.status, 75, result.output)
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: root.appendingPathComponent("launched").path)
+        )
+    }
+
+    func testAggregateSoakSupervisorDoesNotTrustStaleTmuxName() throws {
+        let scriptURL = packageRoot().appendingPathComponent(
+            "scripts/phase08-soak-qualification.sh"
+        )
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-soak-supervisor-stale-tmux-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let result = try runBash(
+            #"""
+            source "$1"
+            active_run_root="$2/active-run-v2"
+            supervisor_runner_session='hostwright-p08-soak-test'
+            supervisor_startup_deadline=$(( $(date +%s) + 60 ))
+            tmux() {
+              case "$1" in
+                has-session) return 0 ;;
+                display-message) printf '999999\n' ;;
+              esac
+            }
+            if supervisor_runner_state; then
+              exit 90
+            fi
+            """#,
+            arguments: [scriptURL.path, root.path]
+        )
+
+        XCTAssertEqual(result.status, 0, result.output)
+    }
+
+    func testAggregateSoakSupervisorRecoversDeadDifferentBootGapWithoutReset() throws {
+        let scriptURL = packageRoot().appendingPathComponent(
+            "scripts/phase08-soak-qualification.sh"
+        )
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-soak-supervisor-wake-gap-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let result = try runBash(
+            #"""
+            source "$1"
+            HOSTWRIGHT_PHASE08_SOAK_ROOT="$2"
+            HOSTWRIGHT_PHASE08_SOAK_SOURCE_COMMIT='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+            state_file="$2/state-v2.tsv"
+            evidence_file="$2/evidence-v2.log"
+            segment_file="$2/segments-v1.tsv"
+            active_run_root="$2/active-run-v2"
+            supervisor_runner_session='hostwright-p08-soak-nonexistent-test'
+            cumulative_samples=3
+            cumulative_seconds=900
+            last_sample_epoch=1900
+            previous_checkpoint_sha256='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+            prior_segment='cccccccc-cccc-4ccc-8ccc-cccccccccccc'
+            printf 'phase\trunning\n' > "$state_file"
+            : > "$evidence_file"
+            printf 'segmentID\tevent\tepoch\tsequence\tqualifiedSeconds\tcheckpointSHA256\tdetail1\tdetail2\n' > "$segment_file"
+            mkdir "$active_run_root"
+            chmod 700 "$active_run_root"
+            {
+              printf 'schemaVersion\t1\n'
+              printf 'pid\t999999\n'
+              printf 'bootIdentity\t%s\n' 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+              printf 'segmentID\t%s\n' "$prior_segment"
+              printf 'startEpoch\t1000\n'
+              printf 'startSequence\t0\n'
+              printf 'startCheckpointSHA256\t%s\n' "$genesis_checkpoint_sha256"
+              printf 'gapSeconds\t0\n'
+            } > "$active_run_root/owner-v1.tsv"
+            chmod 600 "$active_run_root/owner-v1.tsv"
+            if supervisor_runner_state; then
+              exit 91
+            fi
+            recover_active_run_marker
+            [[ "$(latest_state_value phase)" == resumable ]]
+            [[ "$cumulative_samples" == 3 ]]
+            [[ "$cumulative_seconds" == 900 ]]
+            [[ ! -e "$active_run_root" ]]
+            """#,
+            arguments: [scriptURL.path, root.path]
+        )
+
+        XCTAssertEqual(result.status, 0, result.output)
+    }
+
     private func runtimeFixture(
         id: String,
         project: String,

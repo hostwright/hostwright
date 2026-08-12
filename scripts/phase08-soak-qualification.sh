@@ -837,6 +837,20 @@ oslog_count_with_retry() {
   die 'A bounded OSLog observation contained no persisted Hostwright records after retries.' 69
 }
 
+daemon_observation_with_retry() {
+  local attempt=0
+  while [[ "$attempt" -lt 5 ]]; do
+    rss_kb="$(ps -o rss= -p "$daemon_pid" | tr -d ' ')"
+    descriptors="$(/usr/sbin/lsof -p "$daemon_pid" 2>/dev/null | wc -l | tr -d ' ')"
+    if [[ "$rss_kb" =~ ^[0-9]+$ && "$descriptors" =~ ^[0-9]+$ ]]; then
+      return
+    fi
+    attempt=$((attempt + 1))
+    sleep 1
+  done
+  die "A bounded daemon observability sample lost its foreground process identity (rssKB=${rss_kb:-missing} descriptors=${descriptors:-missing})." 69
+}
+
 checkpoint_path() {
   local sequence="$1"
   printf '%s/sequence-%04d.tsv\n' "$checkpoint_root" "$sequence"
@@ -1259,8 +1273,7 @@ record_sample() {
   local metrics_series oslog_count runtime_inventory_sha256 config_sha256 integrity_sha256
   local qualified_seconds material
   epoch="$(date +%s)"
-  rss_kb="$(ps -o rss= -p "$daemon_pid" | tr -d ' ')"
-  descriptors="$(/usr/sbin/lsof -p "$daemon_pid" 2>/dev/null | wc -l | tr -d ' ')"
+  daemon_observation_with_retry
   database_bytes="$(stat -f '%z' "$HOSTWRIGHT_PHASE08_SOAK_ROOT/state.sqlite")"
   operations="$(sqlite_query_with_retry "$HOSTWRIGHT_PHASE08_SOAK_ROOT/state.sqlite" 'SELECT count(*) FROM operation_ledger;')"
   active_groups="$(sqlite_query_with_retry "$HOSTWRIGHT_PHASE08_SOAK_ROOT/state.sqlite" "SELECT count(*) FROM operation_groups WHERE status = 'active';")"
@@ -1279,7 +1292,7 @@ record_sample() {
       && "$metrics_series" == 59 && "$runtime_inventory_sha256" =~ ^[a-f0-9]{64}$ \
       && "$config_sha256" =~ ^[a-f0-9]{64}$ && "$integrity_sha256" =~ ^[a-f0-9]{64}$ \
       && "$oslog_count" -gt 0 ]] \
-    || die 'A soak sample was incomplete, unbounded, or lost exact runtime/observability identity.'
+    || die "A soak sample was incomplete, unbounded, or lost exact runtime/observability identity (metricsSeries=$metrics_series rssKB=$rss_kb descriptors=$descriptors databaseBytes=$database_bytes operations=$operations activeGroups=$active_groups events=$events traces=$traces retries=$retries oslog10m=$oslog_count)."
   qualified_seconds=$((sequence * sample_interval_seconds))
   printf -v material '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' \
     "$sequence" "$qualification_id" "$segment_id" "$segment_sample" "$epoch" "$qualified_seconds" \

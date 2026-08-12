@@ -123,6 +123,8 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
             "PRAGMA busy_timeout=5000",
             "oslog_count_with_retry",
             "no persisted Hostwright records after retries",
+            "daemon_observation_with_retry",
+            "foreground process identity",
             "run_checkpointed_fault",
             "resume)",
             "status)",

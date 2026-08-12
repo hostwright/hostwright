@@ -822,6 +822,21 @@ sqlite_query_with_retry() {
   die "A bounded SQLite observation failed after retries: $query" 69
 }
 
+oslog_count_with_retry() {
+  local attempt=0
+  local count=0
+  while [[ "$attempt" -lt 3 ]]; do
+    count="$(/usr/bin/log show --last 10m --style ndjson --predicate "subsystem == \"$subsystem\"" 2>/dev/null | wc -l | tr -d ' ')"
+    if [[ "$count" =~ ^[1-9][0-9]*$ ]]; then
+      printf '%s\n' "$count"
+      return
+    fi
+    attempt=$((attempt + 1))
+    sleep 2
+  done
+  die 'A bounded OSLog observation contained no persisted Hostwright records after retries.' 69
+}
+
 checkpoint_path() {
   local sequence="$1"
   printf '%s/sequence-%04d.tsv\n' "$checkpoint_root" "$sequence"
@@ -1256,7 +1271,7 @@ record_sample() {
   runtime_inventory_sha256="$(sha256 "$inventory_file")"
   config_sha256="$(sha256 "$HOSTWRIGHT_PHASE08_SOAK_ROOT/hostwright.yaml")"
   integrity_sha256="$(sha256 "$sample_root/integrity.json")"
-  oslog_count="$(/usr/bin/log show --last 10m --style ndjson --predicate "subsystem == \"$subsystem\"" 2>/dev/null | wc -l | tr -d ' ')"
+  oslog_count="$(oslog_count_with_retry)"
   [[ "$rss_kb" =~ ^[0-9]+$ && "$descriptors" =~ ^[0-9]+$ \
       && "$database_bytes" =~ ^[0-9]+$ && "$operations" =~ ^[0-9]+$ \
       && "$active_groups" =~ ^[0-9]+$ && "$events" =~ ^[0-9]+$ \

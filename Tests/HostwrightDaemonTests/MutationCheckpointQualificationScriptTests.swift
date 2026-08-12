@@ -121,6 +121,8 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
             "validate_checkpoint_chain",
             "sqlite_query_with_retry",
             "PRAGMA busy_timeout=5000",
+            "oslog_count_with_retry",
+            "no persisted Hostwright records after retries",
             "run_checkpointed_fault",
             "resume)",
             "status)",

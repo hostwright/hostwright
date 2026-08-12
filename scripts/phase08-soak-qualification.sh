@@ -806,6 +806,22 @@ read_with_retry() {
   die "A bounded read-only soak observation failed: ${*##*/}"
 }
 
+sqlite_query_with_retry() {
+  local database="$1"
+  local query="$2"
+  local attempt=0
+  local output
+  while [[ "$attempt" -lt 5 ]]; do
+    if output="$(/usr/bin/sqlite3 "$database" "PRAGMA busy_timeout=5000; $query" 2>/dev/null)"; then
+      printf '%s\n' "$output"
+      return
+    fi
+    attempt=$((attempt + 1))
+    sleep 1
+  done
+  die "A bounded SQLite observation failed after retries: $query" 69
+}
+
 checkpoint_path() {
   local sequence="$1"
   printf '%s/sequence-%04d.tsv\n' "$checkpoint_root" "$sequence"
@@ -1231,11 +1247,11 @@ record_sample() {
   rss_kb="$(ps -o rss= -p "$daemon_pid" | tr -d ' ')"
   descriptors="$(/usr/sbin/lsof -p "$daemon_pid" 2>/dev/null | wc -l | tr -d ' ')"
   database_bytes="$(stat -f '%z' "$HOSTWRIGHT_PHASE08_SOAK_ROOT/state.sqlite")"
-  operations="$(/usr/bin/sqlite3 "$HOSTWRIGHT_PHASE08_SOAK_ROOT/state.sqlite" 'SELECT count(*) FROM operation_ledger;')"
-  active_groups="$(/usr/bin/sqlite3 "$HOSTWRIGHT_PHASE08_SOAK_ROOT/state.sqlite" "SELECT count(*) FROM operation_groups WHERE status = 'active';")"
-  events="$(/usr/bin/sqlite3 "$HOSTWRIGHT_PHASE08_SOAK_ROOT/state.sqlite" 'SELECT count(*) FROM event_ledger;')"
-  traces="$(/usr/bin/sqlite3 "$HOSTWRIGHT_PHASE08_SOAK_ROOT/state.sqlite" "SELECT count(*) FROM event_ledger WHERE type = 'trace.span.v1';")"
-  retries="$(/usr/bin/sqlite3 "$HOSTWRIGHT_PHASE08_SOAK_ROOT/state.sqlite" 'SELECT count(*) FROM restart_attempt_history;')"
+  operations="$(sqlite_query_with_retry "$HOSTWRIGHT_PHASE08_SOAK_ROOT/state.sqlite" 'SELECT count(*) FROM operation_ledger;')"
+  active_groups="$(sqlite_query_with_retry "$HOSTWRIGHT_PHASE08_SOAK_ROOT/state.sqlite" "SELECT count(*) FROM operation_groups WHERE status = 'active';")"
+  events="$(sqlite_query_with_retry "$HOSTWRIGHT_PHASE08_SOAK_ROOT/state.sqlite" 'SELECT count(*) FROM event_ledger;')"
+  traces="$(sqlite_query_with_retry "$HOSTWRIGHT_PHASE08_SOAK_ROOT/state.sqlite" "SELECT count(*) FROM event_ledger WHERE type = 'trace.span.v1';")"
+  retries="$(sqlite_query_with_retry "$HOSTWRIGHT_PHASE08_SOAK_ROOT/state.sqlite" 'SELECT count(*) FROM restart_attempt_history;')"
   metrics_series="$(/usr/bin/jq -er '.series | length' "$sample_root/metrics.json")"
   runtime_inventory_sha256="$(sha256 "$inventory_file")"
   config_sha256="$(sha256 "$HOSTWRIGHT_PHASE08_SOAK_ROOT/hostwright.yaml")"

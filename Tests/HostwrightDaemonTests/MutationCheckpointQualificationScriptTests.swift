@@ -119,6 +119,8 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
             "samples-v2.tsv",
             "commit_checkpoint",
             "validate_checkpoint_chain",
+            "sqlite_query_with_retry",
+            "PRAGMA busy_timeout=5000",
             "run_checkpointed_fault",
             "resume)",
             "status)",

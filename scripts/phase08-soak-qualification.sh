@@ -811,9 +811,12 @@ sqlite_query_with_retry() {
   local query="$2"
   local attempt=0
   local output
+  local result
   while [[ "$attempt" -lt 5 ]]; do
     if output="$(/usr/bin/sqlite3 "$database" "PRAGMA busy_timeout=5000; $query" 2>/dev/null)"; then
-      printf '%s\n' "$output"
+      result="$(printf '%s\n' "$output" | tail -n 1)"
+      [[ -n "$result" ]] || die "A bounded SQLite observation returned no result: $query" 69
+      printf '%s\n' "$result"
       return
     fi
     attempt=$((attempt + 1))

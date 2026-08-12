@@ -986,6 +986,8 @@ validate_checkpoint_chain() {
   local row_resource_uuid row_project_name row_hostwright_sha row_daemon_sha row_template_sha
   local row_host_identity_sha row_source_commit predecessor_sha256 checkpoint_sha256
   local prior_segment_id='' prior_segment_sample=0
+  local -a source_epoch_commits=() source_epoch_hostwright_shas=() source_epoch_daemon_shas=()
+  local source_epoch_count=0 source_epoch_index source_epoch_found
   validate_segment_ledger
   [[ -z "$(find "$checkpoint_root" -mindepth 1 -maxdepth 1 \
       \( ! -type f -o \( ! -name 'sequence-*.tsv' -a ! -name 'sequence-*.tsv.next.*' \) \) \
@@ -1040,8 +1042,8 @@ validate_checkpoint_chain() {
         && "$row_resource_identifier" == "$resource_identifier" \
         && "$row_resource_uuid" == "$resource_uuid" \
         && "$row_project_name" == "$project_name" \
-        && "$row_hostwright_sha" == "$hostwright_sha" \
-        && "$row_daemon_sha" == "$daemon_sha" \
+        && "$row_hostwright_sha" =~ ^[a-f0-9]{64}$ \
+        && "$row_daemon_sha" =~ ^[a-f0-9]{64}$ \
         && "$row_template_sha" == "$template_sha" \
         && "$row_host_identity_sha" == "$host_identity_sha" \
         && "$predecessor_sha256" == "$expected_predecessor" \
@@ -1049,6 +1051,29 @@ validate_checkpoint_chain() {
       || die 'A cumulative checkpoint failed identity, bound, or predecessor validation.' 75
     source_commit_is_allowed "$row_source_commit" \
       || die 'A cumulative checkpoint is bound to an unknown source commit.' 75
+    source_epoch_found=0
+    source_epoch_index=0
+    while [[ "$source_epoch_index" -lt "$source_epoch_count" ]]; do
+      if [[ "${source_epoch_commits[$source_epoch_index]}" == "$row_source_commit" ]]; then
+        [[ "${source_epoch_hostwright_shas[$source_epoch_index]}" == "$row_hostwright_sha" \
+            && "${source_epoch_daemon_shas[$source_epoch_index]}" == "$row_daemon_sha" ]] \
+          || die 'A cumulative checkpoint changed executable identity within one source epoch.' 75
+        source_epoch_found=1
+        break
+      fi
+      source_epoch_index=$((source_epoch_index + 1))
+    done
+    if [[ "$source_epoch_found" == 0 ]]; then
+      source_epoch_commits[$source_epoch_count]="$row_source_commit"
+      source_epoch_hostwright_shas[$source_epoch_count]="$row_hostwright_sha"
+      source_epoch_daemon_shas[$source_epoch_count]="$row_daemon_sha"
+      source_epoch_count=$((source_epoch_count + 1))
+    fi
+    if [[ "$row_source_commit" == "$checkpoint_source_commit" ]]; then
+      [[ "$row_hostwright_sha" == "$hostwright_sha" \
+          && "$row_daemon_sha" == "$daemon_sha" ]] \
+        || die 'The checkpoint source epoch does not match its durable executable identity.' 75
+    fi
     if [[ "$row_segment_id" == "$prior_segment_id" ]]; then
       [[ "$row_segment_sample" == "$((prior_segment_sample + 1))" ]] \
         || die 'A cumulative checkpoint skipped or duplicated a segment sample.' 75

@@ -1443,6 +1443,26 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
         XCTAssertTrue(rejected.output.contains("runtime inventory hash changed"))
     }
 
+    func testAggregateSoakValidatesExecutableIdentityBySourceEpoch() throws {
+        let scriptURL = packageRoot().appendingPathComponent(
+            "scripts/phase08-soak-qualification.sh"
+        )
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-soak-checkpoint-epochs-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let result = try runBash(
+            checkpointFixtureSource(validate: true, includesExecutableTransition: true),
+            arguments: [scriptURL.path, root.path]
+        )
+
+        XCTAssertEqual(result.status, 0, result.output)
+        XCTAssertTrue(result.output.contains("samples=2 seconds=600 rows=3"))
+    }
+
     func testAggregateSoakReusesCompletedFaultReceiptExactlyOnce() throws {
         let scriptURL = packageRoot().appendingPathComponent(
             "scripts/phase08-soak-qualification.sh"
@@ -1709,11 +1729,24 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
         """
     }
 
-    private func checkpointFixtureSource(validate: Bool) -> String {
+    private func checkpointFixtureSource(
+        validate: Bool,
+        includesExecutableTransition: Bool = false
+    ) -> String {
+        let transitionMode = includesExecutableTransition ? "1" : "0"
         let setup = #"""
         source "$1"
         HOSTWRIGHT_PHASE08_SOAK_ROOT="$2"
-        HOSTWRIGHT_PHASE08_SOAK_SOURCE_COMMIT='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+        transition_mode='\#(transitionMode)'
+        prior_source='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+        current_source='7777777777777777777777777777777777777777'
+        prior_hostwright_sha='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+        prior_daemon_sha='cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'
+        current_hostwright_sha='1111111111111111111111111111111111111111111111111111111111111111'
+        current_daemon_sha='2222222222222222222222222222222222222222222222222222222222222222'
+        HOSTWRIGHT_PHASE08_SOAK_SOURCE_COMMIT="$prior_source"
+        checkpoint_source_commit="$prior_source"
+        source_commit_history="$prior_source"
         state_file="$2/state-v2.tsv"
         evidence_file="$2/evidence-v2.log"
         sample_file="$2/samples-v2.tsv"
@@ -1721,11 +1754,12 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
         segment_file="$2/segments-v1.tsv"
         qualification_id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
         segment_id='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+        next_segment_id='dddddddd-dddd-4ddd-8ddd-dddddddddddd'
         project_name='p08-soak-test'
         resource_identifier='hostwright-v2-p08-soa-web-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
         resource_uuid='cccccccc-cccc-8ccc-8ccc-cccccccccccc'
-        hostwright_sha='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
-        daemon_sha='cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'
+        hostwright_sha="$prior_hostwright_sha"
+        daemon_sha="$prior_daemon_sha"
         template_sha='dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
         host_identity_sha='9999999999999999999999999999999999999999999999999999999999999999'
         previous_checkpoint_sha256="$genesis_checkpoint_sha256"
@@ -1734,25 +1768,48 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
         printf 'schemaVersion\t2\n' > "$state_file"
         printf 'segmentID\tevent\tepoch\tsequence\tqualifiedSeconds\tcheckpointSHA256\tdetail1\tdetail2\n' > "$segment_file"
         printf '%s\tstart\t1000\t0\t0\t%s\tgapSeconds=0\tsourceCommit=%s\n' \
-          "$segment_id" "$genesis_checkpoint_sha256" "$HOSTWRIGHT_PHASE08_SOAK_SOURCE_COMMIT" >> "$segment_file"
+          "$segment_id" "$genesis_checkpoint_sha256" "$prior_source" >> "$segment_file"
         printf '%b\n' "$checkpoint_header" > "$sample_file"
         if [[ ! -e "$checkpoint_root/sequence-0001.tsv" ]]; then
           for sequence in 1 2; do
+            row_segment_id="$segment_id"
+            row_segment_sample="$sequence"
+            row_source_commit="$prior_source"
+            row_hostwright_sha="$prior_hostwright_sha"
+            row_daemon_sha="$prior_daemon_sha"
+            if [[ "$transition_mode" == 1 && "$sequence" == 2 ]]; then
+              printf '%s\tfinish\t1400\t1\t300\t%s\tpassed\t0\n' \
+                "$segment_id" "$previous_checkpoint_sha256" >> "$segment_file"
+              printf '%s\tstart\t1500\t1\t300\t%s\tgapSeconds=0\tsourceCommit=%s\n' \
+                "$next_segment_id" "$previous_checkpoint_sha256" "$current_source" >> "$segment_file"
+              row_segment_id="$next_segment_id"
+              row_segment_sample=1
+              row_source_commit="$current_source"
+              row_hostwright_sha="$current_hostwright_sha"
+              row_daemon_sha="$current_daemon_sha"
+            fi
             printf '{"sequence":%s}\n' "$sequence" > "$2/runtime-inventory-v1/sequence-$(printf '%04d' "$sequence").json"
             chmod 600 "$2/runtime-inventory-v1/sequence-$(printf '%04d' "$sequence").json"
             inventory_sha="$(sha256 "$2/runtime-inventory-v1/sequence-$(printf '%04d' "$sequence").json")"
             printf -v material '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' \
-              "$sequence" "$qualification_id" "$segment_id" "$sequence" "$((1000 + sequence * 300))" "$((sequence * 300))" \
+              "$sequence" "$qualification_id" "$row_segment_id" "$row_segment_sample" "$((1000 + sequence * 300))" "$((sequence * 300))" \
               123 1024 12 4096 10 0 20 2 0 1 "$inventory_sha" \
               eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee \
               ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff \
-              "$resource_identifier" "$resource_uuid" "$project_name" "$hostwright_sha" \
-              "$daemon_sha" "$template_sha" "$host_identity_sha" \
-              "$HOSTWRIGHT_PHASE08_SOAK_SOURCE_COMMIT" \
+              "$resource_identifier" "$resource_uuid" "$project_name" "$row_hostwright_sha" \
+              "$row_daemon_sha" "$template_sha" "$host_identity_sha" \
+              "$row_source_commit" \
               "$previous_checkpoint_sha256"
             commit_checkpoint "$sequence" "$material"
           done
           printf '%b\n' "$checkpoint_header" > "$sample_file"
+        fi
+        if [[ "$transition_mode" == 1 ]]; then
+          HOSTWRIGHT_PHASE08_SOAK_SOURCE_COMMIT="$current_source"
+          checkpoint_source_commit="$current_source"
+          source_commit_history="$prior_source,$current_source"
+          hostwright_sha="$current_hostwright_sha"
+          daemon_sha="$current_daemon_sha"
         fi
         """#
         if validate {

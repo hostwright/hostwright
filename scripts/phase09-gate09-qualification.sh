@@ -180,6 +180,11 @@ live(){
   HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" HOSTWRIGHT_CACHE_DIR="$runtime/cache" HOSTWRIGHT_LOG_DIR="$runtime/logs" "$cli" exec probe --manifest "$config" --state-db "$state" --no-stdin -- python3 -c 'print("gate09-exec")' >/dev/null
   HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" HOSTWRIGHT_CACHE_DIR="$runtime/cache" HOSTWRIGHT_LOG_DIR="$runtime/logs" "$cli" events --state-db "$state" --project "$live_project" --limit 20 --output json | /usr/bin/jq -e . >/dev/null
   HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" HOSTWRIGHT_CACHE_DIR="$runtime/cache" HOSTWRIGHT_LOG_DIR="$runtime/logs" "$bootstrap" --live --root "$runtime" --state "$state" --socket "$socket" > "$runtime/stream-live.json"
+  trace_id="$(/usr/bin/sqlite3 "$state" 'SELECT trace_id FROM trace_spans ORDER BY started_at DESC LIMIT 1;')"
+  if [[ -n "$trace_id" ]]; then
+    trace_hash="$(HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" traces inspect --state-db "$state" --trace-id "$trace_id" --output json | /usr/bin/jq -er --arg id "$trace_id" '.traces[] | select(.traceID == $id) | .traceSHA256')"
+    HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" traces export --state-db "$state" --trace-id "$trace_id" --output-path "$runtime/trace.json" --confirm-trace "$trace_hash" --output json | /usr/bin/jq -e . >/dev/null
+  fi
 
   first_process_identity="$(/usr/bin/awk -F $'\t' -v p="$pid" '$2=="process"&&$7~("pid="p";"){print $7}' "$root/ownership-v1.tsv")"
   stop_exact_process "$daemon" "$(stat -f '%d' "$daemon")" "$(stat -f '%i' "$daemon")" "$first_process_identity"
@@ -207,12 +212,6 @@ live(){
     /bin/sleep 1
   done
   [[ "$metrics_exported" == 1 ]] || die 'Gate 9 metrics snapshot remained unstable across bounded retries.' 124
-  trace_id="$(/usr/bin/sqlite3 "$state" 'SELECT trace_id FROM trace_spans ORDER BY started_at DESC LIMIT 1;')"
-  if [[ -n "$trace_id" ]]; then
-    trace_hash="$(HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" traces inspect --state-db "$state" --trace-id "$trace_id" --output json | /usr/bin/jq -er --arg id "$trace_id" '.traces[] | select(.traceID == $id) | .traceSHA256')"
-    HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" traces export --state-db "$state" --trace-id "$trace_id" --output-path "$runtime/trace.json" --confirm-trace "$trace_hash" --output json | /usr/bin/jq -e . >/dev/null
-  fi
-
   record_keychain_items "$state"
   pid="$(start_daemon "$runtime" "$daemon" "$config" "$state" restarted "$cli")"
   HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" capabilities --json | /usr/bin/jq -e . >/dev/null

@@ -11,37 +11,40 @@ struct MetricsCommandRunner {
     let environment: CLIEnvironment
 
     func run() throws -> CLIRunResult {
-        let snapshot = try StateMetricsService(
+        let metrics = StateMetricsService(
             store: SQLiteStateStore(configuration: stateStoreConfiguration),
             date: environment.metricsDate
-        ).snapshot()
+        )
         switch options.action {
         case .snapshot:
+            let snapshot = try metrics.snapshot()
             return CLIRunResult(
                 standardOutput: options.output == .json
                     ? CLIJSON.codable(snapshot)
-                    : render(snapshot)
+                : render(snapshot)
             )
         case .export(let outputPath, let confirmationSHA256):
-            guard confirmationSHA256 == snapshot.snapshotSHA256 else {
-                throw HostwrightMetricsError.snapshotChanged
+            let receipt = try metrics.withSnapshot { snapshot in
+                guard confirmationSHA256 == snapshot.snapshotSHA256 else {
+                    throw HostwrightMetricsError.snapshotChanged
+                }
+                guard !environment.metricsCancelled() else {
+                    throw StateStoreError.operationCancelled(path: stateStoreConfiguration.databasePath)
+                }
+                let data = try canonicalData(snapshot)
+                let written = try environment.metricsExport(
+                    data,
+                    outputPath,
+                    HostwrightTraceContract.maximumExportBytes,
+                    environment.metricsCancelled
+                )
+                return HostwrightMetricsExportReceipt(
+                    snapshotSHA256: snapshot.snapshotSHA256,
+                    outputPath: outputPath,
+                    outputSHA256: written.outputSHA256,
+                    outputBytes: written.outputBytes
+                )
             }
-            guard !environment.metricsCancelled() else {
-                throw StateStoreError.operationCancelled(path: stateStoreConfiguration.databasePath)
-            }
-            let data = try canonicalData(snapshot)
-            let written = try environment.metricsExport(
-                data,
-                outputPath,
-                HostwrightTraceContract.maximumExportBytes,
-                environment.metricsCancelled
-            )
-            let receipt = HostwrightMetricsExportReceipt(
-                snapshotSHA256: snapshot.snapshotSHA256,
-                outputPath: outputPath,
-                outputSHA256: written.outputSHA256,
-                outputBytes: written.outputBytes
-            )
             return CLIRunResult(
                 standardOutput: options.output == .json
                     ? CLIJSON.codable(receipt)

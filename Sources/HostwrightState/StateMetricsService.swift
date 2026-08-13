@@ -29,41 +29,49 @@ public struct StateMetricsService: Sendable {
     }
 
     public func snapshot() throws -> HostwrightMetricsSnapshot {
-        let result = try store.withValidatedConnection(readOnly: true) { connection in
-            let before = try StateMaintenanceFileSupport.fingerprint(store.path)
-            let dataVersionBefore = try requiredUInt64(
-                connection.query("PRAGMA data_version").first?.first ?? nil,
-                context: "SQLite data version"
-            )
-            let projection = try connection.transaction {
-                try project(connection)
-            }
-            let dataVersionAfter = try requiredUInt64(
-                connection.query("PRAGMA data_version").first?.first ?? nil,
-                context: "SQLite data version"
-            )
-            let after = try StateMaintenanceFileSupport.fingerprint(store.path)
-            guard before == after, dataVersionBefore == dataVersionAfter else {
-                throw StateStoreError.transactionOutcomeUncertain(
-                    path: store.path,
-                    message: "the authoritative database changed during the metrics snapshot"
-                )
-            }
-            return (before, projection)
-        }
+        try withSnapshot { $0 }
+    }
 
+    public func withSnapshot<Value>(
+        _ body: (HostwrightMetricsSnapshot) throws -> Value
+    ) throws -> Value {
+        try store.withValidatedConnection(readOnly: true) { connection in
+            try body(makeSnapshot(on: connection))
+        }
+    }
+
+    private func makeSnapshot(on connection: SQLiteConnection) throws -> HostwrightMetricsSnapshot {
+        let before = try StateMaintenanceFileSupport.fingerprint(store.path)
+        let dataVersionBefore = try requiredUInt64(
+            connection.query("PRAGMA data_version").first?.first ?? nil,
+            context: "SQLite data version"
+        )
+        let projection = try connection.transaction {
+            try project(connection)
+        }
+        let dataVersionAfter = try requiredUInt64(
+            connection.query("PRAGMA data_version").first?.first ?? nil,
+            context: "SQLite data version"
+        )
+        let after = try StateMaintenanceFileSupport.fingerprint(store.path)
+        guard before == after, dataVersionBefore == dataVersionAfter else {
+            throw StateStoreError.transactionOutcomeUncertain(
+                path: store.path,
+                message: "the authoritative database changed during the metrics snapshot"
+            )
+        }
         let source = HostwrightMetricsSource(
             schemaVersion: MigrationRunner.latestSchemaVersion,
-            databaseSHA256: result.0.sha256,
-            databaseBytes: result.0.bytes
+            databaseSHA256: before.sha256,
+            databaseBytes: before.bytes
         )
         let retention = HostwrightMetricsRetention()
         let identity = SnapshotIdentity(
             schemaVersion: HostwrightMetricCatalog.schemaVersion,
             kind: "hostwright.metrics.snapshot",
             source: source,
-            series: result.1.series,
-            slos: result.1.slos,
+            series: projection.series,
+            slos: projection.slos,
             retention: retention
         )
         let encoder = JSONEncoder()
@@ -74,8 +82,8 @@ public struct StateMetricsService: Sendable {
         return HostwrightMetricsSnapshot(
             generatedAt: ISO8601DateFormatter().string(from: date()),
             source: source,
-            series: result.1.series,
-            slos: result.1.slos,
+            series: projection.series,
+            slos: projection.slos,
             retention: retention,
             snapshotSHA256: digest
         )

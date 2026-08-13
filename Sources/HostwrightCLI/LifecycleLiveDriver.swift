@@ -3,6 +3,7 @@ import Foundation
 import HostwrightCore
 import HostwrightManifest
 import HostwrightNetworking
+import HostwrightObservability
 import HostwrightReconciler
 import HostwrightRegistry
 import HostwrightRuntime
@@ -87,6 +88,7 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             )
         )
         try store.migrate()
+        HostwrightTraceContext.session?.attach(StateTraceSink(store: store))
 
         let projectName = manifest.project ?? ""
         let projectID = "project-\(projectName)"
@@ -447,13 +449,21 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
         let recoveryStateJSONRedacted = try recoverySnapshot.map(
             lifecycleRecoveryStateJSONRedacted
         )
+        let groupIdempotencyKey = options.operationIdempotencyKeySHA256 ??
+            compiled.plan.planSHA256
+        let operationFencingToken = options.operationIdempotencyKeySHA256.map {
+            HostwrightResourceUUID.legacy(
+                kind: "lifecycle-fencing",
+                identifier: $0
+            )
+        } ?? preparation.planFencingToken
         let operationID = HostwrightResourceUUID.legacy(
             kind: "lifecycle-operation",
-            identifier: compiled.plan.planSHA256
+            identifier: groupIdempotencyKey
         )
         let groupID = HostwrightResourceUUID.legacy(
             kind: "lifecycle-group",
-            identifier: compiled.plan.planSHA256
+            identifier: groupIdempotencyKey
         )
         try lifecyclePersistDesiredImageLocks(
             plan: compiled.plan,
@@ -489,7 +499,8 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
         let validator = LifecycleLiveValidator(
             adapter: adapter,
             state: state,
-            store: store
+            store: store,
+            groupIdempotencyKey: groupIdempotencyKey
         )
         let effects = LifecycleLiveEffects(
             adapter: adapter,
@@ -520,20 +531,28 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
         } else {
             serviceTunnelFinalizer = nil
         }
+        let lifecycleFinalizer = LifecycleCompositeFinalizer(
+            dependent: serviceTunnelFinalizer,
+            ownership: LifecycleOwnershipFinalizer(
+                store: store,
+                adapter: adapter
+            )
+        )
         let executor = LifecycleSagaExecutor(
             store: store,
             effects: effects,
             validator: validator,
             recoveryStateJSONRedacted: recoveryStateJSONRedacted,
-            finalizer: serviceTunnelFinalizer
+            finalizer: lifecycleFinalizer
         )
         let result = try hostwrightWaitForAsync {
             try await executor.execute(
                 plan: compiled.plan,
                 operationID: operationID,
                 groupID: groupID,
-                fencingToken: preparation.planFencingToken,
-                lockOwner: "hostwright-cli"
+                fencingToken: operationFencingToken,
+                lockOwner: "hostwright-cli:\(operationID)",
+                groupIdempotencyKey: groupIdempotencyKey
             )
         }
         if result.status == .compensated, let recoverySnapshot {
@@ -801,7 +820,7 @@ private func lifecycleRequiresNamedVolumeDetach(
     }
 }
 
-private func lifecyclePersistDesiredImageLocks(
+func lifecyclePersistDesiredImageLocks(
     plan: LifecyclePlan,
     desiredServicesByNodeKey: [String: DesiredRuntimeService],
     groupID: String,
@@ -815,11 +834,31 @@ private func lifecyclePersistDesiredImageLocks(
               let lock = service.imageLock else {
             continue
         }
+        if let existing = try store.imageDigestLocks.load(
+            planSHA256: plan.planSHA256,
+            resourceUUID: node.resourceUUID,
+            stateKind: .desired
+        ) {
+            guard existing.projectID == plan.projectID,
+                  existing.resourceUUID == node.resourceUUID,
+                  existing.serviceName == service.logicalServiceName,
+                  existing.replicaIndex == service.replicaIndex,
+                  existing.stateKind == .desired,
+                  existing.lock == lock,
+                  existing.providerGeneration == plan.providerGeneration,
+                  existing.planSHA256 == plan.planSHA256,
+                  existing.observationSHA256 == nil else {
+                throw StateStoreError.invalidRecord(
+                    "Existing desired image digest lock does not match the exact repeated lifecycle plan."
+                )
+            }
+            persistedResourceUUIDs.insert(node.resourceUUID)
+            continue
+        }
         let record = ImageDigestLockRecord(
             id: HostwrightResourceUUID.legacy(
                 kind: "image-digest-lock-desired",
-                identifier:
-                    "\(plan.planSHA256):\(node.resourceUUID)"
+                identifier: "\(plan.planSHA256):\(node.resourceUUID)"
             ),
             projectID: plan.projectID,
             resourceUUID: node.resourceUUID,
@@ -974,7 +1013,10 @@ private struct LifecycleRecoveryDeadline: Sendable {
     }
 }
 
-private struct LifecycleRecoveryDeadlineEffects: LifecycleSagaEffects {
+private struct LifecycleRecoveryDeadlineEffects:
+    LifecycleSagaEffects,
+    LifecycleSagaCompensationVerifying
+{
     let base: any LifecycleSagaEffects
     let deadline: LifecycleRecoveryDeadline
 
@@ -1013,6 +1055,44 @@ private struct LifecycleRecoveryDeadlineEffects: LifecycleSagaEffects {
             }
         } catch {
             return .failed(timeoutFailure(context: context))
+        }
+    }
+
+    func verifyCompensation(
+        plan: LifecyclePlan,
+        context: LifecycleSagaContext
+    ) async -> LifecycleSagaCompensationVerification {
+        guard plan.command == .update else {
+            return .verified(
+                LifecycleNodeVerification(
+                    summaryRedacted: "No update revision restoration was required."
+                )
+            )
+        }
+        guard let verifier = base as? any LifecycleSagaCompensationVerifying else {
+            return .safeHold(
+                reasonCode:
+                    LifecycleRecoverySafeHoldReason.restoredHealthFailed.rawValue,
+                hintRedacted:
+                    "The bounded recovery path cannot verify the restored revision. " +
+                    "Preserve the exact recovery checkpoint."
+            )
+        }
+        do {
+            return try await deadline.run {
+                await verifier.verifyCompensation(
+                    plan: plan,
+                    context: context
+                )
+            }
+        } catch {
+            return .safeHold(
+                reasonCode:
+                    LifecycleRecoverySafeHoldReason.restoredHealthFailed.rawValue,
+                hintRedacted:
+                    "The bounded restored-revision health verification timed out. " +
+                    "Preserve the exact recovery checkpoint."
+            )
         }
     }
 
@@ -1064,8 +1144,26 @@ struct LifecyclePersistedRecoveryDriver {
                 "The exact lifecycle operation group does not exist."
             )
         }
-        guard sourceGroup.planHash == request.confirmationPlanSHA256,
-              let persistedPlan = try? LifecyclePersistedIntentCodec.decode(
+        guard sourceGroup.planHash == request.confirmationPlanSHA256 else {
+            throw LifecyclePersistedRecoveryError.confirmationMismatch
+        }
+        guard LifecycleMutationCheckpointRecord(
+            checkpoint: sourceGroup.checkpoint
+        ) != nil else {
+            throw LifecyclePersistedRecoveryError.safeHold(
+                LifecycleRecoverySafeHold(
+                    reasonCode: .planningIncomplete,
+                    reason:
+                        "The lifecycle checkpoint is not recognized by checkpoint contract v1. No runtime mutation was attempted.",
+                    affectedNodeKeys: [],
+                    operatorCommands: [
+                        "hostwright recovery --state-db <path> --output json",
+                        "hostwright inspect --output json"
+                    ]
+                )
+            )
+        }
+        guard let persistedPlan = try? LifecyclePersistedIntentCodec.decode(
                   sourceGroup.intentJSONRedacted
               ),
               persistedPlan.planSHA256 == sourceGroup.planHash,
@@ -1869,8 +1967,13 @@ struct LifecyclePersistedRecoveryDriver {
     ) async throws -> LifecycleSagaExecutionResult {
         switch request.action {
         case .resume:
+            let recoveryOwner = recoveryProcessOwner(for: .resume)
             guard sourceGroup.status == .interrupted ||
                     isExpiredActive(sourceGroup) ||
+                    isHandedOffActive(
+                        sourceGroup,
+                        controllerID: "hostwright-recovery-resume"
+                    ) ||
                     isFailedSafeHold(sourceGroup) else {
                 throw LifecyclePersistedRecoveryError.unavailable(
                     "Only an interrupted lifecycle operation, its exact expired active lease, or an exact failed safe-hold can be resumed."
@@ -1881,7 +1984,7 @@ struct LifecyclePersistedRecoveryDriver {
                 operationID: sourceGroup.operationID,
                 groupID: sourceGroup.id,
                 fencingToken: sourceGroup.fencingToken,
-                lockOwner: "hostwright-recovery-resume",
+                lockOwner: recoveryOwner,
                 store: store,
                 deadline: deadline,
                 recoveryStateJSONRedacted:
@@ -1903,12 +2006,18 @@ struct LifecyclePersistedRecoveryDriver {
             }
             return result
         case .rollback:
+            let recoveryOwner = recoveryProcessOwner(for: .rollback)
+            let handedOffActive = isHandedOffActive(
+                sourceGroup,
+                controllerID: "hostwright-recovery-rollback"
+            )
             guard sourceGroup.status == .interrupted ||
-                    sourceGroup.status == .failed,
+                    sourceGroup.status == .failed ||
+                    handedOffActive,
                   sourceGroup.rollbackAvailable,
                   persistedPlan.command == .update else {
                 throw LifecyclePersistedRecoveryError.unavailable(
-                    "Only an interrupted or failed update with recorded inverses can be rolled back."
+                    "Only an interrupted, failed, or exactly handed-off update with recorded inverses can be rolled back."
                 )
             }
             if isCompletedCompensation(sourceGroup) {
@@ -1970,6 +2079,13 @@ struct LifecyclePersistedRecoveryDriver {
                         "Completed compensation and exact ownership projection are verified."
                 )
             }
+            if handedOffActive {
+                try claimRollbackHandoff(
+                    sourceGroup: sourceGroup,
+                    recoveryOwner: recoveryOwner,
+                    store: store
+                )
+            }
             let rollbackFencingToken = HostwrightResourceUUID.legacy(
                 kind: "lifecycle-rollback-fence",
                 identifier: sourceGroup.id
@@ -1999,7 +2115,7 @@ struct LifecyclePersistedRecoveryDriver {
                 operationID: rollbackOperationID,
                 groupID: rollbackGroupID,
                 fencingToken: rollbackFencingToken,
-                lockOwner: "hostwright-recovery-rollback",
+                lockOwner: recoveryOwner,
                 store: store,
                 deadline: deadline,
                 recoveryStateJSONRedacted:
@@ -2018,6 +2134,75 @@ struct LifecyclePersistedRecoveryDriver {
             }
             return result
         }
+    }
+
+    private func recoveryProcessOwner(
+        for action: LifecyclePersistedRecoveryAction
+    ) -> String {
+        let controller = switch action {
+        case .resume: "hostwright-recovery-resume"
+        case .rollback: "hostwright-recovery-rollback"
+        }
+        return "\(controller):\(HostwrightResourceUUID.generate())"
+    }
+
+    private func isHandedOffActive(
+        _ group: OperationGroupRecord,
+        controllerID: String
+    ) -> Bool {
+        guard group.status == .active,
+              group.lockOwner == controllerID,
+              let expiry = group.lockExpiresAt,
+              expiry > hostwrightTimestamp(),
+              let data = group.metadataJSONRedacted.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data)
+                as? [String: Any],
+              let authority = object["localLeaseAuthority"]
+                as? [String: Any],
+              (authority["schemaVersion"] as? NSNumber)?.intValue == 1,
+              authority["controllerID"] as? String == controllerID else {
+            return false
+        }
+        return true
+    }
+
+    private func claimRollbackHandoff(
+        sourceGroup: OperationGroupRecord,
+        recoveryOwner: String,
+        store: SQLiteStateStore
+    ) throws {
+        let now = Date()
+        let timestamp = ISO8601DateFormatter().string(from: now)
+        let replacementExpiry = ISO8601DateFormatter().string(
+            from: now.addingTimeInterval(300)
+        )
+        let claim = try store.operationGroups.reclaimExpiredActive(
+            groupID: sourceGroup.id,
+            expectedPlanHash: sourceGroup.planHash,
+            expectedFencingToken: sourceGroup.fencingToken,
+            lockOwner: recoveryOwner,
+            lockExpiresAt: replacementExpiry,
+            currentTimestamp: timestamp
+        )
+        guard case .reclaimed(let claimed) = claim,
+              claimed.lockOwner == recoveryOwner,
+              claimed.lockExpiresAt == replacementExpiry else {
+            throw LifecyclePersistedRecoveryError.unavailable(
+                "The exact rollback handoff was claimed by another local recovery process."
+            )
+        }
+        try store.operationGroups.finishExactLease(
+            groupID: claimed.id,
+            expectedFencingToken: claimed.fencingToken,
+            expectedLockOwner: recoveryOwner,
+            expectedLockExpiresAt: replacementExpiry,
+            status: .interrupted,
+            checkpoint: claimed.checkpoint,
+            manualRecoveryHintRedacted:
+                claimed.manualRecoveryHintRedacted,
+            updatedAt: timestamp,
+            metadataJSONRedacted: claimed.metadataJSONRedacted
+        )
     }
 
     private func rebindImageRecoveryAuthorizations(
@@ -2146,6 +2331,11 @@ struct LifecyclePersistedRecoveryDriver {
         recoveryStateJSONRedacted: String? = nil,
         allowFailedSafeHoldResume: Bool = false
     ) async throws -> LifecycleSagaExecutionResult {
+        let persistedGroup = try store.operationGroups.load(id: groupID)
+        if let persistedGroup,
+           persistedGroup.planHash != plan.planSHA256 {
+            throw LifecycleSagaError.persistedPlanMismatch
+        }
         let desiredByNode = recoveryDesiredServices(plan: plan)
         try lifecyclePersistDesiredImageLocks(
             plan: plan,
@@ -2168,15 +2358,23 @@ struct LifecyclePersistedRecoveryDriver {
             validator: LifecycleLiveValidator(
                 adapter: runtime.adapter,
                 state: runtime.state,
-                store: store
+                store: store,
+                groupIdempotencyKey:
+                    persistedGroup?.groupIdempotencyKey ?? plan.planSHA256
             ),
-            recoveryStateJSONRedacted: recoveryStateJSONRedacted
+            recoveryStateJSONRedacted: recoveryStateJSONRedacted,
+            finalizer: LifecycleOwnershipFinalizer(
+                store: store,
+                adapter: runtime.adapter
+            )
         ).execute(
             plan: plan,
             operationID: operationID,
             groupID: groupID,
             fencingToken: fencingToken,
             lockOwner: lockOwner,
+            groupIdempotencyKey:
+                persistedGroup?.groupIdempotencyKey ?? plan.planSHA256,
             allowFailedSafeHoldResume: allowFailedSafeHoldResume
         )
     }
@@ -2319,6 +2517,7 @@ struct LifecyclePersistedRecoveryDriver {
         guard unsafeFailures.isEmpty else {
             throw LifecyclePersistedRecoveryError.safeHold(
                 LifecycleRecoverySafeHold(
+                    reasonCode: .ambiguousEffect,
                     reason:
                         "A failed update step has ambiguous or partial effects.",
                     affectedNodeKeys: unsafeFailures.map(\.stepKey)
@@ -2379,6 +2578,7 @@ struct LifecyclePersistedRecoveryDriver {
             guard unsafeNodeKeys.isEmpty else {
                 throw LifecyclePersistedRecoveryError.safeHold(
                     LifecycleRecoverySafeHold(
+                        reasonCode: .ambiguousEffect,
                         reason:
                             "Interrupted update effects are ambiguous or partial; " +
                             "exact compensation cannot be proven.",
@@ -2433,6 +2633,7 @@ struct LifecyclePersistedRecoveryDriver {
                 }) else {
                     throw LifecyclePersistedRecoveryError.safeHold(
                         LifecycleRecoverySafeHold(
+                            reasonCode: .healthyRevisionUnavailable,
                             reason:
                                 "The persisted update does not prove the exact prior revision was healthy.",
                             affectedNodeKeys: [node.key]
@@ -2640,6 +2841,7 @@ enum LifecycleSpecialNodeEvidence: Equatable, Sendable {
 enum LifecycleSpecialExecutionError: Error, Equatable, Sendable {
     case invalidExactBinding
     case invalidHook
+    case invalidProbe
     case invalidCompletionCheckpoint
     case staleCapability
     case unavailable(String)
@@ -2688,7 +2890,7 @@ actor LifecycleRuntimeExecutionState {
     let desiredState: DesiredRuntimeState
     var observedState: ObservedRuntimeState
     var bindingsByResourceUUID: [String: LifecycleResourceBinding]
-    let desiredByNode: [String: DesiredRuntimeService]
+    var desiredByNode: [String: DesiredRuntimeService]
     var specialEvidenceByNodeKey: [String: LifecycleSpecialNodeEvidence] = [:]
 
     init(
@@ -2762,6 +2964,13 @@ actor LifecycleRuntimeExecutionState {
         desiredByNode[nodeKey]
     }
 
+    func setDesiredService(
+        _ service: DesiredRuntimeService,
+        for nodeKey: String
+    ) {
+        desiredByNode[nodeKey] = service
+    }
+
     func recordSpecialEvidence(
         _ evidence: LifecycleSpecialNodeEvidence,
         for nodeKey: String
@@ -2820,6 +3029,19 @@ struct LifecycleLiveValidator: LifecycleSagaContextValidating {
     let adapter: any RuntimeAdapter
     let state: LifecycleRuntimeExecutionState
     let store: SQLiteStateStore
+    let groupIdempotencyKey: String?
+
+    init(
+        adapter: any RuntimeAdapter,
+        state: LifecycleRuntimeExecutionState,
+        store: SQLiteStateStore,
+        groupIdempotencyKey: String? = nil
+    ) {
+        self.adapter = adapter
+        self.state = state
+        self.store = store
+        self.groupIdempotencyKey = groupIdempotencyKey
+    }
 
     func validate(
         plan: LifecyclePlan,
@@ -2941,7 +3163,7 @@ struct LifecycleLiveValidator: LifecycleSagaContextValidating {
         node: LifecyclePlanNode
     ) -> Bool {
         guard let group = try? store.operationGroups.latest(
-            groupIdempotencyKey: plan.planSHA256
+            groupIdempotencyKey: groupIdempotencyKey ?? plan.planSHA256
         ),
         group.planHash == plan.planSHA256,
         let steps = try? store.operationGroupSteps.load(groupID: group.id) else {
@@ -3011,7 +3233,10 @@ struct LifecycleLiveValidator: LifecycleSagaContextValidating {
     }
 }
 
-struct LifecycleLiveEffects: LifecycleSagaEffects {
+struct LifecycleLiveEffects:
+    LifecycleSagaEffects,
+    LifecycleSagaCompensationVerifying
+{
     let adapter: any RuntimeAdapter
     let state: LifecycleRuntimeExecutionState
     let store: SQLiteStateStore
@@ -3066,7 +3291,7 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
             return .failed(failure)
         }
         if node.action == .validate || node.action == .promote {
-            return .accepted
+            return await applyRolloutGate(node: node, context: context)
         }
         if node.action == .verify {
             guard probeKind(for: node) != nil else {
@@ -3075,8 +3300,8 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
             return await applyProbe(node: node, context: context)
         }
         do {
-            if node.action != .create,
-               let binding = await state.binding(
+            var existingOwnershipWasBound = false
+            if let binding = await state.binding(
                    resourceUUID: node.resourceUUID,
                    resourceIdentifier: node.resourceIdentifier
                ) {
@@ -3099,6 +3324,7 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
                         )
                     )
                 }
+                existingOwnershipWasBound = true
                 if current.fencingToken != context.fencingToken {
                     guard current.fencingToken == binding.currentFencingToken,
                           let advanced = try store.ownership.advanceFencingToken(
@@ -3124,6 +3350,18 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
                     }
                     _ = advanced
                 }
+            }
+            if node.action != .create || existingOwnershipWasBound {
+                try await bindOwnershipMutationLease(
+                    node: node,
+                    context: context
+                )
+            }
+            if node.action == .delete || node.action == .retire {
+                try await markOwnershipDeleting(
+                    node: node,
+                    context: context
+                )
             }
             if node.action == .runHook {
                 return await applyHook(node: node, context: context)
@@ -3195,6 +3433,152 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
                 )
             )
         }
+    }
+
+    private func bindOwnershipMutationLease(
+        node: LifecyclePlanNode,
+        context: LifecycleSagaContext
+    ) async throws {
+        guard let current = try store.ownership.loadAll().first(where: {
+            $0.resourceUUID == node.resourceUUID &&
+                $0.resourceIdentifier == node.resourceIdentifier &&
+                RuntimeProviderBinding.stableID(for: $0.runtimeAdapter) ==
+                    context.plan.providerID
+        }),
+        current.fencingToken == context.fencingToken,
+        let group = try store.operationGroups.load(id: context.groupID),
+        group.status == .active,
+        group.planHash == context.plan.planSHA256,
+        group.fencingToken == context.fencingToken,
+        group.lockOwner == context.leaseOwner,
+        let groupOwner = group.lockOwner,
+        let groupExpiry = group.lockExpiresAt else {
+            throw StateStoreError.invalidRecord(
+                "Lifecycle mutation requires the exact owned resource and active finite mutation lease."
+            )
+        }
+        let prior = try OwnershipAuthorityMetadata.decode(
+            from: current.metadataJSONRedacted
+        )
+        try prior?.validate(for: current)
+        if let prior, prior.deletionTimestamp != nil {
+            guard node.action == .delete || node.action == .retire,
+                  prior.operationGroupID == group.id,
+                  prior.leaseOwner == groupOwner,
+                  prior.leaseExpiresAt == groupExpiry else {
+                throw StateStoreError.invalidRecord(
+                    "Lifecycle mutation found ownership already bound to deletion."
+                )
+            }
+            return
+        }
+        if let prior,
+           prior.operationGroupID == group.id,
+           prior.leaseOwner == groupOwner,
+           prior.leaseExpiresAt == groupExpiry {
+            return
+        }
+        let handoffGeneration = (prior?.handoffGeneration ?? 0) +
+            ((prior?.operationGroupID == group.id) ? 0 : 1)
+        let bound = try OwnershipAuthorityRecord.lifecycle(
+            ownership: current,
+            operationGroup: group,
+            finalizerState: .active,
+            handoffGeneration: handoffGeneration
+        )
+        let metadata = try OwnershipAuthorityMetadata.encode(
+            bound,
+            into: current.metadataJSONRedacted
+        )
+        try store.ownership.upsert(
+            OwnershipRecord(
+                id: current.id,
+                resourceIdentifier: current.resourceIdentifier,
+                resourceType: current.resourceType,
+                projectID: current.projectID,
+                serviceName: current.serviceName,
+                runtimeAdapter: current.runtimeAdapter,
+                createdAt: current.createdAt,
+                observedAt: hostwrightTimestamp(),
+                cleanupEligible: current.cleanupEligible,
+                metadataJSONRedacted: metadata,
+                identityVersion: current.identityVersion,
+                resourceUUID: current.resourceUUID,
+                resourceGeneration: current.resourceGeneration,
+                projectResourceUUID: current.projectResourceUUID,
+                projectGeneration: current.projectGeneration,
+                providerGeneration: current.providerGeneration,
+                fencingToken: current.fencingToken
+            )
+        )
+    }
+
+    private func markOwnershipDeleting(
+        node: LifecyclePlanNode,
+        context: LifecycleSagaContext
+    ) async throws {
+        guard let current = try store.ownership.loadAll().first(where: {
+            $0.resourceUUID == node.resourceUUID &&
+                $0.resourceIdentifier == node.resourceIdentifier &&
+                RuntimeProviderBinding.stableID(for: $0.runtimeAdapter) ==
+                    context.plan.providerID
+        }),
+        current.fencingToken == context.fencingToken,
+        let group = try store.operationGroups.load(id: context.groupID),
+        group.status == .active,
+        group.planHash == context.plan.planSHA256,
+        group.fencingToken == context.fencingToken,
+        group.lockOwner == context.leaseOwner else {
+            throw StateStoreError.invalidRecord(
+                "Lifecycle deletion requires the exact owned resource and active mutation lease."
+            )
+        }
+        let prior = try OwnershipAuthorityMetadata.decode(
+            from: current.metadataJSONRedacted
+        )
+        try prior?.validate(for: current)
+        if let prior, prior.deletionTimestamp != nil {
+            guard prior.operationGroupID == group.id,
+                  Set(prior.finalizers.map(\.state)) == [.releasing] else {
+                throw StateStoreError.invalidRecord(
+                    "Lifecycle deletion found a different or terminal ownership finalizer."
+                )
+            }
+            return
+        }
+        let deleting = try OwnershipAuthorityRecord.lifecycle(
+            ownership: current,
+            operationGroup: group,
+            finalizerState: .releasing,
+            deletionTimestamp: hostwrightTimestamp(),
+            handoffGeneration: (prior?.handoffGeneration ?? 0) +
+                ((prior?.operationGroupID == group.id) ? 0 : 1)
+        )
+        let metadata = try OwnershipAuthorityMetadata.encode(
+            deleting,
+            into: current.metadataJSONRedacted
+        )
+        try store.ownership.upsert(
+            OwnershipRecord(
+                id: current.id,
+                resourceIdentifier: current.resourceIdentifier,
+                resourceType: current.resourceType,
+                projectID: current.projectID,
+                serviceName: current.serviceName,
+                runtimeAdapter: current.runtimeAdapter,
+                createdAt: current.createdAt,
+                observedAt: hostwrightTimestamp(),
+                cleanupEligible: current.cleanupEligible,
+                metadataJSONRedacted: metadata,
+                identityVersion: current.identityVersion,
+                resourceUUID: current.resourceUUID,
+                resourceGeneration: current.resourceGeneration,
+                projectResourceUUID: current.projectResourceUUID,
+                projectGeneration: current.projectGeneration,
+                providerGeneration: current.providerGeneration,
+                fencingToken: current.fencingToken
+            )
+        )
     }
 
     private func acquireImageContentLeaseIfNeeded(
@@ -3549,6 +3933,29 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
                 observedService: matches.first,
                 desiredService: await state.desiredService(for: node.key)
             ) {
+                if context.plan.command == .update,
+                   node.action == .promote {
+                    do {
+                        try validateRolloutDependencies(
+                            node: node,
+                            desiredState: desired,
+                            observedState: observed
+                        )
+                        try await validatePromotionEvidence(
+                            node: node,
+                            context: context,
+                            observedState: observed
+                        )
+                    } catch {
+                        return .noEffect(
+                            LifecycleNodeVerification(
+                                observationSHA256: inventory.semanticSHA256,
+                                summaryRedacted:
+                                    "Rollout promotion postcondition lacks current exact health proof."
+                            )
+                        )
+                    }
+                }
                 try reconcileNetworkPorts(
                     node: node,
                     context: context,
@@ -4039,6 +4446,183 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
         }
     }
 
+    func verifyCompensation(
+        plan: LifecyclePlan,
+        context: LifecycleSagaContext
+    ) async -> LifecycleSagaCompensationVerification {
+        guard plan.command == .update else {
+            return .verified(
+                LifecycleNodeVerification(
+                    summaryRedacted: "No update revision restoration was required."
+                )
+            )
+        }
+        let priorNodes = plan.nodes.filter { $0.action == .retire }
+            .sorted { $0.key < $1.key }
+        guard !priorNodes.isEmpty else {
+            return .verified(
+                LifecycleNodeVerification(
+                    summaryRedacted: "The update had no prior revision to restore."
+                )
+            )
+        }
+        do {
+            let capability = try await adapter.capabilitySnapshot()
+            guard capability.descriptor.providerID == plan.providerID,
+                  capability.canonicalSHA256 == plan.capabilitySHA256 else {
+                throw LifecycleSpecialExecutionError.staleCapability
+            }
+            var finalVerification = LifecycleNodeVerification(
+                summaryRedacted: "Exact prior revisions were restored and verified healthy."
+            )
+            for prior in priorNodes {
+                let desired = try LifecycleRevisionCodec
+                    .decodeRedactedDesiredJSON(
+                        prior.desiredSpecificationJSONRedacted
+                    )
+                let revisionSHA256 = try LifecycleRevisionCodec
+                    .revisionSHA256(for: desired)
+                guard prior.preconditions.contains(where: {
+                    $0.kind == "old-revision-verified-healthy" &&
+                        $0.expectedValue == revisionSHA256
+                }) else {
+                    throw StateStoreError.invalidRecord(
+                        "The compensated update lacks exact prior healthy-revision proof."
+                    )
+                }
+                let allRecords = try store.ownership.loadAll()
+                let records = allRecords.filter { record in
+                    record.resourceUUID == prior.resourceUUID &&
+                        record.resourceIdentifier == prior.resourceIdentifier &&
+                        record.resourceGeneration == prior.resourceGeneration &&
+                        record.projectResourceUUID == plan.projectResourceUUID &&
+                        record.projectGeneration == plan.projectGeneration &&
+                        record.providerGeneration == plan.providerGeneration &&
+                        RuntimeProviderBinding.stableID(for: record.runtimeAdapter) ==
+                            plan.providerID
+                }
+                guard records.count == 1,
+                      let binding = await state.binding(
+                          resourceUUID: prior.resourceUUID,
+                          resourceIdentifier: prior.resourceIdentifier
+                      ),
+                      binding.resourceUUID == prior.resourceUUID,
+                      binding.resourceGeneration == prior.resourceGeneration else {
+                    throw StateStoreError.invalidRecord(
+                        "The compensated update lacks one exact restored ownership binding."
+                    )
+                }
+                let checks = restoredHealthChecks(for: desired)
+                var finalNode: LifecyclePlanNode?
+                for check in checks {
+                    let key = String(
+                        "rollback-verify-\(prior.key)-\(check.suffix)".prefix(127)
+                    )
+                    let verificationNode = try LifecyclePlanNode(
+                        key: key,
+                        action: .verify,
+                        serviceName: prior.serviceName,
+                        resourceIdentifier: prior.resourceIdentifier,
+                        resourceUUID: prior.resourceUUID,
+                        resourceGeneration: prior.resourceGeneration,
+                        fencingToken: context.fencingToken,
+                        dependencies: [],
+                        preconditions: [
+                            LifecyclePlanCondition(
+                                kind: "rollback-restored-revision",
+                                subject: desired.identity.displayName,
+                                expectedValue: revisionSHA256
+                            )
+                        ],
+                        postconditions: [check.condition],
+                        timeoutSeconds: prior.timeoutSeconds,
+                        compensation: nil,
+                        desiredSpecificationJSONRedacted:
+                            prior.desiredSpecificationJSONRedacted
+                    )
+                    await state.setDesiredService(desired, for: key)
+                    guard case .accepted = await apply(
+                        node: verificationNode,
+                        context: context
+                    ) else {
+                        throw StateStoreError.invalidRecord(
+                            "A restored revision did not pass its bounded \(check.suffix) health check."
+                        )
+                    }
+                    guard case .satisfied(let verification) = await observe(
+                        node: verificationNode,
+                        context: context
+                    ) else {
+                        throw StateStoreError.invalidRecord(
+                            "A restored revision lacks exact structured \(check.suffix) health proof."
+                        )
+                    }
+                    finalVerification = verification
+                    finalNode = verificationNode
+                }
+                guard let finalNode else {
+                    throw StateStoreError.invalidRecord(
+                        "Restored revision verification produced no health check."
+                    )
+                }
+                try await markHealthyRevision(
+                    node: finalNode,
+                    context: context,
+                    identity: desired.identity,
+                    observedAt: hostwrightTimestamp(),
+                    desiredService: desired
+                )
+            }
+            return .verified(finalVerification)
+        } catch {
+            let diagnostic = RuntimeRedactionPolicy.default.redact(
+                String(describing: error)
+            )
+            return .safeHold(
+                reasonCode:
+                    LifecycleRecoverySafeHoldReason.restoredHealthFailed.rawValue,
+                hintRedacted:
+                    "Restored revision health could not be proven: \(diagnostic) " +
+                    "Inspect with `hostwright recovery --output json`; retry only the exact group " +
+                    "with `hostwright recovery rollback --group \(context.groupID) " +
+                    "--confirm-plan \(plan.planSHA256)`."
+            )
+        }
+    }
+
+    private func restoredHealthChecks(
+        for desired: DesiredRuntimeService
+    ) -> [(suffix: String, condition: LifecyclePlanCondition)] {
+        if desired.probes.configuredKinds.isEmpty {
+            return [
+                (
+                    "running",
+                    LifecyclePlanCondition(
+                        kind: "lifecycle",
+                        subject: desired.identity.displayName,
+                        expectedValue: RuntimeLifecycleState.running.rawValue
+                    )
+                )
+            ]
+        }
+        return desired.probes.configuredKinds.map { kind in
+            let expected: String
+            switch kind {
+            case .startup: expected = "succeeded"
+            case .readiness: expected = "ready"
+            case .liveness: expected = "healthy"
+            }
+            return (
+                kind.rawValue,
+                LifecyclePlanCondition(
+                    kind: "probe-\(kind.rawValue)",
+                    subject: desired.identity.displayName,
+                    expectedValue: expected
+                )
+            )
+        }
+    }
+
     func compensate(
         compensation: LifecycleCompensation,
         node: LifecyclePlanNode,
@@ -4200,10 +4784,7 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
         guard conditions.count == 1,
               let seconds = Int(conditions[0].expectedValue),
               seconds > 0,
-              let group = try? store.operationGroups.latest(
-                  groupIdempotencyKey: context.plan.planSHA256
-              ),
-              group.id == context.groupID,
+              let group = try? store.operationGroups.load(id: context.groupID),
               let startedAt = lifecycleEpochMilliseconds(group.createdAt) else {
             return RuntimeNormalizedFailure(
                 category: .staleCapability,
@@ -4248,6 +4829,175 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
         }
         guard Set(kinds).count == 1 else { return nil }
         return kinds[0]
+    }
+
+    private func stableObservationSeconds(for node: LifecyclePlanNode) -> Int {
+        let values = node.preconditions.compactMap { condition -> Int? in
+            guard condition.kind == "stable-observation-seconds" else {
+                return nil
+            }
+            return Int(condition.expectedValue)
+        }
+        guard values.count == 1, let value = values.first, value > 0 else {
+            return 0
+        }
+        return value
+    }
+
+    private func applyRolloutGate(
+        node: LifecyclePlanNode,
+        context: LifecycleSagaContext
+    ) async -> LifecycleSagaApplyOutcome {
+        guard context.plan.command == .update else {
+            return .accepted
+        }
+        do {
+            let desiredState = await state.desiredStateSnapshot()
+            let observed = try await adapter.observe(desiredState: desiredState)
+            guard observed.adapterMetadata?.providerID == context.plan.providerID,
+                  observed.capabilitySHA256 == context.plan.capabilitySHA256 else {
+                throw LifecycleSpecialExecutionError.staleCapability
+            }
+            await state.replaceObservedState(observed)
+            try validateRolloutDependencies(
+                node: node,
+                desiredState: desiredState,
+                observedState: observed
+            )
+            guard node.action == .promote else {
+                return .accepted
+            }
+            try await validatePromotionEvidence(
+                node: node,
+                context: context,
+                observedState: observed
+            )
+            return .accepted
+        } catch {
+            let diagnostic = node.action == .promote
+                ? "Rollout promotion refused ambiguous or unproven candidate health."
+                : "Rollout preparation refused an unhealthy or ambiguous dependency."
+            await state.recordSpecialEvidence(.noEffect(diagnostic), for: node.key)
+            return .failed(
+                specialFailure(
+                    category: error is LifecycleSpecialExecutionError
+                        ? .rejected
+                        : .ambiguousEffect,
+                    context: context,
+                    diagnostic: diagnostic,
+                    guidance:
+                        "Preserve the exact rollout checkpoint and restore declared health before resuming."
+                )
+            )
+        }
+    }
+
+    private func validatePromotionEvidence(
+        node: LifecyclePlanNode,
+        context: LifecycleSagaContext,
+        observedState: ObservedRuntimeState
+    ) async throws {
+        guard let desired = await state.desiredService(for: node.key) else {
+            throw LifecycleSpecialExecutionError.invalidExactBinding
+        }
+        let identity = await state.identity(
+            for: node,
+            projectName: context.plan.projectName
+        )
+        let matches = observedState.services.filter {
+            $0.identity == identity &&
+                $0.resourceIdentifier == node.resourceIdentifier
+        }
+        guard matches.count == 1,
+              matches[0].lifecycleState == .running else {
+            throw LifecycleSpecialExecutionError.invalidExactBinding
+        }
+        if desired.probes.configuredKinds.isEmpty {
+            guard matches[0].healthState == .healthy ||
+                    matches[0].healthState == .notConfigured else {
+                throw LifecycleSpecialExecutionError.invalidProbe
+            }
+            return
+        }
+        guard let snapshot = try probeStore.loadLatest(
+            groupID: context.groupID,
+            resourceIdentifier: node.resourceIdentifier ?? ""
+        ) else {
+            throw LifecycleSpecialExecutionError.invalidProbe
+        }
+        let now = nowMilliseconds()
+        let resumed = try RuntimeProbeStateMachine.resumed(
+            snapshot,
+            probes: desired.probes,
+            nowMilliseconds: now
+        )
+        guard desired.probes.configuredKinds.allSatisfy({
+            resumed.state(for: $0)?.phase == .succeeded
+        }) else {
+            throw LifecycleSpecialExecutionError.invalidProbe
+        }
+        if desired.updatePolicy.stableObservationSeconds > 0 {
+            guard let stableSince = resumed.stableSinceMilliseconds,
+                  now >= stableSince +
+                    Int64(desired.updatePolicy.stableObservationSeconds) * 1_000 else {
+                throw LifecycleSpecialExecutionError.invalidProbe
+            }
+            let stableDeadline = stableSince +
+                Int64(desired.updatePolicy.stableObservationSeconds) * 1_000
+            let terminalKinds = [
+                RuntimeProbeKind.readiness,
+                .liveness
+            ].filter { desired.probes[$0] != nil }
+            guard terminalKinds.allSatisfy({ kind in
+                (resumed.state(for: kind)?.lastAttemptAtMilliseconds ??
+                    Int64.min) >= stableDeadline
+            }) else {
+                throw LifecycleSpecialExecutionError.invalidProbe
+            }
+        }
+    }
+
+    private func validateRolloutDependencies(
+        node: LifecyclePlanNode,
+        desiredState: DesiredRuntimeState,
+        observedState: ObservedRuntimeState
+    ) throws {
+        let conditions = node.preconditions.filter {
+            $0.kind.hasPrefix("dependency-")
+        }
+        for condition in conditions {
+            guard let serviceName = condition.subject.split(separator: "/").last
+                .map(String.init) else {
+                throw LifecycleSpecialExecutionError.invalidProbe
+            }
+            let desired = desiredState.services.filter {
+                $0.logicalServiceName == serviceName
+            }
+            let observed = observedState.services.filter {
+                $0.identity.serviceName == serviceName
+            }
+            guard !desired.isEmpty, observed.count >= desired.count else {
+                throw LifecycleSpecialExecutionError.invalidProbe
+            }
+            let satisfied: Bool
+            switch condition.kind {
+            case "dependency-started":
+                satisfied = observed.allSatisfy { $0.lifecycleState == .running }
+            case "dependency-ready":
+                satisfied = observed.allSatisfy {
+                    $0.lifecycleState == .running &&
+                        ($0.healthState == .healthy ||
+                            $0.healthState == .notConfigured)
+                }
+            case "dependency-completed":
+                satisfied = observed.allSatisfy { $0.lifecycleState == .exited }
+            default:
+                throw LifecycleSpecialExecutionError.invalidProbe
+            }
+            guard satisfied else {
+                throw LifecycleSpecialExecutionError.invalidProbe
+            }
+        }
     }
 
     private func applyHook(
@@ -4572,9 +5322,11 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
                 )
             }
 
+            let stableObservationSeconds = stableObservationSeconds(for: node)
             let requiredKinds = RuntimeProbeKind.allCases.filter { kind in
                 guard desired.probes[kind] != nil else { return false }
-                return kind == .startup || kind == targetKind
+                return stableObservationSeconds > 0 ||
+                    kind == .startup || kind == targetKind
             }
             var pendingKind: RuntimeProbeKind?
             probeKinds: for kind in requiredKinds {
@@ -4652,6 +5404,59 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
                 if probeState.phase != .succeeded {
                     pendingKind = kind
                     break
+                }
+            }
+            if pendingKind == nil, stableObservationSeconds > 0 {
+                guard let stableSince = snapshot.stableSinceMilliseconds else {
+                    return await terminalProbeFailure(
+                        node: node,
+                        context: context,
+                        outcome: .failed,
+                        diagnostic: "Stable rollout observation has no durable healthy-start checkpoint."
+                    )
+                }
+                let stableDeadline = stableSince +
+                    Int64(stableObservationSeconds) * 1_000
+                let recurringKinds = [
+                    RuntimeProbeKind.readiness,
+                    .liveness
+                ].filter { desired.probes[$0] != nil }
+                if now >= stableDeadline {
+                    pendingKind = recurringKinds.first { kind in
+                        guard let state = snapshot.state(for: kind) else {
+                            return true
+                        }
+                        return (state.lastAttemptAtMilliseconds ?? Int64.min) <
+                            stableDeadline
+                    }
+                } else {
+                    pendingKind = recurringKinds.first { kind in
+                        guard let state = snapshot.state(for: kind) else {
+                            return false
+                        }
+                        return now >= state.nextAttemptAtMilliseconds
+                    }
+                    if pendingKind == nil {
+                        let nextProbe = recurringKinds.compactMap {
+                            snapshot.state(for: $0)?.nextAttemptAtMilliseconds
+                        }.min() ?? stableDeadline
+                        let wait = min(
+                            max(1, nextProbe - now),
+                            max(1, stableDeadline - now),
+                            250
+                        )
+                        do {
+                            try await sleepMilliseconds(wait)
+                            continue
+                        } catch {
+                            return await terminalProbeFailure(
+                                node: node,
+                                context: context,
+                                outcome: .cancelled,
+                                diagnostic: "Stable rollout observation wait was cancelled."
+                            )
+                        }
+                    }
                 }
             }
             guard let kind = pendingKind else {
@@ -5491,14 +6296,43 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
             try store.imageDigestLocks.save(record)
         }
         if node.action == .create, let exactContainer {
-            let record = OwnershipRecord(
-                id: HostwrightResourceUUID.generate(),
+            let existing = try store.ownership.loadAll().first(where: {
+                $0.resourceUUID == node.resourceUUID &&
+                    $0.resourceIdentifier ==
+                        (node.resourceIdentifier ?? exactContainer.name) &&
+                    RuntimeProviderBinding.stableID(
+                        for: $0.runtimeAdapter
+                    ) == context.plan.providerID
+            })
+            let existingAuthority = try existing.flatMap {
+                try OwnershipAuthorityMetadata.decode(
+                    from: $0.metadataJSONRedacted
+                )
+            }
+            if let existing {
+                try existingAuthority?.validate(for: existing)
+                guard existing.fencingToken == context.fencingToken,
+                      existing.projectID == context.plan.projectID,
+                      existing.serviceName == identity.serviceName,
+                      existing.projectResourceUUID ==
+                        context.plan.projectResourceUUID,
+                      existingAuthority?.deletionTimestamp == nil,
+                      existingAuthority.map({
+                          Set($0.finalizers.map(\.state)) == [.active]
+                      }) ?? true else {
+                    throw StateStoreError.invalidRecord(
+                        "Lifecycle replacement create found stale, deleting, or mismatched ownership authority."
+                    )
+                }
+            }
+            let baseRecord = OwnershipRecord(
+                id: existing?.id ?? HostwrightResourceUUID.generate(),
                 resourceIdentifier: node.resourceIdentifier ?? exactContainer.name,
                 resourceType: "container",
                 projectID: context.plan.projectID,
                 serviceName: identity.serviceName,
                 runtimeAdapter: context.plan.providerID.rawValue,
-                createdAt: now,
+                createdAt: existing?.createdAt ?? now,
                 observedAt: now,
                 cleanupEligible: true,
                 metadataJSONRedacted: try lifecycleOwnershipMetadataJSON(
@@ -5516,6 +6350,46 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
                 providerGeneration: context.plan.providerGeneration,
                 fencingToken: context.fencingToken
             )
+            guard let group = try store.operationGroups.load(
+                id: context.groupID
+            ),
+            group.status == .active,
+            group.planHash == context.plan.planSHA256,
+            group.fencingToken == context.fencingToken,
+            group.lockOwner == context.leaseOwner else {
+                throw StateStoreError.invalidRecord(
+                    "Lifecycle ownership authority requires the exact active operation lease."
+                )
+            }
+            let authority = try OwnershipAuthorityRecord.lifecycle(
+                ownership: baseRecord,
+                operationGroup: group,
+                finalizerState: .active,
+                handoffGeneration:
+                    existingAuthority?.handoffGeneration ?? 0
+            )
+            let record = OwnershipRecord(
+                id: baseRecord.id,
+                resourceIdentifier: baseRecord.resourceIdentifier,
+                resourceType: baseRecord.resourceType,
+                projectID: baseRecord.projectID,
+                serviceName: baseRecord.serviceName,
+                runtimeAdapter: baseRecord.runtimeAdapter,
+                createdAt: baseRecord.createdAt,
+                observedAt: baseRecord.observedAt,
+                cleanupEligible: baseRecord.cleanupEligible,
+                metadataJSONRedacted: try OwnershipAuthorityMetadata.encode(
+                    authority,
+                    into: baseRecord.metadataJSONRedacted
+                ),
+                identityVersion: baseRecord.identityVersion,
+                resourceUUID: baseRecord.resourceUUID,
+                resourceGeneration: baseRecord.resourceGeneration,
+                projectResourceUUID: baseRecord.projectResourceUUID,
+                projectGeneration: baseRecord.projectGeneration,
+                providerGeneration: baseRecord.providerGeneration,
+                fencingToken: baseRecord.fencingToken
+            )
             try store.ownership.upsert(record)
             await state.setBinding(
                 try LifecycleResourceBinding(
@@ -5526,7 +6400,13 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
             )
         }
         let marksHealthyRevision = node.action == .promote ||
-            (node.action == .verify &&
+            (context.plan.command == .rollback &&
+                node.action == .verify &&
+                node.preconditions.contains(where: {
+                    $0.kind == "rollback-restored-revision"
+                })) ||
+            (context.plan.command != .update &&
+                node.action == .verify &&
                 node.postconditions.contains(where: {
                     $0.kind == "probe-readiness" ||
                         $0.kind == "dependency-ready"
@@ -5544,20 +6424,6 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
             )
         }
         if node.action == .delete || node.action == .retire {
-            if let record = try store.ownership.loadAll().first(where: {
-                $0.resourceUUID == node.resourceUUID
-            }) {
-                guard try store.ownership.removeExact(
-                    resourceIdentifier: record.resourceIdentifier,
-                    runtimeAdapter: record.runtimeAdapter,
-                    expectedResourceUUID: record.resourceUUID,
-                    expectedFencingToken: record.fencingToken
-                ) else {
-                    throw StateStoreError.invalidRecord(
-                        "Verified runtime deletion could not remove the exact ownership projection."
-                    )
-                }
-            }
             await state.removeBinding(resourceUUID: node.resourceUUID)
         }
         try store.observedStates.saveSnapshot(
@@ -5576,7 +6442,8 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
         node: LifecyclePlanNode,
         context: LifecycleSagaContext,
         identity: RuntimeServiceIdentity,
-        observedAt: String
+        observedAt: String,
+        desiredService: DesiredRuntimeService? = nil
     ) async throws {
         guard let current = try store.ownership.loadAll().first(where: {
             $0.resourceUUID == node.resourceUUID &&
@@ -5587,13 +6454,27 @@ struct LifecycleLiveEffects: LifecycleSagaEffects {
                 "Verified healthy revision is missing exact ownership state."
             )
         }
-        let metadata = try lifecycleOwnershipMetadataJSON(
+        let resolvedDesiredService = if let desiredService {
+            desiredService
+        } else {
+            await state.desiredService(for: node.key)
+        }
+        var metadata = try lifecycleOwnershipMetadataJSON(
             identity: identity,
-            desiredService: await state.desiredService(for: node.key),
+            desiredService: resolvedDesiredService,
             healthy: true,
             capabilitySHA256: context.plan.capabilitySHA256,
             planSHA256: context.plan.planSHA256
         )
+        if let authority = try OwnershipAuthorityMetadata.decode(
+            from: current.metadataJSONRedacted
+        ) {
+            try authority.validate(for: current)
+            metadata = try OwnershipAuthorityMetadata.encode(
+                authority,
+                into: metadata
+            )
+        }
         try store.ownership.upsert(
             OwnershipRecord(
                 id: current.id,

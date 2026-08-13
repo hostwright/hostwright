@@ -192,6 +192,20 @@ final class SQLiteConnection {
         try executeRaw(sql)
     }
 
+    func vacuumAuthoritativeDatabase() throws {
+        guard let handle,
+              profile == .authoritativeState,
+              !readOnly,
+              !managedTransactionActive else {
+            throw StateStoreError.transactionInvariantViolation(
+                message: "authoritative VACUUM requires an idle managed write connection"
+            )
+        }
+        let previous = sqlite3_limit(handle, SQLITE_LIMIT_ATTACHED, 1)
+        defer { sqlite3_limit(handle, SQLITE_LIMIT_ATTACHED, previous) }
+        try executeRaw("VACUUM")
+    }
+
     func run(_ sql: String, bindings: [SQLiteValue] = []) throws {
         let statement = try prepare(sql)
         try statement.bind(bindings)
@@ -249,12 +263,14 @@ final class SQLiteConnection {
         var began = false
         var commitAttempted = false
         do {
-            try executeInternalTransactionControl("BEGIN IMMEDIATE TRANSACTION")
+            try executeInternalTransactionControl(
+                readOnly ? "BEGIN TRANSACTION" : "BEGIN IMMEDIATE TRANSACTION"
+            )
             began = true
             managedTransactionActive = true
             guard sqlite3_get_autocommit(handle) == 0 else {
                 throw StateStoreError.transactionInvariantViolation(
-                    message: "BEGIN IMMEDIATE did not establish a write transaction"
+                    message: "BEGIN did not establish a managed transaction"
                 )
             }
 
@@ -274,7 +290,7 @@ final class SQLiteConnection {
             managedTransactionActive = false
             guard sqlite3_get_autocommit(handle) != 0 else {
                 throw StateStoreError.transactionInvariantViolation(
-                    message: "COMMIT returned without closing the write transaction"
+                    message: "COMMIT returned without closing the managed transaction"
                 )
             }
             return value

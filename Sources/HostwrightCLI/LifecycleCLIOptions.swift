@@ -24,6 +24,7 @@ public struct LifecycleCLIOptions: Equatable, Sendable {
     public let timeoutSeconds: Int
     public let parallelism: Int
     public let output: CLIOutputFormat
+    public let operationIdempotencyKeySHA256: String?
 
     public init(
         command: LifecycleCommandKind,
@@ -35,7 +36,8 @@ public struct LifecycleCLIOptions: Equatable, Sendable {
         runtimeProvider: RuntimeProviderSelection = .automatic,
         timeoutSeconds: Int = 300,
         parallelism: Int = min(4, max(1, ProcessInfo.processInfo.activeProcessorCount)),
-        output: CLIOutputFormat = .text
+        output: CLIOutputFormat = .text,
+        operationIdempotencyKeySHA256: String? = nil
     ) {
         self.command = command
         self.manifestPath = manifestPath
@@ -47,6 +49,7 @@ public struct LifecycleCLIOptions: Equatable, Sendable {
         self.timeoutSeconds = timeoutSeconds
         self.parallelism = parallelism
         self.output = output
+        self.operationIdempotencyKeySHA256 = operationIdempotencyKeySHA256
     }
 }
 

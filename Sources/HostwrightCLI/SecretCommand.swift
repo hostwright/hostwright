@@ -129,19 +129,27 @@ struct SecretCommandRunner {
             expectedVersion: expectedVersion,
             targetVersion: targetVersion
         )
+        let activeGroup: OperationGroupRecord
         do {
             let acquired = try store.operationGroups.acquire(journal.record)
-            guard acquired.acquired?.id == journal.record.id else {
+            guard let group = acquired.acquired,
+                  group.id == journal.record.id else {
                 throw HostwrightDiagnostic(
                     code: .secretConflict,
                     message: "Another secret mutation with the same durable identity is active."
                 )
             }
+            activeGroup = group
         } catch let diagnostic as HostwrightDiagnostic {
             throw diagnostic
         } catch {
             throw stateDiagnostic()
         }
+        let mutationFence = try hostwrightAcquireExactOperationMutationFence(
+            store: store,
+            group: activeGroup
+        )
+        defer { mutationFence.release() }
 
         do {
             let metadata = try mapped(effect)

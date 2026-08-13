@@ -46,7 +46,7 @@ public struct HostwrightTunnelSessionIntent: Codable, Equatable, Sendable {
     }
 }
 
-/// The state module implements this contract with the schema-v16 SQLite
+/// The state module implements this contract with the schema-v17 SQLite
 /// repository. The network helper never creates a second journal.
 public protocol HostwrightTunnelIntentPersisting: Sendable {
     func save(_ intent: HostwrightTunnelSessionIntent) throws

@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import HostwrightCore
 import HostwrightRuntime
@@ -20,13 +21,14 @@ public enum DaemonCommand: Equatable, Sendable {
             return .version
         }
 
-        var foreground = false
+        var mode: DaemonMode?
         var configPath: String?
         var stateDatabasePath: String?
         var lockFilePath: String?
-        var cadenceSeconds = 30
-        var jitterSeconds = 5
+        var cadenceSeconds = 5
+        var jitterSeconds = 0
         var maxBackoffSeconds = 300
+        var maximumParallelism = min(4, max(1, ProcessInfo.processInfo.activeProcessorCount))
         var maxIterations: Int?
         var index = 0
 
@@ -34,7 +36,20 @@ public enum DaemonCommand: Equatable, Sendable {
             let argument = arguments[index]
             switch argument {
             case "--foreground":
-                foreground = true
+                guard mode == nil else {
+                    throw DaemonError.invalidConfiguration(
+                        "Select exactly one of --foreground or --service."
+                    )
+                }
+                mode = .foregroundDev
+                index += 1
+            case "--service":
+                guard mode == nil else {
+                    throw DaemonError.invalidConfiguration(
+                        "Select exactly one of --foreground or --service."
+                    )
+                }
+                mode = .managedService
                 index += 1
             case "--config":
                 configPath = try value(after: argument, in: arguments, at: index)
@@ -54,6 +69,9 @@ public enum DaemonCommand: Equatable, Sendable {
             case "--max-backoff":
                 maxBackoffSeconds = try positiveInteger(after: argument, in: arguments, at: index)
                 index += 2
+            case "--parallelism":
+                maximumParallelism = try positiveInteger(after: argument, in: arguments, at: index)
+                index += 2
             case "--max-iterations":
                 maxIterations = try positiveInteger(after: argument, in: arguments, at: index)
                 index += 2
@@ -62,8 +80,10 @@ public enum DaemonCommand: Equatable, Sendable {
             }
         }
 
-        guard foreground else {
-            throw DaemonError.invalidConfiguration("--foreground is required; launch agent installation is not implemented.")
+        guard let mode else {
+            throw DaemonError.invalidConfiguration(
+                "Select exactly one of --foreground or --service."
+            )
         }
 
         let resolution: HostwrightLocalPathResolution
@@ -71,7 +91,7 @@ public enum DaemonCommand: Equatable, Sendable {
             resolution = try HostwrightLocalPathResolver.resolve(
                 explicitStateDatabasePath: stateDatabasePath,
                 homeDirectory: homeDirectory,
-                environment: environment
+                environment: mode == .managedService ? [:] : environment
             )
         } catch {
             throw DaemonError.invalidConfiguration(String(describing: error))
@@ -83,16 +103,55 @@ public enum DaemonCommand: Equatable, Sendable {
             throw DaemonError.invalidConfiguration(String(describing: error))
         }
         let configuration = DaemonConfiguration(
+            mode: mode,
             configPath: configPath ?? "",
             stateStoreConfiguration: StateStoreConfiguration(localPathResolution: resolution),
             lockFilePath: resolvedLockPath,
             cadenceSeconds: cadenceSeconds,
             jitterSeconds: jitterSeconds,
             maxBackoffSeconds: maxBackoffSeconds,
+            maximumParallelism: maximumParallelism,
             maxIterations: maxIterations
         )
         try configuration.validate()
         return .run(configuration)
+    }
+
+    package static func managedServiceEnvironment(
+        homeDirectory: String
+    ) -> [String: String] {
+        [
+            "HOME": homeDirectory,
+            "LANG": "C",
+            "LC_ALL": "C",
+            "PATH": SecureSubprocessEnvironment.trustedSystemPath
+        ]
+    }
+
+    package static func currentUserHomeDirectory(
+        userID: uid_t = geteuid()
+    ) throws -> String {
+        guard let record = getpwuid(userID), let directory = record.pointee.pw_dir else {
+            throw DaemonError.invalidConfiguration(
+                "managed service current-user home could not be resolved."
+            )
+        }
+        do {
+            return try SecureExecutableResolver.verifyWorkingDirectory(
+                path: String(cString: directory)
+            )
+        } catch {
+            throw DaemonError.invalidConfiguration(
+                "managed service current-user home is unsafe."
+            )
+        }
+    }
+
+    package static func managedServiceEnvironmentRequiresReexec(
+        inheritedEnvironment: [String: String],
+        homeDirectory: String
+    ) -> Bool {
+        inheritedEnvironment != managedServiceEnvironment(homeDirectory: homeDirectory)
     }
 
     private static func value(after flag: String, in arguments: [String], at index: Int) throws -> String {
@@ -133,19 +192,22 @@ public struct DaemonProcessResult: Equatable, Sendable {
 
 public enum HostwrightDaemonMain {
     public static let helpText = """
-    hostwrightd foreground development loop
+    hostwrightd reconciliation service
 
     Usage:
       hostwrightd --foreground --config <hostwright.yaml> [--state-db <path>] [options]
+      hostwrightd --service --config <absolute-hostwright.yaml> [--state-db <path>] [options]
 
     Required:
       --foreground              Run in foreground development mode.
+      --service                 Run as the managed per-user LaunchAgent.
       --config <path>           Explicit Hostwright manifest/config path.
 
     Options:
-      --interval <seconds>      Base reconciliation cadence. Default: 30.
-      --jitter <seconds>        Deterministic jitter cap. Default: 5.
+      --interval <seconds>      Base reconciliation cadence. Default: 5.
+      --jitter <seconds>        Deterministic jitter cap. Default: 0.
       --max-backoff <seconds>   Maximum retry backoff. Default: 300.
+      --parallelism <count>     Lifecycle DAG parallelism from 1 through 32. Default: min(4, CPUs).
       --max-iterations <count>  Stop after count loop iterations; intended for tests/dev proof.
       --state-db <path>         Optional SQLite override; defaults to Application Support.
       --lock-file <path>        Optional lock override; defaults to Application Support/run.
@@ -153,36 +215,56 @@ public enum HostwrightDaemonMain {
       --help                    Show this help.
 
     Safety:
-      This phase observes, plans, and records daemon loop attempts only.
-      It does not install a launch agent and does not perform unattended runtime mutation.
+      Each healthy loop validates, observes, plans, and reconciles through the shared lifecycle saga.
+      LaunchAgent lifecycle is controlled by hostwright daemon; hostwrightd does not self-install.
+      Mutations require exact provider capability, ownership, plan confirmation, and durable fencing.
 
     """
 
     public static func run(
         arguments: [String],
         runtimeAdapter: any RuntimeAdapter,
+        reconciliationDriver: any DaemonReconciliationDriving,
         shutdownToken: DaemonShutdownToken = DaemonShutdownToken()
     ) async -> DaemonProcessResult {
         do {
-            switch try DaemonCommand.parse(arguments: arguments) {
+            let isManagedService = arguments.contains("--service")
+            let homeDirectory = isManagedService
+                ? try DaemonCommand.currentUserHomeDirectory()
+                : FileManager.default.homeDirectoryForCurrentUser.path
+            let environment = isManagedService
+                ? DaemonCommand.managedServiceEnvironment(homeDirectory: homeDirectory)
+                : ProcessInfo.processInfo.environment
+            switch try DaemonCommand.parse(
+                arguments: arguments,
+                homeDirectory: homeDirectory,
+                environment: environment
+            ) {
             case .help:
                 return DaemonProcessResult(standardOutput: helpText)
             case .version:
                 return DaemonProcessResult(standardOutput: "\(HostwrightIdentity.version)\n")
             case .run(let configuration):
-                let clock = SystemDaemonClock(shutdownToken: shutdownToken)
+                let configurationMonitor = DaemonConfigurationChangeMonitor()
+                let clock = SystemDaemonClock(
+                    shutdownToken: shutdownToken,
+                    configurationMonitor: configurationMonitor
+                )
                 let runner = DaemonLoopRunner(
                     configuration: configuration,
                     runtimeAdapter: runtimeAdapter,
+                    reconciliationDriver: reconciliationDriver,
                     clock: clock,
                     instanceLock: FileDaemonInstanceLock(path: configuration.lockFilePath),
                     shutdownToken: shutdownToken,
-                    readConfig: { try String(contentsOfFile: $0, encoding: .utf8) }
+                    configurationMonitor: configurationMonitor,
+                    readConfig: { try String(contentsOfFile: $0, encoding: .utf8) },
+                    readConfiguration: SecureDaemonConfigurationReader.read
                 )
                 let summary = try await runner.run()
                 return DaemonProcessResult(
                     standardOutput: """
-                    hostwrightd foreground dev loop stopped
+                    hostwrightd \(configuration.mode.rawValue) loop stopped
                     Iterations: \(summary.iterations)
                     Successful: \(summary.successfulIterations)
                     Failed: \(summary.failedIterations)

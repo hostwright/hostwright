@@ -1,5 +1,7 @@
 import Foundation
 import HostwrightCore
+import HostwrightDaemonCore
+import HostwrightObservability
 import HostwrightRuntime
 import HostwrightSecrets
 import HostwrightState
@@ -56,9 +58,175 @@ public struct SecretCLIOptions: Equatable, Sendable {
     }
 }
 
+public enum DaemonCLIAction: Equatable, Sendable {
+    case status
+    case lifecycle(DaemonLifecycleOperation)
+}
+
+public struct DaemonCLIOptions: Equatable, Sendable {
+    public let action: DaemonCLIAction
+    public let daemonExecutablePath: String?
+    public let configPath: String?
+    public let output: CLIOutputFormat
+
+    public init(
+        action: DaemonCLIAction,
+        daemonExecutablePath: String?,
+        configPath: String?,
+        output: CLIOutputFormat
+    ) {
+        self.action = action
+        self.daemonExecutablePath = daemonExecutablePath
+        self.configPath = configPath
+        self.output = output
+    }
+}
+
+public enum RestartBudgetCLIAction: Equatable, Sendable {
+    case status(projectID: String?)
+    case release(projectID: String, serviceName: String, holdToken: String)
+}
+
+public struct RestartBudgetCLIOptions: Equatable, Sendable {
+    public let action: RestartBudgetCLIAction
+    public let stateDatabasePath: String?
+    public let output: CLIOutputFormat
+
+    public init(
+        action: RestartBudgetCLIAction,
+        stateDatabasePath: String?,
+        output: CLIOutputFormat
+    ) {
+        self.action = action
+        self.stateDatabasePath = stateDatabasePath
+        self.output = output
+    }
+}
+
+public enum MaintenanceCLIAction: Equatable, Sendable {
+    case preview(manifestPath: String, actions: [String], at: String?)
+    case status(projectID: String?)
+    case cancel(projectID: String, confirmationToken: String)
+    case override(projectID: String, confirmationToken: String, reason: String)
+}
+
+public struct MaintenanceCLIOptions: Equatable, Sendable {
+    public let action: MaintenanceCLIAction
+    public let stateDatabasePath: String?
+    public let output: CLIOutputFormat
+
+    public init(
+        action: MaintenanceCLIAction,
+        stateDatabasePath: String?,
+        output: CLIOutputFormat
+    ) {
+        self.action = action
+        self.stateDatabasePath = stateDatabasePath
+        self.output = output
+    }
+}
+
+public enum OwnershipCLIAction: Equatable, Sendable {
+    case status(projectID: String?)
+    case handoff(
+        groupID: String,
+        planSHA256: String,
+        fencingToken: String,
+        priorControllerID: String,
+        priorExpiry: String,
+        targetControllerID: String,
+        leaseSeconds: Int
+    )
+}
+
+public struct OwnershipCLIOptions: Equatable, Sendable {
+    public let action: OwnershipCLIAction
+    public let stateDatabasePath: String?
+    public let output: CLIOutputFormat
+
+    public init(
+        action: OwnershipCLIAction,
+        stateDatabasePath: String?,
+        output: CLIOutputFormat
+    ) {
+        self.action = action
+        self.stateDatabasePath = stateDatabasePath
+        self.output = output
+    }
+}
+
+public enum MetricsCLIAction: Equatable, Sendable {
+    case snapshot
+    case export(outputPath: String, confirmationSHA256: String)
+}
+
+public struct MetricsCLIOptions: Equatable, Sendable {
+    public let action: MetricsCLIAction
+    public let stateDatabasePath: String?
+    public let output: CLIOutputFormat
+
+    public init(
+        action: MetricsCLIAction,
+        stateDatabasePath: String?,
+        output: CLIOutputFormat
+    ) {
+        self.action = action
+        self.stateDatabasePath = stateDatabasePath
+        self.output = output
+    }
+}
+
+public enum TraceCLIAction: Equatable, Sendable {
+    case inspect(traceID: String?, limit: Int)
+    case export(traceID: String, outputPath: String, confirmationSHA256: String)
+}
+
+public struct TraceCLIOptions: Equatable, Sendable {
+    public let action: TraceCLIAction
+    public let stateDatabasePath: String?
+    public let output: CLIOutputFormat
+
+    public init(action: TraceCLIAction, stateDatabasePath: String?, output: CLIOutputFormat) {
+        self.action = action
+        self.stateDatabasePath = stateDatabasePath
+        self.output = output
+    }
+}
+
+public enum SupportBundleCLIAction: Equatable, Sendable {
+    case status
+    case preview
+    case create(outputPath: String, confirmationSHA256: String, recipientReference: String?)
+    case delete(bundlePath: String, confirmationSHA256: String)
+    case recover
+}
+
+public struct SupportBundleCLIOptions: Equatable, Sendable {
+    public let action: SupportBundleCLIAction
+    public let stateDatabasePath: String?
+    public let projectName: String?
+    public let manifestPath: String?
+    public let output: CLIOutputFormat
+
+    public init(
+        action: SupportBundleCLIAction,
+        stateDatabasePath: String?,
+        projectName: String?,
+        manifestPath: String?,
+        output: CLIOutputFormat
+    ) {
+        self.action = action
+        self.stateDatabasePath = stateDatabasePath
+        self.projectName = projectName
+        self.manifestPath = manifestPath
+        self.output = output
+    }
+}
+
 public enum CLICommand: Equatable, Sendable {
     case version
     case capabilities(output: CLIOutputFormat)
+    case observabilityStatus(output: CLIOutputFormat)
     case runtimeProviders(output: CLIOutputFormat)
     case runtimeMigrate(options: RuntimeProviderMigrationCLIOptions)
     case paths(stateDatabasePath: String?, output: CLIOutputFormat)
@@ -67,6 +235,13 @@ public enum CLICommand: Equatable, Sendable {
     case registry(options: RegistryCLIOptions)
     case image(options: ImageCLIOptions)
     case volume(options: StorageCLIOptions)
+    case daemon(options: DaemonCLIOptions)
+    case restartBudget(options: RestartBudgetCLIOptions)
+    case maintenance(options: MaintenanceCLIOptions)
+    case ownership(options: OwnershipCLIOptions)
+    case metrics(options: MetricsCLIOptions)
+    case traces(options: TraceCLIOptions)
+    case supportBundle(options: SupportBundleCLIOptions)
     case migrateManifestPreview(path: String, output: CLIOutputFormat)
     case initManifest
     case importStack(path: String, output: CLIOutputFormat, teamProfilePath: String?)
@@ -89,7 +264,13 @@ public enum CLICommand: Equatable, Sendable {
     case lifecycle(options: LifecycleCLIOptions)
     case interactive(options: InteractiveCLIOptions)
     case logs(serviceName: String, path: String, tail: Int, stateDatabasePath: String?)
-    case events(stateDatabasePath: String?, projectName: String?, filters: EventFilters, output: CLIOutputFormat)
+    case events(
+        stateDatabasePath: String?,
+        projectName: String?,
+        filters: EventFilters,
+        stream: EventStreamCLIOptions,
+        output: CLIOutputFormat
+    )
     case recovery(
         action: RecoveryCLIAction,
         stateDatabasePath: String?,
@@ -117,6 +298,8 @@ public enum CLICommand: Equatable, Sendable {
             return .help
         case "capabilities":
             return try capabilitiesCommand(arguments: arguments)
+        case "observability":
+            return try observabilityCommand(arguments: arguments)
         case "runtime":
             return try runtimeCommand(arguments: arguments)
         case "paths":
@@ -131,6 +314,18 @@ public enum CLICommand: Equatable, Sendable {
             return .image(options: try ImageCLIParser.parse(arguments: arguments))
         case "volume":
             return .volume(options: try StorageCLIParser.parse(arguments: arguments))
+        case "daemon":
+            return try daemonCommand(arguments: arguments)
+        case "restart-budget":
+            return try restartBudgetCommand(arguments: arguments)
+        case "maintenance":
+            return try maintenanceCommand(arguments: arguments)
+        case "ownership":
+            return try ownershipCommand(arguments: arguments)
+        case "metrics":
+            return try metricsCommand(arguments: arguments)
+        case "traces":
+            return try tracesCommand(arguments: arguments)
         case "migrate":
             return try migrateCommand(arguments: arguments)
         case "init":
@@ -183,6 +378,489 @@ public enum CLICommand: Equatable, Sendable {
         return CLIOutputFormat(rawValue: arguments[arguments.index(after: outputIndex)])
     }
 
+    private static func daemonCommand(arguments: [String]) throws -> CLICommand {
+        guard arguments.count >= 2 else {
+            throw CLIUsageError(
+                "daemon requires status, install, validate, bootstrap, start, stop, kickstart, upgrade, rollback, disable, repair, or uninstall."
+            )
+        }
+        let action: DaemonCLIAction
+        if arguments[1] == "status" {
+            action = .status
+        } else if let operation = DaemonLifecycleOperation(rawValue: arguments[1]) {
+            action = .lifecycle(operation)
+        } else {
+            throw CLIUsageError("daemon does not support operation '\(arguments[1])'.")
+        }
+
+        var daemonExecutablePath: String?
+        var configPath: String?
+        var output: CLIOutputFormat = .text
+        var outputSelected = false
+        var index = 2
+        while index < arguments.count {
+            switch arguments[index] {
+            case "--daemon-executable":
+                guard daemonExecutablePath == nil, index + 1 < arguments.count else {
+                    throw CLIUsageError(
+                        "daemon \(arguments[1]) accepts one value after --daemon-executable."
+                    )
+                }
+                daemonExecutablePath = arguments[index + 1]
+                index += 2
+            case "--config":
+                guard configPath == nil, index + 1 < arguments.count else {
+                    throw CLIUsageError(
+                        "daemon \(arguments[1]) accepts one value after --config."
+                    )
+                }
+                configPath = arguments[index + 1]
+                index += 2
+            case "--json":
+                guard !outputSelected else {
+                    throw CLIUsageError("daemon \(arguments[1]) accepts one output selector.")
+                }
+                output = .json
+                outputSelected = true
+                index += 1
+            case "--output":
+                guard !outputSelected else {
+                    throw CLIUsageError("daemon \(arguments[1]) accepts one output selector.")
+                }
+                output = try parseOutputValue(
+                    arguments: arguments,
+                    index: index,
+                    commandName: "daemon \(arguments[1])"
+                )
+                outputSelected = true
+                index += 2
+            default:
+                throw CLIUsageError(
+                    "daemon \(arguments[1]) does not support argument '\(arguments[index])'."
+                )
+            }
+        }
+
+        let acceptsInputs: Bool
+        switch action {
+        case .lifecycle(.install), .lifecycle(.upgrade):
+            acceptsInputs = true
+        default:
+            acceptsInputs = false
+        }
+        if acceptsInputs {
+            guard let daemonExecutablePath,
+                  daemonExecutablePath.hasPrefix("/"),
+                  let configPath,
+                  configPath.hasPrefix("/") else {
+                throw CLIUsageError(
+                    "daemon \(arguments[1]) requires --daemon-executable <absolute-path> and --config <absolute-path>."
+                )
+            }
+        } else if daemonExecutablePath != nil || configPath != nil {
+            throw CLIUsageError(
+                "daemon \(arguments[1]) does not accept --daemon-executable or --config."
+            )
+        }
+        return .daemon(
+            options: DaemonCLIOptions(
+                action: action,
+                daemonExecutablePath: daemonExecutablePath,
+                configPath: configPath,
+                output: output
+            )
+        )
+    }
+
+    private static func restartBudgetCommand(arguments: [String]) throws -> CLICommand {
+        guard arguments.count >= 2, ["status", "release"].contains(arguments[1]) else {
+            throw CLIUsageError("restart-budget requires status or release.")
+        }
+        let verb = arguments[1]
+        var projectID: String?
+        var serviceName: String?
+        var holdToken: String?
+        var stateDatabasePath: String?
+        var output = CLIOutputFormat.text
+        var outputSelected = false
+        var index = 2
+        while index < arguments.count {
+            let argument = arguments[index]
+            switch argument {
+            case "--project", "--service", "--confirm-hold", "--state-db", "--output":
+                guard index + 1 < arguments.count else {
+                    throw CLIUsageError("restart-budget requires one value after \(argument).")
+                }
+                let value = arguments[index + 1]
+                switch argument {
+                case "--project":
+                    guard projectID == nil else { throw CLIUsageError("restart-budget accepts --project once.") }
+                    projectID = value
+                case "--service":
+                    guard serviceName == nil else { throw CLIUsageError("restart-budget accepts --service once.") }
+                    serviceName = value
+                case "--confirm-hold":
+                    guard holdToken == nil else { throw CLIUsageError("restart-budget accepts --confirm-hold once.") }
+                    holdToken = value
+                case "--state-db":
+                    guard stateDatabasePath == nil else { throw CLIUsageError("restart-budget accepts --state-db once.") }
+                    stateDatabasePath = value
+                case "--output":
+                    guard !outputSelected, let parsed = CLIOutputFormat(rawValue: value) else {
+                        throw CLIUsageError("restart-budget --output requires text or json once.")
+                    }
+                    output = parsed
+                    outputSelected = true
+                default:
+                    break
+                }
+                index += 2
+            case "--json":
+                guard !outputSelected else { throw CLIUsageError("restart-budget accepts one output selector.") }
+                output = .json
+                outputSelected = true
+                index += 1
+            default:
+                throw CLIUsageError("Unsupported restart-budget option '\(argument)'.")
+            }
+        }
+        if let projectID,
+           projectID.range(of: "^project-[A-Za-z0-9](?:[A-Za-z0-9._-]{0,126}[A-Za-z0-9])?$", options: .regularExpression) == nil {
+            throw CLIUsageError("restart-budget --project requires an exact bounded project ID.")
+        }
+        if let serviceName,
+           serviceName.range(of: "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$", options: .regularExpression) == nil {
+            throw CLIUsageError("restart-budget --service requires a Manifest v2 service name.")
+        }
+        let action: RestartBudgetCLIAction
+        if verb == "status" {
+            guard serviceName == nil, holdToken == nil else {
+                throw CLIUsageError("restart-budget status accepts only optional --project, state, and output selectors.")
+            }
+            action = .status(projectID: projectID)
+        } else {
+            guard let projectID, let serviceName, let holdToken,
+                  holdToken.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil else {
+                throw CLIUsageError("restart-budget release requires exact --project, --service, and --confirm-hold SHA-256 values.")
+            }
+            action = .release(projectID: projectID, serviceName: serviceName, holdToken: holdToken)
+        }
+        return .restartBudget(
+            options: RestartBudgetCLIOptions(
+                action: action,
+                stateDatabasePath: stateDatabasePath,
+                output: output
+            )
+        )
+    }
+
+    private static func maintenanceCommand(arguments: [String]) throws -> CLICommand {
+        guard arguments.count >= 2,
+              ["preview", "status", "cancel", "override"].contains(arguments[1]) else {
+            throw CLIUsageError("maintenance requires preview, status, cancel, or override.")
+        }
+        let verb = arguments[1]
+        var manifestPath: String?
+        var actions: [String] = []
+        var at: String?
+        var projectID: String?
+        var confirmationToken: String?
+        var reason: String?
+        var stateDatabasePath: String?
+        var output = CLIOutputFormat.text
+        var outputSelected = false
+        var index = 2
+        while index < arguments.count {
+            let argument = arguments[index]
+            switch argument {
+            case "--action", "--at", "--project", "--confirm-deferral", "--reason", "--state-db", "--output":
+                guard index + 1 < arguments.count else {
+                    throw CLIUsageError("maintenance requires one value after \(argument).")
+                }
+                let value = arguments[index + 1]
+                switch argument {
+                case "--action": actions.append(value)
+                case "--at":
+                    guard at == nil else { throw CLIUsageError("maintenance accepts --at once.") }
+                    at = value
+                case "--project":
+                    guard projectID == nil else { throw CLIUsageError("maintenance accepts --project once.") }
+                    projectID = value
+                case "--confirm-deferral":
+                    guard confirmationToken == nil else { throw CLIUsageError("maintenance accepts --confirm-deferral once.") }
+                    confirmationToken = value
+                case "--reason":
+                    guard reason == nil else { throw CLIUsageError("maintenance accepts --reason once.") }
+                    reason = value
+                case "--state-db":
+                    guard stateDatabasePath == nil else { throw CLIUsageError("maintenance accepts --state-db once.") }
+                    stateDatabasePath = value
+                case "--output":
+                    guard !outputSelected, let parsed = CLIOutputFormat(rawValue: value) else {
+                        throw CLIUsageError("maintenance --output requires text or json once.")
+                    }
+                    output = parsed
+                    outputSelected = true
+                default: break
+                }
+                index += 2
+            case "--json":
+                guard !outputSelected else { throw CLIUsageError("maintenance accepts one output selector.") }
+                output = .json
+                outputSelected = true
+                index += 1
+            default:
+                guard verb == "preview", manifestPath == nil, !argument.hasPrefix("-") else {
+                    throw CLIUsageError("Unsupported maintenance option '\(argument)'.")
+                }
+                manifestPath = argument
+                index += 1
+            }
+        }
+        if let projectID,
+           projectID.range(of: "^project-[A-Za-z0-9](?:[A-Za-z0-9._-]{0,126}[A-Za-z0-9])?$", options: .regularExpression) == nil {
+            throw CLIUsageError("maintenance --project requires an exact bounded project ID.")
+        }
+        if let confirmationToken,
+           confirmationToken.range(of: "^[a-f0-9]{64}$", options: .regularExpression) == nil {
+            throw CLIUsageError("maintenance --confirm-deferral requires an exact SHA-256 token.")
+        }
+        let action: MaintenanceCLIAction
+        switch verb {
+        case "preview":
+            guard projectID == nil, confirmationToken == nil, reason == nil,
+                  let manifestPath, !actions.isEmpty,
+                  Set(actions).count == actions.count,
+                  actions.allSatisfy({ ["create", "start", "restart", "update", "remove"].contains($0) }) else {
+                throw CLIUsageError("maintenance preview requires a manifest and one or more unique elective --action values.")
+            }
+            if let at {
+                let formatter = ISO8601DateFormatter()
+                guard let date = formatter.date(from: at), formatter.string(from: date) == at else {
+                    throw CLIUsageError("maintenance preview --at requires canonical RFC3339 UTC.")
+                }
+            }
+            action = .preview(manifestPath: manifestPath, actions: actions.sorted(), at: at)
+        case "status":
+            guard manifestPath == nil, actions.isEmpty, at == nil, confirmationToken == nil, reason == nil else {
+                throw CLIUsageError("maintenance status accepts only optional --project, state, and output selectors.")
+            }
+            action = .status(projectID: projectID)
+        case "cancel":
+            guard manifestPath == nil, actions.isEmpty, at == nil, reason == nil,
+                  let projectID, let confirmationToken else {
+                throw CLIUsageError("maintenance cancel requires exact --project and --confirm-deferral values.")
+            }
+            action = .cancel(projectID: projectID, confirmationToken: confirmationToken)
+        default:
+            guard manifestPath == nil, actions.isEmpty, at == nil,
+                  let projectID, let confirmationToken, let reason,
+                  !reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  reason.utf8.count <= 512,
+                  reason.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }) else {
+                throw CLIUsageError("maintenance override requires exact --project, --confirm-deferral, and bounded --reason values.")
+            }
+            action = .override(projectID: projectID, confirmationToken: confirmationToken, reason: reason)
+        }
+        return .maintenance(options: MaintenanceCLIOptions(action: action, stateDatabasePath: stateDatabasePath, output: output))
+    }
+
+    private static func ownershipCommand(
+        arguments: [String]
+    ) throws -> CLICommand {
+        guard arguments.count >= 2,
+              ["status", "handoff"].contains(arguments[1]) else {
+            throw CLIUsageError("ownership requires status or handoff.")
+        }
+        let verb = arguments[1]
+        var projectID: String?
+        var groupID: String?
+        var planSHA256: String?
+        var fencingToken: String?
+        var priorControllerID: String?
+        var priorExpiry: String?
+        var targetControllerID: String?
+        var leaseSeconds: Int?
+        var stateDatabasePath: String?
+        var output = CLIOutputFormat.text
+        var outputSelected = false
+        var index = 2
+
+        while index < arguments.count {
+            let argument = arguments[index]
+            switch argument {
+            case "--project", "--group", "--confirm-plan", "--confirm-fence",
+                 "--from-controller", "--from-expiry", "--to-controller",
+                 "--lease-seconds", "--state-db", "--output":
+                guard index + 1 < arguments.count else {
+                    throw CLIUsageError(
+                        "ownership requires one value after \(argument)."
+                    )
+                }
+                let value = arguments[index + 1]
+                switch argument {
+                case "--project":
+                    guard projectID == nil else {
+                        throw CLIUsageError("ownership accepts --project once.")
+                    }
+                    projectID = value
+                case "--group":
+                    guard groupID == nil else {
+                        throw CLIUsageError("ownership accepts --group once.")
+                    }
+                    groupID = value.lowercased()
+                case "--confirm-plan":
+                    guard planSHA256 == nil else {
+                        throw CLIUsageError(
+                            "ownership accepts --confirm-plan once."
+                        )
+                    }
+                    planSHA256 = value.lowercased()
+                case "--confirm-fence":
+                    guard fencingToken == nil else {
+                        throw CLIUsageError(
+                            "ownership accepts --confirm-fence once."
+                        )
+                    }
+                    fencingToken = value.lowercased()
+                case "--from-controller":
+                    guard priorControllerID == nil else {
+                        throw CLIUsageError(
+                            "ownership accepts --from-controller once."
+                        )
+                    }
+                    priorControllerID = value
+                case "--from-expiry":
+                    guard priorExpiry == nil else {
+                        throw CLIUsageError(
+                            "ownership accepts --from-expiry once."
+                        )
+                    }
+                    priorExpiry = value
+                case "--to-controller":
+                    guard targetControllerID == nil else {
+                        throw CLIUsageError(
+                            "ownership accepts --to-controller once."
+                        )
+                    }
+                    targetControllerID = [
+                        "resume": "hostwright-recovery-resume",
+                        "rollback": "hostwright-recovery-rollback"
+                    ][value]
+                    guard targetControllerID != nil else {
+                        throw CLIUsageError(
+                            "ownership --to-controller requires resume or rollback."
+                        )
+                    }
+                case "--lease-seconds":
+                    guard leaseSeconds == nil,
+                          let parsed = Int(value),
+                          (1...900).contains(parsed) else {
+                        throw CLIUsageError(
+                            "ownership --lease-seconds requires 1 through 900."
+                        )
+                    }
+                    leaseSeconds = parsed
+                case "--state-db":
+                    guard stateDatabasePath == nil else {
+                        throw CLIUsageError("ownership accepts --state-db once.")
+                    }
+                    stateDatabasePath = value
+                case "--output":
+                    guard !outputSelected,
+                          let parsed = CLIOutputFormat(rawValue: value) else {
+                        throw CLIUsageError(
+                            "ownership --output requires text or json once."
+                        )
+                    }
+                    output = parsed
+                    outputSelected = true
+                default:
+                    preconditionFailure("Unknown ownership parser option.")
+                }
+                index += 2
+            case "--json":
+                guard !outputSelected else {
+                    throw CLIUsageError(
+                        "ownership accepts one output selector."
+                    )
+                }
+                output = .json
+                outputSelected = true
+                index += 1
+            default:
+                throw CLIUsageError(
+                    "Unsupported ownership option '\(argument)'."
+                )
+            }
+        }
+
+        if let projectID,
+           projectID.range(
+               of: "^project-[A-Za-z0-9](?:[A-Za-z0-9._-]{0,126}[A-Za-z0-9])?$",
+               options: .regularExpression
+           ) == nil {
+            throw CLIUsageError(
+                "ownership --project requires an exact bounded project ID."
+            )
+        }
+        let action: OwnershipCLIAction
+        if verb == "status" {
+            guard groupID == nil, planSHA256 == nil, fencingToken == nil,
+                  priorControllerID == nil, priorExpiry == nil,
+                  targetControllerID == nil, leaseSeconds == nil else {
+                throw CLIUsageError(
+                    "ownership status accepts only optional --project, state, and output selectors."
+                )
+            }
+            action = .status(projectID: projectID)
+        } else {
+            guard projectID == nil,
+                  let groupID, HostwrightResourceUUID.isValid(groupID),
+                  let planSHA256,
+                  planSHA256.range(
+                      of: "^[a-f0-9]{64}$",
+                      options: .regularExpression
+                  ) != nil,
+                  let fencingToken,
+                  HostwrightResourceUUID.isValid(fencingToken),
+                  let priorControllerID,
+                  !priorControllerID.isEmpty,
+                  priorControllerID.utf8.count <= 128,
+                  priorControllerID.unicodeScalars.allSatisfy({
+                      !CharacterSet.controlCharacters.contains($0)
+                  }),
+                  let priorExpiry,
+                  let expiryDate = ISO8601DateFormatter().date(
+                      from: priorExpiry
+                  ),
+                  ISO8601DateFormatter().string(from: expiryDate) ==
+                    priorExpiry,
+                  let targetControllerID,
+                  let leaseSeconds else {
+                throw CLIUsageError(
+                    "ownership handoff requires exact group, plan, fence, prior controller/expiry, target controller, and bounded lease values."
+                )
+            }
+            action = .handoff(
+                groupID: groupID,
+                planSHA256: planSHA256,
+                fencingToken: fencingToken,
+                priorControllerID: priorControllerID,
+                priorExpiry: priorExpiry,
+                targetControllerID: targetControllerID,
+                leaseSeconds: leaseSeconds
+            )
+        }
+        return .ownership(
+            options: OwnershipCLIOptions(
+                action: action,
+                stateDatabasePath: stateDatabasePath,
+                output: output
+            )
+        )
+    }
+
     private static func capabilitiesCommand(arguments: [String]) throws -> CLICommand {
         let options = Array(arguments.dropFirst())
         if options.isEmpty {
@@ -199,6 +877,24 @@ public enum CLICommand: Equatable, Sendable {
             return .capabilities(output: output)
         }
         throw CLIUsageError("capabilities supports only --json or --output text|json.")
+    }
+
+    private static func observabilityCommand(arguments: [String]) throws -> CLICommand {
+        guard arguments.count >= 2, arguments[1] == "status" else {
+            throw CLIUsageError("observability requires status.")
+        }
+        let options = Array(arguments.dropFirst(2))
+        if options.isEmpty {
+            return .observabilityStatus(output: .text)
+        }
+        if options == ["--json"] {
+            return .observabilityStatus(output: .json)
+        }
+        if options.count == 2, options[0] == "--output",
+           let output = CLIOutputFormat(rawValue: options[1]) {
+            return .observabilityStatus(output: output)
+        }
+        throw CLIUsageError("observability status supports only --json or --output text|json.")
     }
 
     private static func runtimeCommand(arguments: [String]) throws -> CLICommand {
@@ -339,11 +1035,11 @@ public enum CLICommand: Equatable, Sendable {
 
     private static func stateCommand(arguments: [String]) throws -> CLICommand {
         guard arguments.count >= 2 else {
-            throw CLIUsageError("state requires integrity, backup, backups, restore, repair, or recover.")
+            throw CLIUsageError("state requires integrity, backup, backups, restore, repair, recover, retention, or compact.")
         }
         let operation = arguments[1]
-        guard ["integrity", "backup", "backups", "restore", "repair", "recover"].contains(operation) else {
-            throw CLIUsageError("state supports integrity, backup, backups, restore, repair, and recover.")
+        guard ["integrity", "backup", "backups", "restore", "repair", "recover", "retention", "compact"].contains(operation) else {
+            throw CLIUsageError("state supports integrity, backup, backups, restore, repair, recover, retention, and compact.")
         }
 
         var stateDatabasePath: String?
@@ -352,7 +1048,17 @@ public enum CLICommand: Equatable, Sendable {
         var backupID: String?
         var dryRun = false
         var confirmationToken: String?
+        var compactionEvaluatedAt: String?
+        var manifestPath: String?
         var index = 2
+        if operation == "retention" || operation == "compact" {
+            guard index < arguments.count,
+                  !arguments[index].hasPrefix("-") else {
+                throw CLIUsageError("state \(operation) requires one manifest path.")
+            }
+            manifestPath = arguments[index]
+            index += 1
+        }
         while index < arguments.count {
             switch arguments[index] {
             case "--state-db":
@@ -394,7 +1100,7 @@ public enum CLICommand: Equatable, Sendable {
                 backupID = value
                 index += 2
             case "--dry-run":
-                guard operation == "restore" || operation == "repair", !dryRun else {
+                guard operation == "restore" || operation == "repair" || operation == "compact", !dryRun else {
                     throw CLIUsageError("state \(operation) accepts --dry-run at most once.")
                 }
                 dryRun = true
@@ -417,6 +1123,24 @@ public enum CLICommand: Equatable, Sendable {
                     flag: "--confirm-repair"
                 )
                 index += 2
+            case "--confirm-compact":
+                guard operation == "compact", confirmationToken == nil, index + 1 < arguments.count else {
+                    throw CLIUsageError("state compact accepts one value after --confirm-compact.")
+                }
+                confirmationToken = try parseStateConfirmationToken(
+                    arguments[index + 1],
+                    flag: "--confirm-compact"
+                )
+                index += 2
+            case "--evaluated-at":
+                guard operation == "compact", compactionEvaluatedAt == nil,
+                      index + 1 < arguments.count else {
+                    throw CLIUsageError("state compact accepts one value after --evaluated-at.")
+                }
+                compactionEvaluatedAt = try parseCompactionEvaluationTimestamp(
+                    arguments[index + 1]
+                )
+                index += 2
             default:
                 throw CLIUsageError("state \(operation) does not support argument '\(arguments[index])'.")
             }
@@ -435,6 +1159,23 @@ public enum CLICommand: Equatable, Sendable {
             action = .backups
         case "recover":
             action = .recover
+        case "retention":
+            guard let manifestPath, !dryRun, confirmationToken == nil else {
+                throw CLIUsageError("state retention is read-only and accepts one manifest path.")
+            }
+            action = .retention(manifestPath: manifestPath)
+        case "compact":
+            guard let manifestPath, dryRun != (confirmationToken != nil) else {
+                throw CLIUsageError("state compact requires a manifest and exactly one of --dry-run or --confirm-compact <token>.")
+            }
+            guard dryRun ? compactionEvaluatedAt == nil : compactionEvaluatedAt != nil else {
+                throw CLIUsageError("confirmed state compact requires the exact --evaluated-at value emitted by its dry-run plan.")
+            }
+            action = .compact(
+                manifestPath: manifestPath,
+                confirmation: dryRun ? .dryRun : .confirmed(token: confirmationToken ?? ""),
+                evaluatedAt: compactionEvaluatedAt
+            )
         case "restore":
             guard let backupID else {
                 throw CLIUsageError("state restore requires --backup <id>.")
@@ -773,6 +1514,17 @@ public enum CLICommand: Equatable, Sendable {
     ) throws -> String {
         guard value.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil else {
             throw CLIUsageError("\(flag) requires the exact 64-character token emitted by the dry-run plan.")
+        }
+        return value
+    }
+
+    private static func parseCompactionEvaluationTimestamp(_ value: String) throws -> String {
+        let formatter = ISO8601DateFormatter()
+        guard let date = formatter.date(from: value),
+              formatter.string(from: date) == value else {
+            throw CLIUsageError(
+                "--evaluated-at requires the exact canonical RFC3339 UTC value emitted by the dry-run plan."
+            )
         }
         return value
     }
@@ -1134,6 +1886,185 @@ public enum CLICommand: Equatable, Sendable {
         )
     }
 
+    private static func metricsCommand(arguments: [String]) throws -> CLICommand {
+        guard arguments.count >= 2, ["snapshot", "export"].contains(arguments[1]) else {
+            throw CLIUsageError("metrics requires exactly one action: snapshot or export.")
+        }
+        let actionName = arguments[1]
+        var stateDatabasePath: String?
+        var outputPath: String?
+        var confirmationSHA256: String?
+        var output: CLIOutputFormat = .text
+        var outputSelected = false
+        var index = 2
+        while index < arguments.count {
+            switch arguments[index] {
+            case "--state-db":
+                guard stateDatabasePath == nil, index + 1 < arguments.count else {
+                    throw CLIUsageError("metrics accepts exactly one value after --state-db.")
+                }
+                stateDatabasePath = arguments[index + 1]
+                index += 2
+            case "--output-path":
+                guard outputPath == nil, index + 1 < arguments.count else {
+                    throw CLIUsageError("metrics export accepts exactly one value after --output-path.")
+                }
+                let candidate = arguments[index + 1]
+                guard candidate.hasPrefix("/"),
+                      URL(fileURLWithPath: candidate).standardizedFileURL.path == candidate,
+                      (candidate as NSString).lastPathComponent != ".",
+                      (candidate as NSString).lastPathComponent != ".." else {
+                    throw CLIUsageError("metrics export --output-path requires one normalized absolute file path.")
+                }
+                outputPath = candidate
+                index += 2
+            case "--confirm-snapshot":
+                guard confirmationSHA256 == nil, index + 1 < arguments.count else {
+                    throw CLIUsageError("metrics export accepts exactly one value after --confirm-snapshot.")
+                }
+                let candidate = arguments[index + 1]
+                guard candidate.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil else {
+                    throw CLIUsageError("metrics export --confirm-snapshot requires 64 lowercase hexadecimal characters.")
+                }
+                confirmationSHA256 = candidate
+                index += 2
+            case "--output":
+                guard !outputSelected else {
+                    throw CLIUsageError("metrics output format may be selected only once.")
+                }
+                output = try parseOutputValue(
+                    arguments: arguments,
+                    index: index,
+                    commandName: "metrics"
+                )
+                outputSelected = true
+                index += 2
+            default:
+                throw CLIUsageError("metrics supports only --state-db, --output, --output-path, and --confirm-snapshot.")
+            }
+        }
+
+        switch actionName {
+        case "snapshot":
+            guard outputPath == nil, confirmationSHA256 == nil else {
+                throw CLIUsageError("metrics snapshot does not accept export confirmation or output-path flags.")
+            }
+            return .metrics(options: MetricsCLIOptions(
+                action: .snapshot,
+                stateDatabasePath: stateDatabasePath,
+                output: output
+            ))
+        case "export":
+            guard let outputPath, let confirmationSHA256 else {
+                throw CLIUsageError("metrics export requires --output-path and --confirm-snapshot.")
+            }
+            return .metrics(options: MetricsCLIOptions(
+                action: .export(
+                    outputPath: outputPath,
+                    confirmationSHA256: confirmationSHA256
+                ),
+                stateDatabasePath: stateDatabasePath,
+                output: output
+            ))
+        default:
+            preconditionFailure("validated metrics action")
+        }
+    }
+
+    private static func tracesCommand(arguments: [String]) throws -> CLICommand {
+        guard arguments.count >= 2, ["inspect", "export"].contains(arguments[1]) else {
+            throw CLIUsageError("traces requires exactly one action: inspect or export.")
+        }
+        let actionName = arguments[1]
+        var stateDatabasePath: String?
+        var traceID: String?
+        var limit = 20
+        var limitSelected = false
+        var outputPath: String?
+        var confirmationSHA256: String?
+        var output: CLIOutputFormat = .text
+        var outputSelected = false
+        var index = 2
+        while index < arguments.count {
+            let argument = arguments[index]
+            switch argument {
+            case "--state-db", "--trace-id", "--limit", "--output-path", "--confirm-trace", "--output":
+                guard index + 1 < arguments.count else {
+                    throw CLIUsageError("traces requires one value after \(argument).")
+                }
+                let value = arguments[index + 1]
+                switch argument {
+                case "--state-db":
+                    guard stateDatabasePath == nil else { throw CLIUsageError("traces accepts --state-db once.") }
+                    stateDatabasePath = value
+                case "--trace-id":
+                    guard traceID == nil, let uuid = UUID(uuidString: value),
+                          uuid.uuidString.lowercased() == value else {
+                        throw CLIUsageError("traces --trace-id requires one canonical lowercase UUID.")
+                    }
+                    traceID = value
+                case "--limit":
+                    guard !limitSelected, let parsed = Int(value), (1...100).contains(parsed) else {
+                        throw CLIUsageError("traces --limit must be selected once between 1 and 100.")
+                    }
+                    limit = parsed
+                    limitSelected = true
+                case "--output-path":
+                    guard outputPath == nil, value.hasPrefix("/"),
+                          URL(fileURLWithPath: value).standardizedFileURL.path == value,
+                          ![".", ".."].contains((value as NSString).lastPathComponent) else {
+                        throw CLIUsageError("traces export --output-path requires one normalized absolute file path.")
+                    }
+                    outputPath = value
+                case "--confirm-trace":
+                    guard confirmationSHA256 == nil,
+                          value.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil else {
+                        throw CLIUsageError("traces export --confirm-trace requires one lowercase SHA-256.")
+                    }
+                    confirmationSHA256 = value
+                default:
+                    guard !outputSelected, let parsed = CLIOutputFormat(rawValue: value) else {
+                        throw CLIUsageError("traces --output requires text or json once.")
+                    }
+                    output = parsed
+                    outputSelected = true
+                }
+                index += 2
+            case "--json":
+                guard !outputSelected else { throw CLIUsageError("traces accepts one output selector.") }
+                output = .json
+                outputSelected = true
+                index += 1
+            default:
+                throw CLIUsageError("Unsupported traces option '\(argument)'.")
+            }
+        }
+        if actionName == "inspect" {
+            guard outputPath == nil, confirmationSHA256 == nil else {
+                throw CLIUsageError("traces inspect does not accept export confirmation or output-path flags.")
+            }
+            return .traces(options: TraceCLIOptions(
+                action: .inspect(traceID: traceID, limit: limit),
+                stateDatabasePath: stateDatabasePath,
+                output: output
+            ))
+        }
+        guard let traceID, let outputPath, let confirmationSHA256, !limitSelected else {
+            throw CLIUsageError(
+                "traces export requires --trace-id, --output-path, and --confirm-trace and does not accept --limit."
+            )
+        }
+        return .traces(options: TraceCLIOptions(
+            action: .export(
+                traceID: traceID,
+                outputPath: outputPath,
+                confirmationSHA256: confirmationSHA256
+            ),
+            stateDatabasePath: stateDatabasePath,
+            output: output
+        ))
+    }
+
     private static func eventsCommand(arguments: [String]) throws -> CLICommand {
         var stateDatabasePath: String?
         var projectName: String?
@@ -1142,6 +2073,10 @@ public enum CLICommand: Equatable, Sendable {
         var severity: StateEventSeverity?
         var limit: Int?
         var sort: EventSortOrder = .ascending
+        var cursor: String?
+        var watch = false
+        var timeoutSeconds = EventStreamCLIOptions.defaultTimeoutSeconds
+        var timeoutSelected = false
         var output: CLIOutputFormat = .text
         var index = 1
 
@@ -1157,19 +2092,19 @@ public enum CLICommand: Equatable, Sendable {
                 guard index + 1 < arguments.count else {
                     throw CLIUsageError("events requires a value after --project.")
                 }
-                projectName = arguments[index + 1]
+                projectName = try eventFilterValue(arguments[index + 1], label: "project")
                 index += 2
             case "--type":
                 guard index + 1 < arguments.count else {
                     throw CLIUsageError("events requires a value after --type.")
                 }
-                eventType = arguments[index + 1]
+                eventType = try eventFilterValue(arguments[index + 1], label: "type")
                 index += 2
             case "--service":
                 guard index + 1 < arguments.count else {
                     throw CLIUsageError("events requires a value after --service.")
                 }
-                serviceName = arguments[index + 1]
+                serviceName = try eventFilterValue(arguments[index + 1], label: "service")
                 index += 2
             case "--severity":
                 guard index + 1 < arguments.count, let parsed = StateEventSeverity(rawValue: arguments[index + 1]) else {
@@ -1178,8 +2113,12 @@ public enum CLICommand: Equatable, Sendable {
                 severity = parsed
                 index += 2
             case "--limit":
-                guard index + 1 < arguments.count, let parsed = Int(arguments[index + 1]), parsed > 0 else {
-                    throw CLIUsageError("events requires a positive integer after --limit.")
+                guard index + 1 < arguments.count,
+                      let parsed = Int(arguments[index + 1]),
+                      (1...HostwrightEventStreamPage.maximumPageSize).contains(parsed) else {
+                    throw CLIUsageError(
+                        "events --limit must be between 1 and \(HostwrightEventStreamPage.maximumPageSize)."
+                    )
                 }
                 limit = parsed
                 index += 2
@@ -1189,20 +2128,66 @@ public enum CLICommand: Equatable, Sendable {
                 }
                 sort = parsed
                 index += 2
+            case "--cursor":
+                guard index + 1 < arguments.count else {
+                    throw CLIUsageError("events requires a value after --cursor.")
+                }
+                let value = arguments[index + 1]
+                guard !value.isEmpty,
+                      value.utf8.count <= HostwrightEventCursor.maximumTokenBytes else {
+                    throw CLIUsageError("events --cursor is empty or exceeds the cursor limit.")
+                }
+                cursor = value
+                index += 2
+            case "--watch":
+                watch = true
+                index += 1
+            case "--timeout":
+                guard index + 1 < arguments.count,
+                      let parsed = Int(arguments[index + 1]),
+                      (1...EventStreamCLIOptions.maximumTimeoutSeconds).contains(parsed) else {
+                    throw CLIUsageError(
+                        "events --timeout must be between 1 and \(EventStreamCLIOptions.maximumTimeoutSeconds) seconds."
+                    )
+                }
+                timeoutSeconds = parsed
+                timeoutSelected = true
+                index += 2
             case "--output":
                 output = try parseOutputValue(arguments: arguments, index: index, commandName: "events")
                 index += 2
             default:
-                throw CLIUsageError("events supports only --state-db, --project, --type, --service, --severity, --limit, --sort, and --output.")
+                throw CLIUsageError("events supports only --state-db, --project, --type, --service, --severity, --limit, --sort, --cursor, --watch, --timeout, and --output.")
             }
+        }
+
+        guard !timeoutSelected || watch else {
+            throw CLIUsageError("events --timeout requires --watch.")
+        }
+        guard (cursor == nil && !watch) || sort == .ascending else {
+            throw CLIUsageError("events cursor and watch modes require --sort asc.")
         }
 
         return .events(
             stateDatabasePath: stateDatabasePath,
             projectName: projectName,
             filters: EventFilters(type: eventType, serviceName: serviceName, severity: severity, limit: limit, sort: sort),
+            stream: EventStreamCLIOptions(
+                cursor: cursor,
+                watch: watch,
+                timeoutSeconds: timeoutSeconds
+            ),
             output: output
         )
+    }
+
+    private static func eventFilterValue(_ value: String, label: String) throws -> String {
+        guard !value.isEmpty,
+              value.utf8.count <= 255,
+              value.range(of: "^[ -~]+$", options: .regularExpression) != nil else {
+            throw CLIUsageError("events --\(label) must be printable text within 255 bytes.")
+        }
+        return value
     }
 
     private static func recoveryCommand(arguments: [String]) throws -> CLICommand {
@@ -1652,6 +2637,9 @@ public enum CLICommand: Equatable, Sendable {
     }
 
     private static func diagnosticsCommand(arguments: [String]) throws -> CLICommand {
+        if arguments.count >= 2, arguments[1] == "support" {
+            return try supportBundleCommand(arguments: arguments)
+        }
         var stateDatabasePath: String?
         var bundlePath: String?
         var projectName: String?
@@ -1694,6 +2682,122 @@ public enum CLICommand: Equatable, Sendable {
         }
         return .diagnostics(stateDatabasePath: stateDatabasePath, bundlePath: bundlePath, projectName: projectName, manifestPath: manifestPath)
     }
+
+    private static func supportBundleCommand(arguments: [String]) throws -> CLICommand {
+        guard arguments.count >= 3 else {
+            throw CLIUsageError("diagnostics support requires status, preview, create, delete, or recover.")
+        }
+        let verb = arguments[2]
+        guard ["status", "preview", "create", "delete", "recover"].contains(verb) else {
+            throw CLIUsageError("diagnostics support requires status, preview, create, delete, or recover.")
+        }
+        var stateDatabasePath: String?
+        var projectName: String?
+        var manifestPath: String?
+        var outputPath: String?
+        var bundlePath: String?
+        var previewSHA256: String?
+        var bundleSHA256: String?
+        var recipientReference: String?
+        var output = CLIOutputFormat.text
+        var seen = Set<String>()
+        var index = 3
+
+        func requireUnique(_ flag: String) throws {
+            guard seen.insert(flag).inserted else {
+                throw CLIUsageError("diagnostics support does not accept duplicate \(flag).")
+            }
+        }
+        while index < arguments.count {
+            let flag = arguments[index]
+            switch flag {
+            case "--json":
+                try requireUnique("--output")
+                output = .json
+                index += 1
+            case "--output":
+                try requireUnique("--output")
+                guard index + 1 < arguments.count,
+                      let parsed = CLIOutputFormat(rawValue: arguments[index + 1]) else {
+                    throw CLIUsageError("diagnostics support --output supports only text or json.")
+                }
+                output = parsed
+                index += 2
+            case "--state-db", "--project", "--manifest", "--output-path", "--bundle",
+                 "--confirm-preview", "--confirm-bundle", "--encrypt-recipient":
+                try requireUnique(flag)
+                guard index + 1 < arguments.count else {
+                    throw CLIUsageError("diagnostics support requires a value after \(flag).")
+                }
+                let value = arguments[index + 1]
+                guard !value.isEmpty else {
+                    throw CLIUsageError("diagnostics support requires a non-empty value after \(flag).")
+                }
+                switch flag {
+                case "--state-db": stateDatabasePath = value
+                case "--project": projectName = value
+                case "--manifest": manifestPath = value
+                case "--output-path": outputPath = value
+                case "--bundle": bundlePath = value
+                case "--confirm-preview": previewSHA256 = value
+                case "--confirm-bundle": bundleSHA256 = value
+                case "--encrypt-recipient": recipientReference = value
+                default: break
+                }
+                index += 2
+            default:
+                throw CLIUsageError("diagnostics support received an unsupported option: \(flag).")
+            }
+        }
+
+        let action: SupportBundleCLIAction
+        switch verb {
+        case "status":
+            guard projectName == nil, manifestPath == nil, outputPath == nil, bundlePath == nil,
+                  previewSHA256 == nil, bundleSHA256 == nil, recipientReference == nil else {
+                throw CLIUsageError("diagnostics support status supports only --state-db and --output.")
+            }
+            action = .status
+        case "preview":
+            guard outputPath == nil, bundlePath == nil, previewSHA256 == nil,
+                  bundleSHA256 == nil, recipientReference == nil else {
+                throw CLIUsageError("diagnostics support preview supports only --state-db, --project, --manifest, and --output.")
+            }
+            action = .preview
+        case "create":
+            guard let outputPath, let previewSHA256,
+                  HostwrightSupportBundleContract.isValidSHA256(previewSHA256),
+                  bundlePath == nil, bundleSHA256 == nil else {
+                throw CLIUsageError("diagnostics support create requires --output-path and a 64-character --confirm-preview SHA-256.")
+            }
+            action = .create(
+                outputPath: outputPath,
+                confirmationSHA256: previewSHA256,
+                recipientReference: recipientReference
+            )
+        case "delete":
+            guard let bundlePath, let bundleSHA256,
+                  HostwrightSupportBundleContract.isValidSHA256(bundleSHA256),
+                  projectName == nil, manifestPath == nil, outputPath == nil,
+                  previewSHA256 == nil, recipientReference == nil else {
+                throw CLIUsageError("diagnostics support delete requires --bundle and a 64-character --confirm-bundle SHA-256.")
+            }
+            action = .delete(bundlePath: bundlePath, confirmationSHA256: bundleSHA256)
+        default:
+            guard projectName == nil, manifestPath == nil, outputPath == nil, bundlePath == nil,
+                  previewSHA256 == nil, bundleSHA256 == nil, recipientReference == nil else {
+                throw CLIUsageError("diagnostics support recover supports only --state-db and --output.")
+            }
+            action = .recover
+        }
+        return .supportBundle(options: SupportBundleCLIOptions(
+            action: action,
+            stateDatabasePath: stateDatabasePath,
+            projectName: projectName,
+            manifestPath: manifestPath,
+            output: output
+        ))
+    }
 }
 
 public enum EventSortOrder: String, Equatable, Sendable {
@@ -1717,6 +2821,25 @@ public struct EventFilters: Equatable, Sendable {
     }
 }
 
+public struct EventStreamCLIOptions: Equatable, Sendable {
+    public static let defaultTimeoutSeconds = 30
+    public static let maximumTimeoutSeconds = 300
+
+    public let cursor: String?
+    public let watch: Bool
+    public let timeoutSeconds: Int
+
+    public init(
+        cursor: String? = nil,
+        watch: Bool = false,
+        timeoutSeconds: Int = EventStreamCLIOptions.defaultTimeoutSeconds
+    ) {
+        self.cursor = cursor
+        self.watch = watch
+        self.timeoutSeconds = timeoutSeconds
+    }
+}
+
 public enum CleanupConfirmation: Equatable, Sendable {
     case dryRun
     case confirmed(token: String)
@@ -1729,6 +2852,12 @@ public enum StateCLIAction: Equatable, Sendable {
     case restore(backupID: String, confirmation: StateMutationConfirmation)
     case repair(confirmation: StateMutationConfirmation)
     case recover
+    case retention(manifestPath: String)
+    case compact(
+        manifestPath: String,
+        confirmation: StateMutationConfirmation,
+        evaluatedAt: String?
+    )
 }
 
 public enum StateMutationConfirmation: Equatable, Sendable {
@@ -1821,6 +2950,26 @@ public enum CLIExitCode: Int32, Equatable, Sendable {
             return .partialFailure
         case .storageDenied:
             return .unsafeOperation
+        case .daemonInvalid:
+            return .validation
+        case .daemonUnavailable:
+            return .runtimeUnavailable
+        case .daemonConflict, .daemonCancelled, .daemonPartialEffect:
+            return .partialFailure
+        case .daemonDenied:
+            return .unsafeOperation
+        case .supportInvalidContract, .supportSectionLimitExceeded,
+             .supportPlaintextLimitExceeded, .supportInvalidRecipientReference:
+            return .validation
+        case .supportPreviewChanged:
+            return .confirmationMismatch
+        case .supportUnsafeOutputPath, .supportReceiptUnavailable,
+             .supportBundleIdentityChanged, .supportRecoverySafeHold:
+            return .unsafeOperation
+        case .supportEncryptionUnavailable:
+            return .runtimeUnavailable
+        case .supportEncryptionFailed, .supportRecoveryRequired, .supportCancelled:
+            return .partialFailure
         case .unsupportedArchitecture, .unsupportedMacOSVersion:
             return .validation
         }

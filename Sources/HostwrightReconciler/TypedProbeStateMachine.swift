@@ -371,15 +371,18 @@ public struct RuntimeProbeState: Codable, Equatable, Sendable {
 public struct RuntimeProbeSnapshot: Codable, Equatable, Sendable {
     public let resourceIdentifier: String
     public let startedAtMilliseconds: Int64
+    public let stableSinceMilliseconds: Int64?
     public let states: [RuntimeProbeState]
 
     public init(
         resourceIdentifier: String,
         startedAtMilliseconds: Int64,
+        stableSinceMilliseconds: Int64? = nil,
         states: [RuntimeProbeState]
     ) {
         self.resourceIdentifier = resourceIdentifier
         self.startedAtMilliseconds = startedAtMilliseconds
+        self.stableSinceMilliseconds = stableSinceMilliseconds
         self.states = states.sorted { $0.kind.order < $1.kind.order }
     }
 
@@ -609,7 +612,7 @@ public enum RuntimeProbeStateMachine {
             phase = .unavailable
         }
 
-        return replacing(
+        let updated = replacing(
             RuntimeProbeState(
                 kind: request.kind,
                 phase: phase,
@@ -626,6 +629,16 @@ public enum RuntimeProbeStateMachine {
             ),
             in: snapshot
         )
+        let allConfiguredProbesPassing = !updated.states.isEmpty &&
+            updated.states.allSatisfy { $0.phase == .succeeded }
+        return RuntimeProbeSnapshot(
+            resourceIdentifier: updated.resourceIdentifier,
+            startedAtMilliseconds: updated.startedAtMilliseconds,
+            stableSinceMilliseconds: allConfiguredProbesPassing
+                ? updated.stableSinceMilliseconds ?? result.completedAtMilliseconds
+                : nil,
+            states: updated.states
+        )
     }
 
     public static func resumed(
@@ -637,6 +650,7 @@ public enum RuntimeProbeStateMachine {
         return RuntimeProbeSnapshot(
             resourceIdentifier: snapshot.resourceIdentifier,
             startedAtMilliseconds: snapshot.startedAtMilliseconds,
+            stableSinceMilliseconds: snapshot.stableSinceMilliseconds,
             states: snapshot.states.map { state in
                 guard state.phase == .executing else {
                     return state
@@ -771,6 +785,7 @@ public enum RuntimeProbeStateMachine {
         RuntimeProbeSnapshot(
             resourceIdentifier: snapshot.resourceIdentifier,
             startedAtMilliseconds: snapshot.startedAtMilliseconds,
+            stableSinceMilliseconds: snapshot.stableSinceMilliseconds,
             states: snapshot.states.map { $0.kind == state.kind ? state : $0 }
         )
     }

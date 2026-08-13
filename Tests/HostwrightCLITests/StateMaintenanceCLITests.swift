@@ -6,6 +6,7 @@ import XCTest
 final class StateMaintenanceCLITests: XCTestCase {
     func testParserRecognizesCompleteStateMaintenanceSurface() throws {
         let token = String(repeating: "a", count: 64)
+        let evaluatedAt = "2026-08-12T11:30:00Z"
         XCTAssertEqual(
             try CLICommand.parse(arguments: ["state", "integrity", "--json"]),
             .state(action: .integrity, stateDatabasePath: nil, output: .json)
@@ -30,6 +31,30 @@ final class StateMaintenanceCLITests: XCTestCase {
                 output: .text
             )
         )
+        XCTAssertEqual(
+            try CLICommand.parse(arguments: ["state", "retention", "hostwright.yaml", "--json"]),
+            .state(
+                action: .retention(manifestPath: "hostwright.yaml"),
+                stateDatabasePath: nil,
+                output: .json
+            )
+        )
+        XCTAssertEqual(
+            try CLICommand.parse(arguments: [
+                "state", "compact", "hostwright.yaml",
+                "--confirm-compact", token,
+                "--evaluated-at", evaluatedAt
+            ]),
+            .state(
+                action: .compact(
+                    manifestPath: "hostwright.yaml",
+                    confirmation: .confirmed(token: token),
+                    evaluatedAt: evaluatedAt
+                ),
+                stateDatabasePath: nil,
+                output: .text
+            )
+        )
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["state", "restore", "--backup", "backup-1"]))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["state", "repair", "--dry-run", "--confirm-repair", token]))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["state", "repair", "--confirm-repair", "token"]))
@@ -37,6 +62,13 @@ final class StateMaintenanceCLITests: XCTestCase {
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["state", "integrity", "--json", "--output", "text"]))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["state", "backup", "--state-db", "/a", "--state-db", "/b"]))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["state", "unknown"]))
+        XCTAssertThrowsError(try CLICommand.parse(arguments: ["state", "compact", "hostwright.yaml"]))
+        XCTAssertThrowsError(try CLICommand.parse(arguments: [
+            "state", "compact", "hostwright.yaml", "--confirm-compact", token
+        ]))
+        XCTAssertThrowsError(try CLICommand.parse(arguments: [
+            "state", "compact", "hostwright.yaml", "--dry-run", "--evaluated-at", evaluatedAt
+        ]))
     }
 
     func testCLIBackupCatalogDryRunRestoreAndConfirmedRestoreRoundTrip() throws {
@@ -191,6 +223,50 @@ final class StateMaintenanceCLITests: XCTestCase {
         }
     }
 
+    func testCLIRetentionStatusDryRunAndExactConfirmationRoundTrip() throws {
+        try withStore { store in
+            try appendEvent("compact-me", to: store)
+            let manifestPath = URL(fileURLWithPath: store.path)
+                .deletingLastPathComponent().appendingPathComponent("hostwright.yaml").path
+            try retentionManifest.write(toFile: manifestPath, atomically: true, encoding: .utf8)
+
+            let status = HostwrightCLI.run(arguments: [
+                "state", "retention", manifestPath, "--state-db", store.path, "--json"
+            ])
+            XCTAssertEqual(status.exitCode, 0, status.standardError)
+            XCTAssertEqual(
+                try JSONDecoder().decode(
+                    StateRetentionStatus.self,
+                    from: Data(status.standardOutput.utf8)
+                ).kind,
+                "stateRetentionStatus"
+            )
+
+            let dryRun = HostwrightCLI.run(arguments: [
+                "state", "compact", manifestPath, "--dry-run", "--state-db", store.path, "--json"
+            ])
+            XCTAssertEqual(dryRun.exitCode, 0, dryRun.standardError)
+            let plan = try JSONDecoder().decode(
+                StateCompactionPlan.self,
+                from: Data(dryRun.standardOutput.utf8)
+            )
+            XCTAssertTrue(plan.executable)
+
+            let confirmed = HostwrightCLI.run(arguments: [
+                "state", "compact", manifestPath, "--confirm-compact", plan.confirmationToken,
+                "--evaluated-at", plan.evaluatedAt,
+                "--state-db", store.path, "--json"
+            ])
+            XCTAssertEqual(confirmed.exitCode, 0, confirmed.standardError)
+            let result = try JSONDecoder().decode(
+                StateCompactionResult.self,
+                from: Data(confirmed.standardOutput.utf8)
+            )
+            XCTAssertEqual(result.integrityHealth, .healthy)
+            XCTAssertFalse(try store.events.loadAll().contains { $0.id == "compact-me" })
+        }
+    }
+
     private func withStore(_ body: (SQLiteStateStore) throws -> Void) throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("hostwright-state-cli-\(UUID().uuidString)", isDirectory: true)
@@ -226,5 +302,30 @@ final class StateMaintenanceCLITests: XCTestCase {
         try XCTUnwrap(
             JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any]
         )
+    }
+
+    private var retentionManifest: String {
+        """
+        version: 2
+        project: demo
+        retention:
+          recoveryHorizon: 60s
+          maximumDatabaseBytes: 1099511627776
+          targetDatabaseBytes: 1099511627776
+          classes:
+            operations: { maxAge: 60s, maxRecords: 1000, minimumRecords: 0 }
+            observations: { maxAge: 60s, maxRecords: 1000, minimumRecords: 0 }
+            events: { maxAge: 60s, maxRecords: 1000, minimumRecords: 0 }
+            logs: { maxAge: 60s, maxRecords: 1000, minimumRecords: 0 }
+            metrics: { maxAge: 60s, maxRecords: 1000, minimumRecords: 0 }
+            traces: { maxAge: 60s, maxRecords: 1000, minimumRecords: 0 }
+            audits: { maxAge: 60s, maxRecords: 1000, minimumRecords: 0 }
+            supportEvidence: { maxAge: 60s, maxRecords: 1000, minimumRecords: 0 }
+            backups: { maxAge: 60s, maxRecords: 1000, minimumRecords: 0 }
+            tombstones: { maxAge: 60s, maxRecords: 1000, minimumRecords: 0 }
+        services:
+          api:
+            image: local/api:latest
+        """
     }
 }

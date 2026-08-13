@@ -70,7 +70,10 @@ struct ImagePersistedRecoveryDriver {
             groupID: sourceGroup.id,
             expectedFencingToken: sourceGroup.fencingToken,
             lockOwner: "image-recovery-\(UUID().uuidString.lowercased())",
-            lockExpiresAt: nil,
+            lockExpiresAt: hostwrightTimestampAdding(
+                seconds: 900,
+                to: timestamp
+            ),
             updatedAt: timestamp
         )
         do {

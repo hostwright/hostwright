@@ -23,6 +23,40 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertEqual(try CLICommand.parse(arguments: ["plan", "--output", "json"]), .plan(path: "hostwright.yaml", output: .json, teamProfilePath: nil))
         XCTAssertEqual(try CLICommand.parse(arguments: ["paths"]), .paths(stateDatabasePath: nil, output: .text))
         XCTAssertEqual(try CLICommand.parse(arguments: ["paths", "--json"]), .paths(stateDatabasePath: nil, output: .json))
+        XCTAssertEqual(
+            try CLICommand.parse(arguments: ["restart-budget", "status", "--project", "project-demo", "--json"]),
+            .restartBudget(
+                options: RestartBudgetCLIOptions(
+                    action: .status(projectID: "project-demo"),
+                    stateDatabasePath: nil,
+                    output: .json
+                )
+            )
+        )
+        XCTAssertEqual(
+            try CLICommand.parse(arguments: [
+                "restart-budget", "release", "--project", "project-demo",
+                "--service", "api", "--confirm-hold", String(repeating: "a", count: 64),
+                "--state-db", "/tmp/state.sqlite"
+            ]),
+            .restartBudget(
+                options: RestartBudgetCLIOptions(
+                    action: .release(
+                        projectID: "project-demo",
+                        serviceName: "api",
+                        holdToken: String(repeating: "a", count: 64)
+                    ),
+                    stateDatabasePath: "/tmp/state.sqlite",
+                    output: .text
+                )
+            )
+        )
+        XCTAssertThrowsError(
+            try CLICommand.parse(arguments: [
+                "restart-budget", "release", "--project", "project-demo",
+                "--service", "api", "--confirm-hold", "wrong"
+            ])
+        )
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["paths", "--json", "--output", "text"]))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["paths", "--output", "text", "--json"]))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["paths", "--output", "text", "--output", "json"]))
@@ -79,11 +113,23 @@ final class HostwrightCLITests: XCTestCase {
         )
         XCTAssertEqual(
             try CLICommand.parse(arguments: ["events", "--state-db", "/tmp/state.sqlite", "--project", "demo"]),
-            .events(stateDatabasePath: "/tmp/state.sqlite", projectName: "demo", filters: EventFilters(), output: .text)
+            .events(
+                stateDatabasePath: "/tmp/state.sqlite",
+                projectName: "demo",
+                filters: EventFilters(),
+                stream: EventStreamCLIOptions(),
+                output: .text
+            )
         )
         XCTAssertEqual(
             try CLICommand.parse(arguments: ["events", "--state-db", "/tmp/state.sqlite", "--output", "json"]),
-            .events(stateDatabasePath: "/tmp/state.sqlite", projectName: nil, filters: EventFilters(), output: .json)
+            .events(
+                stateDatabasePath: "/tmp/state.sqlite",
+                projectName: nil,
+                filters: EventFilters(),
+                stream: EventStreamCLIOptions(),
+                output: .json
+            )
         )
         XCTAssertEqual(
             try CLICommand.parse(arguments: ["events", "--state-db", "/tmp/state.sqlite", "--type", "cleanup.failed", "--service", "api", "--severity", "error", "--limit", "5", "--sort", "desc", "--output", "json"]),
@@ -91,6 +137,7 @@ final class HostwrightCLITests: XCTestCase {
                 stateDatabasePath: "/tmp/state.sqlite",
                 projectName: nil,
                 filters: EventFilters(type: "cleanup.failed", serviceName: "api", severity: .error, limit: 5, sort: .descending),
+                stream: EventStreamCLIOptions(),
                 output: .json
             )
         )
@@ -215,6 +262,70 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["extension", "run"]))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["extension", "check", "--declaration", "relative.json", "--executable", "/tmp/extension"]))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["extension", "check", "--declaration", "/tmp/extension.json", "--executable", "/tmp/extension", "--output", "yaml"]))
+    }
+
+    func testPhase08RestartBudgetStatusAndExactReleaseAreNonMutatingUntilConfirmed() throws {
+        try withTemporaryDatabase { databasePath in
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            try saveDesiredManifest(store: store, manifestText: singleServiceManifest)
+            let holdToken = String(repeating: "a", count: 64)
+            try store.restartPolicies.upsert(
+                RestartPolicyStateRecord(
+                    id: "restart-api",
+                    projectID: "project-demo",
+                    serviceName: "api",
+                    policy: .onFailure,
+                    status: .crashLoopBlocked,
+                    attemptCount: 3,
+                    maxAttempts: 3,
+                    holdToken: holdToken,
+                    policySHA256: String(repeating: "b", count: 64),
+                    updatedAt: "2026-08-01T12:00:00Z",
+                    metadataJSONRedacted: "{}"
+                )
+            )
+
+            let status = HostwrightCLI.run(arguments: [
+                "restart-budget", "status", "--project", "project-demo",
+                "--state-db", databasePath, "--json"
+            ])
+            XCTAssertEqual(status.exitCode, CLIExitCode.success.rawValue)
+            XCTAssertEqual(try jsonObject(status.standardOutput)["released"] as? Bool, false)
+            XCTAssertEqual(try store.restartAttempts.loadProject("project-demo"), [])
+
+            let stale = HostwrightCLI.run(arguments: [
+                "restart-budget", "release", "--project", "project-demo",
+                "--service", "api", "--confirm-hold", String(repeating: "c", count: 64),
+                "--state-db", databasePath, "--json"
+            ])
+            XCTAssertEqual(stale.exitCode, CLIExitCode.confirmationMismatch.rawValue)
+            XCTAssertEqual(
+                try store.restartPolicies.load(projectID: "project-demo", serviceName: "api")?.status,
+                .crashLoopBlocked
+            )
+            XCTAssertEqual(try store.restartAttempts.loadProject("project-demo"), [])
+
+            let released = HostwrightCLI.run(arguments: [
+                "restart-budget", "release", "--project", "project-demo",
+                "--service", "api", "--confirm-hold", holdToken,
+                "--state-db", databasePath, "--json"
+            ])
+            XCTAssertEqual(released.exitCode, CLIExitCode.success.rawValue)
+            XCTAssertEqual(try jsonObject(released.standardOutput)["released"] as? Bool, true)
+            XCTAssertEqual(
+                try store.restartPolicies.load(projectID: "project-demo", serviceName: "api")?.status,
+                .active
+            )
+            XCTAssertEqual(try store.restartAttempts.loadProject("project-demo").map(\.decision), [.manualRelease])
+            XCTAssertTrue(
+                try store.events.contains(
+                    type: "restart.policy.manual-release",
+                    source: "hostwright-cli",
+                    payloadContains: "\"releaseGeneration\":1"
+                )
+            )
+        }
     }
 
     func testApplyDefaultsStateDBAndRequiresConfirmedPlanHash() throws {
@@ -524,7 +635,7 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertTrue(result.standardOutput.contains("hostwright migrate preview <path> [--json|--output text|json]"))
         XCTAssertTrue(result.standardOutput.contains("JSON output is supported for capabilities, paths, migrate preview"))
         XCTAssertTrue(result.standardOutput.contains("import-stack reads a narrow safe stack-file subset"))
-        XCTAssertTrue(result.standardOutput.contains("Diagnostics writes a local redacted JSON bundle only"))
+        XCTAssertTrue(result.standardOutput.contains("Diagnostics-v1 remains a local redacted JSON export."))
         XCTAssertTrue(result.standardOutput.contains("hostwright import-stack compose.yaml --output json"))
         XCTAssertTrue(result.standardOutput.contains("hostwright doctor --output json"))
         XCTAssertTrue(result.standardOutput.contains("--team-profile <path>"))
@@ -1042,7 +1153,11 @@ final class HostwrightCLITests: XCTestCase {
             let store = SQLiteStateStore(path: databasePath)
             XCTAssertTrue(try store.operations.loadAll().isEmpty)
             XCTAssertTrue(try store.operationGroups.loadAll().isEmpty)
-            XCTAssertTrue(try store.events.loadAll().isEmpty)
+            XCTAssertTrue(
+                try store.events.loadAll().allSatisfy {
+                    $0.type == "trace.span.v1"
+                }
+            )
             XCTAssertTrue(try store.ownership.loadAll().isEmpty)
             XCTAssertNil(try store.observedStates.loadLatestSnapshot(
                 projectID: "project-demo",
@@ -2592,6 +2707,92 @@ final class HostwrightCLITests: XCTestCase {
         }
     }
 
+    func testRecoveryOutputIncludesVersionedLifecycleCheckpointContract() throws {
+        try withTemporaryDatabase { databasePath in
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            let groupID = HostwrightResourceUUID.legacy(
+                kind: "checkpoint-contract-group",
+                identifier: databasePath
+            )
+            let operationID = HostwrightResourceUUID.legacy(
+                kind: "checkpoint-contract-operation",
+                identifier: databasePath
+            )
+            let fence = HostwrightResourceUUID.legacy(
+                kind: "checkpoint-contract-fence",
+                identifier: databasePath
+            )
+            let planSHA256 = String(repeating: "a", count: 64)
+            XCTAssertNotNil(
+                try store.operationGroups.acquire(
+                    OperationGroupRecord(
+                        id: groupID,
+                        operationID: operationID,
+                        groupKind: "lifecycle-v1",
+                        projectID: "project-demo",
+                        serviceName: "api",
+                        plannedActionType: "up",
+                        status: .active,
+                        groupIdempotencyKey: planSHA256,
+                        planHash: planSHA256,
+                        checkpoint: "intent-persisted",
+                        lockOwner: "checkpoint-contract-test",
+                        lockExpiresAt: "2026-08-01T23:00:00Z",
+                        rollbackAvailable: true,
+                        manualRecoveryHintRedacted: "",
+                        createdAt: "2026-08-01T22:00:00Z",
+                        updatedAt: "2026-08-01T22:00:00Z",
+                        metadataJSONRedacted: "{}",
+                        fencingToken: fence,
+                        intentJSONRedacted: "{}",
+                        compensationJSONRedacted: "[]",
+                        verificationJSONRedacted: "{}"
+                    )
+                ).acquired
+            )
+            try store.operationGroups.finish(
+                groupID: groupID,
+                status: .interrupted,
+                checkpoint: "create-api:effect-pending",
+                manualRecoveryHintRedacted: "re-observe exact resource",
+                updatedAt: "2026-08-01T22:00:01Z",
+                metadataJSONRedacted: "{}"
+            )
+
+            let jsonResult = HostwrightCLI.run(
+                arguments: [
+                    "recovery", "--state-db", databasePath,
+                    "--output", "json"
+                ],
+                environment: environment(files: FileBox())
+            )
+            XCTAssertEqual(jsonResult.exitCode, 0, jsonResult.standardError)
+            let object = try jsonObject(jsonResult.standardOutput)
+            let groups = try XCTUnwrap(
+                object["operationGroups"] as? [[String: Any]]
+            )
+            let contract = try XCTUnwrap(
+                groups.first?["checkpointContract"] as? [String: Any]
+            )
+            XCTAssertEqual(contract["schemaVersion"] as? Int, 1)
+            XCTAssertEqual(contract["classification"] as? String, "forward-effect")
+            XCTAssertEqual(contract["recovery"] as? String, "reobserve")
+            XCTAssertEqual(contract["nodeKey"] as? String, "create-api")
+
+            let textResult = HostwrightCLI.run(
+                arguments: ["recovery", "--state-db", databasePath],
+                environment: environment(files: FileBox())
+            )
+            XCTAssertEqual(textResult.exitCode, 0, textResult.standardError)
+            XCTAssertTrue(
+                textResult.standardOutput.contains(
+                    "checkpoint-contract: v1 class=forward-effect recovery=reobserve"
+                )
+            )
+        }
+    }
+
     func testRecoveryJSONOutputIncludesLegacyRestartRecoveryWhenNoOperationGroupExists() throws {
         try withTemporaryDatabase { databasePath in
             let store = SQLiteStateStore(path: databasePath)
@@ -2680,7 +2881,14 @@ final class HostwrightCLITests: XCTestCase {
                 )],
                 adapterMetadata: fakeAdapterMetadata
             )
-            let adapter = ScriptedApplyRuntimeAdapter(observedState: observed)
+            let adapter = ScriptedApplyRuntimeAdapter(
+                observedState: observed,
+                postExecuteObservedState: ObservedRuntimeState(
+                    projectName: "demo",
+                    services: [],
+                    adapterMetadata: fakeAdapterMetadata
+                )
+            )
 
             let dryRun = HostwrightCLI.run(
                 arguments: ["cleanup", "--state-db", databasePath, "--dry-run"],
@@ -2709,21 +2917,33 @@ final class HostwrightCLITests: XCTestCase {
                 environment: environment(files: files, runtimeAdapter: adapter)
             )
 
-            XCTAssertEqual(confirmed.exitCode, 0)
+            XCTAssertEqual(
+                confirmed.exitCode,
+                0,
+                "stdout=\(confirmed.standardOutput) stderr=\(confirmed.standardError)"
+            )
             XCTAssertEqual(adapter.executedActions.map(\.kind), [.remove])
             let cleanupContext = try XCTUnwrap(adapter.confirmations.last?.context)
             XCTAssertNil(cleanupContext.validationIssue)
             let events = try SQLiteStateStore(path: databasePath).events.loadAll()
             XCTAssertTrue(events.contains { $0.type == "cleanup.planned" })
             XCTAssertTrue(events.contains { $0.type == "cleanup.deleted" })
-            XCTAssertLessThan(
-                events.firstIndex { $0.type == "cleanup.planned" }!,
-                events.firstIndex { $0.type == "cleanup.deleted" }!
-            )
+            if let plannedIndex = events.firstIndex(where: {
+                $0.type == "cleanup.planned"
+            }), let deletedIndex = events.firstIndex(where: {
+                $0.type == "cleanup.deleted"
+            }) {
+                XCTAssertLessThan(plannedIndex, deletedIndex)
+            }
             let ownership = try SQLiteStateStore(path: databasePath).ownership.loadAll()
-            XCTAssertEqual(ownership.count, 1)
-            XCTAssertFalse(ownership[0].cleanupEligible)
-            XCTAssertNotEqual(ownership[0].fencingToken, cleanupContext.fencingToken)
+            XCTAssertTrue(ownership.isEmpty)
+            XCTAssertNotEqual(
+                HostwrightResourceUUID.legacy(
+                    kind: "ownership-fence",
+                    identifier: "owner-api"
+                ),
+                cleanupContext.fencingToken
+            )
         }
     }
 
@@ -2787,7 +3007,14 @@ final class HostwrightCLITests: XCTestCase {
                 ],
                 adapterMetadata: fakeAdapterMetadata
             )
-            let adapter = ScriptedApplyRuntimeAdapter(observedState: observed)
+            let adapter = ScriptedApplyRuntimeAdapter(
+                observedState: observed,
+                postExecuteObservedState: ObservedRuntimeState(
+                    projectName: "demo",
+                    services: [],
+                    adapterMetadata: fakeAdapterMetadata
+                )
+            )
 
             let dryRun = HostwrightCLI.run(
                 arguments: ["cleanup", "--state-db", databasePath, "--dry-run"],
@@ -2825,7 +3052,11 @@ final class HostwrightCLITests: XCTestCase {
             XCTAssertFalse(confirmed.standardOutput.contains("- deleted hostwright-demo-dupe"))
 
             let ownership = try store.ownership.loadAll()
-            XCTAssertFalse(try XCTUnwrap(ownership.first { $0.resourceIdentifier == "hostwright-demo-api" }).cleanupEligible)
+            XCTAssertNil(
+                ownership.first {
+                    $0.resourceIdentifier == "hostwright-demo-api"
+                }
+            )
             XCTAssertTrue(try XCTUnwrap(ownership.first { $0.resourceIdentifier == "hostwright-demo-worker" }).cleanupEligible)
             XCTAssertTrue(try XCTUnwrap(ownership.first { $0.resourceIdentifier == "hostwright-demo-dupe" }).cleanupEligible)
         }
@@ -2996,6 +3227,11 @@ final class HostwrightCLITests: XCTestCase {
             )
             let adapter = ScriptedApplyRuntimeAdapter(
                 observedState: observed,
+                postExecuteObservedState: ObservedRuntimeState(
+                    projectName: "demo",
+                    services: [],
+                    adapterMetadata: fakeAdapterMetadata
+                ),
                 onExecute: { _ in
                     try FileManager.default.removeItem(atPath: databasePath)
                     try FileManager.default.createDirectory(atPath: databasePath, withIntermediateDirectories: false)
@@ -3337,6 +3573,20 @@ final class HostwrightCLITests: XCTestCase {
             let secret = fakeSecret
             let adapter = ScriptedApplyRuntimeAdapter(
                 observedState: observed,
+                postExecuteObservedState: ObservedRuntimeState(
+                    projectName: "demo",
+                    services: [
+                        ObservedRuntimeService(
+                            identity: RuntimeServiceIdentity(
+                                projectName: "demo",
+                                serviceName: "worker"
+                            ),
+                            resourceIdentifier: "hostwright-demo-worker",
+                            lifecycleState: .stopped
+                        )
+                    ],
+                    adapterMetadata: fakeAdapterMetadata
+                ),
                 onExecute: { action in
                     if action.identity.serviceName == "worker" {
                         throw RuntimeAdapterError.commandFailed(exitStatus: 2, message: "delete failed", standardError: "token=\(secret)")
@@ -3371,11 +3621,24 @@ final class HostwrightCLITests: XCTestCase {
             XCTAssertTrue(events.contains { $0.type == "cleanup.deleted" })
             XCTAssertTrue(events.contains { $0.type == "cleanup.failed" })
             let ownership = try store.ownership.loadAll()
-            XCTAssertFalse(try XCTUnwrap(ownership.first { $0.serviceName == "api" }).cleanupEligible)
+            XCTAssertNil(ownership.first { $0.serviceName == "api" })
             let survivingWorkerOwnership = try XCTUnwrap(ownership.first { $0.serviceName == "worker" })
             XCTAssertTrue(survivingWorkerOwnership.cleanupEligible)
-            XCTAssertEqual(survivingWorkerOwnership.fencingToken, originalWorkerOwnership.fencingToken)
-            XCTAssertEqual(adapter.observedDesiredStates.count, 3)
+            XCTAssertNotEqual(
+                survivingWorkerOwnership.fencingToken,
+                originalWorkerOwnership.fencingToken
+            )
+            let workerAuthority = try XCTUnwrap(
+                OwnershipAuthorityMetadata.decode(
+                    from: survivingWorkerOwnership.metadataJSONRedacted
+                )
+            )
+            XCTAssertNotNil(workerAuthority.deletionTimestamp)
+            XCTAssertEqual(
+                Set(workerAuthority.finalizers.map(\.state)),
+                [.releasing]
+            )
+            XCTAssertEqual(adapter.observedDesiredStates.count, 4)
             let recoveryHint = try XCTUnwrap(
                 adapter.observedDesiredStates.last?.ownedResourceHints.first {
                     $0.resourceIdentifier == originalWorkerOwnership.resourceIdentifier
@@ -3455,7 +3718,7 @@ final class HostwrightCLITests: XCTestCase {
             let events = try store.events.loadAll()
             XCTAssertTrue(events.contains { $0.type == "cleanup.deleted" })
             XCTAssertFalse(events.contains { $0.type == "cleanup.failed" })
-            XCTAssertFalse(try XCTUnwrap(store.ownership.loadAll().first).cleanupEligible)
+            XCTAssertTrue(try store.ownership.loadAll().isEmpty)
         }
     }
 

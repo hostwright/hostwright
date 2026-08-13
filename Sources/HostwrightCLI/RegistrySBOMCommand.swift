@@ -192,6 +192,11 @@ struct RegistrySBOMCommandRunner {
                 ]
             )
         }
+        let mutationFence = try hostwrightAcquireExactOperationMutationFence(
+            store: store,
+            group: group
+        )
+        defer { mutationFence.release() }
         do {
             let generated = try OCIImageArchiveSBOMGenerator()
                 .generate(
@@ -346,6 +351,11 @@ struct RegistrySBOMCommandRunner {
                 ]
             )
         }
+        let mutationFence = try hostwrightAcquireExactOperationMutationFence(
+            store: store,
+            group: group
+        )
+        defer { mutationFence.release() }
         do {
             var recorded: [ImageSBOMRecord] = []
             for item in pending {
@@ -543,6 +553,11 @@ struct RegistrySBOMCommandRunner {
                 ]
             )
         }
+        let mutationFence = try hostwrightAcquireExactOperationMutationFence(
+            store: store,
+            group: group
+        )
+        defer { mutationFence.release() }
         var outputApplied = false
         let successResult = {
             render(

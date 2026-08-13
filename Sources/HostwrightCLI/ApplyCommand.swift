@@ -1,6 +1,7 @@
 import Foundation
 import HostwrightCore
 import HostwrightManifest
+import HostwrightObservability
 import HostwrightPolicy
 import HostwrightReconciler
 import HostwrightRuntime
@@ -54,6 +55,7 @@ struct ApplyCommandRunner {
             let mapping = ManifestRuntimeMapper.map(manifest)
             let store = SQLiteStateStore(configuration: stateStoreConfiguration)
             try store.migrate()
+            HostwrightTraceContext.session?.attach(StateTraceSink(store: store))
             let timestamp = hostwrightTimestamp()
             let projectName = mapping.desiredState.projectName
             let projectID = "project-\(projectName)"
@@ -83,7 +85,9 @@ struct ApplyCommandRunner {
             let observed: ObservedRuntimeState
             do {
                 observed = try waitForAsync {
-                    try await adapter.observe(desiredState: observationDesiredState)
+                    try await HostwrightTraceContext.withSpan(.providerObserve) {
+                        try await adapter.observe(desiredState: observationDesiredState)
+                    }
                 }
             } catch {
                 return failure(code: .runtimeUnavailable, message: "Runtime observation failed: \(RuntimeRedactionPolicy.default.redact(String(describing: error)))")
@@ -450,18 +454,20 @@ struct ApplyCommandRunner {
             let event: RuntimeEvent
             do {
                 event = try waitForAsync {
-                    try await adapter.execute(
-                        runtimeAction,
-                        confirmation: RuntimeMutationConfirmation(
-                            confirmed: true,
-                            reason: "Confirmed Hostwright plan \(plan.planHash)",
-                            planHash: plan.planHash,
-                            manifestHash: teamBinding?.manifestHash,
-                            profileHash: teamBinding?.profileHash,
-                            approvalHash: teamBinding?.approvalHash,
-                            context: mutationContext
+                    try await HostwrightTraceContext.withSpan(.providerApply) {
+                        try await adapter.execute(
+                            runtimeAction,
+                            confirmation: RuntimeMutationConfirmation(
+                                confirmed: true,
+                                reason: "Confirmed Hostwright plan \(plan.planHash)",
+                                planHash: plan.planHash,
+                                manifestHash: teamBinding?.manifestHash,
+                                profileHash: teamBinding?.profileHash,
+                                approvalHash: teamBinding?.approvalHash,
+                                context: mutationContext
+                            )
                         )
-                    )
+                    }
                 }
             } catch {
                 let runtimeErrorDescription = RuntimeRedactionPolicy.default.redact(String(describing: error))

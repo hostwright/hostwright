@@ -5,18 +5,48 @@ import HostwrightHealth
 import HostwrightImport
 import HostwrightManifest
 import HostwrightNetworking
+import HostwrightObservability
 import HostwrightPolicy
 import HostwrightReconciler
 import HostwrightRuntime
 import HostwrightState
 
+func hostwrightAcquireExactOperationMutationFence(
+    store: SQLiteStateStore,
+    group: OperationGroupRecord
+) throws -> OperationMutationFence {
+    let fence = try store.acquireOperationMutationFence(groupID: group.id)
+    do {
+        guard let current = try store.operationGroups.load(id: group.id),
+              current.status == .active,
+              current.planHash == group.planHash,
+              current.fencingToken == group.fencingToken,
+              current.lockOwner == group.lockOwner,
+              current.lockExpiresAt == group.lockExpiresAt else {
+            throw StateStoreError.invalidRecord(
+                "Operation mutation fencing lost the exact active lease before effects."
+            )
+        }
+        return fence
+    } catch {
+        fence.release()
+        throw error
+    }
+}
+
 func hostwrightWaitForAsync<T: Sendable>(_ operation: @escaping @Sendable () async throws -> T) throws -> T {
     let semaphore = DispatchSemaphore(value: 0)
     let box = CLIAsyncResultBox<T>()
+    let traceSession = HostwrightTraceContext.session
+    let traceSpan = HostwrightTraceContext.span
 
     Task.detached {
         do {
-            box.result = Result.success(try await operation())
+            box.result = Result.success(try await HostwrightTraceContext.withValues(
+                session: traceSession,
+                span: traceSpan,
+                operation: operation
+            ))
         } catch {
             box.result = Result.failure(error)
         }
@@ -683,11 +713,23 @@ enum CLIJSON {
         ].compactNilValues()
     }
 
-    static func events(stateDatabasePath: String, projectName: String?, filters: EventFilters, events: [EventRecord]) -> String {
+    static func events(
+        stateDatabasePath: String,
+        projectName: String?,
+        filters: EventFilters,
+        events: [EventRecord],
+        snapshotPageSize: Int,
+        snapshotMoreAvailable: Bool
+    ) -> String {
         render([
             "kind": "events",
+            "schemaVersion": HostwrightEventStreamPage.schemaVersion,
+            "mode": "snapshot",
+            "status": HostwrightEventStreamStatus.ready.rawValue,
             "stateDatabasePath": stateDatabasePath,
             "project": projectName as Any,
+            "pageSize": snapshotPageSize,
+            "moreAvailable": snapshotMoreAvailable,
             "filters": [
                 "type": filters.type as Any,
                 "serviceName": filters.serviceName as Any,
@@ -712,6 +754,81 @@ enum CLIJSON {
         ].compactNilValues())
     }
 
+    static func eventStream(
+        stateDatabasePath: String,
+        projectName: String?,
+        filters: EventFilters,
+        pageSize: Int,
+        watch: Bool,
+        timeoutSeconds: Int?,
+        page: HostwrightEventStreamPage
+    ) -> String {
+        render([
+            "kind": "events",
+            "schemaVersion": HostwrightEventStreamPage.schemaVersion,
+            "cursorSchemaVersion": HostwrightEventCursor.schemaVersion,
+            "mode": watch ? "watch" : "cursor-page",
+            "status": page.status.rawValue,
+            "stateDatabasePath": stateDatabasePath,
+            "project": projectName as Any,
+            "pageSize": pageSize,
+            "timeoutSeconds": timeoutSeconds as Any,
+            "moreAvailable": page.moreAvailable,
+            "nextCursor": page.nextCursor as Any,
+            "retentionGap": page.retentionGap.map { gap in
+                [
+                    "requestedCursor": gap.requestedCursor,
+                    "earliestAvailableCursor": gap.earliestAvailableCursor as Any,
+                    "latestAvailableCursor": gap.latestAvailableCursor as Any
+                ].compactNilValues()
+            } as Any,
+            "filters": [
+                "type": filters.type as Any,
+                "serviceName": filters.serviceName as Any,
+                "severity": filters.severity?.rawValue as Any,
+                "limit": filters.limit as Any,
+                "sort": filters.sort.rawValue
+            ].compactNilValues(),
+            "events": page.events.map { record in
+                let event = record.event
+                return [
+                    "position": record.position,
+                    "cursor": record.cursor,
+                    "eventReference": record.eventReference,
+                    "eventClass": record.eventClass.rawValue,
+                    "operationReferences": record.operationReferences,
+                    "auditReference": record.auditReference as Any,
+                    "id": event.id,
+                    "timestamp": event.timestamp,
+                    "severity": event.severity.rawValue,
+                    "type": event.type,
+                    "source": event.source,
+                    "projectID": event.projectID as Any,
+                    "serviceName": event.serviceName as Any,
+                    "runtimeAdapter": event.runtimeAdapter as Any,
+                    "message": RuntimeRedactionPolicy.default.redact(event.message),
+                    "payloadJSONRedacted": RuntimeRedactionPolicy.default.redact(
+                        event.payloadJSONRedacted
+                    )
+                ].compactNilValues()
+            }
+        ].compactNilValues())
+    }
+
+    static func eventError(
+        code: String,
+        message: String,
+        exitCode: CLIExitCode
+    ) -> String {
+        render([
+            "kind": "error",
+            "schemaVersion": HostwrightEventStreamPage.schemaVersion,
+            "code": code,
+            "message": message,
+            "exitCode": exitCode.rawValue
+        ])
+    }
+
     static func recovery(stateDatabasePath: String, projectName: String?, records: [RecoveryRecord]) -> String {
         render([
             "kind": "recovery",
@@ -720,6 +837,10 @@ enum CLIJSON {
             "operationGroups": records.map { record in
                 let group = record.group
                 let mode = recoveryMode(for: group)
+                let checkpoint = group.groupKind == "lifecycle-v1"
+                    ? LifecycleMutationCheckpointRecord(
+                        checkpoint: group.checkpoint
+                    ) : nil
                 return [
                     "id": group.id,
                     "operationID": group.operationID,
@@ -729,6 +850,14 @@ enum CLIJSON {
                     "plannedActionType": group.plannedActionType,
                     "status": group.status.rawValue,
                     "checkpoint": group.checkpoint,
+                    "checkpointContract": checkpoint.map {
+                        [
+                            "schemaVersion": $0.schemaVersion,
+                            "classification": $0.classification.rawValue,
+                            "recovery": $0.recovery.rawValue,
+                            "nodeKey": $0.nodeKey as Any
+                        ].compactNilValues()
+                    } as Any,
                     "lockOwner": group.lockOwner.map(RuntimeRedactionPolicy.default.redact) as Any,
                     "lockExpiresAt": group.lockExpiresAt as Any,
                     "planHash": group.planHash,
@@ -765,7 +894,10 @@ enum CLIJSON {
         stateDatabasePath: String,
         result: LifecycleSagaExecutionResult
     ) -> String {
-        render([
+        let checkpoint = LifecycleMutationCheckpointRecord(
+            checkpoint: result.checkpoint
+        )
+        return render([
             "kind": "recovery-execution",
             "action": action == .resume ? "resume" : "rollback",
             "stateDatabasePath": stateDatabasePath,
@@ -774,6 +906,14 @@ enum CLIJSON {
             "planSHA256": result.planSHA256,
             "status": result.status.rawValue,
             "checkpoint": result.checkpoint,
+            "checkpointContract": checkpoint.map {
+                [
+                    "schemaVersion": $0.schemaVersion,
+                    "classification": $0.classification.rawValue,
+                    "recovery": $0.recovery.rawValue,
+                    "nodeKey": $0.nodeKey as Any
+                ].compactNilValues()
+            } as Any,
             "completedNodeKeys": result.completedNodeKeys,
             "recoveryHint": RuntimeRedactionPolicy.default.redact(
                 result.recoveryHintRedacted

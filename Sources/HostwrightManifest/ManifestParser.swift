@@ -286,7 +286,8 @@ private struct ManifestNodeDecoder {
             allowed: [
                 "version", "project", "imagePolicy", "imageTrust", "imageSBOM",
                 "imageVulnerability", "imageProvenance", "volumes", "networks",
-                "certificates", "ingress", "tunnels", "services"
+                "certificates", "ingress", "tunnels", "restartBudget", "maintenance", "retention",
+                "services"
             ]
         )
         let version = try values["version"].map(versionInteger)
@@ -315,6 +316,15 @@ private struct ManifestNodeDecoder {
         let imageProvenance = try values["imageProvenance"].map {
             try decodeImageProvenance($0, path: "$.imageProvenance")
         }
+        let restartBudget = try values["restartBudget"].map {
+            try decodeProjectRestartBudget($0, path: "$.restartBudget")
+        }
+        let maintenance = try values["maintenance"].map {
+            try decodeMaintenance($0, path: "$.maintenance")
+        }
+        let retention = try values["retention"].map {
+            try decodeRetention($0, path: "$.retention")
+        }
         let volumes = try values["volumes"].map {
             try decodeVolumeDeclarations($0, path: "$.volumes")
         } ?? [:]
@@ -339,6 +349,9 @@ private struct ManifestNodeDecoder {
             imageSBOM: imageSBOM,
             imageVulnerability: imageVulnerability,
             imageProvenance: imageProvenance,
+            restartBudget: restartBudget,
+            maintenance: maintenance,
+            retention: retention,
             volumes: volumes,
             networks: networks,
             certificates: certificates,
@@ -1931,19 +1944,360 @@ private struct ManifestNodeDecoder {
         return HostwrightHealthCheck(command: command, interval: "\(probe.interval)s")
     }
 
+    private func decodeProjectRestartBudget(
+        _ node: Node,
+        path: String
+    ) throws -> HostwrightProjectRestartBudget {
+        let values = try mapping(node, path: path, allowed: ["maxAttempts", "window"])
+        return HostwrightProjectRestartBudget(
+            maxAttempts: try values["maxAttempts"].map {
+                try integer($0, path: "\(path).maxAttempts")
+            } ?? 10,
+            window: try duration(
+                values["window"],
+                default: 300,
+                path: "\(path).window"
+            )
+        )
+    }
+
+    private func decodeMaintenance(
+        _ node: Node,
+        path: String
+    ) throws -> HostwrightMaintenancePolicy {
+        let values = try mapping(
+            node,
+            path: path,
+            allowed: ["timezone", "maximumDeferral", "windows"]
+        )
+        guard let timezoneNode = values["timezone"],
+              let windowsNode = values["windows"] else {
+            throw ManifestParser.failure(
+                "maintenance requires timezone and windows.",
+                code: .manifestValidationFailed,
+                node: node,
+                path: path
+            )
+        }
+        guard case .sequence(let sequence) = windowsNode else {
+            throw ManifestParser.failure(
+                "maintenance.windows must be a sequence.",
+                code: .manifestValidationFailed,
+                node: windowsNode,
+                path: "\(path).windows"
+            )
+        }
+        let windows = try sequence.enumerated().map { index, child in
+            try decodeMaintenanceWindow(child, path: "\(path).windows[\(index)]")
+        }
+        return HostwrightMaintenancePolicy(
+            timezone: try string(timezoneNode, path: "\(path).timezone"),
+            maximumDeferral: try duration(
+                values["maximumDeferral"],
+                default: 86_400,
+                path: "\(path).maximumDeferral"
+            ),
+            windows: windows.sorted { $0.id < $1.id }
+        )
+    }
+
+    private func decodeMaintenanceWindow(
+        _ node: Node,
+        path: String
+    ) throws -> HostwrightMaintenanceWindow {
+        let values = try mapping(
+            node,
+            path: path,
+            allowed: ["id", "actions", "recurring", "oneShot"]
+        )
+        guard let idNode = values["id"], let actionsNode = values["actions"] else {
+            throw ManifestParser.failure(
+                "A maintenance window requires id and actions.",
+                code: .manifestValidationFailed,
+                node: node,
+                path: path
+            )
+        }
+        let rawActions = try strings(actionsNode, path: "\(path).actions")
+        let actions = try rawActions.enumerated().map { index, raw in
+            guard let action = HostwrightMaintenanceActionClass(rawValue: raw),
+                  action.isElective else {
+                throw ManifestParser.failure(
+                    "maintenance window actions must be create, start, restart, update, or remove.",
+                    code: .manifestValidationFailed,
+                    node: actionsNode,
+                    path: "\(path).actions[\(index)]"
+                )
+            }
+            return action
+        }
+        let scheduleNodes = [values["recurring"], values["oneShot"]].compactMap { $0 }
+        guard scheduleNodes.count == 1 else {
+            throw ManifestParser.failure(
+                "A maintenance window requires exactly one of recurring or oneShot.",
+                code: .manifestValidationFailed,
+                node: node,
+                path: path
+            )
+        }
+        let schedule: HostwrightMaintenanceSchedule
+        if let recurringNode = values["recurring"] {
+            let recurring = try mapping(
+                recurringNode,
+                path: "\(path).recurring",
+                allowed: ["weekdays", "start", "duration"]
+            )
+            guard let weekdaysNode = recurring["weekdays"],
+                  let startNode = recurring["start"],
+                  recurring["duration"] != nil else {
+                throw ManifestParser.failure(
+                    "A recurring maintenance window requires weekdays, start, and duration.",
+                    code: .manifestValidationFailed,
+                    node: recurringNode,
+                    path: "\(path).recurring"
+                )
+            }
+            let weekdays = try strings(weekdaysNode, path: "\(path).recurring.weekdays")
+                .enumerated().map { index, raw in
+                    guard let weekday = HostwrightMaintenanceWeekday(rawValue: raw) else {
+                        throw ManifestParser.failure(
+                            "Recurring weekdays must use monday through sunday.",
+                            code: .manifestValidationFailed,
+                            node: weekdaysNode,
+                            path: "\(path).recurring.weekdays[\(index)]"
+                        )
+                    }
+                    return weekday
+                }
+            schedule = .recurring(
+                HostwrightRecurringMaintenanceWindow(
+                    weekdays: weekdays.sorted { $0.rawValue < $1.rawValue },
+                    start: try string(startNode, path: "\(path).recurring.start"),
+                    duration: try duration(
+                        recurring["duration"],
+                        default: 0,
+                        path: "\(path).recurring.duration"
+                    )
+                )
+            )
+        } else {
+            let oneShotNode = values["oneShot"]!
+            let oneShot = try mapping(
+                oneShotNode,
+                path: "\(path).oneShot",
+                allowed: ["startsAt", "duration"]
+            )
+            guard let startsAtNode = oneShot["startsAt"],
+                  oneShot["duration"] != nil else {
+                throw ManifestParser.failure(
+                    "A oneShot maintenance window requires startsAt and duration.",
+                    code: .manifestValidationFailed,
+                    node: oneShotNode,
+                    path: "\(path).oneShot"
+                )
+            }
+            schedule = .oneShot(
+                HostwrightOneShotMaintenanceWindow(
+                    startsAt: try string(startsAtNode, path: "\(path).oneShot.startsAt"),
+                    duration: try duration(
+                        oneShot["duration"],
+                        default: 0,
+                        path: "\(path).oneShot.duration"
+                    )
+                )
+            )
+        }
+        return HostwrightMaintenanceWindow(
+            id: try string(idNode, path: "\(path).id"),
+            actions: actions.sorted { $0.rawValue < $1.rawValue },
+            schedule: schedule
+        )
+    }
+
+    private func decodeRetention(
+        _ node: Node,
+        path: String
+    ) throws -> HostwrightRetentionPolicy {
+        let values = try mapping(
+            node,
+            path: path,
+            allowed: [
+                "recoveryHorizon", "maximumDatabaseBytes", "targetDatabaseBytes",
+                "classes", "holds"
+            ]
+        )
+        guard let recoveryNode = values["recoveryHorizon"],
+              let maximumNode = values["maximumDatabaseBytes"],
+              let targetNode = values["targetDatabaseBytes"],
+              let classesNode = values["classes"] else {
+            throw ManifestParser.failure(
+                "retention requires recoveryHorizon, maximumDatabaseBytes, targetDatabaseBytes, and classes.",
+                code: .manifestValidationFailed,
+                node: node,
+                path: path
+            )
+        }
+
+        let classNames = Set(HostwrightRetentionClass.allCases.map(\.rawValue))
+        let classValues = try mapping(classesNode, path: "\(path).classes", allowed: classNames)
+        guard classValues.count == HostwrightRetentionClass.allCases.count else {
+            throw ManifestParser.failure(
+                "retention.classes must declare all ten bounded retention classes.",
+                code: .manifestValidationFailed,
+                node: classesNode,
+                path: "\(path).classes"
+            )
+        }
+        var classes: [HostwrightRetentionClass: HostwrightRetentionClassPolicy] = [:]
+        for retentionClass in HostwrightRetentionClass.allCases {
+            guard let classNode = classValues[retentionClass.rawValue] else {
+                throw ManifestParser.failure(
+                    "retention.classes.\(retentionClass.rawValue) is required.",
+                    code: .manifestValidationFailed,
+                    node: classesNode,
+                    path: "\(path).classes.\(retentionClass.rawValue)"
+                )
+            }
+            classes[retentionClass] = try decodeRetentionClassPolicy(
+                classNode,
+                path: "\(path).classes.\(retentionClass.rawValue)"
+            )
+        }
+
+        let holds: [HostwrightRetentionHold]
+        if let holdsNode = values["holds"] {
+            guard case .sequence(let sequence) = holdsNode else {
+                throw ManifestParser.failure(
+                    "retention.holds must be a sequence.",
+                    code: .manifestValidationFailed,
+                    node: holdsNode,
+                    path: "\(path).holds"
+                )
+            }
+            holds = try sequence.enumerated().map { index, child in
+                try decodeRetentionHold(child, path: "\(path).holds[\(index)]")
+            }.sorted { $0.id < $1.id }
+        } else {
+            holds = []
+        }
+
+        return HostwrightRetentionPolicy(
+            recoveryHorizon: try seconds(
+                try string(recoveryNode, path: "\(path).recoveryHorizon"),
+                node: recoveryNode,
+                path: "\(path).recoveryHorizon"
+            ),
+            maximumDatabaseBytes: try integer(maximumNode, path: "\(path).maximumDatabaseBytes"),
+            targetDatabaseBytes: try integer(targetNode, path: "\(path).targetDatabaseBytes"),
+            classes: classes,
+            holds: holds
+        )
+    }
+
+    private func decodeRetentionClassPolicy(
+        _ node: Node,
+        path: String
+    ) throws -> HostwrightRetentionClassPolicy {
+        let values = try mapping(
+            node,
+            path: path,
+            allowed: ["maxAge", "maxRecords", "minimumRecords"]
+        )
+        guard let maxAgeNode = values["maxAge"],
+              let maxRecordsNode = values["maxRecords"],
+              let minimumRecordsNode = values["minimumRecords"] else {
+            throw ManifestParser.failure(
+                "A retention class requires maxAge, maxRecords, and minimumRecords.",
+                code: .manifestValidationFailed,
+                node: node,
+                path: path
+            )
+        }
+        return HostwrightRetentionClassPolicy(
+            maxAge: try seconds(
+                try string(maxAgeNode, path: "\(path).maxAge"),
+                node: maxAgeNode,
+                path: "\(path).maxAge"
+            ),
+            maxRecords: try integer(maxRecordsNode, path: "\(path).maxRecords"),
+            minimumRecords: try integer(minimumRecordsNode, path: "\(path).minimumRecords")
+        )
+    }
+
+    private func decodeRetentionHold(
+        _ node: Node,
+        path: String
+    ) throws -> HostwrightRetentionHold {
+        let values = try mapping(
+            node,
+            path: path,
+            allowed: ["id", "class", "selector", "reason", "expiresAt"]
+        )
+        guard let idNode = values["id"],
+              let classNode = values["class"],
+              let selectorNode = values["selector"],
+              let reasonNode = values["reason"] else {
+            throw ManifestParser.failure(
+                "A retention hold requires id, class, selector, and reason.",
+                code: .manifestValidationFailed,
+                node: node,
+                path: path
+            )
+        }
+        let rawClass = try string(classNode, path: "\(path).class")
+        guard let retentionClass = HostwrightRetentionClass(rawValue: rawClass) else {
+            throw ManifestParser.failure(
+                "A retention hold class must name one declared retention class.",
+                code: .manifestValidationFailed,
+                node: classNode,
+                path: "\(path).class"
+            )
+        }
+        return HostwrightRetentionHold(
+            id: try string(idNode, path: "\(path).id"),
+            retentionClass: retentionClass,
+            selector: try string(selectorNode, path: "\(path).selector"),
+            reason: try string(reasonNode, path: "\(path).reason"),
+            expiresAt: try values["expiresAt"].map { try string($0, path: "\(path).expiresAt") }
+        )
+    }
+
     private func decodeRestart(_ node: Node, path: String) throws -> HostwrightRestart {
-        let values = try mapping(node, path: path, allowed: ["policy"])
+        let values = try mapping(
+            node,
+            path: path,
+            allowed: [
+                "policy", "maxAttempts", "window", "backoff", "maxBackoff",
+                "jitter", "stableRun", "priority"
+            ]
+        )
         guard let policy = values["policy"] else {
             throw ManifestParser.failure("restart requires policy.", node: node, path: "\(path).policy")
         }
-        return HostwrightRestart(policy: try enumString(policy, path: "\(path).policy"))
+        return HostwrightRestart(
+            policy: try enumString(policy, path: "\(path).policy"),
+            maxAttempts: try values["maxAttempts"].map {
+                try integer($0, path: "\(path).maxAttempts")
+            } ?? 3,
+            window: try duration(values["window"], default: 300, path: "\(path).window"),
+            backoff: try duration(values["backoff"], default: 60, path: "\(path).backoff"),
+            maxBackoff: try duration(values["maxBackoff"], default: 300, path: "\(path).maxBackoff"),
+            jitter: try duration(values["jitter"], default: 0, path: "\(path).jitter"),
+            stableRun: try duration(values["stableRun"], default: 60, path: "\(path).stableRun"),
+            priority: try values["priority"].map {
+                try integer($0, path: "\(path).priority")
+            } ?? 0
+        )
     }
 
     private func decodeUpdate(_ node: Node, path: String) throws -> HostwrightUpdatePolicy {
         let values = try mapping(
             node,
             path: path,
-            allowed: ["strategy", "maxSurge", "maxUnavailable", "progressDeadline"]
+            allowed: [
+                "strategy", "maxSurge", "maxUnavailable", "progressDeadline",
+                "stableObservation"
+            ]
         )
         let strategyRaw = try values["strategy"].map {
             try string($0, path: "\(path).strategy")
@@ -1966,6 +2320,11 @@ private struct ManifestNodeDecoder {
                 values["progressDeadline"],
                 default: 300,
                 path: "\(path).progressDeadline"
+            ),
+            stableObservation: try duration(
+                values["stableObservation"],
+                default: 0,
+                path: "\(path).stableObservation"
             )
         )
     }

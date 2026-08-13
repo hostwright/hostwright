@@ -7,6 +7,7 @@ The current CLI provides strict RuntimeAdapter-backed lifecycle, observation, re
 ```bash
 hostwright --version
 hostwright capabilities [--json | --output text|json]
+hostwright observability status [--json | --output text|json]
 hostwright runtime providers [--json]
 hostwright runtime migrate [path] --to apple-cli|containerization --dry-run [--state-db <path>] [--json | --output text|json]
 hostwright runtime migrate [path] --to apple-cli|containerization --confirm-migration <token> [--state-db <path>] [--json | --output text|json]
@@ -14,6 +15,9 @@ hostwright paths [--state-db <path>] [--json | --output text|json]
 hostwright state integrity [--state-db <path>] [--json | --output text|json]
 hostwright state backup [--state-db <path>] [--json | --output text|json]
 hostwright state backups [--state-db <path>] [--json | --output text|json]
+hostwright state retention <manifest> [--state-db <path>] [--json | --output text|json]
+hostwright state compact <manifest> --dry-run [--state-db <path>] [--json | --output text|json]
+hostwright state compact <manifest> --confirm-compact <token> [--state-db <path>] [--json | --output text|json]
 hostwright state restore --backup <id> --dry-run [--state-db <path>] [--json | --output text|json]
 hostwright state restore --backup <id> --confirm-restore <token> [--state-db <path>] [--json | --output text|json]
 hostwright state repair --dry-run [--state-db <path>] [--json | --output text|json]
@@ -76,6 +80,14 @@ hostwright import-stack <path> [--output text|json] [--team-profile <path>]
 hostwright validate [path] [--team-profile <path>]
 hostwright plan [path] [--output text|json] [--team-profile <path>]
 hostwright status [path] [--state-db <path>] [--output text|json] [--runtime-provider auto|apple-cli|containerization]
+hostwright restart-budget status [--project <project-id>] [--state-db <path>] [--output text|json]
+hostwright restart-budget release --project <project-id> --service <name> --confirm-hold <sha256> [--state-db <path>] [--output text|json]
+hostwright maintenance preview <manifest> --action <create|start|restart|update|remove>... [--at <RFC3339-UTC>] [--output text|json]
+hostwright maintenance status [--project <project-id>] [--state-db <path>] [--output text|json]
+hostwright maintenance cancel --project <project-id> --confirm-deferral <sha256> [--state-db <path>] [--output text|json]
+hostwright maintenance override --project <project-id> --confirm-deferral <sha256> --reason <text> [--state-db <path>] [--output text|json]
+hostwright ownership status [--project <project-id>] [--state-db <path>] [--json | --output text|json]
+hostwright ownership handoff --group <uuid> --confirm-plan <sha256> --confirm-fence <uuid> --from-controller <id> --from-expiry <RFC3339-UTC> --to-controller resume|rollback --lease-seconds <1-900> [--state-db <path>] [--json | --output text|json]
 hostwright apply [path] [--state-db <path>] --confirm-plan <hash> [--runtime-provider auto|apple-cli|containerization] [--team-profile <path> --approval-record <path>]
 hostwright up [path] [--service <name>] [--state-db <path>] (--dry-run | --confirm-plan <hash>) [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--parallelism <1-32>] [--output text|json]
 hostwright down [path] [--service <name>] [--state-db <path>] (--dry-run | --confirm-plan <hash>) [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--parallelism <1-32>] [--output text|json]
@@ -91,7 +103,7 @@ hostwright copy (<absolute-host-path> <service:/absolute/container/path> | <serv
 hostwright export <service> <absolute-destination-path> [--manifest <path>] [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--output text|json]
 hostwright inspect|stats <service> [--manifest <path>] [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--output text|json]
 hostwright logs <service> [path] [--tail <n>] [--follow] [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--state-db <path>] [--output text|json]
-hostwright events [--state-db <path>] [--project <name>] [--type <event>] [--service <name>] [--severity info|warning|error] [--limit <n>] [--sort asc|desc] [--output text|json]
+hostwright events [--state-db <path>] [--project <name>] [--type <event>] [--service <name>] [--severity info|warning|error] [--limit <1...1000>] [--sort asc|desc] [--cursor beginning|<token>] [--watch] [--timeout <1...300>] [--output text|json]
 hostwright recovery [--state-db <path>] [--project <name>] [--output text|json]
 hostwright recovery resume|rollback --group <uuid> --confirm-plan <hash> [--timeout <seconds>] [--state-db <path>] [--project <name>] [--output text|json]
 hostwright diagnostics [--state-db <path>] --bundle <path> [--project <name>] [--manifest <path>]
@@ -102,7 +114,8 @@ hostwright extension check --declaration <absolute-path> --executable <absolute-
 hostwright doctor [--state-db <path>] [--json | --output text|json]
 hostwright-control --version
 hostwright-control --manifest <absolute-path> [--state-db <absolute-path>] [--team-profile <absolute-path>]
-hostwrightd --foreground --config <hostwright.yaml> [--state-db <path>] [options]
+hostwright daemon status|install|validate|bootstrap|start|stop|kickstart|upgrade|rollback|disable|repair|uninstall [options]
+hostwrightd --foreground|--service --config <hostwright.yaml> [--state-db <path>] [options]
 hostwright-dist --version
 hostwright-dist install <artifact-source> --prefix <path> [--state-db <path>] --output json
 hostwright-dist upgrade <artifact-source> --prefix <path> [--state-db <path>] --output json
@@ -121,7 +134,9 @@ hostwright-dist help
 
 Text output is the default for `hostwright` commands. Installed-lifecycle `hostwright-dist` commands require `--output json`; release and developer-evidence commands retain their documented text/report output.
 
-`capabilities`, `runtime providers`, `runtime migrate`, `paths`, every `state`, `secret`, `registry`, and `image` subcommand, `migrate preview`, `import-stack`, `plan`, `status`, every lifecycle command, non-TTY interactive operations, `events`, `recovery`, `extension check`, and `doctor` accept JSON output where shown above. JSON streaming uses bounded NDJSON frames with base64 payloads. Interactive TTY mode and JSON mode are mutually exclusive. JSON output does not weaken mutation gates.
+`capabilities`, `runtime providers`, `runtime migrate`, `paths`, `restart-budget`, `maintenance`, `ownership`, every `state`, `secret`, `registry`, and `image` subcommand, `migrate preview`, `import-stack`, `plan`, `status`, every lifecycle command, non-TTY interactive operations, `events`, `recovery`, `extension check`, and `doctor` accept JSON output where shown above. JSON streaming uses bounded NDJSON frames with base64 payloads. Interactive TTY mode and JSON mode are mutually exclusive. JSON output does not weaken mutation gates.
+
+`events` snapshot output is timestamp-sorted and bounded to 100 records by default. Cursor mode uses durable append order, accepts `beginning` or an opaque returned cursor, and returns at most 1,000 records. `--watch` is one local long-poll page with a 1-to-300-second timeout and no persistent listener. See [Durable Events and Local Watches](events.md).
 
 When JSON mode is requested and the CLI can classify the failure, stderr uses this envelope:
 
@@ -206,7 +221,7 @@ These commands produced and independently verified the immutable dev.11 and dev.
 
 The installed lifecycle accepts either the fully verified trusted release plus its exact team identifier or a verified developer distribution. It exposes `install`, `upgrade`, `repair`, `status`, `adopt-legacy`, `recover`, `rollback`, `uninstall-plan`, and `uninstall`; all require structured JSON output. Upgrade is strict SemVer, repair requires the exact installed version and commit, arbitrary downgrade is refused, and rollback accepts only the one verified immediately prior generation retained by a successful upgrade.
 
-Lifecycle status is `not-installed`, `ready`, or `recovery-required`. A pending durable journal must be resolved with `recover` before another mutation. `uninstall --data-policy preserve` requires no confirmation and retains the bound state database. `remove` requires the exact current plan token and removes only the verified active SQLite file set in addition to owned installed payload. The lifecycle creates no LaunchAgent; it stops/restores only an exact existing Homebrew launchd record and refuses a running unmanaged installed `hostwrightd` rather than terminating it.
+Distribution lifecycle status is `not-installed`, `ready`, or `recovery-required`. A pending durable journal must be resolved with `recover` before another mutation. `uninstall --data-policy preserve` requires no confirmation and retains the bound state database. `remove` requires the exact current plan token and removes only the verified active SQLite file set in addition to owned installed payload. `hostwright-dist` creates no LaunchAgent; it stops/restores only an exact existing Homebrew launchd record and refuses a running unmanaged installed `hostwrightd` rather than terminating it. The separate `hostwright daemon` surface owns `dev.hostwright.daemon` and never adopts the Homebrew record.
 
 The complete artifact-source grammar, prefix policy, JSON contracts, durable checkpoint flow, state behavior, legacy adoption, recovery actions, cleanup boundary, and troubleshooting are in [Installed Distribution Lifecycle](installed-lifecycle.md).
 
@@ -215,6 +230,21 @@ The complete artifact-source grammar, prefix policy, JSON contracts, durable che
 Prints the current product version, release target, locked contract versions, and a deterministic catalog of stable, experimental, unavailable, and externally blocked capabilities. Each capability names its owning phase, GitHub epic, reason, and required evidence classes.
 
 JSON is the machine-readable current-support source. The command performs no runtime observation, network access, state access, or mutation. It reports what this exact build declares; it does not convert a planned capability into support.
+
+## `hostwright observability status [--json | --output text|json]`
+
+Reports the schema-v1 local OSLog contract: subsystem, fixed categories, enabled/minimum-level collection policy, field and payload limits, the SQLite durable authority, macOS rotation authority, and the no-upload policy. It is read-only and creates no state or log file. JSON is stable machine-readable status; see [Local Observability](observability.md) for inspection, privacy, and troubleshooting boundaries.
+
+## `hostwright metrics snapshot|export`
+
+```bash
+hostwright metrics snapshot [--state-db <path>] [--output text|json]
+hostwright metrics export --output-path <absolute-new-path> --confirm-snapshot <sha256> [--state-db <path>] [--output text|json]
+```
+
+`snapshot` is a schema-v1 read-only projection over one existing compatible schema-v17 database. It reports the fixed 59-series catalog, bounded histogram/summary values, three minimum-sample SLO results, source database identity, dropped-sample accounting, retention authority, and `snapshotSHA256`. It does not create, migrate, repair, sample, inspect runtime, listen, or upload.
+
+`export` recomputes the snapshot, requires the exact current hash, and creates one canonical new mode-`0600` file under an existing private current-user directory. It refuses overwrite, stale confirmation, symlink/parent/path/hard-link races, cancellation, or unverifiable bytes. The result remains operator-owned and is never uploaded or automatically removed. See [Bounded Local Metrics and SLOs](metrics.md).
 
 ## `hostwright secret ...`
 
@@ -264,7 +294,7 @@ Result JSON is schema version 1 and includes the provider, provider version, ope
 
 ## `hostwright volume ...`
 
-Provides current schema-v16 inspection, capacity, health, recovery, exact deletion/prune, snapshot, and verified backup/restore operations through Storage Provider API v1. The shipped `hostwright-local` provider stores exact Hostwright-owned resources on one Mac. `list`, `inspect`, `capacity`, and `health` are read-only. `recover` requires the persisted idempotency key for the exact interrupted volume operation.
+Provides current schema-v17 inspection, capacity, health, recovery, exact deletion/prune, snapshot, and verified backup/restore operations through Storage Provider API v1. The shipped `hostwright-local` provider stores exact Hostwright-owned resources on one Mac. `list`, `inspect`, `capacity`, and `health` are read-only. `recover` requires the persisted idempotency key for the exact interrupted volume operation.
 
 Every destructive operation requires exactly one `--dry-run` or `--confirm-plan <sha256>`. Confirmation binds provider and capability identity, project/resource UUIDs, generation, fence, ownership, attachments, holds, reclaim policy, protection evidence, and current observation. Changed or ambiguous evidence fails before provider mutation. `prune` never invokes global or name-based cleanup.
 
@@ -339,6 +369,20 @@ It is available only when integrity is `degraded` exclusively in `observed_servi
 ### `state recover`
 
 Resolves a pending restore/repair maintenance journal under the exclusive state fence. Depending on the durable checkpoint, it removes an unpublished stage, restores the displaced original, verifies and finalizes the published replacement, or relies on SQLite transaction rollback. Invalid/tampered journal fields or filesystem state fail closed and preserve evidence. With no journal, the command is idempotent and returns `recovered: false` plus current health.
+
+### `state retention` and `state compact`
+
+```bash
+hostwright state retention hostwright.yaml --json
+hostwright state compact hostwright.yaml --dry-run --json
+hostwright state compact hostwright.yaml --confirm-compact <confirmationToken> --json
+```
+
+`state retention` is read-only. Its schema-v1 report lists all ten declared classes, producer availability, current/candidate/held/recovery-critical counts, bounded candidate identity digests, database pressure, blockers, and any pending compaction plan. Metrics report `producerAvailable: true` with zero separate sample records because they project retained authoritative rows. Logs, traces, and support evidence remain zero with `producerAvailable: false` until their owning Phase 08 gates exist; Hostwright does not fabricate them.
+
+`state compact --dry-run` deterministically applies age, count, recovery-horizon, minimum-record, and exact hold rules. Confirmation binds the policy, current database, complete non-backup safety counts, exact candidate identities, and blockers. Execution first creates a verified private online backup, revalidates under the exclusive state fence, records a strict private journal, deletes database candidates in one transaction, atomically stages exact catalog deletions, compacts free pages, and reruns complete integrity checks. Eligible operation history includes terminal unreferenced ledger rows and only succeeded unreferenced operation groups; the latter removes its exact child steps in the same transaction. Every durable and torn-commit checkpoint resumes only with the same exact token. Missing, referenced, active, interrupted, failed, ambiguous, held, future-dated, finalizer-incomplete, or identity-changed records remain untouched.
+
+Retention never calls the Apple runtime, a native/global prune, or wildcard deletion. A pressure hold means the already-eligible safe candidates cannot prove the configured target; it does not shorten recovery or bypass ownership, finalizers, leases, foreign keys, or holds.
 
 Do not confuse `hostwright state recover` with `hostwright recovery`: the former repairs the state-database maintenance saga; the latter is read-only inspection of workload operation recovery records.
 
@@ -546,9 +590,29 @@ Failure example:
 HW-RUNTIME-001: logs requires an observed Hostwright-managed service.
 ```
 
-## `hostwright events [--state-db <path>] [--project <name>] [--type <event>] [--service <name>] [--severity info|warning|error] [--limit <n>] [--sort asc|desc] [--output text|json]`
+## `hostwright restart-budget ...`
 
-Reads the SQLite event ledger from the selected, already-migrated state database and renders events in deterministic timestamp/id order. Selection uses the standard override precedence and Application Support default.
+`restart-budget status` reads schema-v17 workload/project budget state without observing runtime, creating state, or migrating a missing database. Optional `--project` uses the exact persisted `project-*` identity. Text and JSON include workload status, reason class, attempts, rolling windows, priority, backoff, policy digest, release generation, and the current hold token when one exists.
+
+`restart-budget release` requires exact `--project`, Manifest service name, and lowercase SHA-256 `--confirm-hold`. It atomically resets only the matching held workload, increments its release generation, and records append-only manual-release history plus `restart.policy.manual-release`. A stale token or changed workload generation returns confirmation mismatch and changes nothing. Release never starts, restarts, or otherwise touches runtime; the daemon must re-observe on its next level-triggered iteration.
+
+## `hostwright maintenance ...`
+
+`maintenance preview` securely parses and validates the named Manifest v2 file, then evaluates one or more unique elective `--action` values at the current time or an optional canonical UTC `--at`. It is read-only: it does not create or open state and reports the active or next applicable window plus the exact policy digest.
+
+`maintenance status` reads the latest append-only schema-v17 deferral state for one exact project or all projects. A deferred record reports its action classes, plan and policy digests, hard deadline, state, and exact confirmation token.
+
+`maintenance cancel` atomically cancels only the current matching deferred or override-authorized record. `maintenance override` atomically authorizes only the current matching deferred record and requires a bounded redacted reason. Both require the exact project and `--confirm-deferral` SHA-256; stale, superseded, admitted, failed, or mismatched input changes nothing. Neither command touches runtime. The daemon re-observes and revalidates the exact binding immediately before any admitted lifecycle effect.
+
+## `hostwright ownership ...`
+
+`ownership status` is a local read-only view over the already-migrated schema-v17 ownership authority and active or interrupted mutation groups. Text and schema-v1 JSON distinguish active, deleting, released, quarantined, legacy, and invalid ownership and report only bounded non-secret identity, proof, finalizer, deletion, lease, and handoff fields. It does not create or migrate state, inspect runtime, or infer ownership from a resource name.
+
+`ownership handoff` performs one exact expired-lease compare-and-swap for `lifecycle-v1` operation groups, whose recovery driver can immediately claim the fixed handoff controller through the same local effect fence. It requires the operation-group UUID, persisted plan SHA-256, fencing UUID, prior controller, canonical prior UTC expiry, target local controller (`resume` or `rollback`), and a 1–900 second lease. Success atomically rebinds the group and every exact ownership record attached to it. A live, in-flight, unsupported-kind, stale, malformed, or mismatched tuple returns confirmation mismatch and changes nothing. Other mutation kinds retain their existing native recovery contracts and cannot be handed off through this command. Handoff does not execute recovery or runtime mutation, bypass finalizers, authorize another user, or add a multi-host lease.
+
+## `hostwright events [--state-db <path>] [--project <name>] [--type <event>] [--service <name>] [--severity info|warning|error] [--limit <1...1000>] [--sort asc|desc] [--cursor beginning|<token>] [--watch] [--timeout <1...300>] [--output text|json]`
+
+Reads the SQLite event ledger from the selected, already-migrated state database. Compatible snapshots render deterministic timestamp/append order. Cursor pages and bounded local watches use durable SQLite append order, exact event digests, explicit retention gaps, and resumable schema-v1 cursors. Selection uses the standard override precedence and Application Support default.
 
 It does not inspect runtime state and does not create or migrate the database as a read side effect.
 
@@ -557,8 +621,13 @@ Filters are applied after project selection and before rendering:
 - `--type <event>` matches the event type, such as `cleanup.failed`.
 - `--service <name>` matches a service name on event rows that carry one.
 - `--severity info|warning|error` matches event severity.
-- `--limit <n>` returns the first `n` filtered records in the selected order.
+- `--limit <1...1000>` returns the first bounded filtered page; the default is 100.
 - `--sort asc|desc` defaults to `asc`.
+- `--cursor beginning|<token>` selects append-ordered cursor mode; cursor modes require ascending order.
+- `--watch` returns one bounded page after the current or supplied cursor and never creates a listener.
+- `--timeout <1...300>` bounds a watch and defaults to 30 seconds.
+
+Cursor/watch JSON adds `schemaVersion`, `cursorSchemaVersion`, `mode`, `status`, `pageSize`, `moreAvailable`, `nextCursor`, immutable event and audit references, and an optional `retentionGap`. See [Durable Events and Local Watches](events.md) for resume, cancellation, compaction-gap, and privacy rules.
 
 JSON shape:
 
@@ -575,7 +644,11 @@ JSON shape:
 
 Inspection reads durable operation groups and steps from the selected, already-migrated state database without creating or migrating it. Output distinguishes completed work, resumable work, compensable work, and safe holds, and includes the exact group identity, persisted plan hash, checkpoint, remaining effects, and redacted operator guidance.
 
+For `lifecycle-v1` groups, text includes `checkpoint-contract: v1 class=<class> recovery=<action>`. JSON includes `checkpointContract` with `schemaVersion`, `classification`, `recovery`, and the bounded `nodeKey` when the checkpoint is node-scoped. Confirmed execution refuses an absent or unrecognized checkpoint contract before runtime mutation; inspection preserves the original checkpoint for diagnosis.
+
 `recovery resume` and `recovery rollback` require the exact group UUID and persisted plan SHA-256. They re-observe provider identity, capabilities, generations, fences, ownership, and completed effects before continuing. Resume skips already verified nodes. Rollback applies only precomputed inverse actions whose exact ownership and effect remain provable; otherwise the group stays in safe hold without deleting or fabricating success.
+
+Rollback success also requires fresh health proof for the exact last verified revision. The local JSON lifecycle result includes `recoveryReasonCode` when a reason-coded safe hold occurs. `rollback.restored-health-failed` means inverse effects completed but the restored resource did not prove its running/configured-probe contract; preserve it, inspect `hostwright recovery --output json`, and retry only the reported group and plan hash. Hostwright does not undo a rollback merely because this terminal health proof failed.
 
 JSON shape:
 
@@ -607,6 +680,22 @@ Example:
 ```bash
 hostwright diagnostics --bundle ./hostwright-diagnostics.json --project api-local
 ```
+
+## `hostwright diagnostics support status|preview|create|delete|recover`
+
+The additive schema-v1 support workflow preserves the diagnostics command above and adds:
+
+```text
+hostwright diagnostics support status [--state-db <path>] [--output text|json]
+hostwright diagnostics support preview [--state-db <path>] [--project <name>] [--manifest <path>] [--output text|json]
+hostwright diagnostics support create [--state-db <path>] [--project <name>] [--manifest <path>] --output-path <absolute-new-path> --confirm-preview <sha256> [--encrypt-recipient <keychain-certificate-reference>] [--output text|json]
+hostwright diagnostics support delete [--state-db <path>] --bundle <absolute-path> --confirm-bundle <sha256> [--output text|json]
+hostwright diagnostics support recover [--state-db <path>] [--output text|json]
+```
+
+Preview reports the fixed bounded section inventory, dropped counts, byte counts, total estimate, bundle ID, and exact confirmation hash. Create recomputes it, refuses stale evidence, writes one new private single-link file, and optionally performs macOS CMS encryption before disk. Status exposes only retained receipt count and pending recovery phase. Delete requires an unchanged file plus the retained creation receipt for its exact path and content hash. Recover finalizes a proven effect, records a proven no-effect case, or safe-holds identity drift.
+
+No support command reads raw credential stores, accepts secret values, uploads a bundle, creates a listener, overwrites output, or discovers files to delete. Domain failures use `HW-SUPPORT-001` through `HW-SUPPORT-013`. See [Privacy-Safe Support Bundles](support-bundles.md) for content, limits, encryption, path policy, retention, recovery, and exact cleanup.
 
 ## `hostwright cleanup [path] [--state-db <path>] --dry-run [--team-profile <path>]`
 
@@ -726,21 +815,39 @@ JSON shape:
 
 Doctor never creates or migrates state. Existing state must be checkpointed and free of rollback journals and nonempty WAL data; it is opened as an immutable read-only SQLite snapshot, using an existing Hostwright fence without creating one. Identity, content fingerprint, and checkpoint state are revalidated after inspection so concurrent change fails as a retryable inspection error. See [Doctor Checks](doctor-checks.md) for the complete classification, safety boundary, and remediation flow.
 
-## `hostwrightd --foreground --config <path> [--state-db <path>] [options]`
+## `hostwright daemon ...`
 
-Runs the foreground development daemon loop. It requires an explicit config path. State uses the standard Application Support default unless overridden.
+Controls the exact current-user `dev.hostwright.daemon` LaunchAgent. Text is the default; `--json` and `--output text|json` select versioned machine output.
+
+```text
+hostwright daemon status
+hostwright daemon install --daemon-executable <absolute-hostwrightd> --config <absolute-hostwright.yaml>
+hostwright daemon validate|bootstrap|start|stop|kickstart|rollback|disable|repair|uninstall
+hostwright daemon upgrade --daemon-executable <absolute-hostwrightd> --config <absolute-hostwright.yaml>
+```
+
+Install/upgrade accept no PATH lookup: both paths must be absolute, canonical, securely owned, and securely revalidated immediately before bootstrap. Other operations accept no executable/config override. Pending durable intent makes every mutation except `repair` fail with recovery-required status.
+
+Readiness is `not-installed`, `stopped`, `running`, `disabled`, or `recovery-required`. JSON schema v1 reports the exact label/domain/plist, executable/config generation, process ID when proven, pending operation, changed flag, and stable reason code. Errors use `HW-DAEMON-101` through `HW-DAEMON-106`; unsafe ownership/external-process refusals exit `71`, while incomplete or ambiguous effects exit `72`.
+
+The command never manages the Homebrew service record, project state, distribution payload, runtime resources, or an unmanaged process. See [Daemon](../architecture/daemon.md) for plist, checkpoint, rollback, security, recovery, and cleanup contracts.
+
+## `hostwrightd --foreground|--service --config <path> [--state-db <path>] [options]`
+
+Runs the foreground development daemon loop or the exact managed service loop. Exactly one mode is required. `--service` requires an absolute normalized config and does not accept `--max-iterations`. Foreground mode accepts the documented state environment overrides. Managed service mode ignores inherited environment overrides and, before runtime construction, re-executes the revalidated same binary once when necessary with an exact initial environment containing only `HOME`, a fixed C locale, and the trusted system `PATH`. It uses the standard Application Support state default unless an explicit argument overrides it.
 
 Options:
 
-- `--interval <seconds>`: base reconciliation cadence; default `30`.
-- `--jitter <seconds>`: deterministic jitter cap; default `5`.
+- `--interval <seconds>`: base reconciliation cadence; default `5`.
+- `--jitter <seconds>`: deterministic jitter cap; default `0`. Healthy interval plus jitter cannot exceed five seconds.
 - `--max-backoff <seconds>`: repeated-error backoff cap; default `300`.
+- `--parallelism <count>`: lifecycle DAG parallelism from `1` through `32`; default `min(4, CPUs)`.
 - `--max-iterations <count>`: stop after a bounded number of iterations for development proof.
 - `--state-db <path>`: optional absolute state override.
 - `--lock-file <path>`: optional absolute lock override. Default state uses `run/hostwrightd.lock`; an explicit/environment state uses a stable hashed lock beneath `run`.
 
-Each iteration validates the manifest, observes runtime through `RuntimeAdapter`, computes a plan, and records daemon events plus operation records in the selected state database. Before the loop, the daemon creates/validates the private runtime layout and acquires the validated `0600` single-instance lock.
+Each iteration securely validates the explicit manifest and its declared local trust/provenance key files, observes runtime through `RuntimeAdapter`, computes a plan, and records daemon events plus operation records in the selected state database. Parent-directory changes wake the loop early and are coalesced; a five-second level-triggered scan remains the missed-event fallback. Invalid or partial reloads record one fingerprinted rejection and retain the last accepted desired state. Before the loop, the daemon creates/validates the private runtime layout and acquires the validated `0600` single-instance lock.
 
-It does not call `RuntimeAdapter.execute`, does not install a launch agent, and does not perform unattended runtime mutation.
+The loop starts immediately and repeats within five healthy seconds without an event edge. It invokes the same `up` lifecycle planner, exact confirmation, live driver, project operation-group lease, checkpoints, fencing, compensation, and verification as the CLI. LaunchAgent creation and lifecycle still belong to `hostwright daemon`, not the daemon executable itself.
 
 Shell completion remains research-only in Phase 12. Hostwright does not install shell completions or mutate shell profile files.

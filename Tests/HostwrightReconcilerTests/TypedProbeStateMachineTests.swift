@@ -5,6 +5,73 @@ import XCTest
 @testable import HostwrightRuntime
 
 final class TypedProbeStateMachineTests: XCTestCase {
+    func testStableHealthCheckpointSurvivesRepeatedSuccessAndResetsOnDeclaredFailure() throws {
+        let probes = RuntimeProbeSet(
+            readiness: RuntimeProbeConfiguration(
+                action: .exec(RuntimeProbeExecAction(command: ["/bin/ready"])),
+                intervalSeconds: 1,
+                successThreshold: 1,
+                failureThreshold: 1
+            )
+        )
+        var snapshot = RuntimeProbeStateMachine.initialSnapshot(
+            resourceIdentifier: "service-stable",
+            probes: probes,
+            startedAtMilliseconds: 0
+        )
+        var started = try RuntimeProbeStateMachine.markAttemptStarted(
+            kind: .readiness,
+            probes: probes,
+            snapshot: snapshot,
+            nowMilliseconds: 0
+        )
+        snapshot = try RuntimeProbeStateMachine.record(
+            RuntimeProbeAttemptResult(
+                outcome: .succeeded,
+                completedAtMilliseconds: 10
+            ),
+            request: started.request,
+            probes: probes,
+            snapshot: started.snapshot
+        )
+        XCTAssertEqual(snapshot.stableSinceMilliseconds, 10)
+
+        started = try RuntimeProbeStateMachine.markAttemptStarted(
+            kind: .readiness,
+            probes: probes,
+            snapshot: snapshot,
+            nowMilliseconds: 1_010
+        )
+        snapshot = try RuntimeProbeStateMachine.record(
+            RuntimeProbeAttemptResult(
+                outcome: .succeeded,
+                completedAtMilliseconds: 1_020
+            ),
+            request: started.request,
+            probes: probes,
+            snapshot: started.snapshot
+        )
+        XCTAssertEqual(snapshot.stableSinceMilliseconds, 10)
+
+        started = try RuntimeProbeStateMachine.markAttemptStarted(
+            kind: .readiness,
+            probes: probes,
+            snapshot: snapshot,
+            nowMilliseconds: 2_020
+        )
+        snapshot = try RuntimeProbeStateMachine.record(
+            RuntimeProbeAttemptResult(
+                outcome: .failed,
+                completedAtMilliseconds: 2_030
+            ),
+            request: started.request,
+            probes: probes,
+            snapshot: started.snapshot
+        )
+        XCTAssertNil(snapshot.stableSinceMilliseconds)
+        XCTAssertEqual(snapshot.state(for: .readiness)?.phase, .failed)
+    }
+
     func testManifestProbeMappingPreservesEveryTypedField() {
         let mapped = RuntimeProbeManifestMapper.map(
             HostwrightProbes(

@@ -1,7 +1,9 @@
+import Foundation
+import HostwrightObservability
 import HostwrightRuntime
 
 public struct EventLedger: Sendable {
-    private let store: SQLiteStateStore
+    let store: SQLiteStateStore
 
     public init(store: SQLiteStateStore) {
         self.store = store
@@ -9,32 +11,105 @@ public struct EventLedger: Sendable {
 
     public func append(_ events: [EventRecord]) throws {
         let redactedEvents = events.map { $0.redacted() }
-        try store.withValidatedConnection { connection in
-            try connection.transaction {
-                for event in redactedEvents {
-                    try connection.run(
-                        """
-                        INSERT INTO event_ledger (
-                            id, timestamp, severity, type, source, project_id, service_name,
-                            runtime_adapter, message, payload_json_redacted
-                        )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        bindings: [
-                            .text(event.id),
-                            .text(event.timestamp),
-                            .text(event.severity.rawValue),
-                            .text(event.type),
-                            .text(event.source),
-                            optionalText(event.projectID),
-                            optionalText(event.serviceName),
-                            optionalText(event.runtimeAdapter),
-                            .text(event.message),
-                            .text(event.payloadJSONRedacted)
-                        ]
-                    )
+        var attempt = 0
+        while true {
+            attempt += 1
+            do {
+                try store.withValidatedConnection { connection in
+                    try connection.transaction {
+                        for event in redactedEvents {
+                            try connection.run(
+                                """
+                                INSERT INTO event_ledger (
+                                    id, timestamp, severity, type, source, project_id, service_name,
+                                    runtime_adapter, message, payload_json_redacted
+                                )
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                """,
+                                bindings: [
+                                    .text(event.id),
+                                    .text(event.timestamp),
+                                    .text(event.severity.rawValue),
+                                    .text(event.type),
+                                    .text(event.source),
+                                    optionalText(event.projectID),
+                                    optionalText(event.serviceName),
+                                    optionalText(event.runtimeAdapter),
+                                    .text(event.message),
+                                    .text(event.payloadJSONRedacted)
+                                ]
+                            )
+                        }
+                    }
                 }
+                break
+            } catch StateStoreError.databaseLocked(_, let message)
+                where attempt < 4 && message.contains("state-writer fence") {
+                Thread.sleep(forTimeInterval: Double(attempt) * 0.01)
             }
+        }
+        for event in redactedEvents where event.type != HostwrightTraceContract.eventType {
+            HostwrightTraceContext.session?.linkEvent(event.id)
+        }
+        mirrorToOSLog(redactedEvents)
+    }
+
+    private func mirrorToOSLog(_ events: [EventRecord]) {
+        guard let correlationID = HostwrightLogContext.correlationID else { return }
+        for event in events where event.type != HostwrightTraceContract.eventType {
+            let severity: HostwrightLogSeverity
+            let reason: HostwrightLogReason
+            switch event.severity {
+            case .info:
+                severity = .info
+                reason = .durableEventInfo
+            case .warning:
+                severity = .warning
+                reason = .durableEventWarning
+            case .error:
+                severity = .error
+                reason = .durableEventError
+            }
+            guard let record = try? HostwrightLogRecord(
+                category: logCategory(event.type),
+                severity: severity,
+                reason: reason,
+                correlationID: correlationID,
+                outcome: .observed,
+                fields: [
+                    HostwrightLogField(
+                        name: .eventID,
+                        value: event.id,
+                        privacy: .publicValue
+                    ),
+                    HostwrightLogField(
+                        name: .eventType,
+                        value: event.type,
+                        privacy: .publicValue
+                    ),
+                    HostwrightLogField(
+                        name: .source,
+                        value: event.source,
+                        privacy: .publicValue
+                    )
+                ]
+            ) else { continue }
+            HostwrightLogContext.emit(record)
+        }
+    }
+
+    private func logCategory(_ eventType: String) -> HostwrightLogCategory {
+        let prefix = eventType.split(separator: ".", maxSplits: 1).first.map(String.init) ?? ""
+        switch prefix {
+        case "daemon": return .daemon
+        case "health": return .health
+        case "rollback", "recovery": return .recovery
+        case "runtime", "provider": return .runtime
+        case "security", "secret", "approval", "trust", "vulnerability": return .security
+        case "retention", "gc", "cleanup": return .garbageCollection
+        case "reconciliation", "restart", "maintenance", "update": return .reconciliation
+        case "lifecycle", "operation": return .lifecycle
+        default: return .state
         }
     }
 
@@ -49,6 +124,65 @@ public struct EventLedger: Sendable {
                 """
             )
             return try rows.map(eventRecord(from:))
+        }
+    }
+
+    public func count(
+        type: String,
+        source: String,
+        payloadContains fragment: String
+    ) throws -> Int {
+        try validateLookup(type: type, source: source, fragment: fragment)
+        return try store.withValidatedConnection(readOnly: true) { connection in
+            let rows = try connection.query(
+                """
+                SELECT COUNT(*)
+                FROM event_ledger
+                WHERE type = ? AND source = ? AND instr(payload_json_redacted, ?) > 0
+                """,
+                bindings: [.text(type), .text(source), .text(fragment)]
+            )
+            guard let value = rows.first?.first ?? nil,
+                  let count = Int(value),
+                  count >= 0 else {
+                throw StateStoreError.invalidRecord("Event count query returned invalid evidence.")
+            }
+            return count
+        }
+    }
+
+    public func contains(
+        type: String,
+        source: String,
+        payloadContains fragment: String
+    ) throws -> Bool {
+        try validateLookup(type: type, source: source, fragment: fragment)
+        return try store.withValidatedConnection(readOnly: true) { connection in
+            let rows = try connection.query(
+                """
+                SELECT 1
+                FROM event_ledger
+                WHERE type = ? AND source = ? AND instr(payload_json_redacted, ?) > 0
+                LIMIT 1
+                """,
+                bindings: [.text(type), .text(source), .text(fragment)]
+            )
+            return !rows.isEmpty
+        }
+    }
+
+    private func validateLookup(
+        type: String,
+        source: String,
+        fragment: String
+    ) throws {
+        guard !type.isEmpty,
+              type.utf8.count <= 128,
+              !source.isEmpty,
+              source.utf8.count <= 128,
+              !fragment.isEmpty,
+              fragment.utf8.count <= 512 else {
+            throw StateStoreError.invalidRecord("Event lookup fields must be non-empty and bounded.")
         }
     }
 }
@@ -87,6 +221,7 @@ public struct OperationLedger: Sendable {
                 )
             }
         }
+        HostwrightTraceContext.session?.linkOperation(redacted.id)
     }
 
     public func loadAll() throws -> [OperationRecord] {

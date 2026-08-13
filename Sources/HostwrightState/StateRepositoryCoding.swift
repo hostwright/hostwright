@@ -326,7 +326,7 @@ func healthCheckResultRecord(from row: [String?]) throws -> HealthCheckResultRec
 }
 
 func restartPolicyStateRecord(from row: [String?]) throws -> RestartPolicyStateRecord {
-    guard row.count == 12,
+    guard row.count == 26,
           let id = row[0],
           let projectID = row[1],
           let serviceName = row[2],
@@ -341,7 +341,28 @@ func restartPolicyStateRecord(from row: [String?]) throws -> RestartPolicyStateR
           let backoffSecondsText = row[7],
           let backoffSeconds = Int(backoffSecondsText),
           let updatedAt = row[10],
-          let metadataJSON = row[11]
+          let metadataJSON = row[11],
+          let reasonText = row[12],
+          let reasonClass = RestartReasonClass(rawValue: reasonText),
+          let windowSecondsText = row[14],
+          let windowSeconds = Int(windowSecondsText),
+          let initialBackoffText = row[15],
+          let initialBackoff = Int(initialBackoffText),
+          let maximumBackoffText = row[16],
+          let maximumBackoff = Int(maximumBackoffText),
+          let jitterText = row[17],
+          let jitter = Int(jitterText),
+          let stableRunText = row[18],
+          let stableRun = Int(stableRunText),
+          let priorityText = row[20],
+          let priority = Int(priorityText),
+          let projectMaxAttemptsText = row[21],
+          let projectMaxAttempts = Int(projectMaxAttemptsText),
+          let projectWindowText = row[22],
+          let projectWindow = Int(projectWindowText),
+          let releaseGenerationText = row[24],
+          let releaseGeneration = Int(releaseGenerationText),
+          let policySHA256 = row[25]
     else {
         throw StateStoreError.invalidRecord("Could not decode restart policy state row.")
     }
@@ -357,7 +378,62 @@ func restartPolicyStateRecord(from row: [String?]) throws -> RestartPolicyStateR
         backoffSeconds: backoffSeconds,
         backoffUntil: row[8],
         lastFailureAt: row[9],
+        reasonClass: reasonClass,
+        windowStartedAt: row[13],
+        windowSeconds: windowSeconds,
+        initialBackoffSeconds: initialBackoff,
+        maximumBackoffSeconds: maximumBackoff,
+        jitterSeconds: jitter,
+        stableRunSeconds: stableRun,
+        stableSince: row[19],
+        priority: priority,
+        projectMaxAttempts: projectMaxAttempts,
+        projectWindowSeconds: projectWindow,
+        holdToken: row[23],
+        releaseGeneration: releaseGeneration,
+        policySHA256: policySHA256,
         updatedAt: updatedAt,
+        metadataJSONRedacted: metadataJSON
+    )
+}
+
+func restartAttemptHistoryRecord(from row: [String?]) throws -> RestartAttemptHistoryRecord {
+    guard row.count == 15,
+          let id = row[0],
+          let projectID = row[1],
+          let serviceName = row[2],
+          let reasonText = row[3],
+          let reasonClass = RestartReasonClass(rawValue: reasonText),
+          let decisionText = row[4],
+          let decision = RestartAttemptDecision(rawValue: decisionText),
+          let attemptText = row[5],
+          let attemptNumber = Int(attemptText),
+          let projectAttemptText = row[6],
+          let projectAttemptNumber = Int(projectAttemptText),
+          let admittedText = row[7],
+          let releaseText = row[9],
+          let releaseGeneration = Int(releaseText),
+          let occurredAt = row[11],
+          let policySHA256 = row[13],
+          let metadataJSON = row[14]
+    else {
+        throw StateStoreError.invalidRecord("Could not decode restart attempt history row.")
+    }
+    return RestartAttemptHistoryRecord(
+        id: id,
+        projectID: projectID,
+        serviceName: serviceName,
+        reasonClass: reasonClass,
+        decision: decision,
+        attemptNumber: attemptNumber,
+        projectAttemptNumber: projectAttemptNumber,
+        admitted: admittedText == "1",
+        holdToken: row[8],
+        releaseGeneration: releaseGeneration,
+        operationID: row[10],
+        occurredAt: occurredAt,
+        backoffUntil: row[12],
+        policySHA256: policySHA256,
         metadataJSONRedacted: metadataJSON
     )
 }

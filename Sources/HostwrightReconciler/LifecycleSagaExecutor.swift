@@ -1,5 +1,6 @@
 import Foundation
 import HostwrightCore
+import HostwrightObservability
 import HostwrightRuntime
 import HostwrightState
 
@@ -102,6 +103,7 @@ public struct LifecycleSagaContext: Sendable {
     public let operationID: String
     public let groupID: String
     public let fencingToken: String
+    public let leaseOwner: String?
     public let attempt: Int
     public let direction: OperationGroupStepDirection
 
@@ -110,6 +112,7 @@ public struct LifecycleSagaContext: Sendable {
         operationID: String,
         groupID: String,
         fencingToken: String,
+        leaseOwner: String? = nil,
         attempt: Int,
         direction: OperationGroupStepDirection = .forward
     ) {
@@ -117,6 +120,7 @@ public struct LifecycleSagaContext: Sendable {
         self.operationID = operationID
         self.groupID = groupID
         self.fencingToken = fencingToken
+        self.leaseOwner = leaseOwner
         self.attempt = attempt
         self.direction = direction
     }
@@ -203,10 +207,122 @@ public protocol LifecycleSagaEffects: Sendable {
     ) async -> LifecycleSagaCompensationOutcome
 }
 
+public enum LifecycleSagaCompensationVerification: Equatable, Sendable {
+    case verified(LifecycleNodeVerification)
+    case safeHold(reasonCode: String, hintRedacted: String)
+}
+
+public protocol LifecycleSagaCompensationVerifying: Sendable {
+    func verifyCompensation(
+        plan: LifecyclePlan,
+        context: LifecycleSagaContext
+    ) async -> LifecycleSagaCompensationVerification
+}
+
 public protocol LifecycleSagaFinalizing: Sendable {
     func finalize(
         context: LifecycleSagaContext
     ) async throws
+}
+
+public enum LifecycleMutationCheckpointClass: String, Codable, Equatable, Sendable {
+    case intent
+    case forwardEffect = "forward-effect"
+    case verification
+    case compensation
+    case restoredHealth = "restored-health"
+    case finalizer
+    case interruption
+    case safeHold = "safe-hold"
+    case terminal
+}
+
+public enum LifecycleMutationRecoveryClass: String, Codable, Equatable, Sendable {
+    case resume
+    case reobserve
+    case safeHold = "safe-hold"
+    case complete
+}
+
+public struct LifecycleMutationCheckpointRecord: Codable, Equatable, Sendable {
+    public static let currentSchemaVersion = 1
+
+    public let schemaVersion: Int
+    public let checkpoint: String
+    public let classification: LifecycleMutationCheckpointClass
+    public let recovery: LifecycleMutationRecoveryClass
+    public let nodeKey: String?
+
+    public init?(checkpoint: String) {
+        guard !checkpoint.isEmpty, checkpoint.utf8.count <= 255 else {
+            return nil
+        }
+        let exact: (
+            LifecycleMutationCheckpointClass,
+            LifecycleMutationRecoveryClass
+        )?
+        switch checkpoint {
+        case "intent-persisted": exact = (.intent, .resume)
+        case "verified": exact = (.terminal, .complete)
+        case "compensated": exact = (.terminal, .complete)
+        case "rollback-restored-health-verified":
+            exact = (.restoredHealth, .complete)
+        case "rollback-restored-health-safe-hold":
+            exact = (.restoredHealth, .safeHold)
+        case "finalizer:started", "finalizer:failed":
+            exact = (.finalizer, .reobserve)
+        case "finalizer:verified": exact = (.finalizer, .complete)
+        default: exact = nil
+        }
+        if let exact {
+            schemaVersion = Self.currentSchemaVersion
+            self.checkpoint = checkpoint
+            classification = exact.0
+            recovery = exact.1
+            nodeKey = nil
+            return
+        }
+
+        guard let separator = checkpoint.lastIndex(of: ":") else {
+            return nil
+        }
+        let node = String(checkpoint[..<separator])
+        let suffix = String(checkpoint[checkpoint.index(after: separator)...])
+        guard !node.isEmpty else { return nil }
+        let classified: (
+            LifecycleMutationCheckpointClass,
+            LifecycleMutationRecoveryClass
+        )?
+        switch suffix {
+        case "effect-pending": classified = (.forwardEffect, .reobserve)
+        case "verified", "verified-after-resume":
+            classified = (.verification, .complete)
+        case "compensation-pending": classified = (.compensation, .reobserve)
+        case "compensated": classified = (.compensation, .complete)
+        case "compensation-ambiguous-after-resume",
+             "compensation-attempts-exhausted",
+             "compensation-context-stale",
+             "compensation-failed",
+             "compensation-record-mismatch",
+             "compensation-unavailable":
+            classified = (.compensation, .safeHold)
+        case "restored-health-safe-hold":
+            classified = (.restoredHealth, .safeHold)
+        case "cancelled-before-effect", "cancelled-no-effect":
+            classified = (.interruption, .resume)
+        case "ambiguous-after-resume", "ambiguous-effect",
+             "accepted-without-effect", "context-stale",
+             "irreversible-effect-safe-hold":
+            classified = (.safeHold, .safeHold)
+        default: classified = nil
+        }
+        guard let classified else { return nil }
+        schemaVersion = Self.currentSchemaVersion
+        self.checkpoint = checkpoint
+        classification = classified.0
+        recovery = classified.1
+        nodeKey = node
+    }
 }
 
 public protocol LifecycleSagaClock: Sendable {
@@ -237,6 +353,7 @@ public struct LifecycleSagaExecutionResult: Equatable, Sendable {
     public let checkpoint: String
     public let completedNodeKeys: [String]
     public let recoveryHintRedacted: String
+    public let recoveryReasonCode: String?
 
     public init(
         status: LifecycleSagaExecutionStatus,
@@ -245,7 +362,8 @@ public struct LifecycleSagaExecutionResult: Equatable, Sendable {
         planSHA256: String,
         checkpoint: String,
         completedNodeKeys: [String],
-        recoveryHintRedacted: String
+        recoveryHintRedacted: String,
+        recoveryReasonCode: String? = nil
     ) {
         self.status = status
         self.operationID = operationID
@@ -254,6 +372,7 @@ public struct LifecycleSagaExecutionResult: Equatable, Sendable {
         self.checkpoint = checkpoint
         self.completedNodeKeys = completedNodeKeys
         self.recoveryHintRedacted = recoveryHintRedacted
+        self.recoveryReasonCode = recoveryReasonCode
     }
 }
 
@@ -322,11 +441,69 @@ public struct LifecycleSagaExecutor: Sendable {
         fencingToken: String,
         lockOwner: String,
         lockExpiresAt: String? = nil,
+        groupIdempotencyKey: String? = nil,
         allowFailedSafeHoldResume: Bool = false
     ) async throws -> LifecycleSagaExecutionResult {
+        guard let session = HostwrightTraceContext.session else {
+            return try await executeUntraced(
+                plan: plan,
+                operationID: operationID,
+                groupID: groupID,
+                fencingToken: fencingToken,
+                lockOwner: lockOwner,
+                lockExpiresAt: lockExpiresAt,
+                groupIdempotencyKey: groupIdempotencyKey,
+                allowFailedSafeHoldResume: allowFailedSafeHoldResume
+            )
+        }
+        session.linkOperation(operationID)
+        let token = session.start(
+            .sagaExecute,
+            attributes: [try? HostwrightTraceAttribute(key: .phase, value: "execute")]
+                .compactMap { $0 }
+        )
+        do {
+            let result = try await HostwrightTraceContext.withSpan(token) {
+                try await executeUntraced(
+                    plan: plan,
+                    operationID: operationID,
+                    groupID: groupID,
+                    fencingToken: fencingToken,
+                    lockOwner: lockOwner,
+                    lockExpiresAt: lockExpiresAt,
+                    groupIdempotencyKey: groupIdempotencyKey,
+                    allowFailedSafeHoldResume: allowFailedSafeHoldResume
+                )
+            }
+            let status: HostwrightTraceSpanStatus = [.succeeded, .alreadySucceeded].contains(result.status)
+                ? .succeeded
+                : (result.status == .interrupted ? .cancelled : .failed)
+            _ = session.finish(token, status: status)
+            return result
+        } catch {
+            _ = session.finish(token, status: error is CancellationError ? .cancelled : .failed)
+            throw error
+        }
+    }
+
+    private func executeUntraced(
+        plan: LifecyclePlan,
+        operationID: String,
+        groupID: String,
+        fencingToken: String,
+        lockOwner: String,
+        lockExpiresAt: String? = nil,
+        groupIdempotencyKey: String? = nil,
+        allowFailedSafeHoldResume: Bool = false
+    ) async throws -> LifecycleSagaExecutionResult {
+        let resolvedGroupIdempotencyKey = groupIdempotencyKey ?? plan.planSHA256
         guard HostwrightResourceUUID.isValid(operationID),
               HostwrightResourceUUID.isValid(groupID),
               HostwrightResourceUUID.isValid(fencingToken),
+              resolvedGroupIdempotencyKey.range(
+                  of: "^[a-f0-9]{64}$",
+                  options: .regularExpression
+              ) != nil,
               !lockOwner.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw LifecycleSagaError.invalidIdentity(
                 "Lifecycle saga requires canonical operation, group, and fencing UUIDs plus a lock owner."
@@ -340,27 +517,17 @@ public struct LifecycleSagaExecutor: Sendable {
             fencingToken: normalizedFence,
             lockOwner: lockOwner,
             lockExpiresAt: lockExpiresAt,
+            groupIdempotencyKey: resolvedGroupIdempotencyKey,
             allowFailedSafeHoldResume: allowFailedSafeHoldResume
         )
+        guard let mutationCheckpoint = LifecycleMutationCheckpointRecord(
+            checkpoint: group.checkpoint
+        ) else {
+            throw LifecycleSagaError.stateFailure(
+                "Lifecycle checkpoint contract v1 does not recognize the exact persisted checkpoint. No external effect was attempted."
+            )
+        }
         if group.status == .succeeded {
-            if let finalizer {
-                do {
-                    try await finalizer.finalize(
-                        context: LifecycleSagaContext(
-                            plan: plan,
-                            operationID:
-                                operationID.lowercased(),
-                            groupID: group.id,
-                            fencingToken: normalizedFence,
-                            attempt: 1
-                        )
-                    )
-                } catch {
-                    throw LifecycleSagaError.stateFailure(
-                        "Succeeded lifecycle finalizer recovery failed for the exact persisted group."
-                    )
-                }
-            }
             return result(
                 status: .alreadySucceeded,
                 plan: plan,
@@ -383,6 +550,20 @@ public struct LifecycleSagaExecutor: Sendable {
                 hint: group.manualRecoveryHintRedacted
             )
         }
+        let mutationFence = try store.acquireOperationMutationFence(
+            groupID: group.id
+        )
+        defer { mutationFence.release() }
+        guard let currentLease = try store.operationGroups.load(id: group.id),
+              currentLease.status == .active,
+              currentLease.planHash == group.planHash,
+              currentLease.fencingToken == group.fencingToken,
+              currentLease.lockOwner == group.lockOwner,
+              currentLease.lockExpiresAt == group.lockExpiresAt else {
+            throw LifecycleSagaError.stateFailure(
+                "Lifecycle execution lost its exact operation mutation fence before effects."
+            )
+        }
         guard group.planHash == plan.planSHA256,
               group.fencingToken == normalizedFence else {
             throw LifecycleSagaError.persistedPlanMismatch
@@ -390,6 +571,26 @@ public struct LifecycleSagaExecutor: Sendable {
 
         let planNodeKeys = Set(plan.nodes.map(\.key))
         var completed = try completedNodeKeys(groupID: group.id).intersection(planNodeKeys)
+        if mutationCheckpoint.classification == .compensation ||
+            mutationCheckpoint.classification == .restoredHealth {
+            let rollbackKeys = Set(
+                try store.operationGroupSteps.load(groupID: group.id)
+                    .filter { $0.direction == .rollback }
+                    .map(\.stepKey)
+            )
+            let compensationNodes = plan.nodes.filter {
+                rollbackKeys.contains($0.key)
+            }
+            return try await compensate(
+                plan: plan,
+                group: group,
+                completed: completed,
+                currentNodes: compensationNodes,
+                reason: group.manualRecoveryHintRedacted.isEmpty
+                    ? "Resuming the exact persisted compensation checkpoint."
+                    : group.manualRecoveryHintRedacted
+            )
+        }
         while completed != planNodeKeys {
             if Task.isCancelled {
                 let pendingKey = plan.nodes.first { !completed.contains($0.key) }?.key ?? "lifecycle"
@@ -437,15 +638,22 @@ public struct LifecycleSagaExecutor: Sendable {
                 checkpoint: "finalizer:started"
             )
             do {
-                try await finalizer.finalize(
-                    context: LifecycleSagaContext(
-                        plan: plan,
-                        operationID: operationID.lowercased(),
-                        groupID: group.id,
-                        fencingToken: normalizedFence,
-                        attempt: 1
+                try await HostwrightTraceContext.withSpan(
+                    .finalizerExecute,
+                    attributes: [try? HostwrightTraceAttribute(key: .phase, value: "finalize")]
+                        .compactMap { $0 }
+                ) {
+                    try await finalizer.finalize(
+                        context: LifecycleSagaContext(
+                            plan: plan,
+                            operationID: operationID.lowercased(),
+                            groupID: group.id,
+                            fencingToken: normalizedFence,
+                            leaseOwner: group.lockOwner,
+                            attempt: 1
+                        )
                     )
-                )
+                }
             } catch {
                 return try interrupt(
                     plan: plan,
@@ -463,13 +671,13 @@ public struct LifecycleSagaExecutor: Sendable {
         }
 
         let finishedAt = clock.now()
-        try store.operationGroups.finish(
-            groupID: group.id,
+        try finishOwned(
+            group: group,
             status: .succeeded,
             checkpoint: "verified",
-            manualRecoveryHintRedacted: "",
+            hint: "",
             updatedAt: finishedAt,
-            metadataJSONRedacted: try jsonObject([
+            metadata: try jsonObject([
                 "lifecyclePlanSchemaVersion": LifecyclePlan.currentSchemaVersion,
                 "planSHA256": plan.planSHA256,
                 "result": LifecycleSagaExecutionStatus.succeeded.rawValue
@@ -574,7 +782,8 @@ public struct LifecycleSagaExecutor: Sendable {
                     group: group,
                     completed: completedAfterRecovery,
                     checkpoint: "\(ambiguous.key):ambiguous-after-resume",
-                    hint: "Runtime observation could not prove whether the interrupted effect occurred."
+                    hint: "Runtime observation could not prove whether the interrupted effect occurred.",
+                    reasonCode: LifecycleRecoverySafeHoldReason.ambiguousEffect.rawValue
                 )
             )
         }
@@ -636,7 +845,8 @@ public struct LifecycleSagaExecutor: Sendable {
                     $0.validation,
                     plan: plan,
                     node: $0.node,
-                    fence: normalizedFence
+                    fence: normalizedFence,
+                    groupIdempotencyKey: group.groupIdempotencyKey
                 )
             }
             if let stale = staleResults.first {
@@ -661,7 +871,8 @@ public struct LifecycleSagaExecutor: Sendable {
                         completed: completed.union(advanced),
                         checkpoint: "\(stale.node.key):context-stale",
                         hint:
-                            "Provider identity, generation, capabilities, ownership, or fencing changed before mutation."
+                            "Provider identity, generation, capabilities, ownership, or fencing changed before mutation.",
+                        reasonCode: LifecycleRecoverySafeHoldReason.missingOwnership.rawValue
                     )
                 )
             }
@@ -799,6 +1010,31 @@ public struct LifecycleSagaExecutor: Sendable {
             }
 
             let completedAfterAttempts = completed.union(advanced)
+            let restoredHealthFailures = (
+                ambiguousNodes + acceptedWithoutEffectNodes +
+                    effectPresentNodes + definitiveFailures
+            ).filter {
+                plan.command == .rollback &&
+                    $0.action == .verify &&
+                    $0.preconditions.contains {
+                        $0.kind == "rollback-restored-revision"
+                    }
+            }
+            if let failedHealth = restoredHealthFailures.sorted(
+                by: { $0.key < $1.key }
+            ).first {
+                return .terminal(
+                    try safeHold(
+                        plan: plan,
+                        group: group,
+                        completed: completedAfterAttempts,
+                        checkpoint: "\(failedHealth.key):restored-health-safe-hold",
+                        hint:
+                            "Rollback effects completed, but the exact restored revision did not prove healthy. Preserve all owned resources and inspect the recorded probe evidence.",
+                        reasonCode: "rollback.restored-health-failed"
+                    )
+                )
+            }
             if let ambiguous = (ambiguousNodes + acceptedWithoutEffectNodes)
                 .sorted(by: { $0.key < $1.key })
                 .first {
@@ -818,7 +1054,8 @@ public struct LifecycleSagaExecutor: Sendable {
                         group: group,
                         completed: completedAfterAttempts,
                         checkpoint: checkpoint,
-                        hint: hint
+                        hint: hint,
+                        reasonCode: LifecycleRecoverySafeHoldReason.ambiguousEffect.rawValue
                     )
                 )
             }
@@ -876,7 +1113,13 @@ public struct LifecycleSagaExecutor: Sendable {
                     LifecycleSagaRecoveryResult(
                         node: node,
                         attempt: attempt,
-                        observation: await effects.observe(node: node, context: context)
+                        observation: await HostwrightTraceContext.withSpan(
+                            .providerObserve,
+                            attributes: [try? HostwrightTraceAttribute(key: .phase, value: "observe")]
+                                .compactMap { $0 }
+                        ) {
+                            await effects.observe(node: node, context: context)
+                        }
                     )
                 }
             }
@@ -903,11 +1146,13 @@ public struct LifecycleSagaExecutor: Sendable {
                     LifecycleSagaValidationResult(
                         node: node,
                         attempt: attempt,
-                        validation: await validator.validate(
-                            plan: plan,
-                            node: node,
-                            expectedFencingToken: fence
-                        )
+                        validation: await HostwrightTraceContext.withSpan(.healthEvaluate) {
+                            await validator.validate(
+                                plan: plan,
+                                node: node,
+                                expectedFencingToken: fence
+                            )
+                        }
                     )
                 }
             }
@@ -932,8 +1177,20 @@ public struct LifecycleSagaExecutor: Sendable {
             for (node, attempt) in inputs {
                 let context = context(plan: plan, group: group, attempt: attempt)
                 tasks.addTask {
-                    let outcome = await effects.apply(node: node, context: context)
-                    let observation = await effects.observe(node: node, context: context)
+                    let outcome = await HostwrightTraceContext.withSpan(
+                        .providerApply,
+                        attributes: [try? HostwrightTraceAttribute(key: .phase, value: "apply")]
+                            .compactMap { $0 }
+                    ) {
+                        await effects.apply(node: node, context: context)
+                    }
+                    let observation = await HostwrightTraceContext.withSpan(
+                        .providerObserve,
+                        attributes: [try? HostwrightTraceAttribute(key: .phase, value: "observe")]
+                            .compactMap { $0 }
+                    ) {
+                        await effects.observe(node: node, context: context)
+                    }
                     return LifecycleSagaAttemptResult(
                         node: node,
                         attempt: attempt,
@@ -957,6 +1214,7 @@ public struct LifecycleSagaExecutor: Sendable {
         fencingToken: String,
         lockOwner: String,
         lockExpiresAt: String?,
+        groupIdempotencyKey: String,
         allowFailedSafeHoldResume: Bool
     ) throws -> OperationGroupRecord {
         let now = clock.now()
@@ -967,7 +1225,7 @@ public struct LifecycleSagaExecutor: Sendable {
                 "Lifecycle operation lease must expire after its acquisition timestamp."
             )
         }
-        if let latest = try store.operationGroups.latest(groupIdempotencyKey: plan.planSHA256) {
+        if let latest = try store.operationGroups.latest(groupIdempotencyKey: groupIdempotencyKey) {
             guard latest.planHash == plan.planSHA256,
                   latest.fencingToken == fencingToken else {
                 throw LifecycleSagaError.persistedPlanMismatch
@@ -1033,7 +1291,7 @@ public struct LifecycleSagaExecutor: Sendable {
             serviceName: nil,
             plannedActionType: plan.command.rawValue,
             status: .active,
-            groupIdempotencyKey: plan.planSHA256,
+            groupIdempotencyKey: groupIdempotencyKey,
             planHash: plan.planSHA256,
             checkpoint: "intent-persisted",
             lockOwner: lockOwner,
@@ -1098,6 +1356,7 @@ public struct LifecycleSagaExecutor: Sendable {
             operationID: group.operationID,
             groupID: group.id,
             fencingToken: group.fencingToken,
+            leaseOwner: group.lockOwner,
             attempt: attempt,
             direction: direction
         )
@@ -1107,7 +1366,8 @@ public struct LifecycleSagaExecutor: Sendable {
         _ validation: LifecycleSagaValidation,
         plan: LifecyclePlan,
         node: LifecyclePlanNode,
-        fence: String
+        fence: String,
+        groupIdempotencyKey: String
     ) -> Bool {
         validation.providerID == plan.providerID &&
             validation.providerGeneration == plan.providerGeneration &&
@@ -1115,7 +1375,8 @@ public struct LifecycleSagaExecutor: Sendable {
             validation.projectResourceUUID.lowercased() == plan.projectResourceUUID &&
             validation.projectGeneration == plan.projectGeneration &&
             validation.fencingToken.lowercased() == fence &&
-            node.fencingToken == fence &&
+            (node.fencingToken == fence ||
+                groupIdempotencyKey != plan.planSHA256) &&
             validation.ownershipVerified
     }
 
@@ -1214,7 +1475,8 @@ public struct LifecycleSagaExecutor: Sendable {
                 manualRecoveryHintRedacted: failure?.guidance ?? "",
                 metadataJSONRedacted: try jsonObject(metadata)
             ),
-            expectedFencingToken: group.fencingToken
+            expectedFencingToken: group.fencingToken,
+            expectedLockOwner: group.lockOwner ?? ""
         )
     }
 
@@ -1270,6 +1532,17 @@ public struct LifecycleSagaExecutor: Sendable {
     ) async throws -> LifecycleSagaExecutionResult {
         let affectedKeys = completed.union(currentNodes.map(\.key))
         let affected = plan.nodes.filter { affectedKeys.contains($0.key) }
+        if let irreversible = affected.first(where: { $0.action == .runHook }) {
+            return try safeHold(
+                plan: plan,
+                group: group,
+                completed: completed,
+                checkpoint: "\(irreversible.key):irreversible-effect-safe-hold",
+                hint:
+                    "\(reason) Hook \(irreversible.key) completed and its external effects cannot be inverted safely.",
+                reasonCode: LifecycleRecoverySafeHoldReason.irreversibleEffect.rawValue
+            )
+        }
         let rollbackStepsByKey = Dictionary(
             grouping: try store.operationGroupSteps.load(groupID: group.id)
                 .filter { $0.direction == .rollback },
@@ -1282,7 +1555,8 @@ public struct LifecycleSagaExecutor: Sendable {
                     group: group,
                     completed: completed,
                     checkpoint: "\(node.key):compensation-unavailable",
-                    hint: "\(reason) The exact inverse is unavailable; preserve state and owned resources."
+                    hint: "\(reason) The exact inverse is unavailable; preserve state and owned resources.",
+                    reasonCode: LifecycleRecoverySafeHoldReason.missingInverse.rawValue
                 )
             }
             let previousRollbackSteps = rollbackStepsByKey[node.key] ?? []
@@ -1294,7 +1568,8 @@ public struct LifecycleSagaExecutor: Sendable {
                         completed: completed,
                         checkpoint: "\(node.key):compensation-record-mismatch",
                         hint:
-                            "\(reason) The persisted compensation action does not match the exact planned inverse."
+                            "\(reason) The persisted compensation action does not match the exact planned inverse.",
+                        reasonCode: LifecycleRecoverySafeHoldReason.missingInverse.rawValue
                     )
                 }
                 if latest.status == .succeeded {
@@ -1308,15 +1583,21 @@ public struct LifecycleSagaExecutor: Sendable {
                     for: node,
                     compensation: compensation
                 )
-                let observation = await effects.observe(
-                    node: compensatingNode,
-                    context: context(
-                        plan: plan,
-                        group: group,
-                        attempt: max(1, attempt - 1),
-                        direction: .rollback
+                let observation = await HostwrightTraceContext.withSpan(
+                    .providerObserve,
+                    attributes: [try? HostwrightTraceAttribute(key: .phase, value: "observe")]
+                        .compactMap { $0 }
+                ) {
+                    await effects.observe(
+                        node: compensatingNode,
+                        context: context(
+                            plan: plan,
+                            group: group,
+                            attempt: max(1, attempt - 1),
+                            direction: .rollback
+                        )
                     )
-                )
+                }
                 switch observation {
                 case .satisfied(let verification):
                     try recordStep(
@@ -1344,7 +1625,8 @@ public struct LifecycleSagaExecutor: Sendable {
                         completed: completed,
                         checkpoint: "\(node.key):compensation-ambiguous-after-resume",
                         hint:
-                            "\(reason) Re-observation could not prove whether the interrupted compensation completed."
+                            "\(reason) Re-observation could not prove whether the interrupted compensation completed.",
+                        reasonCode: LifecycleRecoverySafeHoldReason.ambiguousEffect.rawValue
                     )
                 }
             }
@@ -1355,21 +1637,31 @@ public struct LifecycleSagaExecutor: Sendable {
                     completed: completed,
                     checkpoint: "\(node.key):compensation-attempts-exhausted",
                     hint:
-                        "\(reason) Compensation exhausted its bounded attempts; preserve the checkpoint for operator recovery."
+                        "\(reason) Compensation exhausted its bounded attempts; preserve the checkpoint for operator recovery.",
+                    reasonCode: LifecycleRecoverySafeHoldReason.compensationFailed.rawValue
                 )
             }
-            let validation = await validator.validate(
+            let validation = await HostwrightTraceContext.withSpan(.healthEvaluate) {
+                await validator.validate(
+                    plan: plan,
+                    node: node,
+                    expectedFencingToken: group.fencingToken
+                )
+            }
+            guard isCurrent(
+                validation,
                 plan: plan,
                 node: node,
-                expectedFencingToken: group.fencingToken
-            )
-            guard isCurrent(validation, plan: plan, node: node, fence: group.fencingToken) else {
+                fence: group.fencingToken,
+                groupIdempotencyKey: group.groupIdempotencyKey
+            ) else {
                 return try safeHold(
                     plan: plan,
                     group: group,
                     completed: completed,
                     checkpoint: "\(node.key):compensation-context-stale",
-                    hint: "\(reason) Compensation refused because ownership or fencing changed."
+                    hint: "\(reason) Compensation refused because ownership or fencing changed.",
+                    reasonCode: LifecycleRecoverySafeHoldReason.missingOwnership.rawValue
                 )
             }
             try recordStep(
@@ -1387,16 +1679,22 @@ public struct LifecycleSagaExecutor: Sendable {
                 suffix: "compensation-pending",
                 verification: nil
             )
-            let outcome = await effects.compensate(
-                compensation: compensation,
-                node: node,
-                context: context(
-                    plan: plan,
-                    group: group,
-                    attempt: attempt,
-                    direction: .rollback
+            let outcome = await HostwrightTraceContext.withSpan(
+                .rollbackCompensate,
+                attributes: [try? HostwrightTraceAttribute(key: .phase, value: "compensate")]
+                    .compactMap { $0 }
+            ) {
+                await effects.compensate(
+                    compensation: compensation,
+                    node: node,
+                    context: context(
+                        plan: plan,
+                        group: group,
+                        attempt: attempt,
+                        direction: .rollback
+                    )
                 )
-            )
+            }
             switch outcome {
             case .compensated(let verification):
                 try recordStep(
@@ -1429,19 +1727,64 @@ public struct LifecycleSagaExecutor: Sendable {
                     group: group,
                     completed: completed,
                     checkpoint: "\(node.key):compensation-failed",
-                    hint: "\(reason) Compensation failed; preserve the checkpoint for operator recovery."
+                    hint: "\(reason) Compensation failed; preserve the checkpoint for operator recovery.",
+                    reasonCode: LifecycleRecoverySafeHoldReason.compensationFailed.rawValue
                 )
             }
         }
-        try store.operationGroups.finish(
-            groupID: group.id,
+        var restoredHealth = "not-required"
+        if let verifier = effects as? any LifecycleSagaCompensationVerifying {
+            switch await verifier.verifyCompensation(
+                plan: plan,
+                context: context(
+                    plan: plan,
+                    group: group,
+                    attempt: 1,
+                    direction: .rollback
+                )
+            ) {
+            case .verified(let verification):
+                guard let lockOwner = group.lockOwner else {
+                    throw LifecycleSagaError.stateFailure(
+                        "Lifecycle compensation lost its finite lease before restored-health verification."
+                    )
+                }
+                let now = clock.now()
+                try store.operationGroups.recordCheckpointRenewingLease(
+                    groupID: group.id,
+                    expectedFencingToken: group.fencingToken,
+                    expectedLockOwner: lockOwner,
+                    checkpoint: "rollback-restored-health-verified",
+                    verificationJSONRedacted: try jsonObject([
+                        "reasonCode": "rollback.restored-health-verified",
+                        "summary": verification.summaryRedacted,
+                        "observationSHA256": verification.observationSHA256 ?? ""
+                    ]),
+                    lockExpiresAt: try Self.leaseExpiration(after: now),
+                    updatedAt: now
+                )
+                restoredHealth = "verified"
+            case .safeHold(let reasonCode, let hintRedacted):
+                return try safeHold(
+                    plan: plan,
+                    group: group,
+                    completed: completed,
+                    checkpoint: "rollback-restored-health-safe-hold",
+                    hint: hintRedacted,
+                    reasonCode: reasonCode
+                )
+            }
+        }
+        try finishOwned(
+            group: group,
             status: .failed,
             checkpoint: "compensated",
-            manualRecoveryHintRedacted: reason,
+            hint: reason,
             updatedAt: clock.now(),
-            metadataJSONRedacted: try jsonObject([
+            metadata: try jsonObject([
                 "result": LifecycleSagaExecutionStatus.compensated.rawValue,
-                "planSHA256": plan.planSHA256
+                "planSHA256": plan.planSHA256,
+                "restoredHealth": restoredHealth
             ])
         )
         return result(
@@ -1484,13 +1827,13 @@ public struct LifecycleSagaExecutor: Sendable {
         checkpoint: String,
         hint: String
     ) throws -> LifecycleSagaExecutionResult {
-        try store.operationGroups.finish(
-            groupID: group.id,
+        try finishOwned(
+            group: group,
             status: .interrupted,
             checkpoint: checkpoint,
-            manualRecoveryHintRedacted: hint,
+            hint: hint,
             updatedAt: clock.now(),
-            metadataJSONRedacted: try jsonObject([
+            metadata: try jsonObject([
                 "result": LifecycleSagaExecutionStatus.interrupted.rawValue,
                 "planSHA256": plan.planSHA256
             ])
@@ -1511,18 +1854,23 @@ public struct LifecycleSagaExecutor: Sendable {
         group: OperationGroupRecord,
         completed: Set<String>,
         checkpoint: String,
-        hint: String
+        hint: String,
+        reasonCode: String? = nil
     ) throws -> LifecycleSagaExecutionResult {
-        try store.operationGroups.finish(
-            groupID: group.id,
+        var metadata: [String: Any] = [
+            "result": LifecycleSagaExecutionStatus.safeHold.rawValue,
+            "planSHA256": plan.planSHA256
+        ]
+        if let reasonCode {
+            metadata["reasonCode"] = reasonCode
+        }
+        try finishOwned(
+            group: group,
             status: .failed,
             checkpoint: checkpoint,
-            manualRecoveryHintRedacted: hint,
+            hint: hint,
             updatedAt: clock.now(),
-            metadataJSONRedacted: try jsonObject([
-                "result": LifecycleSagaExecutionStatus.safeHold.rawValue,
-                "planSHA256": plan.planSHA256
-            ])
+            metadata: try jsonObject(metadata)
         )
         return result(
             status: .safeHold,
@@ -1531,7 +1879,39 @@ public struct LifecycleSagaExecutor: Sendable {
             groupID: group.id,
             checkpoint: checkpoint,
             completed: completed,
-            hint: hint
+            hint: hint,
+            reasonCode: reasonCode
+        )
+    }
+
+    private func finishOwned(
+        group: OperationGroupRecord,
+        status: OperationGroupStatus,
+        checkpoint: String,
+        hint: String,
+        updatedAt: String,
+        metadata: String
+    ) throws {
+        guard let expectedOwner = group.lockOwner,
+              let current = try store.operationGroups.load(id: group.id),
+              current.status == .active,
+              current.fencingToken == group.fencingToken,
+              current.lockOwner == expectedOwner,
+              let currentExpiry = current.lockExpiresAt else {
+            throw LifecycleSagaError.stateFailure(
+                "Lifecycle terminal transition lost its exact fenced executor lease."
+            )
+        }
+        try store.operationGroups.finishExactLease(
+            groupID: group.id,
+            expectedFencingToken: group.fencingToken,
+            expectedLockOwner: expectedOwner,
+            expectedLockExpiresAt: currentExpiry,
+            status: status,
+            checkpoint: checkpoint,
+            manualRecoveryHintRedacted: hint,
+            updatedAt: updatedAt,
+            metadataJSONRedacted: metadata
         )
     }
 
@@ -1542,7 +1922,8 @@ public struct LifecycleSagaExecutor: Sendable {
         groupID: String,
         checkpoint: String,
         completed: Set<String>,
-        hint: String
+        hint: String,
+        reasonCode: String? = nil
     ) -> LifecycleSagaExecutionResult {
         result(
             status: status,
@@ -1551,7 +1932,8 @@ public struct LifecycleSagaExecutor: Sendable {
             groupID: groupID,
             checkpoint: checkpoint,
             completed: completed.sorted(),
-            hint: hint
+            hint: hint,
+            reasonCode: reasonCode
         )
     }
 
@@ -1562,7 +1944,8 @@ public struct LifecycleSagaExecutor: Sendable {
         groupID: String,
         checkpoint: String,
         completed: [String],
-        hint: String
+        hint: String,
+        reasonCode: String? = nil
     ) -> LifecycleSagaExecutionResult {
         LifecycleSagaExecutionResult(
             status: status,
@@ -1571,7 +1954,8 @@ public struct LifecycleSagaExecutor: Sendable {
             planSHA256: plan.planSHA256,
             checkpoint: checkpoint,
             completedNodeKeys: completed.sorted(),
-            recoveryHintRedacted: RuntimeRedactionPolicy.default.redact(hint)
+            recoveryHintRedacted: RuntimeRedactionPolicy.default.redact(hint),
+            recoveryReasonCode: reasonCode
         )
     }
 

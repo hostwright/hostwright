@@ -1,7 +1,13 @@
 import Foundation
+import HostwrightObservability
 import HostwrightRuntime
 
 enum StateJSON {
+    private static let nonSecretStructuredKeys: Set<String> = [
+        "hostwrightAuthority",
+        "localLeaseAuthority"
+    ]
+
     private static let nonSecretIdentityKeys: Set<String> = [
         "authorizationPlanSHA256",
         "capabilitySHA256",
@@ -16,6 +22,7 @@ enum StateJSON {
         "resourceFencingToken",
         "resourceUUID",
         "secretReferenceSHA256",
+        "signerPublicKeySHA256",
         "verification"
     ]
 
@@ -48,6 +55,39 @@ enum StateJSON {
         return try encode(redact(value, using: policy))
     }
 
+    static func redactedJSONPreservingInvalid(
+        _ json: String,
+        using policy: RuntimeRedactionPolicy = .default
+    ) -> String {
+        (try? redactedJSON(json, using: policy)) ?? policy.redact(json)
+    }
+
+    static func redactedEventPayload(
+        _ json: String,
+        type: String,
+        source: String,
+        using policy: RuntimeRedactionPolicy = .default
+    ) -> String {
+        if type == HostwrightTraceContract.eventType,
+           source == HostwrightTraceContract.source,
+           let data = json.data(using: .utf8),
+           let decoded = try? JSONDecoder().decode(
+               HostwrightTraceSpanRecord.self,
+               from: data
+           ),
+           let validated = try? decoded.validated() {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [
+                .sortedKeys,
+                .withoutEscapingSlashes
+            ]
+            if let encoded = try? encoder.encode(validated) {
+                return String(decoding: encoded, as: UTF8.self)
+            }
+        }
+        return redactedJSONPreservingInvalid(json, using: policy)
+    }
+
     static func isObject(_ json: String) -> Bool {
         guard let data = json.data(using: .utf8),
               let value = try? JSONSerialization.jsonObject(with: data) else {
@@ -68,7 +108,9 @@ enum StateJSON {
         if let object = value as? [String: Any] {
             var redacted: [String: Any] = [:]
             for (key, nested) in object {
-                if nonSecretIdentityKeys.contains(key), let string = nested as? String {
+                if nonSecretStructuredKeys.contains(key) {
+                    redacted[key] = redact(nested, key: nil, using: policy)
+                } else if nonSecretIdentityKeys.contains(key), let string = nested as? String {
                     redacted[key] = string
                 } else {
                     redacted[key] = policy.isSensitiveKey(key)

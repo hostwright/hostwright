@@ -13,6 +13,9 @@ public struct HostwrightManifest: Equatable, Sendable {
     public var imageSBOM: HostwrightImageSBOMPolicy?
     public var imageVulnerability: HostwrightImageVulnerabilityPolicy?
     public var imageProvenance: HostwrightImageProvenancePolicy?
+    public var restartBudget: HostwrightProjectRestartBudget?
+    public var maintenance: HostwrightMaintenancePolicy?
+    public var retention: HostwrightRetentionPolicy?
     public var volumes: [String: HostwrightVolumeDeclaration]
     public var networks: [String: HostwrightNetworkDefinition]
     public var certificates: [String: HostwrightCertificateDeclaration]
@@ -83,6 +86,37 @@ public struct HostwrightManifest: Equatable, Sendable {
             imageSBOM: imageSBOM,
             imageVulnerability: imageVulnerability,
             imageProvenance: imageProvenance,
+            restartBudget: nil,
+            volumes: volumes,
+            services: services
+        )
+    }
+
+    public init(
+        version: Int?,
+        project: String?,
+        imagePolicy: HostwrightImagePolicy?,
+        imageTrust: HostwrightImageTrustPolicy?,
+        imageSBOM: HostwrightImageSBOMPolicy?,
+        imageVulnerability: HostwrightImageVulnerabilityPolicy? = nil,
+        imageProvenance: HostwrightImageProvenancePolicy? = nil,
+        restartBudget: HostwrightProjectRestartBudget?,
+        maintenance: HostwrightMaintenancePolicy? = nil,
+        retention: HostwrightRetentionPolicy? = nil,
+        volumes: [String: HostwrightVolumeDeclaration] = [:],
+        services: [HostwrightService]
+    ) {
+        self.init(
+            version: version,
+            project: project,
+            imagePolicy: imagePolicy,
+            imageTrust: imageTrust,
+            imageSBOM: imageSBOM,
+            imageVulnerability: imageVulnerability,
+            imageProvenance: imageProvenance,
+            restartBudget: restartBudget,
+            maintenance: maintenance,
+            retention: retention,
             volumes: volumes,
             networks: [:],
             certificates: [:],
@@ -107,6 +141,42 @@ public struct HostwrightManifest: Equatable, Sendable {
         tunnels: [String: HostwrightTunnelDeclaration] = [:],
         services: [HostwrightService]
     ) {
+        self.init(
+            version: version,
+            project: project,
+            imagePolicy: imagePolicy,
+            imageTrust: imageTrust,
+            imageSBOM: imageSBOM,
+            imageVulnerability: imageVulnerability,
+            imageProvenance: imageProvenance,
+            restartBudget: nil,
+            volumes: volumes,
+            networks: networks,
+            certificates: certificates,
+            ingress: ingress,
+            tunnels: tunnels,
+            services: services
+        )
+    }
+
+    public init(
+        version: Int?,
+        project: String?,
+        imagePolicy: HostwrightImagePolicy?,
+        imageTrust: HostwrightImageTrustPolicy?,
+        imageSBOM: HostwrightImageSBOMPolicy?,
+        imageVulnerability: HostwrightImageVulnerabilityPolicy? = nil,
+        imageProvenance: HostwrightImageProvenancePolicy? = nil,
+        restartBudget: HostwrightProjectRestartBudget?,
+        maintenance: HostwrightMaintenancePolicy? = nil,
+        retention: HostwrightRetentionPolicy? = nil,
+        volumes: [String: HostwrightVolumeDeclaration] = [:],
+        networks: [String: HostwrightNetworkDefinition],
+        certificates: [String: HostwrightCertificateDeclaration],
+        ingress: [String: HostwrightIngressListener] = [:],
+        tunnels: [String: HostwrightTunnelDeclaration] = [:],
+        services: [HostwrightService]
+    ) {
         self.version = version
         self.project = project
         self.imagePolicy = imagePolicy
@@ -114,6 +184,9 @@ public struct HostwrightManifest: Equatable, Sendable {
         self.imageSBOM = imageSBOM
         self.imageVulnerability = imageVulnerability
         self.imageProvenance = imageProvenance
+        self.restartBudget = restartBudget
+        self.maintenance = maintenance
+        self.retention = retention
         self.volumes = volumes
         self.networks = networks
         self.certificates = certificates
@@ -970,9 +1043,215 @@ public enum HostwrightProbeAction: Equatable, Sendable {
 
 public struct HostwrightRestart: Equatable, Sendable {
     public var policy: String
+    public var maxAttempts: Int
+    public var window: Int
+    public var backoff: Int
+    public var maxBackoff: Int
+    public var jitter: Int
+    public var stableRun: Int
+    public var priority: Int
 
     public init(policy: String) {
+        self.init(
+            policy: policy,
+            maxAttempts: 3,
+            window: 300,
+            backoff: 60,
+            maxBackoff: 300,
+            jitter: 0,
+            stableRun: 60,
+            priority: 0
+        )
+    }
+
+    public init(
+        policy: String,
+        maxAttempts: Int,
+        window: Int = 300,
+        backoff: Int = 60,
+        maxBackoff: Int = 300,
+        jitter: Int = 0,
+        stableRun: Int = 60,
+        priority: Int = 0
+    ) {
         self.policy = policy
+        self.maxAttempts = maxAttempts
+        self.window = window
+        self.backoff = backoff
+        self.maxBackoff = maxBackoff
+        self.jitter = jitter
+        self.stableRun = stableRun
+        self.priority = priority
+    }
+}
+
+public struct HostwrightProjectRestartBudget: Equatable, Sendable {
+    public var maxAttempts: Int
+    public var window: Int
+
+    public init(maxAttempts: Int = 10, window: Int = 300) {
+        self.maxAttempts = maxAttempts
+        self.window = window
+    }
+}
+
+public enum HostwrightMaintenanceActionClass: String, CaseIterable, Codable, Equatable, Hashable, Sendable {
+    case create
+    case start
+    case restart
+    case update
+    case remove
+    case recovery
+    case securityStop = "security-stop"
+
+    public var isElective: Bool {
+        self != .recovery && self != .securityStop
+    }
+}
+
+public enum HostwrightMaintenanceWeekday: String, CaseIterable, Equatable, Sendable {
+    case monday
+    case tuesday
+    case wednesday
+    case thursday
+    case friday
+    case saturday
+    case sunday
+}
+
+public struct HostwrightRecurringMaintenanceWindow: Equatable, Sendable {
+    public var weekdays: [HostwrightMaintenanceWeekday]
+    public var start: String
+    public var duration: Int
+
+    public init(
+        weekdays: [HostwrightMaintenanceWeekday],
+        start: String,
+        duration: Int
+    ) {
+        self.weekdays = weekdays
+        self.start = start
+        self.duration = duration
+    }
+}
+
+public struct HostwrightOneShotMaintenanceWindow: Equatable, Sendable {
+    public var startsAt: String
+    public var duration: Int
+
+    public init(startsAt: String, duration: Int) {
+        self.startsAt = startsAt
+        self.duration = duration
+    }
+}
+
+public enum HostwrightMaintenanceSchedule: Equatable, Sendable {
+    case recurring(HostwrightRecurringMaintenanceWindow)
+    case oneShot(HostwrightOneShotMaintenanceWindow)
+}
+
+public struct HostwrightMaintenanceWindow: Equatable, Sendable {
+    public static let maximumWindows = 64
+
+    public var id: String
+    public var actions: [HostwrightMaintenanceActionClass]
+    public var schedule: HostwrightMaintenanceSchedule
+
+    public init(
+        id: String,
+        actions: [HostwrightMaintenanceActionClass],
+        schedule: HostwrightMaintenanceSchedule
+    ) {
+        self.id = id
+        self.actions = actions
+        self.schedule = schedule
+    }
+}
+
+public struct HostwrightMaintenancePolicy: Equatable, Sendable {
+    public var timezone: String
+    public var maximumDeferral: Int
+    public var windows: [HostwrightMaintenanceWindow]
+
+    public init(
+        timezone: String,
+        maximumDeferral: Int = 86_400,
+        windows: [HostwrightMaintenanceWindow]
+    ) {
+        self.timezone = timezone
+        self.maximumDeferral = maximumDeferral
+        self.windows = windows
+    }
+}
+
+public enum HostwrightRetentionClass: String, CaseIterable, Codable, Equatable, Hashable, Sendable {
+    case operations
+    case observations
+    case events
+    case logs
+    case metrics
+    case traces
+    case audits
+    case supportEvidence
+    case backups
+    case tombstones
+}
+
+public struct HostwrightRetentionClassPolicy: Equatable, Sendable {
+    public var maxAge: Int
+    public var maxRecords: Int
+    public var minimumRecords: Int
+
+    public init(maxAge: Int, maxRecords: Int, minimumRecords: Int) {
+        self.maxAge = maxAge
+        self.maxRecords = maxRecords
+        self.minimumRecords = minimumRecords
+    }
+}
+
+public struct HostwrightRetentionHold: Equatable, Sendable {
+    public var id: String
+    public var retentionClass: HostwrightRetentionClass
+    public var selector: String
+    public var reason: String
+    public var expiresAt: String?
+
+    public init(
+        id: String,
+        retentionClass: HostwrightRetentionClass,
+        selector: String,
+        reason: String,
+        expiresAt: String? = nil
+    ) {
+        self.id = id
+        self.retentionClass = retentionClass
+        self.selector = selector
+        self.reason = reason
+        self.expiresAt = expiresAt
+    }
+}
+
+public struct HostwrightRetentionPolicy: Equatable, Sendable {
+    public static let maximumHolds = 64
+
+    public var recoveryHorizon: Int
+    public var maximumDatabaseBytes: Int
+    public var targetDatabaseBytes: Int
+    public var classes: [HostwrightRetentionClass: HostwrightRetentionClassPolicy]
+    public var holds: [HostwrightRetentionHold]
+
+    public init(
+        recoveryHorizon: Int,
+        maximumDatabaseBytes: Int,
+        targetDatabaseBytes: Int,
+        classes: [HostwrightRetentionClass: HostwrightRetentionClassPolicy],
+        holds: [HostwrightRetentionHold] = []
+    ) {
+        self.recoveryHorizon = recoveryHorizon
+        self.maximumDatabaseBytes = maximumDatabaseBytes
+        self.targetDatabaseBytes = targetDatabaseBytes
+        self.classes = classes
+        self.holds = holds
     }
 }
 
@@ -986,17 +1265,20 @@ public struct HostwrightUpdatePolicy: Equatable, Sendable {
     public var maxSurge: Int
     public var maxUnavailable: Int
     public var progressDeadline: Int
+    public var stableObservation: Int
 
     public init(
         strategy: HostwrightUpdateStrategy = .rolling,
         maxSurge: Int = 1,
         maxUnavailable: Int = 0,
-        progressDeadline: Int = 300
+        progressDeadline: Int = 300,
+        stableObservation: Int = 0
     ) {
         self.strategy = strategy
         self.maxSurge = maxSurge
         self.maxUnavailable = maxUnavailable
         self.progressDeadline = progressDeadline
+        self.stableObservation = stableObservation
     }
 }
 

@@ -49,6 +49,10 @@ public struct SQLiteStateStore: StateStore {
         OperationLedger(store: self)
     }
 
+    public var traces: StateTraceService {
+        StateTraceService(store: self)
+    }
+
     public var operationGroups: OperationGroupRepository {
         OperationGroupRepository(store: self)
     }
@@ -65,8 +69,16 @@ public struct SQLiteStateStore: StateStore {
         RestartPolicyStateRepository(store: self)
     }
 
+    public var restartAttempts: RestartAttemptHistoryRepository {
+        RestartAttemptHistoryRepository(store: self)
+    }
+
     public var restartRecovery: RestartRecoveryRecordRepository {
         RestartRecoveryRecordRepository(store: self)
+    }
+
+    public var maintenanceDeferrals: MaintenanceDeferralRepository {
+        MaintenanceDeferralRepository(store: self)
     }
 
     public var ownership: OwnershipRepository {
@@ -103,6 +115,14 @@ public struct SQLiteStateStore: StateStore {
         try withConnection(createIfNeeded: false, readOnly: true) { connection in
             try MigrationRunner().validateAppliedSchema(on: connection)
         }
+    }
+
+    public func acquireOperationMutationFence(
+        groupID: String
+    ) throws -> OperationMutationFence {
+        try configuration.prepareStateAccessFoundation()
+        return try StateAccessCoordinator(configuration: configuration)
+            .acquireOperationMutationFence(groupID: groupID)
     }
 
     public func schemaVersion() throws -> Int {

@@ -209,8 +209,15 @@ struct DistributionInstaller: Sendable {
             timeoutSeconds: 30,
             cancellation: cancellation
         )
-        guard daemon.standardOutput.contains("Usage:"),
-              daemon.standardOutput.contains("does not perform unattended runtime mutation") else {
+        guard daemon.standardOutput.contains(
+            "hostwrightd --foreground --config <hostwright.yaml>"
+        ),
+        daemon.standardOutput.contains(
+            "hostwrightd --service --config <absolute-hostwright.yaml>"
+        ),
+        daemon.standardOutput.contains(
+            "Mutations require exact provider capability, ownership, plan confirmation, and durable fencing."
+        ) else {
             throw DistributionError.lifecycleFailed("installed hostwrightd help did not preserve its safety boundary")
         }
         commands.append(evidenceCommand("installed hostwrightd --help", result: daemon))

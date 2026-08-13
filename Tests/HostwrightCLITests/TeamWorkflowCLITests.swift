@@ -640,6 +640,7 @@ private final class CapturingRuntimeAdapter: RuntimeAdapter, @unchecked Sendable
     private let lock = NSLock()
     private var capturedActions: [PlannedRuntimeAction] = []
     private var capturedConfirmations: [RuntimeMutationConfirmation] = []
+    private var removedResourceIdentifiers: Set<String> = []
 
     init(observedServices: [ObservedRuntimeService]) {
         observedState = ObservedRuntimeState(
@@ -671,7 +672,15 @@ private final class CapturingRuntimeAdapter: RuntimeAdapter, @unchecked Sendable
     }
 
     func observe(desiredState: DesiredRuntimeState) async throws -> ObservedRuntimeState {
-        observedState
+        let removed = lock.withLock { removedResourceIdentifiers }
+        return ObservedRuntimeState(
+            projectName: observedState.projectName,
+            services: observedState.services.filter {
+                !removed.contains($0.resourceIdentifier)
+            },
+            adapterMetadata: observedState.adapterMetadata,
+            capabilitySHA256: observedState.capabilitySHA256
+        )
     }
 
     func plan(desiredState: DesiredRuntimeState, observedState: ObservedRuntimeState) async throws -> RuntimePlan {
@@ -681,6 +690,9 @@ private final class CapturingRuntimeAdapter: RuntimeAdapter, @unchecked Sendable
     func execute(_ action: PlannedRuntimeAction, confirmation: RuntimeMutationConfirmation?) async throws -> RuntimeEvent {
         lock.withLock {
             capturedActions.append(action)
+            if action.kind == .remove {
+                removedResourceIdentifiers.insert(action.resourceIdentifier)
+            }
             if let confirmation {
                 capturedConfirmations.append(confirmation)
             }

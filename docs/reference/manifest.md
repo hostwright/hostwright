@@ -8,6 +8,19 @@ The manifest filename is `hostwright.yaml`.
 version: 2
 project: api-local
 imagePolicy: allow-tags
+restartBudget:
+  maxAttempts: 10
+  window: 300s
+maintenance:
+  timezone: America/New_York
+  maximumDeferral: 86400s
+  windows:
+    - id: weekly-change
+      actions: [create, start, restart, update, remove]
+      recurring:
+        weekdays: [sunday]
+        start: "02:00"
+        duration: 7200s
 
 volumes:
   database-data:
@@ -60,11 +73,19 @@ services:
         interval: 20s
     restart:
       policy: on-failure
+      maxAttempts: 3
+      window: 300s
+      backoff: 60s
+      maxBackoff: 300s
+      jitter: 0s
+      stableRun: 60s
+      priority: 0
     update:
       strategy: rolling
       maxSurge: 1
       maxUnavailable: 0
       progressDeadline: 300s
+      stableObservation: 30s
     hooks:
       postStart:
         exec: ["/app/server", "warm"]
@@ -100,7 +121,7 @@ Hostwright pins Yams 6.2.2 only inside `HostwrightManifest` and applies its own 
 
 Duplicate keys are rejected at every level. Anchors, aliases, merge keys, custom tags, multiple documents, ambiguous scalar coercion, unknown fields, and limit violations fail with stable line, column, and manifest-path diagnostics. Canonical encoding uses fixed field order and lexically sorted maps; every checked-in manifest must satisfy parse → canonical encode → parse equality.
 
-The top-level schema accepts exact named-volume declarations. The service schema accepts `image`, `replicas`, `platform`, `resources`, numeric `user` and `group`, `workdir`, `entrypoint`, `command`, `init`, `dependsOn`, `env`, `secretEnv`, `labels`, `ports`, typed bind/named-volume/tmpfs `volumes`, `probes`, legacy `health`, `restart`, `update`, `hooks`, `rosetta`, `virtualization`, `readOnlyRootFilesystem`, and `shmSize`. No accepted field is inert: it maps to desired runtime behavior or fails before mutation when the selected provider cannot execute it.
+The top-level schema accepts bounded project `restartBudget`, local `maintenance` admission policy, schema-v17 `retention` policy, and exact named-volume declarations. The service schema accepts `image`, `replicas`, `platform`, `resources`, numeric `user` and `group`, `workdir`, `entrypoint`, `command`, `init`, `dependsOn`, `env`, `secretEnv`, `labels`, `ports`, typed bind/named-volume/tmpfs `volumes`, `probes`, legacy `health`, `restart`, `update`, `hooks`, `rosetta`, `virtualization`, `readOnlyRootFilesystem`, and `shmSize`. No accepted field is inert: it maps to desired runtime behavior or fails before mutation when the selected provider cannot execute it.
 
 Unsupported Kubernetes, Compose, or other orchestrator fields fail closed. This includes `apiVersion`, `kind`, `metadata`, `build`, `depends_on`, `deploy`, `networks`, `network_mode`, `dns`, `dns_search`, `domainname`, `hostname`, `extra_hosts`, `aliases`, `expose`, `configs`, and `secrets`.
 
@@ -135,11 +156,20 @@ Validation currently checks:
 - typed mounts use `bind`, `volume`, or `tmpfs`; bind sources cannot expose host root, devices, traversal, symlinks, or unsafe ownership, and named-volume sources must reference a declaration;
 - each probe declares exactly one `exec`, loopback `http`, or loopback `tcp` action with bounded timing and thresholds;
 - HTTP/TCP probes reference a declared container port;
-- restart policy is `no`, `on-failure`, or `unless-stopped`;
-- rolling/recreate update bounds are internally consistent and progress deadlines are positive;
+- restart policy is `no`, `on-failure`, or `unless-stopped`; optional workload `maxAttempts`, rolling `window`, exponential `backoff`/`maxBackoff`, deterministic `jitter`, `stableRun`, and `priority` are bounded and cross-validated;
+- top-level `restartBudget` accepts only project `maxAttempts` from 1 through 1000 and `window` from 1 second through 24 hours;
+- top-level `maintenance` requires a named IANA timezone and 1 through 64 uniquely named recurring or one-shot windows; each window admits only an explicit non-empty subset of `create`, `start`, `restart`, `update`, and `remove`;
+- recurring maintenance uses unique weekdays, strict local `HH:mm`, and a bounded positive duration; one-shot maintenance uses canonical UTC `startsAt` plus a bounded positive duration; `maximumDeferral` is bounded from 1 second through 30 days;
+- top-level `retention`, when present, requires a 60-second-through-365-day recovery horizon, 1 MiB-through-1 TiB maximum/target database sizes with target no larger than maximum, and exactly the ten classes `operations`, `observations`, `events`, `logs`, `metrics`, `traces`, `audits`, `supportEvidence`, `backups`, and `tombstones`;
+- every retention class requires `maxAge`, `maxRecords`, and `minimumRecords`; `maxAge` cannot undercut the recovery horizon, record bounds are finite and internally ordered, and up to 64 exact operator/legal holds may bind one class to `*` or one bounded record identity with an optional canonical UTC expiry;
+- rolling/recreate update bounds are internally consistent, progress deadlines are positive, and optional `stableObservation` is no longer than the progress deadline;
 - Rosetta requires `amd64` plus virtualization.
 
 Validation does not contact registries or Apple container.
+
+`update.stableObservation` defaults to zero. A positive duration requires a readiness or liveness probe. Promotion then requires startup, readiness, liveness, dependency, and stable-observation gates declared by the service. Hostwright persists the first continuously healthy observation and re-runs configured readiness and liveness probes until the duration elapses; a declared probe failure clears the interval. A restart resumes from that persisted checkpoint instead of creating another candidate.
+
+Maintenance scheduling is deterministic in the declared timezone. A nonexistent local time during a daylight-saving transition advances to the first representable matching time; a repeated local time uses its first occurrence only. Elective mutation outside every applicable window is durably deferred with a hard deadline and exact confirmation token. Safety recovery and security-stop actions are never configurable or deferrable. Preview is read-only; cancellation or emergency override applies only to the exact current token, and the daemon revalidates the policy, token, and open interval immediately before lifecycle effects.
 
 After validation, Hostwright maps accepted manifests into runtime desired state and evaluates local policy decisions for planner safety. Current planner policy decisions explain port conflicts, broad bind blockers, privileged-port warnings, unsafe mounts, and secret redaction. Separate local policy APIs can also explain image-policy failures, unsupported untrusted-manifest fields, secure-exposure blockers, and accelerator blockers without adding runtime side effects. Policy evaluation is local and non-mutating; it does not expand the manifest into Compose parity.
 

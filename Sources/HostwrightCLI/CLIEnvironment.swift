@@ -1,7 +1,10 @@
 import Darwin
+import Dispatch
 import Foundation
 import HostwrightCore
+import HostwrightDaemonCore
 import HostwrightHealth
+import HostwrightObservability
 import HostwrightRegistry
 import HostwrightRuntime
 import HostwrightSecrets
@@ -48,6 +51,21 @@ public struct CLIEnvironment: @unchecked Sendable {
     public var benchmarkSleep: (TimeInterval) -> Void
     public var benchmarkUUID: () -> UUID
     public var benchmarkNotice: (String) -> Void
+    public var daemonLifecycleController: () -> DaemonLifecycleController
+    public var observabilitySink: any HostwrightLogSinking
+    public var observabilityCorrelationID: () -> String
+    public var observabilityStatus: () -> HostwrightObservabilityStatus
+    public var eventWatchMonotonicNow: () -> UInt64
+    public var eventWatchSleep: (TimeInterval) -> Void
+    public var eventWatchCancelled: () -> Bool
+    public var metricsDate: @Sendable () -> Date
+    public var metricsCancelled: () -> Bool
+    public var traceDate: @Sendable () -> Date
+    public var traceCancelled: () -> Bool
+    public var supportDate: @Sendable () -> Date
+    public var supportCancelled: () -> Bool
+    public var supportLogs: @Sendable () -> HostwrightSupportLogCollection
+    public var supportEncrypt: @Sendable (Data, String) throws -> Data
 
     public init(
         fileExists: @escaping (String) -> Bool,
@@ -120,7 +138,32 @@ public struct CLIEnvironment: @unchecked Sendable {
         benchmarkMonotonicNanoseconds: @escaping () -> UInt64 = { DispatchTime.now().uptimeNanoseconds },
         benchmarkSleep: @escaping (TimeInterval) -> Void = { Thread.sleep(forTimeInterval: $0) },
         benchmarkUUID: @escaping () -> UUID = { UUID() },
-        benchmarkNotice: @escaping (String) -> Void = { _ in }
+        benchmarkNotice: @escaping (String) -> Void = { _ in },
+        daemonLifecycleController: @escaping () -> DaemonLifecycleController = {
+            DaemonLifecycleController()
+        },
+        observabilitySink: any HostwrightLogSinking = DisabledHostwrightLogSink(),
+        observabilityCorrelationID: @escaping () -> String = { UUID().uuidString.lowercased() },
+        observabilityStatus: @escaping () -> HostwrightObservabilityStatus = {
+            HostwrightObservabilityStatus(configuration: .disabled)
+        },
+        eventWatchMonotonicNow: @escaping () -> UInt64 = {
+            DispatchTime.now().uptimeNanoseconds
+        },
+        eventWatchSleep: @escaping (TimeInterval) -> Void = { interval in
+            Thread.sleep(forTimeInterval: interval)
+        },
+        eventWatchCancelled: @escaping () -> Bool = { false },
+        metricsDate: @escaping @Sendable () -> Date = Date.init,
+        metricsCancelled: @escaping () -> Bool = { false },
+        traceDate: @escaping @Sendable () -> Date = Date.init,
+        traceCancelled: @escaping () -> Bool = { false },
+        supportDate: @escaping @Sendable () -> Date = Date.init,
+        supportCancelled: @escaping () -> Bool = { false },
+        supportLogs: @escaping @Sendable () -> HostwrightSupportLogCollection = { .unavailable },
+        supportEncrypt: @escaping @Sendable (Data, String) throws -> Data = { _, _ in
+            throw HostwrightSupportBundleError.encryptionUnavailable
+        }
     ) {
         self.fileExists = fileExists
         self.readTextFile = readTextFile
@@ -185,6 +228,21 @@ public struct CLIEnvironment: @unchecked Sendable {
         self.benchmarkSleep = benchmarkSleep
         self.benchmarkUUID = benchmarkUUID
         self.benchmarkNotice = benchmarkNotice
+        self.daemonLifecycleController = daemonLifecycleController
+        self.observabilitySink = observabilitySink
+        self.observabilityCorrelationID = observabilityCorrelationID
+        self.observabilityStatus = observabilityStatus
+        self.eventWatchMonotonicNow = eventWatchMonotonicNow
+        self.eventWatchSleep = eventWatchSleep
+        self.eventWatchCancelled = eventWatchCancelled
+        self.metricsDate = metricsDate
+        self.metricsCancelled = metricsCancelled
+        self.traceDate = traceDate
+        self.traceCancelled = traceCancelled
+        self.supportDate = supportDate
+        self.supportCancelled = supportCancelled
+        self.supportLogs = supportLogs
+        self.supportEncrypt = supportEncrypt
     }
 
     public static let live = CLIEnvironment(
@@ -273,6 +331,12 @@ public struct CLIEnvironment: @unchecked Sendable {
         benchmarkUUID: { UUID() },
         benchmarkNotice: { message in
             FileHandle.standardError.write(Data((message + "\n").utf8))
+        },
+        observabilitySink: HostwrightOSLogSink(),
+        observabilityStatus: { HostwrightObservabilityStatus(configuration: .live) },
+        supportLogs: { SupportBundleOSLogCollector.collect() },
+        supportEncrypt: { data, recipient in
+            try SupportBundlePlatformEncryptor.encrypt(data, recipientReference: recipient)
         }
     )
 }

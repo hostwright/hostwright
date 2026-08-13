@@ -12,6 +12,64 @@ public enum ManifestCanonicalEncoder {
             "version: \(HostwrightManifest.currentVersion)",
             "project: \(quote(manifest.project ?? ""))"
         ]
+        if let restartBudget = manifest.restartBudget {
+            lines.append("restartBudget:")
+            lines.append("  maxAttempts: \(restartBudget.maxAttempts)")
+            lines.append("  window: \(quote("\(restartBudget.window)s"))")
+        }
+        if let maintenance = manifest.maintenance {
+            lines.append("maintenance:")
+            lines.append("  timezone: \(quote(maintenance.timezone))")
+            lines.append("  maximumDeferral: \(quote("\(maintenance.maximumDeferral)s"))")
+            lines.append("  windows:")
+            for window in maintenance.windows.sorted(by: { $0.id < $1.id }) {
+                lines.append("    - id: \(quote(window.id))")
+                lines.append("      actions:")
+                for action in window.actions.sorted(by: { $0.rawValue < $1.rawValue }) {
+                    lines.append("        - \(quote(action.rawValue))")
+                }
+                switch window.schedule {
+                case .recurring(let recurring):
+                    lines.append("      recurring:")
+                    lines.append("        weekdays:")
+                    for weekday in recurring.weekdays.sorted(by: { $0.rawValue < $1.rawValue }) {
+                        lines.append("          - \(quote(weekday.rawValue))")
+                    }
+                    lines.append("        start: \(quote(recurring.start))")
+                    lines.append("        duration: \(quote("\(recurring.duration)s"))")
+                case .oneShot(let oneShot):
+                    lines.append("      oneShot:")
+                    lines.append("        startsAt: \(quote(oneShot.startsAt))")
+                    lines.append("        duration: \(quote("\(oneShot.duration)s"))")
+                }
+            }
+        }
+        if let retention = manifest.retention {
+            lines.append("retention:")
+            lines.append("  recoveryHorizon: \(quote("\(retention.recoveryHorizon)s"))")
+            lines.append("  maximumDatabaseBytes: \(retention.maximumDatabaseBytes)")
+            lines.append("  targetDatabaseBytes: \(retention.targetDatabaseBytes)")
+            lines.append("  classes:")
+            for retentionClass in HostwrightRetentionClass.allCases.sorted(by: { $0.rawValue < $1.rawValue }) {
+                guard let policy = retention.classes[retentionClass] else { continue }
+                lines.append("    \(retentionClass.rawValue):")
+                lines.append("      maxAge: \(quote("\(policy.maxAge)s"))")
+                lines.append("      maxRecords: \(policy.maxRecords)")
+                lines.append("      minimumRecords: \(policy.minimumRecords)")
+            }
+            if !retention.holds.isEmpty {
+                lines.append("  holds:")
+                for hold in retention.holds.sorted(by: { $0.id < $1.id }) {
+                    lines.append("    - id: \(quote(hold.id))")
+                    lines.append("      class: \(quote(hold.retentionClass.rawValue))")
+                    lines.append("      selector: \(quote(hold.selector))")
+                    lines.append("      reason: \(quote(hold.reason))")
+                    if let expiresAt = hold.expiresAt {
+                        lines.append("      expiresAt: \(quote(expiresAt))")
+                    }
+                }
+            }
+        }
         if let imagePolicy = manifest.imagePolicy {
             lines.append("imagePolicy: \(quote(imagePolicy.rawValue))")
         }
@@ -198,6 +256,27 @@ public enum ManifestCanonicalEncoder {
             if let restart = service.restart {
                 lines.append("    restart:")
                 lines.append("      policy: \(quote(restart.policy))")
+                if restart.maxAttempts != 3 {
+                    lines.append("      maxAttempts: \(restart.maxAttempts)")
+                }
+                if restart.window != 300 {
+                    lines.append("      window: \(quote("\(restart.window)s"))")
+                }
+                if restart.backoff != 60 {
+                    lines.append("      backoff: \(quote("\(restart.backoff)s"))")
+                }
+                if restart.maxBackoff != 300 {
+                    lines.append("      maxBackoff: \(quote("\(restart.maxBackoff)s"))")
+                }
+                if restart.jitter != 0 {
+                    lines.append("      jitter: \(quote("\(restart.jitter)s"))")
+                }
+                if restart.stableRun != 60 {
+                    lines.append("      stableRun: \(quote("\(restart.stableRun)s"))")
+                }
+                if restart.priority != 0 {
+                    lines.append("      priority: \(restart.priority)")
+                }
             }
             if service.update != HostwrightUpdatePolicy() {
                 lines.append("    update:")
@@ -205,6 +284,9 @@ public enum ManifestCanonicalEncoder {
                 lines.append("      maxSurge: \(service.update.maxSurge)")
                 lines.append("      maxUnavailable: \(service.update.maxUnavailable)")
                 lines.append("      progressDeadline: \(quote("\(service.update.progressDeadline)s"))")
+                if service.update.stableObservation != 0 {
+                    lines.append("      stableObservation: \(quote("\(service.update.stableObservation)s"))")
+                }
             }
             if service.hooks.postStart != nil || service.hooks.preStop != nil {
                 lines.append("    hooks:")

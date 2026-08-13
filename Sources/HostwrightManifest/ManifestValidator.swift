@@ -23,6 +23,9 @@ public enum ManifestValidator {
         validateImageSBOM(manifest, issues: &issues)
         validateImageVulnerability(manifest, issues: &issues)
         validateImageProvenance(manifest, issues: &issues)
+        validateProjectRestartBudget(manifest.restartBudget, issues: &issues)
+        validateMaintenance(manifest.maintenance, issues: &issues)
+        validateRetention(manifest.retention, issues: &issues)
         validateVolumeDeclarations(manifest.volumes, issues: &issues)
         validateNetworkDefinitions(manifest.networks, issues: &issues)
         validateCertificateDeclarations(manifest.certificates, issues: &issues)
@@ -2523,6 +2526,88 @@ public enum ManifestValidator {
         if !allowed.contains(restart.policy) {
             issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Service '\(serviceName)' restart policy must be one of: \(allowed.joined(separator: ", "))."))
         }
+        if !(1...100).contains(restart.maxAttempts) {
+            issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Service '\(serviceName)' restart.maxAttempts must be between 1 and 100."))
+        }
+        if !(1...86_400).contains(restart.window) {
+            issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Service '\(serviceName)' restart.window must be between 1s and 24h."))
+        }
+        if !(1...3_600).contains(restart.backoff) ||
+            !(restart.backoff...86_400).contains(restart.maxBackoff) {
+            issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Service '\(serviceName)' restart backoff must be 1s...1h and maxBackoff must be between backoff and 24h."))
+        }
+        if !(0...restart.backoff).contains(restart.jitter) {
+            issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Service '\(serviceName)' restart.jitter must be between zero and backoff."))
+        }
+        if !(1...86_400).contains(restart.stableRun) {
+            issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Service '\(serviceName)' restart.stableRun must be between 1s and 24h."))
+        }
+        if !(-100...100).contains(restart.priority) {
+            issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Service '\(serviceName)' restart.priority must be between -100 and 100."))
+        }
+    }
+
+    private static func validateProjectRestartBudget(
+        _ budget: HostwrightProjectRestartBudget?,
+        issues: inout [ManifestIssue]
+    ) {
+        guard let budget else { return }
+        if !(1...1_000).contains(budget.maxAttempts) {
+            issues.append(ManifestIssue(code: .manifestValidationFailed, message: "restartBudget.maxAttempts must be between 1 and 1000.", path: "$.restartBudget.maxAttempts"))
+        }
+        if !(1...86_400).contains(budget.window) {
+            issues.append(ManifestIssue(code: .manifestValidationFailed, message: "restartBudget.window must be between 1s and 24h.", path: "$.restartBudget.window"))
+        }
+    }
+
+    private static func validateMaintenance(
+        _ policy: HostwrightMaintenancePolicy?,
+        issues: inout [ManifestIssue]
+    ) {
+        guard let policy else { return }
+        guard TimeZone(identifier: policy.timezone) != nil else {
+            issues.append(ManifestIssue(code: .manifestValidationFailed, message: "maintenance.timezone must name an installed IANA timezone.", path: "$.maintenance.timezone"))
+            return
+        }
+        if !(60...2_592_000).contains(policy.maximumDeferral) {
+            issues.append(ManifestIssue(code: .manifestValidationFailed, message: "maintenance.maximumDeferral must be between 60s and 30 days.", path: "$.maintenance.maximumDeferral"))
+        }
+        if policy.windows.isEmpty || policy.windows.count > HostwrightMaintenanceWindow.maximumWindows {
+            issues.append(ManifestIssue(code: .manifestValidationFailed, message: "maintenance.windows must contain 1 through 64 windows.", path: "$.maintenance.windows"))
+        }
+        let ids = policy.windows.map(\.id)
+        if Set(ids).count != ids.count {
+            issues.append(ManifestIssue(code: .manifestValidationFailed, message: "maintenance window ids must be unique.", path: "$.maintenance.windows"))
+        }
+        let formatter = ISO8601DateFormatter()
+        for (index, window) in policy.windows.enumerated() {
+            let path = "$.maintenance.windows[\(index)]"
+            if window.id.range(of: "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$", options: .regularExpression) == nil {
+                issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Maintenance window ids must use bounded lowercase names.", path: "\(path).id"))
+            }
+            if window.actions.isEmpty || Set(window.actions).count != window.actions.count || window.actions.contains(where: { !$0.isElective }) {
+                issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Maintenance window actions must be a non-empty unique elective set.", path: "\(path).actions"))
+            }
+            switch window.schedule {
+            case .recurring(let recurring):
+                if recurring.weekdays.isEmpty || Set(recurring.weekdays).count != recurring.weekdays.count {
+                    issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Recurring maintenance weekdays must be non-empty and unique.", path: "\(path).recurring.weekdays"))
+                }
+                if recurring.start.range(of: "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$", options: .regularExpression) == nil {
+                    issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Recurring maintenance start must be canonical 24-hour HH:mm.", path: "\(path).recurring.start"))
+                }
+                if !(60...86_400).contains(recurring.duration) {
+                    issues.append(ManifestIssue(code: .manifestValidationFailed, message: "Recurring maintenance duration must be between 60s and 24h.", path: "\(path).recurring.duration"))
+                }
+            case .oneShot(let oneShot):
+                if formatter.date(from: oneShot.startsAt) == nil || formatter.string(from: formatter.date(from: oneShot.startsAt) ?? Date()) != oneShot.startsAt {
+                    issues.append(ManifestIssue(code: .manifestValidationFailed, message: "One-shot maintenance startsAt must be canonical RFC3339 UTC.", path: "\(path).oneShot.startsAt"))
+                }
+                if !(60...86_400).contains(oneShot.duration) {
+                    issues.append(ManifestIssue(code: .manifestValidationFailed, message: "One-shot maintenance duration must be between 60s and 24h.", path: "\(path).oneShot.duration"))
+                }
+            }
+        }
     }
 
     private static func validateUpdate(
@@ -2542,6 +2627,128 @@ public enum ManifestValidator {
         }
         if update.progressDeadline <= 0 {
             issues.append(issue(service, "update.progressDeadline must be positive."))
+        }
+        if update.stableObservation < 0 ||
+            update.stableObservation > update.progressDeadline {
+            issues.append(issue(service, "update.stableObservation must be between 0s and progressDeadline."))
+        }
+        if update.stableObservation > 0,
+           service.probes.readiness == nil,
+           service.probes.liveness == nil {
+            issues.append(issue(service, "update.stableObservation requires a readiness or liveness probe."))
+        }
+    }
+
+    private static func validateRetention(
+        _ policy: HostwrightRetentionPolicy?,
+        issues: inout [ManifestIssue]
+    ) {
+        guard let policy else { return }
+        if !(60...31_536_000).contains(policy.recoveryHorizon) {
+            issues.append(ManifestIssue(
+                code: .manifestValidationFailed,
+                message: "retention.recoveryHorizon must be between 60s and 365 days.",
+                path: "$.retention.recoveryHorizon"
+            ))
+        }
+        let databaseBounds = 1_048_576...1_099_511_627_776
+        if !databaseBounds.contains(policy.maximumDatabaseBytes) {
+            issues.append(ManifestIssue(
+                code: .manifestValidationFailed,
+                message: "retention.maximumDatabaseBytes must be between 1 MiB and 1 TiB.",
+                path: "$.retention.maximumDatabaseBytes"
+            ))
+        }
+        if !databaseBounds.contains(policy.targetDatabaseBytes) ||
+            policy.targetDatabaseBytes > policy.maximumDatabaseBytes {
+            issues.append(ManifestIssue(
+                code: .manifestValidationFailed,
+                message: "retention.targetDatabaseBytes must be between 1 MiB and maximumDatabaseBytes.",
+                path: "$.retention.targetDatabaseBytes"
+            ))
+        }
+        if Set(policy.classes.keys) != Set(HostwrightRetentionClass.allCases) {
+            issues.append(ManifestIssue(
+                code: .manifestValidationFailed,
+                message: "retention.classes must declare exactly the ten supported classes.",
+                path: "$.retention.classes"
+            ))
+        }
+        for retentionClass in HostwrightRetentionClass.allCases {
+            guard let classPolicy = policy.classes[retentionClass] else { continue }
+            let path = "$.retention.classes.\(retentionClass.rawValue)"
+            if classPolicy.maxAge < policy.recoveryHorizon || classPolicy.maxAge > 315_360_000 {
+                issues.append(ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "Retention maxAge must be between recoveryHorizon and ten years.",
+                    path: "\(path).maxAge"
+                ))
+            }
+            if !(1...10_000_000).contains(classPolicy.maxRecords) {
+                issues.append(ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "Retention maxRecords must be between 1 and 10000000.",
+                    path: "\(path).maxRecords"
+                ))
+            }
+            if !(0...classPolicy.maxRecords).contains(classPolicy.minimumRecords) {
+                issues.append(ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "Retention minimumRecords must be between zero and maxRecords.",
+                    path: "\(path).minimumRecords"
+                ))
+            }
+        }
+        if policy.holds.count > HostwrightRetentionPolicy.maximumHolds {
+            issues.append(ManifestIssue(
+                code: .manifestValidationFailed,
+                message: "retention.holds must contain at most 64 holds.",
+                path: "$.retention.holds"
+            ))
+        }
+        let ids = policy.holds.map(\.id)
+        if Set(ids).count != ids.count {
+            issues.append(ManifestIssue(
+                code: .manifestValidationFailed,
+                message: "Retention hold ids must be unique.",
+                path: "$.retention.holds"
+            ))
+        }
+        let formatter = ISO8601DateFormatter()
+        for (index, hold) in policy.holds.enumerated() {
+            let path = "$.retention.holds[\(index)]"
+            if hold.id.range(of: "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$", options: .regularExpression) == nil {
+                issues.append(ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "Retention hold ids must use bounded lowercase names.",
+                    path: "\(path).id"
+                ))
+            }
+            if hold.selector.count > 256 ||
+                hold.selector.range(of: "^(?:\\*|[A-Za-z0-9][A-Za-z0-9._:/@-]{0,255})$", options: .regularExpression) == nil {
+                issues.append(ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "Retention hold selectors must be '*' or one bounded exact identity.",
+                    path: "\(path).selector"
+                ))
+            }
+            if hold.reason.isEmpty || hold.reason.count > 512 ||
+                hold.reason != hold.reason.trimmingCharacters(in: .whitespacesAndNewlines) ||
+                hold.reason.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) {
+                issues.append(ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "Retention hold reasons must be bounded, trimmed, control-free text.",
+                    path: "\(path).reason"
+                ))
+            }
+            if let expiresAt = hold.expiresAt,
+               formatter.date(from: expiresAt).map(formatter.string(from:)) != expiresAt {
+                issues.append(ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "Retention hold expiresAt must be canonical RFC3339 UTC.",
+                    path: "\(path).expiresAt"
+                ))
+            }
         }
     }
 

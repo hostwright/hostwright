@@ -291,7 +291,7 @@ final class SchemaV7ContractTests: XCTestCase {
         }
     }
 
-    func testOwnershipUpsertPreservesUUIDAndAdvancesGeneration() throws {
+    func testOwnershipUpsertRequiresExactIdentityFenceAndMonotonicGeneration() throws {
         try withTemporaryStore { store, _ in
             try store.migrate()
             let initialUUID = HostwrightResourceUUID.generate()
@@ -318,19 +318,52 @@ final class SchemaV7ContractTests: XCTestCase {
                     fencingToken: initialFence
                 )
             )
+            XCTAssertThrowsError(
+                try store.ownership.upsert(
+                    OwnershipRecord(
+                        id: "ownership-forged",
+                        resourceIdentifier: "hostwright-demo-api",
+                        resourceType: "container",
+                        projectID: nil,
+                        serviceName: "worker",
+                        runtimeAdapter: "apple-container-cli",
+                        createdAt: "2026-07-13T00:01:00Z",
+                        observedAt: "2026-07-13T00:01:00Z",
+                        cleanupEligible: true,
+                        metadataJSONRedacted: "{}",
+                        resourceUUID: HostwrightResourceUUID.generate(),
+                        resourceGeneration: 2,
+                        projectResourceUUID: projectUUID,
+                        projectGeneration: 2,
+                        providerGeneration: 2,
+                        fencingToken: currentFence
+                    )
+                )
+            )
+            XCTAssertEqual(
+                try store.ownership.advanceFencingToken(
+                    resourceIdentifier: "hostwright-demo-api",
+                    runtimeAdapter: "apple-container-cli",
+                    expectedResourceUUID: initialUUID,
+                    expectedFencingToken: initialFence,
+                    newFencingToken: currentFence,
+                    observedAt: "2026-07-13T00:00:30Z"
+                )?.fencingToken,
+                currentFence
+            )
             try store.ownership.upsert(
                 OwnershipRecord(
-                    id: "ownership-retry",
+                    id: "ownership-initial",
                     resourceIdentifier: "hostwright-demo-api",
                     resourceType: "container",
                     projectID: nil,
                     serviceName: "api",
                     runtimeAdapter: "apple-container-cli",
-                    createdAt: "2026-07-13T00:01:00Z",
+                    createdAt: "2026-07-13T00:00:00Z",
                     observedAt: "2026-07-13T00:01:00Z",
                     cleanupEligible: true,
                     metadataJSONRedacted: "{}",
-                    resourceUUID: HostwrightResourceUUID.generate(),
+                    resourceUUID: initialUUID,
                     resourceGeneration: 2,
                     projectResourceUUID: projectUUID,
                     projectGeneration: 2,
@@ -338,24 +371,26 @@ final class SchemaV7ContractTests: XCTestCase {
                     fencingToken: currentFence
                 )
             )
-            try store.ownership.upsert(
-                OwnershipRecord(
-                    id: "ownership-stale",
+            XCTAssertThrowsError(
+                try store.ownership.upsert(
+                    OwnershipRecord(
+                    id: "ownership-initial",
                     resourceIdentifier: "hostwright-demo-api",
                     resourceType: "container",
                     projectID: nil,
                     serviceName: "api",
                     runtimeAdapter: "apple-container-cli",
-                    createdAt: "2026-07-13T00:00:30Z",
-                    observedAt: "2026-07-13T00:00:30Z",
+                    createdAt: "2026-07-13T00:00:00Z",
+                    observedAt: "2026-07-13T00:02:00Z",
                     cleanupEligible: true,
                     metadataJSONRedacted: "{}",
-                    resourceUUID: HostwrightResourceUUID.generate(),
+                    resourceUUID: initialUUID,
                     resourceGeneration: 1,
                     projectResourceUUID: projectUUID,
                     projectGeneration: 1,
                     providerGeneration: 1,
-                    fencingToken: HostwrightResourceUUID.generate()
+                    fencingToken: currentFence
+                    )
                 )
             )
 
@@ -420,8 +455,7 @@ final class SchemaV7ContractTests: XCTestCase {
             try store.migrate()
             let resourceUUID = HostwrightResourceUUID.generate()
             let fence = HostwrightResourceUUID.generate()
-            try store.ownership.upsert(
-                OwnershipRecord(
+            let ownership = OwnershipRecord(
                     id: "ownership-remove-exact",
                     resourceIdentifier: "hostwright-demo-api",
                     resourceType: "container",
@@ -439,7 +473,7 @@ final class SchemaV7ContractTests: XCTestCase {
                     providerGeneration: 1,
                     fencingToken: fence
                 )
-            )
+            try store.ownership.upsert(ownership)
 
             XCTAssertFalse(
                 try store.ownership.removeExact(
@@ -450,7 +484,7 @@ final class SchemaV7ContractTests: XCTestCase {
                 )
             )
             XCTAssertEqual(try store.ownership.loadAll().count, 1)
-            XCTAssertTrue(
+            XCTAssertFalse(
                 try store.ownership.removeExact(
                     resourceIdentifier: "hostwright-demo-api",
                     runtimeAdapter: RuntimeProviderID.appleContainerCLI.rawValue,
@@ -458,7 +492,186 @@ final class SchemaV7ContractTests: XCTestCase {
                     expectedFencingToken: fence
                 )
             )
+            XCTAssertEqual(try store.ownership.loadAll().count, 1)
+            let released = OwnershipAuthorityRecord(
+                controllerID: OwnershipAuthorityRecord.lifecycleController,
+                providerID: ownership.runtimeAdapter,
+                ownershipProofSHA256:
+                    OwnershipAuthorityRecord.proofSHA256(
+                        ownership: ownership,
+                        controllerID:
+                            OwnershipAuthorityRecord.lifecycleController,
+                        providerID: ownership.runtimeAdapter,
+                        fencingToken: ownership.fencingToken
+                    ),
+                resourceUUID: ownership.resourceUUID,
+                resourceGeneration: ownership.resourceGeneration,
+                projectResourceUUID: ownership.projectResourceUUID,
+                projectGeneration: ownership.projectGeneration,
+                providerGeneration: ownership.providerGeneration,
+                fencingToken: ownership.fencingToken,
+                finalizers: [
+                    OwnershipFinalizerRecord(
+                        name: "dependent.resources",
+                        state: .released
+                    ),
+                    OwnershipFinalizerRecord(
+                        name: "runtime.absence",
+                        state: .released
+                    )
+                ],
+                deletionTimestamp: "2026-07-23T00:01:00Z",
+                operationGroupID: HostwrightResourceUUID.generate(),
+                leaseOwner: nil,
+                leaseExpiresAt: nil,
+                handoffGeneration: 0
+            )
+            try store.ownership.upsert(
+                OwnershipRecord(
+                    id: ownership.id,
+                    resourceIdentifier: ownership.resourceIdentifier,
+                    resourceType: ownership.resourceType,
+                    projectID: ownership.projectID,
+                    serviceName: ownership.serviceName,
+                    runtimeAdapter: ownership.runtimeAdapter,
+                    createdAt: ownership.createdAt,
+                    observedAt: "2026-07-23T00:01:00Z",
+                    cleanupEligible: false,
+                    metadataJSONRedacted:
+                        try OwnershipAuthorityMetadata.encode(
+                            released,
+                            into: ownership.metadataJSONRedacted
+                        ),
+                    resourceUUID: ownership.resourceUUID,
+                    resourceGeneration: ownership.resourceGeneration,
+                    projectResourceUUID: ownership.projectResourceUUID,
+                    projectGeneration: ownership.projectGeneration,
+                    providerGeneration: ownership.providerGeneration,
+                    fencingToken: ownership.fencingToken
+                )
+            )
+            XCTAssertTrue(
+                try store.ownership.removeExact(
+                    resourceIdentifier: ownership.resourceIdentifier,
+                    runtimeAdapter: ownership.runtimeAdapter,
+                    expectedResourceUUID: resourceUUID,
+                    expectedFencingToken: fence
+                )
+            )
             XCTAssertTrue(try store.ownership.loadAll().isEmpty)
+        }
+    }
+
+    func testOwnershipAuthorityProofAndEnvelopeAreDeterministicAndFailClosed()
+        throws
+    {
+        try withTemporaryStore { store, _ in
+            try store.migrate()
+            let groupID = HostwrightResourceUUID.generate()
+            let operationID = HostwrightResourceUUID.generate()
+            let fence = HostwrightResourceUUID.generate()
+            let plan = String(repeating: "c", count: 64)
+            let group = OperationGroupRecord(
+                id: groupID,
+                operationID: operationID,
+                groupKind: "lifecycle-v1",
+                projectID: nil,
+                serviceName: "api",
+                plannedActionType: "up",
+                status: .active,
+                groupIdempotencyKey: plan,
+                planHash: plan,
+                checkpoint: "intent-persisted",
+                lockOwner: "hostwright-cli:\(operationID)",
+                lockExpiresAt: "2026-07-23T00:10:00Z",
+                rollbackAvailable: true,
+                manualRecoveryHintRedacted: "",
+                createdAt: "2026-07-23T00:00:00Z",
+                updatedAt: "2026-07-23T00:00:00Z",
+                metadataJSONRedacted: "{}",
+                fencingToken: fence
+            )
+            XCTAssertNotNil(
+                try store.operationGroups.acquire(
+                    group,
+                    currentTimestamp: "2026-07-23T00:00:00Z"
+                ).acquired
+            )
+            let ownership = OwnershipRecord(
+                id: "ownership-authority",
+                resourceIdentifier: "hostwright-demo-api",
+                resourceType: "container",
+                projectID: nil,
+                serviceName: "api",
+                runtimeAdapter: RuntimeProviderID.appleContainerCLI.rawValue,
+                createdAt: "2026-07-23T00:00:00Z",
+                observedAt: "2026-07-23T00:00:00Z",
+                cleanupEligible: true,
+                metadataJSONRedacted: "{}",
+                resourceUUID: HostwrightResourceUUID.generate(),
+                projectResourceUUID: HostwrightResourceUUID.generate(),
+                fencingToken: fence
+            )
+            let first = try OwnershipAuthorityRecord.lifecycle(
+                ownership: ownership,
+                operationGroup: group,
+                finalizerState: .active
+            )
+            let second = try OwnershipAuthorityRecord.lifecycle(
+                ownership: ownership,
+                operationGroup: group,
+                finalizerState: .active
+            )
+            XCTAssertEqual(first.ownershipProofSHA256, second.ownershipProofSHA256)
+            let metadata = try OwnershipAuthorityMetadata.encode(
+                first,
+                into: #"{"token":"plain-secret-token","z":1}"#
+            )
+            try store.ownership.upsert(
+                OwnershipRecord(
+                    id: ownership.id,
+                    resourceIdentifier: ownership.resourceIdentifier,
+                    resourceType: ownership.resourceType,
+                    projectID: ownership.projectID,
+                    serviceName: ownership.serviceName,
+                    runtimeAdapter: ownership.runtimeAdapter,
+                    createdAt: ownership.createdAt,
+                    observedAt: ownership.observedAt,
+                    cleanupEligible: ownership.cleanupEligible,
+                    metadataJSONRedacted: metadata,
+                    resourceUUID: ownership.resourceUUID,
+                    projectResourceUUID: ownership.projectResourceUUID,
+                    fencingToken: ownership.fencingToken
+                )
+            )
+            let loaded = try XCTUnwrap(store.ownership.loadAll().first)
+            XCTAssertFalse(
+                loaded.metadataJSONRedacted.contains("plain-secret-token")
+            )
+            XCTAssertEqual(
+                try OwnershipAuthorityMetadata.decode(
+                    from: loaded.metadataJSONRedacted
+                ),
+                first
+            )
+            let forged = OwnershipAuthorityRecord(
+                controllerID: first.controllerID,
+                providerID: first.providerID,
+                ownershipProofSHA256: String(repeating: "0", count: 64),
+                resourceUUID: first.resourceUUID,
+                resourceGeneration: first.resourceGeneration,
+                projectResourceUUID: first.projectResourceUUID,
+                projectGeneration: first.projectGeneration,
+                providerGeneration: first.providerGeneration,
+                fencingToken: first.fencingToken,
+                finalizers: first.finalizers,
+                deletionTimestamp: first.deletionTimestamp,
+                operationGroupID: first.operationGroupID,
+                leaseOwner: first.leaseOwner,
+                leaseExpiresAt: first.leaseExpiresAt,
+                handoffGeneration: first.handoffGeneration
+            )
+            XCTAssertThrowsError(try forged.validate(for: loaded))
         }
     }
 

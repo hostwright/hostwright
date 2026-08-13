@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import XCTest
 @testable import HostwrightCore
 @testable import HostwrightManifest
@@ -515,6 +516,11 @@ final class HostwrightStateTests: XCTestCase {
             XCTAssertEqual(events.map(\.timestamp), ["2026-07-01T00:00:01Z", "2026-07-01T00:00:01Z"])
             XCTAssertTrue(events[0].message.contains("[REDACTED]"))
             XCTAssertFalse(events[0].payloadJSONRedacted.contains(fakeSecret))
+            XCTAssertTrue(
+                events.allSatisfy {
+                    StateJSON.isObject($0.payloadJSONRedacted)
+                }
+            )
         }
     }
 
@@ -807,6 +813,11 @@ final class HostwrightStateTests: XCTestCase {
             XCTAssertEqual(operations[4].status, .succeeded)
             XCTAssertFalse(operations[0].payloadJSONRedacted.contains(fakeSecret))
             XCTAssertFalse(operations[3].payloadJSONRedacted.contains(fakeSecret))
+            XCTAssertTrue(
+                operations.allSatisfy {
+                    StateJSON.isObject($0.payloadJSONRedacted)
+                }
+            )
             XCTAssertEqual(try store.operations.latest(idempotencyKey: "plan-hash:create:api:retry")?.status, .succeeded)
         }
     }
@@ -1007,7 +1018,7 @@ final class HostwrightStateTests: XCTestCase {
         let fence = HostwrightResourceUUID.generate()
         let planHash = String(repeating: "a", count: 64)
         let group = OperationGroupRecord(
-            id: "group-lifecycle-expired",
+            id: HostwrightResourceUUID.generate(),
             operationID: "operation-lifecycle-expired",
             groupKind: "lifecycle-v1",
             projectID: nil,
@@ -1152,6 +1163,304 @@ final class HostwrightStateTests: XCTestCase {
         )
     }
 
+    func testExpiredOperationLeaseHandoffIsExactAndNewOwnerCanRenew() throws {
+        try withTemporaryStore { store, _ in
+            try store.migrate()
+            let groupID = HostwrightResourceUUID.generate()
+            let operationID = HostwrightResourceUUID.generate()
+            let fence = HostwrightResourceUUID.generate()
+            let planHash = String(repeating: "a", count: 64)
+            let originalOwner = "hostwright-cli:\(operationID)"
+            XCTAssertNotNil(
+                try store.operationGroups.acquire(
+                    OperationGroupRecord(
+                        id: groupID,
+                        operationID: operationID,
+                        groupKind: "lifecycle-v1",
+                        projectID: nil,
+                        serviceName: nil,
+                        plannedActionType: "rm",
+                        status: .active,
+                        groupIdempotencyKey: planHash,
+                        planHash: planHash,
+                        checkpoint: "remove-api:effect-pending",
+                        lockOwner: originalOwner,
+                        lockExpiresAt: "2026-08-01T00:10:00Z",
+                        rollbackAvailable: true,
+                        manualRecoveryHintRedacted: "",
+                        createdAt: "2026-08-01T00:00:00Z",
+                        updatedAt: "2026-08-01T00:00:00Z",
+                        metadataJSONRedacted: "{}",
+                        fencingToken: fence
+                    ),
+                    currentTimestamp: "2026-08-01T00:00:00Z"
+                ).acquired
+            )
+            let acquiredGroup = try XCTUnwrap(
+                store.operationGroups.load(id: groupID)
+            )
+            let baseOwnership = OwnershipRecord(
+                id: "ownership-handoff",
+                resourceIdentifier: "hostwright-demo-api",
+                resourceType: "container",
+                projectID: nil,
+                serviceName: "api",
+                runtimeAdapter: "AppleContainerApplyAdapter",
+                createdAt: "2026-08-01T00:00:00Z",
+                observedAt: "2026-08-01T00:00:00Z",
+                cleanupEligible: true,
+                metadataJSONRedacted: "{}",
+                resourceUUID: HostwrightResourceUUID.generate(),
+                projectResourceUUID: HostwrightResourceUUID.generate(),
+                fencingToken: fence
+            )
+            let authority = try OwnershipAuthorityRecord.lifecycle(
+                ownership: baseOwnership,
+                operationGroup: acquiredGroup,
+                finalizerState: .active
+            )
+            try store.ownership.upsert(
+                OwnershipRecord(
+                    id: baseOwnership.id,
+                    resourceIdentifier: baseOwnership.resourceIdentifier,
+                    resourceType: baseOwnership.resourceType,
+                    projectID: baseOwnership.projectID,
+                    serviceName: baseOwnership.serviceName,
+                    runtimeAdapter: baseOwnership.runtimeAdapter,
+                    createdAt: baseOwnership.createdAt,
+                    observedAt: baseOwnership.observedAt,
+                    cleanupEligible: baseOwnership.cleanupEligible,
+                    metadataJSONRedacted:
+                        try OwnershipAuthorityMetadata.encode(
+                            authority,
+                            into: "{}"
+                        ),
+                    resourceUUID: baseOwnership.resourceUUID,
+                    projectResourceUUID:
+                        baseOwnership.projectResourceUUID,
+                    fencingToken: baseOwnership.fencingToken
+                )
+            )
+
+            XCTAssertThrowsError(
+                try store.operationGroups.handoffExpiredActive(
+                    groupID: groupID,
+                    expectedPlanHash: planHash,
+                    expectedFencingToken: fence,
+                    expectedLockOwner: originalOwner,
+                    expectedLockExpiresAt: "2026-08-01T00:10:00Z",
+                    newLockOwner: "hostwright-recovery-resume",
+                    newLockExpiresAt: "2026-08-01T00:20:00Z",
+                    currentTimestamp: "2026-08-01T00:05:00Z"
+                )
+            )
+            let inFlightMutation = try store
+                .acquireOperationMutationFence(groupID: groupID)
+            XCTAssertThrowsError(
+                try store.operationGroups.handoffExpiredActive(
+                    groupID: groupID,
+                    expectedPlanHash: planHash,
+                    expectedFencingToken: fence,
+                    expectedLockOwner: originalOwner,
+                    expectedLockExpiresAt: "2026-08-01T00:10:00Z",
+                    newLockOwner: "hostwright-recovery-resume",
+                    newLockExpiresAt: "2026-08-01T00:20:00Z",
+                    currentTimestamp: "2026-08-01T00:11:00Z"
+                )
+            )
+            inFlightMutation.release()
+            let handedOff = try store.operationGroups.handoffExpiredActive(
+                groupID: groupID,
+                expectedPlanHash: planHash,
+                expectedFencingToken: fence,
+                expectedLockOwner: originalOwner,
+                expectedLockExpiresAt: "2026-08-01T00:10:00Z",
+                newLockOwner: "hostwright-recovery-resume",
+                newLockExpiresAt: "2026-08-01T00:20:00Z",
+                currentTimestamp: "2026-08-01T00:11:00Z"
+            )
+            XCTAssertEqual(
+                handedOff.lockOwner,
+                "hostwright-recovery-resume"
+            )
+            let reboundOwnership = try XCTUnwrap(
+                store.ownership.loadAll().first
+            )
+            let reboundAuthority = try XCTUnwrap(
+                OwnershipAuthorityMetadata.decode(
+                    from: reboundOwnership.metadataJSONRedacted
+                )
+            )
+            XCTAssertEqual(
+                reboundAuthority.leaseOwner,
+                "hostwright-recovery-resume"
+            )
+            XCTAssertEqual(
+                reboundAuthority.leaseExpiresAt,
+                "2026-08-01T00:20:00Z"
+            )
+            XCTAssertEqual(reboundAuthority.handoffGeneration, 1)
+            let metadata = try XCTUnwrap(
+                JSONSerialization.jsonObject(
+                    with: Data(handedOff.metadataJSONRedacted.utf8)
+                ) as? [String: Any]
+            )
+            let leaseAuthority = try XCTUnwrap(
+                metadata["localLeaseAuthority"] as? [String: Any]
+            )
+            XCTAssertEqual(
+                (leaseAuthority["handoffGeneration"] as? NSNumber)?.intValue,
+                1
+            )
+            XCTAssertThrowsError(
+                try store.operationGroups.handoffExpiredActive(
+                    groupID: groupID,
+                    expectedPlanHash: planHash,
+                    expectedFencingToken: fence,
+                    expectedLockOwner: originalOwner,
+                    expectedLockExpiresAt: "2026-08-01T00:10:00Z",
+                    newLockOwner: "hostwright-recovery-rollback",
+                    newLockExpiresAt: "2026-08-01T00:30:00Z",
+                    currentTimestamp: "2026-08-01T00:12:00Z"
+                )
+            )
+            XCTAssertThrowsError(
+                try store.operationGroups.finishExactLease(
+                    groupID: groupID,
+                    expectedFencingToken: fence,
+                    expectedLockOwner: originalOwner,
+                    expectedLockExpiresAt: "2026-08-01T00:10:00Z",
+                    status: .interrupted,
+                    checkpoint: "stale-controller",
+                    manualRecoveryHintRedacted: "",
+                    updatedAt: "2026-08-01T00:12:00Z",
+                    metadataJSONRedacted: "{}"
+                )
+            )
+            let sharedControllerAttempt = try store.operationGroups
+                .reclaimExpiredActive(
+                groupID: groupID,
+                expectedPlanHash: planHash,
+                expectedFencingToken: fence,
+                lockOwner: "hostwright-recovery-resume",
+                lockExpiresAt: "2026-08-01T00:30:00Z",
+                currentTimestamp: "2026-08-01T00:12:00Z"
+            )
+            guard case .activeUnexpired = sharedControllerAttempt else {
+                return XCTFail(
+                    "A shared recovery controller identity must not bypass single-process exclusion."
+                )
+            }
+            let claimant =
+                "hostwright-recovery-resume:\(HostwrightResourceUUID.generate())"
+            let claim = try store.operationGroups.reclaimExpiredActive(
+                groupID: groupID,
+                expectedPlanHash: planHash,
+                expectedFencingToken: fence,
+                lockOwner: claimant,
+                lockExpiresAt: "2026-08-01T00:30:00Z",
+                currentTimestamp: "2026-08-01T00:12:00Z"
+            )
+            guard case .reclaimed(let renewed) = claim else {
+                return XCTFail("One unique recovery process must claim the handoff.")
+            }
+            XCTAssertEqual(renewed.lockOwner, claimant)
+            XCTAssertEqual(
+                renewed.lockExpiresAt,
+                "2026-08-01T00:30:00Z"
+            )
+            let renewedOwnership = try XCTUnwrap(
+                store.ownership.loadAll().first
+            )
+            let renewedAuthority = try XCTUnwrap(
+                OwnershipAuthorityMetadata.decode(
+                    from: renewedOwnership.metadataJSONRedacted
+                )
+            )
+            XCTAssertEqual(
+                renewedAuthority.leaseOwner,
+                claimant
+            )
+            XCTAssertEqual(
+                renewedAuthority.leaseExpiresAt,
+                "2026-08-01T00:30:00Z"
+            )
+            XCTAssertEqual(renewedAuthority.handoffGeneration, 2)
+            let losingClaim = try store.operationGroups.reclaimExpiredActive(
+                groupID: groupID,
+                expectedPlanHash: planHash,
+                expectedFencingToken: fence,
+                lockOwner:
+                    "hostwright-recovery-resume:\(HostwrightResourceUUID.generate())",
+                lockExpiresAt: "2026-08-01T00:40:00Z",
+                currentTimestamp: "2026-08-01T00:13:00Z"
+            )
+            guard case .activeUnexpired(let winner) = losingClaim else {
+                return XCTFail("Only one recovery process may own the handoff.")
+            }
+            XCTAssertEqual(winner.lockOwner, claimant)
+        }
+    }
+
+    func testExpiredHandoffRejectsKindsWithoutCompatibleRecoveryClaimants() throws {
+        try withTemporaryStore { store, _ in
+            try store.migrate()
+            let groupID = HostwrightResourceUUID.generate()
+            let operationID = HostwrightResourceUUID.generate()
+            let fence = HostwrightResourceUUID.generate()
+            let planHash = String(repeating: "d", count: 64)
+            let originalOwner = "hostwright-cli:\(operationID)"
+            XCTAssertNotNil(
+                try store.operationGroups.acquire(
+                    OperationGroupRecord(
+                        id: groupID,
+                        operationID: operationID,
+                        groupKind: "secret-mutation",
+                        projectID: nil,
+                        serviceName: nil,
+                        plannedActionType: "secret-apply",
+                        status: .active,
+                        groupIdempotencyKey: planHash,
+                        planHash: planHash,
+                        checkpoint: "secret:effect-pending",
+                        lockOwner: originalOwner,
+                        lockExpiresAt: "2026-08-01T00:10:00Z",
+                        rollbackAvailable: false,
+                        manualRecoveryHintRedacted: "",
+                        createdAt: "2026-08-01T00:00:00Z",
+                        updatedAt: "2026-08-01T00:00:00Z",
+                        metadataJSONRedacted: "{}",
+                        fencingToken: fence
+                    ),
+                    currentTimestamp: "2026-08-01T00:00:00Z"
+                ).acquired
+            )
+
+            XCTAssertThrowsError(
+                try store.operationGroups.handoffExpiredActive(
+                    groupID: groupID,
+                    expectedPlanHash: planHash,
+                    expectedFencingToken: fence,
+                    expectedLockOwner: originalOwner,
+                    expectedLockExpiresAt: "2026-08-01T00:10:00Z",
+                    newLockOwner: "hostwright-recovery-resume",
+                    newLockExpiresAt: "2026-08-01T00:20:00Z",
+                    currentTimestamp: "2026-08-01T00:11:00Z"
+                )
+            ) { error in
+                XCTAssertTrue(
+                    String(describing: error).contains(
+                        "compatible local recovery claimant"
+                    )
+                )
+            }
+            XCTAssertEqual(
+                try store.operationGroups.load(id: groupID)?.lockOwner,
+                originalOwner
+            )
+        }
+    }
+
     func testOperationGroupStepsAppendAndRedactFailureState() throws {
         try withTemporaryStore { store, _ in
             try saveDesiredState(in: store)
@@ -1265,6 +1574,12 @@ final class HostwrightStateTests: XCTestCase {
             XCTAssertFalse(results.map(\.stdoutRedacted).joined().contains(fakeSecret))
             XCTAssertFalse(results.map(\.stderrRedacted).joined().contains(fakeSecret))
             XCTAssertFalse(results.map(\.metadataJSONRedacted).joined().contains(fakeSecret))
+            XCTAssertTrue(
+                results.allSatisfy {
+                    StateJSON.isArray($0.commandJSONRedacted) &&
+                        StateJSON.isObject($0.metadataJSONRedacted)
+                }
+            )
         }
     }
 
@@ -1309,7 +1624,199 @@ final class HostwrightStateTests: XCTestCase {
             XCTAssertEqual(state.status, .crashLoopBlocked)
             XCTAssertEqual(state.attemptCount, 3)
             XCTAssertFalse(state.metadataJSONRedacted.contains(fakeSecret))
+            XCTAssertTrue(StateJSON.isObject(state.metadataJSONRedacted))
             XCTAssertEqual(try store.restartPolicies.loadProject(projectID: projectID).count, 1)
+        }
+    }
+
+    func testPhase08RestartHoldReleaseRequiresExactTokenAndRecordsHistoryAtomically() throws {
+        try withTemporaryStore { store, _ in
+            try saveDesiredState(in: store)
+            let holdToken = String(repeating: "a", count: 64)
+            let policySHA = String(repeating: "b", count: 64)
+            try store.restartPolicies.upsert(
+                RestartPolicyStateRecord(
+                    id: "restart-held",
+                    projectID: projectID,
+                    serviceName: "api",
+                    policy: .onFailure,
+                    status: .crashLoopBlocked,
+                    attemptCount: 3,
+                    maxAttempts: 3,
+                    holdToken: holdToken,
+                    policySHA256: policySHA,
+                    updatedAt: timestamp,
+                    metadataJSONRedacted: "{}"
+                )
+            )
+
+            XCTAssertNil(
+                try store.restartPolicies.releaseHold(
+                    projectID: projectID,
+                    serviceName: "api",
+                    expectedHoldToken: String(repeating: "c", count: 64),
+                    timestamp: "2026-07-01T00:01:00Z",
+                    historyID: "11111111-1111-4111-8111-111111111111"
+                )
+            )
+            XCTAssertEqual(try store.restartAttempts.loadProject(projectID), [])
+
+            let released = try XCTUnwrap(
+                store.restartPolicies.releaseHold(
+                    projectID: projectID,
+                    serviceName: "api",
+                    expectedHoldToken: holdToken,
+                    timestamp: "2026-07-01T00:01:00Z",
+                    historyID: "22222222-2222-4222-8222-222222222222",
+                    eventID: "44444444-4444-4444-8444-444444444444"
+                )
+            )
+            XCTAssertEqual(released.status, .active)
+            XCTAssertEqual(released.attemptCount, 0)
+            XCTAssertNil(released.holdToken)
+            XCTAssertEqual(released.releaseGeneration, 1)
+            let history = try store.restartAttempts.loadProject(projectID)
+            XCTAssertEqual(history.count, 1)
+            XCTAssertEqual(history[0].decision, .manualRelease)
+            XCTAssertFalse(history[0].admitted)
+            XCTAssertEqual(history[0].holdToken, holdToken)
+            XCTAssertTrue(
+                try store.events.contains(
+                    type: "restart.policy.manual-release",
+                    source: "hostwright-cli",
+                    payloadContains: "\"releaseGeneration\":1"
+                )
+            )
+            XCTAssertNil(
+                try store.restartPolicies.releaseHold(
+                    projectID: projectID,
+                    serviceName: "api",
+                    expectedHoldToken: holdToken,
+                    timestamp: "2026-07-01T00:02:00Z",
+                    historyID: "33333333-3333-4333-8333-333333333333"
+                )
+            )
+            XCTAssertEqual(try store.restartAttempts.loadProject(projectID).count, 1)
+        }
+    }
+
+    func testPhase08ConcurrentRestartHoldReleaseHasExactlyOneWinner() throws {
+        try withTemporaryStore { store, _ in
+            try saveDesiredState(in: store)
+            let holdToken = String(repeating: "d", count: 64)
+            try store.restartPolicies.upsert(
+                RestartPolicyStateRecord(
+                    id: "restart-held-concurrent",
+                    projectID: projectID,
+                    serviceName: "api",
+                    policy: .onFailure,
+                    status: .crashLoopBlocked,
+                    attemptCount: 3,
+                    maxAttempts: 3,
+                    holdToken: holdToken,
+                    policySHA256: String(repeating: "e", count: 64),
+                    updatedAt: timestamp,
+                    metadataJSONRedacted: "{}"
+                )
+            )
+            let targetProjectID = projectID
+            let outcome = Mutex((winners: 0, failures: [String]()))
+            DispatchQueue.concurrentPerform(iterations: 16) { index in
+                do {
+                    let suffix = String(format: "%012x", index + 1)
+                    let released = try store.restartPolicies.releaseHold(
+                        projectID: targetProjectID,
+                        serviceName: "api",
+                        expectedHoldToken: holdToken,
+                        timestamp: "2026-08-01T12:01:00Z",
+                        historyID: "11111111-1111-4111-8111-\(suffix)",
+                        eventID: "22222222-2222-4222-8222-\(suffix)"
+                    )
+                    if released != nil { outcome.withLock { $0.winners += 1 } }
+                } catch {
+                    outcome.withLock { $0.failures.append(String(describing: error)) }
+                }
+            }
+            let result = outcome.withLock { $0 }
+            XCTAssertEqual(result.winners, 1)
+            XCTAssertEqual(result.failures, [])
+            XCTAssertEqual(try store.restartAttempts.loadProject(projectID).count, 1)
+            XCTAssertEqual(
+                try store.events.loadAll().filter { $0.type == "restart.policy.manual-release" }.count,
+                1
+            )
+        }
+    }
+
+    func testPhase08StaleRestartTransitionCannotResurrectReleasedHold() throws {
+        try withTemporaryStore { store, _ in
+            try saveDesiredState(in: store)
+            let holdToken = String(repeating: "f", count: 64)
+            let policySHA = String(repeating: "a", count: 64)
+            let staleState = RestartPolicyStateRecord(
+                id: "restart-stale-transition",
+                projectID: projectID,
+                serviceName: "api",
+                policy: .onFailure,
+                status: .crashLoopBlocked,
+                attemptCount: 3,
+                maxAttempts: 3,
+                holdToken: holdToken,
+                policySHA256: policySHA,
+                updatedAt: timestamp,
+                metadataJSONRedacted: "{}"
+            )
+            try store.restartPolicies.upsert(staleState)
+            _ = try XCTUnwrap(
+                store.restartPolicies.releaseHold(
+                    projectID: projectID,
+                    serviceName: "api",
+                    expectedHoldToken: holdToken,
+                    timestamp: "2026-08-01T12:01:00Z",
+                    historyID: "55555555-5555-4555-8555-555555555555"
+                )
+            )
+            let staleHistory = RestartAttemptHistoryRecord(
+                id: "66666666-6666-4666-8666-666666666666",
+                projectID: projectID,
+                serviceName: "api",
+                reasonClass: .processExit,
+                decision: .hold,
+                attemptNumber: 3,
+                projectAttemptNumber: 0,
+                admitted: false,
+                holdToken: holdToken,
+                occurredAt: "2026-08-01T12:01:01Z",
+                policySHA256: policySHA,
+                metadataJSONRedacted: "{}"
+            )
+
+            XCTAssertThrowsError(
+                try store.restartPolicies.recordTransition(
+                    state: staleState,
+                    history: staleHistory
+                )
+            ) { error in
+                XCTAssertEqual(
+                    error as? StateStoreError,
+                    .invalidRecord(
+                        "Restart state update was fenced by a newer manual release generation."
+                    )
+                )
+            }
+            let current = try XCTUnwrap(
+                store.restartPolicies.load(
+                    projectID: projectID,
+                    serviceName: "api"
+                )
+            )
+            XCTAssertEqual(current.status, .active)
+            XCTAssertNil(current.holdToken)
+            XCTAssertEqual(current.releaseGeneration, 1)
+            XCTAssertEqual(
+                try store.restartAttempts.loadProject(projectID).map(\.decision),
+                [.manualRelease]
+            )
         }
     }
 
@@ -1355,6 +1862,12 @@ final class HostwrightStateTests: XCTestCase {
             XCTAssertEqual(try store.restartRecovery.loadAll().count, 2)
             XCTAssertFalse(records.map(\.manualRecoveryHintRedacted).joined().contains(fakeSecret))
             XCTAssertFalse(records.map(\.metadataJSONRedacted).joined().contains(fakeSecret))
+            XCTAssertTrue(
+                records.allSatisfy {
+                    StateJSON.isArray($0.completedStepsJSONRedacted) &&
+                        StateJSON.isObject($0.metadataJSONRedacted)
+                }
+            )
         }
     }
 
@@ -1380,6 +1893,7 @@ final class HostwrightStateTests: XCTestCase {
             XCTAssertEqual(ownership.count, 1)
             XCTAssertFalse(ownership[0].cleanupEligible)
             XCTAssertFalse(ownership[0].metadataJSONRedacted.contains(fakeSecret))
+            XCTAssertTrue(StateJSON.isObject(ownership[0].metadataJSONRedacted))
         }
     }
 

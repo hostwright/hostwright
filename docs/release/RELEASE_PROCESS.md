@@ -78,7 +78,7 @@ All of the following are required:
 - zero unresolved P0/P1 defects;
 - exact current/previous supported macOS, Apple `container`, Kubernetes, Docker API, and client-family matrices are frozen from passing evidence;
 - Apple CLI and pinned Containerization providers pass declared-capability conformance;
-- 10,000 lifecycle cycles and a 72-hour single-host soak pass without duplicate resources, unmanaged mutation, or monotonic leaks;
+- 10,000 lifecycle cycles and a cumulative checkpointed 72-hour single-host soak pass without duplicate resources, unmanaged mutation, or monotonic leaks; gaps and incomplete intervals do not count;
 - physical three- and five-Mac fault matrices and a seven-day mixed-fault soak pass, including safe read-only behavior without quorum;
 - every critical parser/protocol receives at least 24 aggregate fuzz CPU-hours;
 - supported ASan and TSan lanes pass;

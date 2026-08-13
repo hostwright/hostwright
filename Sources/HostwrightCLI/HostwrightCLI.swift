@@ -1,9 +1,12 @@
+import Dispatch
 import Foundation
 import HostwrightCore
+import HostwrightDaemonCore
 import HostwrightExtensions
 import HostwrightHealth
 import HostwrightImport
 import HostwrightManifest
+import HostwrightObservability
 import HostwrightPolicy
 import HostwrightReconciler
 import HostwrightRegistry
@@ -36,12 +39,113 @@ public enum HostwrightCLI {
     """
 
     public static func run(arguments: [String], environment: CLIEnvironment = .live) -> CLIRunResult {
+        let generatedCorrelationID = environment.observabilityCorrelationID()
+        let correlationID = (try? HostwrightLogRecord(
+            category: .cli,
+            severity: .info,
+            reason: .cliStarted,
+            correlationID: generatedCorrelationID,
+            outcome: .started
+        )) == nil ? UUID().uuidString.lowercased() : generatedCorrelationID
+        return HostwrightLogContext.withValues(
+            sink: environment.observabilitySink,
+            correlationID: correlationID
+        ) {
+            runTraced(arguments: arguments, environment: environment, correlationID: correlationID)
+        }
+    }
+
+    private static func runTraced(
+        arguments: [String],
+        environment: CLIEnvironment,
+        correlationID: String
+    ) -> CLIRunResult {
+        let command = observabilityCommand(arguments)
+        let alwaysSampledCommands = Set([
+            "apply", "cleanup", "daemon", "down", "recovery", "restart", "rm", "run", "start",
+            "stop", "up", "update"
+        ]).contains(command)
+        let traceAttributeCommands = Set([
+            "apply", "cleanup", "daemon", "down", "recovery", "restart", "rm", "up", "update"
+        ])
+        guard let session = try? HostwrightTraceSession(
+            traceID: correlationID,
+            processCorrelationID: correlationID,
+            selected: alwaysSampledCommands || HostwrightTraceSession.deterministicSelection(traceID: correlationID)
+        ) else {
+            return runObserved(arguments: arguments, environment: environment, correlationID: correlationID)
+        }
+        return HostwrightTraceContext.withSession(session) {
+            var attributes = [try? HostwrightTraceAttribute(key: .component, value: "cli")]
+                .compactMap { $0 }
+            if traceAttributeCommands.contains(command) {
+                if let commandAttribute = try? HostwrightTraceAttribute(key: .command, value: command) {
+                    attributes.append(commandAttribute)
+                }
+            }
+            let root = session.start(.cliRequest, attributes: attributes)
+            return HostwrightTraceContext.withSpan(root) {
+                let result = runObserved(
+                    arguments: arguments,
+                    environment: environment,
+                    correlationID: correlationID
+                )
+                let status: HostwrightTraceSpanStatus = result.exitCode == 0
+                    ? .succeeded
+                    : (result.exitCode == 130 ? .cancelled : .failed)
+                let sampling = status == .succeeded
+                    ? (alwaysSampledCommands ? "all" : "deterministic-1-of-16")
+                    : "failure-override"
+                _ = session.finish(
+                    root,
+                    status: status,
+                    attributes: session.rootCompletionAttributes(sampling: sampling)
+                )
+                session.complete(status: status)
+                return result
+            }
+        }
+    }
+
+    private static func runObserved(
+        arguments: [String],
+        environment: CLIEnvironment,
+        correlationID: String
+    ) -> CLIRunResult {
+        let command = observabilityCommand(arguments)
+        emitCLIRecord(
+            reason: .cliStarted,
+            severity: .notice,
+            outcome: .started,
+            correlationID: correlationID,
+            command: command,
+            exitCode: nil
+        )
+        let startedAt = DispatchTime.now().uptimeNanoseconds
+        let result = runUnobserved(arguments: arguments, environment: environment)
+        let elapsed = (DispatchTime.now().uptimeNanoseconds - startedAt) / 1_000_000
+        emitCLIRecord(
+            reason: result.exitCode == 0 ? .cliSucceeded : .cliFailed,
+            severity: result.exitCode == 0 ? .notice : .error,
+            outcome: result.exitCode == 0 ? .succeeded : .failed,
+            correlationID: correlationID,
+            command: command,
+            exitCode: result.exitCode,
+            durationMilliseconds: elapsed
+        )
+        return result
+    }
+
+    private static func runUnobserved(arguments: [String], environment: CLIEnvironment) -> CLIRunResult {
         let outputHint = CLICommand.outputFormatHint(arguments: arguments) ?? .text
         do {
             let command = try CLICommand.parse(arguments: arguments)
             return try run(command: command, environment: environment)
         } catch let error as HostwrightDiagnostic {
             return failure(code: error.code, message: error.message, output: outputHint)
+        } catch let error as HostwrightSupportBundleError {
+            let diagnostic = error.diagnostic
+            return failure(code: diagnostic.code, message: diagnostic.message, output: outputHint)
         } catch let error as CLIUsageError {
             return failure(code: .commandUsage, message: "\(error.message)\n\n\(helpText)", output: outputHint)
         } catch let error as ManifestParseError {
@@ -49,6 +153,60 @@ public enum HostwrightCLI {
         } catch {
             return failure(code: .fileIOFailed, message: String(describing: error), output: outputHint)
         }
+    }
+
+    private static func observabilityCommand(_ arguments: [String]) -> String {
+        let supported = Set([
+            "apply", "benchmark", "capabilities", "cleanup", "daemon", "diagnostics", "down",
+            "doctor", "events", "extension", "help", "image", "init", "interactive",
+            "lifecycle", "logs", "metrics", "network", "paths", "plan", "recovery", "registry",
+            "observability", "restart", "rm", "run", "runtime", "secret", "start", "state", "status",
+            "stop", "storage", "traces", "up", "update", "validate", "version"
+        ])
+        guard let first = arguments.first else { return "help" }
+        let normalized = first.hasPrefix("--") ? String(first.dropFirst(2)) : first
+        return supported.contains(normalized) ? normalized : "unknown"
+    }
+
+    private static func emitCLIRecord(
+        reason: HostwrightLogReason,
+        severity: HostwrightLogSeverity,
+        outcome: HostwrightLogOutcome,
+        correlationID: String,
+        command: String,
+        exitCode: Int32?,
+        durationMilliseconds: UInt64? = nil
+    ) {
+        var fields = [
+            HostwrightLogField(name: .command, value: command, privacy: .publicValue)
+        ]
+        if let exitCode {
+            fields.append(
+                HostwrightLogField(
+                    name: .exitCode,
+                    value: String(exitCode),
+                    privacy: .publicValue
+                )
+            )
+        }
+        if let durationMilliseconds {
+            fields.append(
+                HostwrightLogField(
+                    name: .durationMilliseconds,
+                    value: String(durationMilliseconds),
+                    privacy: .publicValue
+                )
+            )
+        }
+        guard let record = try? HostwrightLogRecord(
+            category: .cli,
+            severity: severity,
+            reason: reason,
+            correlationID: correlationID,
+            outcome: outcome,
+            fields: fields
+        ) else { return }
+        HostwrightLogContext.emit(record)
     }
 
     public static func run(command: CLICommand, environment: CLIEnvironment = .live) throws -> CLIRunResult {
@@ -61,6 +219,28 @@ public enum HostwrightCLI {
                 standardOutput: output == .json
                     ? CLIJSON.capabilities(report)
                     : renderCapabilities(report)
+            )
+        case .observabilityStatus(let output):
+            let status = environment.observabilityStatus()
+            if output == .json {
+                return CLIRunResult(standardOutput: CLIJSON.codable(status))
+            }
+            return CLIRunResult(
+                standardOutput: """
+                Hostwright local observability
+                Schema: v\(status.schemaVersion)
+                Subsystem: \(status.subsystem)
+                Enabled: \(status.enabled)
+                Minimum severity: \(status.minimumSeverity)
+                Categories: \(status.categories.joined(separator: ", "))
+                Field limit: \(status.maximumFieldCount) fields, \(status.maximumFieldValueBytes) bytes each
+                Payload limit: \(status.maximumPayloadBytes) bytes
+                Active signpost limit: \(status.maximumActiveSignposts)
+                Durable authority: \(status.durableAuthority)
+                Rotation authority: \(status.rotationAuthority)
+                Automatic upload: \(status.automaticUpload)
+
+                """
             )
         case .runtimeProviders(let output):
             return try RuntimeProvidersCommandRunner(
@@ -108,7 +288,8 @@ public enum HostwrightCLI {
                     environment: environment
                 ),
                 action: action,
-                output: output
+                output: output,
+                environment: environment
             ).run()
         case .secret(let options):
             return try SecretCommandRunner(
@@ -128,6 +309,63 @@ public enum HostwrightCLI {
         case .volume(let options):
             return try StorageCommandRunner(
                 options: options,
+                environment: environment
+            ).run()
+        case .daemon(let options):
+            return try DaemonLifecycleCommandRunner(
+                options: options,
+                controller: environment.daemonLifecycleController()
+            ).run()
+        case .restartBudget(let options):
+            return try RestartBudgetCommandRunner(
+                options: options,
+                stateStoreConfiguration: try hostwrightStateStoreConfiguration(
+                    explicitPath: options.stateDatabasePath,
+                    environment: environment
+                )
+            ).run()
+        case .maintenance(let options):
+            return try MaintenanceCommandRunner(
+                options: options,
+                stateStoreConfiguration: try hostwrightStateStoreConfiguration(
+                    explicitPath: options.stateDatabasePath,
+                    environment: environment
+                ),
+                environment: environment
+            ).run()
+        case .ownership(let options):
+            return try OwnershipCommandRunner(
+                options: options,
+                stateStoreConfiguration: try hostwrightStateStoreConfiguration(
+                    explicitPath: options.stateDatabasePath,
+                    environment: environment
+                )
+            ).run()
+        case .metrics(let options):
+            return try MetricsCommandRunner(
+                options: options,
+                stateStoreConfiguration: try hostwrightStateStoreConfiguration(
+                    explicitPath: options.stateDatabasePath,
+                    environment: environment
+                ),
+                environment: environment
+            ).run()
+        case .traces(let options):
+            return try TraceCommandRunner(
+                options: options,
+                stateStoreConfiguration: try hostwrightStateStoreConfiguration(
+                    explicitPath: options.stateDatabasePath,
+                    environment: environment
+                ),
+                environment: environment
+            ).run()
+        case .supportBundle(let options):
+            return try SupportBundleCommandRunner(
+                options: options,
+                stateStoreConfiguration: try hostwrightStateStoreConfiguration(
+                    explicitPath: options.stateDatabasePath,
+                    environment: environment
+                ),
                 environment: environment
             ).run()
         case .migrateManifestPreview(let path, let output):
@@ -205,7 +443,7 @@ public enum HostwrightCLI {
                 ),
                 environment: environment
             ).run()
-        case .events(let stateDatabasePath, let projectName, let filters, let output):
+        case .events(let stateDatabasePath, let projectName, let filters, let stream, let output):
             return EventsCommandRunner(
                 stateStoreConfiguration: try hostwrightStateStoreConfiguration(
                     explicitPath: stateDatabasePath,
@@ -213,7 +451,11 @@ public enum HostwrightCLI {
                 ),
                 projectName: projectName,
                 filters: filters,
-                output: output
+                stream: stream,
+                output: output,
+                monotonicNow: environment.eventWatchMonotonicNow,
+                sleep: environment.eventWatchSleep,
+                isCancelled: environment.eventWatchCancelled
             ).run()
         case .recovery(let action, let stateDatabasePath, let projectName, let output):
             return RecoveryCommandRunner(
@@ -272,6 +514,11 @@ public enum HostwrightCLI {
     Usage:
       hostwright --version
       hostwright capabilities [--json|--output text|json]
+      hostwright observability status [--json|--output text|json]
+      hostwright metrics snapshot [--state-db <path>] [--output text|json]
+      hostwright metrics export --output-path <absolute-new-path> --confirm-snapshot <sha256> [--state-db <path>] [--output text|json]
+      hostwright traces inspect [--trace-id <uuid>] [--limit <1-100>] [--state-db <path>] [--output text|json]
+      hostwright traces export --trace-id <uuid> --output-path <absolute-new-path> --confirm-trace <sha256> [--state-db <path>] [--output text|json]
       hostwright runtime providers [--json]
       hostwright runtime migrate [path] --to apple-cli|containerization --dry-run [--state-db <path>] [--json|--output text|json]
       hostwright runtime migrate [path] --to apple-cli|containerization --confirm-migration <token> [--state-db <path>] [--json|--output text|json]
@@ -284,6 +531,9 @@ public enum HostwrightCLI {
       hostwright state repair --dry-run [--state-db <path>] [--json|--output text|json]
       hostwright state repair --confirm-repair <token> [--state-db <path>] [--json|--output text|json]
       hostwright state recover [--state-db <path>] [--json|--output text|json]
+      hostwright state retention <manifest> [--state-db <path>] [--json|--output text|json]
+      hostwright state compact <manifest> --dry-run [--state-db <path>] [--json|--output text|json]
+      hostwright state compact <manifest> --confirm-compact <token> --evaluated-at <RFC3339> [--state-db <path>] [--json|--output text|json]
       hostwright secret create <keychain-reference> [--state-db <path>] [--json|--output text|json]
       hostwright secret update <keychain-reference> [--state-db <path>] [--json|--output text|json]
       hostwright secret list [--json|--output text|json]
@@ -327,6 +577,18 @@ public enum HostwrightCLI {
       hostwright volume prune (--dry-run|--confirm-plan <sha256>) [--state-db <path>] [--json|--output text|json]
       hostwright volume snapshot create|list|inspect|retain|export|restore|delete ...
       hostwright volume backup create|list|inspect|verify|retain|restore|delete ...
+      hostwright daemon status [--json|--output text|json]
+      hostwright daemon install --daemon-executable <absolute-hostwrightd> --config <absolute-hostwright.yaml> [--json|--output text|json]
+      hostwright daemon validate|bootstrap|start|stop|kickstart|rollback|disable|repair|uninstall [--json|--output text|json]
+      hostwright daemon upgrade --daemon-executable <absolute-hostwrightd> --config <absolute-hostwright.yaml> [--json|--output text|json]
+      hostwright restart-budget status [--project <project-id>] [--state-db <path>] [--json|--output text|json]
+      hostwright restart-budget release --project <project-id> --service <name> --confirm-hold <sha256> [--state-db <path>] [--json|--output text|json]
+      hostwright maintenance preview <manifest> --action <create|start|restart|update|remove>... [--at <RFC3339-UTC>] [--json|--output text|json]
+      hostwright maintenance status [--project <project-id>] [--state-db <path>] [--json|--output text|json]
+      hostwright maintenance cancel --project <project-id> --confirm-deferral <sha256> [--state-db <path>] [--json|--output text|json]
+      hostwright maintenance override --project <project-id> --confirm-deferral <sha256> --reason <text> [--state-db <path>] [--json|--output text|json]
+      hostwright ownership status [--project <project-id>] [--state-db <path>] [--json|--output text|json]
+      hostwright ownership handoff --group <uuid> --confirm-plan <sha256> --confirm-fence <uuid> --from-controller <id> --from-expiry <RFC3339-UTC> --to-controller resume|rollback --lease-seconds <1-900> [--state-db <path>] [--json|--output text|json]
       hostwright image pull|push <reference> [--platform linux/arm64|linux/amd64] [--offline] [--progress none|plain] [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--json|--output text|json]
       hostwright image tag <source> <target> [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--json|--output text|json]
       hostwright image load --input <absolute-path> --reference <expected-reference>... [--state-db <path>] [--runtime-provider auto|apple-cli|containerization] [--json|--output text|json]
@@ -358,13 +620,18 @@ public enum HostwrightCLI {
       hostwright inspect <service> [--manifest <path>] [--state-db <path>] [--runtime-provider <auto|apple-cli|containerization>] [--timeout <seconds>] [--json|--output text|json]
       hostwright stats <service> [--manifest <path>] [--state-db <path>] [--runtime-provider <auto|apple-cli|containerization>] [--timeout <seconds>] [--json|--output text|json]
       hostwright logs <service> [path] [--tail <n>] [--follow] [--runtime-provider <auto|apple-cli|containerization>] [--timeout <seconds>] [--state-db <path>] [--output <text|json>]
-      hostwright events [--state-db <path>] [--project <name>] [--type <event>] [--service <name>] [--severity info|warning|error] [--limit <n>] [--sort asc|desc] [--output text|json]
+      hostwright events [--state-db <path>] [--project <name>] [--type <event>] [--service <name>] [--severity info|warning|error] [--limit <1...1000>] [--sort asc|desc] [--cursor beginning|<token>] [--watch] [--timeout <1...300>] [--output text|json]
       hostwright recovery [--state-db <path>] [--project <name>] [--output text|json]
       hostwright recovery resume --group <uuid> --confirm-plan <hash> [--timeout <seconds>] [--state-db <path>] [--project <name>] [--output text|json]
       hostwright recovery rollback --group <uuid> --confirm-plan <hash> [--timeout <seconds>] [--state-db <path>] [--project <name>] [--output text|json]
       hostwright cleanup [path] [--state-db <path>] --dry-run [--team-profile <path>]
       hostwright cleanup [path] [--state-db <path>] --confirm-cleanup <token> [--team-profile <path> --approval-record <path>]
       hostwright diagnostics [--state-db <path>] --bundle <path> [--project <name>] [--manifest <path>]
+      hostwright diagnostics support status [--state-db <path>] [--output text|json]
+      hostwright diagnostics support preview [--state-db <path>] [--project <name>] [--manifest <path>] [--output text|json]
+      hostwright diagnostics support create [--state-db <path>] [--project <name>] [--manifest <path>] --output-path <absolute-new-path> --confirm-preview <sha256> [--encrypt-recipient <keychain-certificate-reference>] [--output text|json]
+      hostwright diagnostics support delete [--state-db <path>] --bundle <absolute-path> --confirm-bundle <sha256> [--output text|json]
+      hostwright diagnostics support recover [--state-db <path>] [--output text|json]
       hostwright benchmark --image <local-image> --samples <3-10> --report <path> --source-commit <40-hex> --source-dirty <true|false> --expected-container-version <version> [--attended-sleep-wake-seconds <15-300>] --confirm-live
       hostwright extension check --declaration <absolute-path> --executable <absolute-path> [--output text|json]
       hostwright doctor [--state-db <path>] [--json|--output text|json]
@@ -377,6 +644,8 @@ public enum HostwrightCLI {
     state restore and repair require a dry-run token bound to the exact state fingerprint and planned effects.
     state repair clears only reconstructible runtime-observation and health projections; it never invents authoritative state.
     state recover completes or rolls back a journaled maintenance operation before ordinary state access resumes.
+    state retention reports bounded class, hold, recovery-horizon, and pressure decisions without mutation.
+    state compact requires an exact dry-run token, creates a verified backup, and deletes only revalidated eligible records.
     secret create and update read values only from stdin or an attended no-echo TTY; command arguments, output, and state contain metadata only.
     registry login reads its secret through the same protected input boundary and persists only an exact endpoint-bound Hostwright Keychain item. status also supports guarded Docker and OCI credential stores and never emits credentials.
     registry referrers discovers, verifies, caches, copies, publishes, retains, recovers, and exactly cleans opaque subject-bound OCI artifacts. Offline reads use only complete verified cache records; prune requires exact Hostwright ownership, no active lease, and plan confirmation.
@@ -393,8 +662,8 @@ public enum HostwrightCLI {
     Apply is a compatibility entry point for an exact confirmed up lifecycle plan. Generate its hash with up --dry-run; execution uses the same durable DAG and saga as up.
     Lifecycle dry-runs emit deterministic plans; confirmed up, down, run, start, stop, restart, rm, and update executions emit deterministic per-resource outcomes. Every lifecycle command supports --json or --output json.
     Cleanup deletes only exact cleanup-eligible Hostwright-owned stopped/created/exited containers after dry-run token confirmation.
-    Diagnostics writes a local redacted JSON bundle only. It never uploads telemetry.
-    JSON output is supported for capabilities, paths, migrate preview, every state, secret, registry, and image subcommand, import-stack, plan, status, every lifecycle command, events, recovery, extension check, doctor, and errors when --json or --output json is present.
+    Diagnostics-v1 remains a local redacted JSON export. Support bundles add bounded preview, confirmation-bound local creation, optional Keychain CMS encryption, durable recovery, and exact receipt-proven deletion. Neither workflow uploads telemetry.
+    JSON output is supported for capabilities, paths, migrate preview, restart-budget, maintenance, ownership, metrics, traces, support bundles, every state, secret, registry, and image subcommand, import-stack, plan, status, every lifecycle command, events, recovery, extension check, doctor, and errors when --json or --output json is present.
     Team profiles and approvals are loaded only from explicit local paths. Profile-aware mutations require an approval bound to the exact profile, manifest, and plan or cleanup token.
     Benchmark runs are explicit local hardware evidence. They refuse image pulls and broad cleanup, use bounded disposable Hostwright-owned resources, and write only the requested non-existing report path.
     Extension check executes one reviewed-local protocol handshake from explicit absolute paths. The protocol grants no Hostwright capability, but the reviewed executable still has the invoking macOS account's ambient privileges; it is not sandboxed.
@@ -407,10 +676,12 @@ public enum HostwrightCLI {
       hostwright state integrity --json
       hostwright state backup --json
       hostwright state backups --json
+      hostwright state retention hostwright.yaml --json
       hostwright status --output json
       hostwright events --project api-local --output json
       hostwright recovery --output json
       hostwright diagnostics --bundle ./hostwright-diagnostics.json
+      hostwright diagnostics support preview --output json
       hostwright benchmark --image docker.io/library/python:alpine --samples 3 --report /tmp/hostwright-benchmark.json --source-commit 0123456789012345678901234567890123456789 --source-dirty true --expected-container-version 1.0.0 --confirm-live
       hostwright extension check --declaration /tmp/extension.json --executable /tmp/extension --output json
       hostwright doctor --output json

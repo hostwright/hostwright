@@ -1,8 +1,12 @@
+import CryptoKit
 import Foundation
 import HostwrightCore
+import HostwrightDaemonCore
+import HostwrightManifest
 import HostwrightReconciler
 import HostwrightRuntime
 import HostwrightSecrets
+import HostwrightState
 import Testing
 @testable import HostwrightCLI
 
@@ -237,6 +241,708 @@ struct LifecycleCommandRunnerTests {
     }
 
     @Test
+    func unattendedReconciliationUsesTheExactSharedPlanAndSagaOnce() async throws {
+        let manifest = "version: 2\nproject: demo\nservices:\n  api:\n    image: example.invalid/api:latest\n"
+        let prepared = try preparation(desired: [service()])
+        let driver = ScriptedLifecycleCommandDriver(preparation: prepared)
+        let reconciler = UnattendedLifecycleReconciler(
+            readManifest: { _ in manifest },
+            makeDriver: { _ in driver }
+        )
+        let result = try await reconciler.reconcile(
+            request: try makeDaemonReconciliationRequest(
+                manifestPath: "/private/tmp/hostwright.yaml",
+                manifestSHA256: SHA256.hash(data: Data(manifest.utf8))
+                    .map { String(format: "%02x", $0) }
+                    .joined(),
+                stateDatabasePath: "/private/tmp/state.sqlite",
+                projectID: "project-demo",
+                maximumParallelism: 4
+            )
+        )
+
+        #expect(result.status == .mutated)
+        #expect(result.reasonCode == .mutationVerified)
+        #expect(result.nodeCount == result.completedNodeCount)
+        #expect(result.nodeCount == 2)
+        #expect(
+            driver.snapshot() == DriverSnapshot(
+                imageChecks: 1,
+                revalidations: 1,
+                executions: 1
+            )
+        )
+    }
+
+    @Test
+    func unattendedMaintenanceWindowClosingBeforeEffectFailsClosed() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-p08-maintenance-close-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700]
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let manifest = """
+        version: 2
+        project: demo
+        maintenance:
+          timezone: UTC
+          windows:
+            - id: release
+              actions:
+                - create
+              oneShot:
+                startsAt: "2026-08-02T04:00:00Z"
+                duration: 3600s
+        services:
+          api:
+            image: example.invalid/api:latest
+        """
+        let policy = try #require(ManifestValidator.validated(manifest).maintenance)
+        let admission = try DaemonMaintenanceAdmission(
+            reconciliationPlanSHA256: String(repeating: "a", count: 64),
+            policySHA256: MaintenanceWindowEvaluator.policySHA256(policy),
+            actionClasses: ["create"],
+            reason: "active-window",
+            confirmationToken: nil,
+            windowID: "release",
+            windowStartsAt: "2026-08-02T04:00:00Z",
+            windowEndsAt: "2026-08-02T05:00:00Z"
+        )
+        let driver = ScriptedLifecycleCommandDriver(
+            preparation: try preparation(desired: [service()])
+        )
+        let reconciler = UnattendedLifecycleReconciler(
+            readManifest: { _ in manifest },
+            makeDriver: { _ in driver },
+            now: { ISO8601DateFormatter().date(from: "2026-08-02T05:00:00Z")! }
+        )
+        var refused = false
+        do {
+            _ = try await reconciler.reconcile(
+                request: try makeDaemonReconciliationRequest(
+                    manifestPath: directory.appendingPathComponent("hostwright.yaml").path,
+                    manifestSHA256: SHA256.hash(data: Data(manifest.utf8)).map { String(format: "%02x", $0) }.joined(),
+                    stateDatabasePath: directory.appendingPathComponent("state.sqlite").path,
+                    projectID: "project-demo",
+                    maximumParallelism: 4,
+                    maintenanceAdmission: admission
+                )
+            )
+        } catch {
+            refused = true
+        }
+        #expect(refused)
+        #expect(driver.snapshot().executions == 0)
+    }
+
+    @Test
+    func unattendedMaintenanceOverrideCancelledBeforeEffectFailsClosed() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-p08-maintenance-cancel-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700]
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let databasePath = directory.appendingPathComponent("state.sqlite").path
+        let manifest = """
+        version: 2
+        project: demo
+        maintenance:
+          timezone: UTC
+          windows:
+            - id: release
+              actions:
+                - create
+              oneShot:
+                startsAt: "2027-08-02T04:00:00Z"
+                duration: 3600s
+        services:
+          api:
+            image: example.invalid/api:latest
+        """
+        let policy = try #require(ManifestValidator.validated(manifest).maintenance)
+        let policySHA = MaintenanceWindowEvaluator.policySHA256(policy)
+        let planSHA = String(repeating: "a", count: 64)
+        let store = SQLiteStateStore(path: databasePath)
+        try store.migrate()
+        let pending = try store.maintenanceDeferrals.deferPlan(
+            projectID: "project-demo",
+            planSHA256: planSHA,
+            policySHA256: policySHA,
+            actionClasses: [.create],
+            firstDeferredAt: "2026-08-02T03:00:00Z",
+            deadlineAt: "2026-08-03T03:00:00Z",
+            reasonRedacted: "outside window"
+        )
+        _ = try store.maintenanceDeferrals.authorizeOverride(
+            projectID: "project-demo",
+            expectedConfirmationToken: pending.confirmationToken,
+            reasonRedacted: "urgent repair",
+            updatedAt: "2026-08-02T03:01:00Z"
+        )
+        _ = try store.maintenanceDeferrals.cancel(
+            projectID: "project-demo",
+            expectedConfirmationToken: pending.confirmationToken,
+            updatedAt: "2026-08-02T03:02:00Z"
+        )
+        let admission = try DaemonMaintenanceAdmission(
+            reconciliationPlanSHA256: planSHA,
+            policySHA256: policySHA,
+            actionClasses: ["create"],
+            reason: "emergency-override",
+            confirmationToken: pending.confirmationToken,
+            windowID: nil,
+            windowStartsAt: nil,
+            windowEndsAt: nil
+        )
+        let driver = ScriptedLifecycleCommandDriver(
+            preparation: try preparation(desired: [service()])
+        )
+        let reconciler = UnattendedLifecycleReconciler(
+            readManifest: { _ in manifest },
+            makeDriver: { _ in driver }
+        )
+        var refused = false
+        do {
+            _ = try await reconciler.reconcile(
+                request: try makeDaemonReconciliationRequest(
+                    manifestPath: directory.appendingPathComponent("hostwright.yaml").path,
+                    manifestSHA256: SHA256.hash(data: Data(manifest.utf8)).map { String(format: "%02x", $0) }.joined(),
+                    stateDatabasePath: databasePath,
+                    projectID: "project-demo",
+                    maximumParallelism: 4,
+                    maintenanceAdmission: admission
+                )
+            )
+        } catch {
+            refused = true
+        }
+        #expect(refused)
+        #expect(driver.snapshot().executions == 0)
+    }
+
+    @Test
+    func unattendedMaintenanceOverridePastHardDeadlineFailsClosed() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-p08-maintenance-deadline-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700]
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let databasePath = directory.appendingPathComponent("state.sqlite").path
+        let manifest = """
+        version: 2
+        project: demo
+        maintenance:
+          timezone: UTC
+          maximumDeferral: 60s
+          windows:
+            - id: release
+              actions:
+                - create
+              oneShot:
+                startsAt: "2027-08-02T04:00:00Z"
+                duration: 3600s
+        services:
+          api:
+            image: example.invalid/api:latest
+        """
+        let policy = try #require(ManifestValidator.validated(manifest).maintenance)
+        let policySHA = MaintenanceWindowEvaluator.policySHA256(policy)
+        let planSHA = String(repeating: "a", count: 64)
+        let store = SQLiteStateStore(path: databasePath)
+        try store.migrate()
+        let pending = try store.maintenanceDeferrals.deferPlan(
+            projectID: "project-demo",
+            planSHA256: planSHA,
+            policySHA256: policySHA,
+            actionClasses: [.create],
+            firstDeferredAt: "2026-08-02T03:00:00Z",
+            deadlineAt: "2026-08-02T03:01:00Z",
+            reasonRedacted: "outside window"
+        )
+        _ = try store.maintenanceDeferrals.authorizeOverride(
+            projectID: "project-demo",
+            expectedConfirmationToken: pending.confirmationToken,
+            reasonRedacted: "urgent repair",
+            updatedAt: "2026-08-02T03:00:30Z"
+        )
+        let admission = try DaemonMaintenanceAdmission(
+            reconciliationPlanSHA256: planSHA,
+            policySHA256: policySHA,
+            actionClasses: ["create"],
+            reason: "emergency-override",
+            confirmationToken: pending.confirmationToken,
+            windowID: nil,
+            windowStartsAt: nil,
+            windowEndsAt: nil
+        )
+        let driver = ScriptedLifecycleCommandDriver(
+            preparation: try preparation(desired: [service()])
+        )
+        let reconciler = UnattendedLifecycleReconciler(
+            readManifest: { _ in manifest },
+            makeDriver: { _ in driver },
+            now: { ISO8601DateFormatter().date(from: "2026-08-02T03:02:00Z")! }
+        )
+        var refused = false
+        do {
+            _ = try await reconciler.reconcile(
+                request: try makeDaemonReconciliationRequest(
+                    manifestPath: directory.appendingPathComponent("hostwright.yaml").path,
+                    manifestSHA256: SHA256.hash(data: Data(manifest.utf8)).map { String(format: "%02x", $0) }.joined(),
+                    stateDatabasePath: databasePath,
+                    projectID: "project-demo",
+                    maximumParallelism: 4,
+                    maintenanceAdmission: admission
+                )
+            )
+        } catch {
+            refused = true
+        }
+        #expect(refused)
+        #expect(driver.snapshot().executions == 0)
+    }
+
+    @Test
+    func repeatedLifecycleGroupReusesOnlyExactPlanScopedImageLockEvidence() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-p08-image-lock-repeat-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700]
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = SQLiteStateStore(
+            path: directory.appendingPathComponent("state.sqlite").path
+        )
+        try store.migrate()
+        let lock = try RuntimeImageDigestLock(
+            requestedReference: "registry.example/team/api:stable",
+            resolvedReference:
+                "registry.example/team/api@sha256:\(String(repeating: "d", count: 64))",
+            descriptorDigest: "sha256:\(String(repeating: "d", count: 64))",
+            variantDigest: "sha256:\(String(repeating: "e", count: 64))",
+            operatingSystem: "linux",
+            architecture: "arm64",
+            providerID: .appleContainerCLI,
+            capabilitySHA256: String(repeating: "c", count: 64)
+        )
+        let desired = service(image: lock.resolvedReference, imageLock: lock)
+        let prepared = try preparation(desired: [desired])
+        let compiled = try LifecycleCommandPlanCompiler().compile(
+            options: options(command: .up, dryRun: true),
+            preparation: prepared
+        )
+        try store.desiredStates.saveManifestSnapshot(
+            projectID: prepared.projectID,
+            manifestPath: "/private/tmp/hostwright.yaml",
+            manifestHash: prepared.manifestSHA256,
+            desiredGeneration: 1,
+            manifest: HostwrightManifest(
+                project: "demo",
+                services: [
+                    HostwrightService(name: "api", image: lock.resolvedReference)
+                ]
+            ),
+            timestamp: "2026-08-01T00:00:00Z",
+            mutationProvider: RuntimeProviderID.appleContainerCLI.rawValue
+        )
+        let firstGroup = HostwrightResourceUUID.generate()
+        let secondGroup = HostwrightResourceUUID.generate()
+
+        try lifecyclePersistDesiredImageLocks(
+            plan: compiled.plan,
+            desiredServicesByNodeKey: compiled.desiredServicesByNodeKey,
+            groupID: firstGroup,
+            store: store,
+            timestamp: "2026-08-01T00:00:01Z"
+        )
+        try lifecyclePersistDesiredImageLocks(
+            plan: compiled.plan,
+            desiredServicesByNodeKey: compiled.desiredServicesByNodeKey,
+            groupID: secondGroup,
+            store: store,
+            timestamp: "2026-08-01T00:00:02Z"
+        )
+
+        let records = try store.imageDigestLocks.load(projectID: prepared.projectID)
+        #expect(records.count == 1)
+        #expect(records[0].operationGroupID == firstGroup)
+        #expect(records[0].lock == lock)
+    }
+
+    @Test
+    func unattendedReconciliationPreservesPostAdmissionFailureAsInterruptedMutation() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-p08-restart-admission-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700]
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let databasePath = directory.appendingPathComponent("state.sqlite").path
+        let store = SQLiteStateStore(path: databasePath)
+        try store.migrate()
+        let manifest = "version: 2\nproject: demo\nservices:\n  api:\n    image: example.invalid/api:latest\n"
+        let prepared = try preparation(desired: [service()])
+        let driver = ScriptedLifecycleCommandDriver(
+            preparation: prepared,
+            executionHook: { compiled, _ in
+                let groupID = HostwrightResourceUUID.legacy(
+                    kind: "lifecycle-group",
+                    identifier: compiled.plan.planSHA256
+                )
+                let operationID = HostwrightResourceUUID.legacy(
+                    kind: "lifecycle-operation",
+                    identifier: compiled.plan.planSHA256
+                )
+                let acquisition = try store.operationGroups.acquire(
+                    OperationGroupRecord(
+                        id: groupID,
+                        operationID: operationID,
+                        groupKind: "lifecycle",
+                        projectID: nil,
+                        serviceName: "api",
+                        plannedActionType: "up",
+                        status: .active,
+                        groupIdempotencyKey: "lifecycle:\(compiled.plan.planSHA256)",
+                        planHash: compiled.plan.planSHA256,
+                        checkpoint: "effect-ambiguous",
+                        lockOwner: "hostwright-cli",
+                        lockExpiresAt: nil,
+                        rollbackAvailable: true,
+                        manualRecoveryHintRedacted: "inspect exact lifecycle evidence",
+                        createdAt: "2026-08-01T12:00:00Z",
+                        updatedAt: "2026-08-01T12:00:00Z",
+                        metadataJSONRedacted: "{}",
+                        fencingToken: HostwrightResourceUUID.generate()
+                    )
+                )
+                let group = try #require(acquisition.acquired)
+                let node = try #require(
+                    compiled.plan.nodes.first { $0.action.mutatesRuntime }
+                )
+                try store.operationGroupSteps.append(
+                    OperationGroupStepRecord(
+                        id: HostwrightResourceUUID.generate(),
+                        groupID: groupID,
+                        stepKey: node.key,
+                        direction: .forward,
+                        plannedActionType: node.action.rawValue,
+                        serviceName: node.serviceName,
+                        resourceIdentifier: node.resourceIdentifier,
+                        stepIdempotencyKey: "\(node.idempotencyKey):forward:1",
+                        status: .started,
+                        startedAt: "2026-08-01T12:00:00Z",
+                        updatedAt: "2026-08-01T12:00:00Z",
+                        finishedAt: nil,
+                        lastErrorRedacted: nil,
+                        manualRecoveryHintRedacted: "",
+                        metadataJSONRedacted: #"{"attempt":1}"#
+                    ),
+                    expectedFencingToken: group.fencingToken
+                )
+                throw HostwrightDiagnostic(
+                    code: .runtimeUnavailable,
+                    message: "ambiguous provider result"
+                )
+            }
+        )
+        let reconciler = UnattendedLifecycleReconciler(
+            readManifest: { _ in manifest },
+            makeDriver: { _ in driver }
+        )
+
+        let result = try await reconciler.reconcile(
+            request: try makeDaemonReconciliationRequest(
+                manifestPath: "/private/tmp/hostwright.yaml",
+                manifestSHA256: SHA256.hash(data: Data(manifest.utf8))
+                    .map { String(format: "%02x", $0) }
+                    .joined(),
+                stateDatabasePath: databasePath,
+                projectID: "project-demo",
+                maximumParallelism: 4
+            )
+        )
+
+        #expect(result.status == .interrupted)
+        #expect(result.reasonCode == .interrupted)
+        #expect(result.runtimeMutationAttempted)
+        #expect(result.checkpoint == "effect-ambiguous")
+        #expect(result.groupID == HostwrightResourceUUID.legacy(
+            kind: "lifecycle-group",
+            identifier: result.planSHA256
+        ))
+    }
+
+    @Test
+    func unattendedReconciliationReportsAnEmptySharedDAGAsConverged() async throws {
+        let manifest = "version: 2\nproject: demo\nservices:\n  api:\n    image: example.invalid/api:latest\n"
+        let desired = service()
+        let observed = ObservedRuntimeService(
+            identity: desired.identity,
+            resourceIdentifier: desired.identity.managedResourceIdentifier,
+            image: desired.image,
+            lifecycleState: .running,
+            healthState: .healthy
+        )
+        let prepared = try preparation(
+            desired: [desired],
+            observed: [observed],
+            bindings: [try resourceBinding(for: observed)]
+        )
+        let driver = ScriptedLifecycleCommandDriver(preparation: prepared)
+        let reconciler = UnattendedLifecycleReconciler(
+            readManifest: { _ in manifest },
+            makeDriver: { _ in driver }
+        )
+        let result = try await reconciler.reconcile(
+            request: try makeDaemonReconciliationRequest(
+                manifestPath: "/private/tmp/hostwright.yaml",
+                manifestSHA256: SHA256.hash(data: Data(manifest.utf8))
+                    .map { String(format: "%02x", $0) }
+                    .joined(),
+                stateDatabasePath: "/private/tmp/state.sqlite",
+                projectID: "project-demo",
+                maximumParallelism: 4
+            )
+        )
+
+        #expect(result.status == .converged)
+        #expect(result.nodeCount == 0)
+        #expect(driver.snapshot().executions == 0)
+    }
+
+    @Test
+    func unattendedReconciliationDefersAnEmptyBudgetSelectionWithoutExecution() async throws {
+        let manifest = "version: 2\nproject: demo\nservices:\n  api:\n    image: example.invalid/api:latest\n"
+        let driver = ScriptedLifecycleCommandDriver(
+            preparation: try preparation(desired: [service()])
+        )
+        let reconciler = UnattendedLifecycleReconciler(
+            readManifest: { _ in manifest },
+            makeDriver: { _ in driver }
+        )
+        let result = try await reconciler.reconcile(
+            request: try makeDaemonReconciliationRequest(
+                manifestPath: "/private/tmp/hostwright.yaml",
+                manifestSHA256: SHA256.hash(data: Data(manifest.utf8))
+                    .map { String(format: "%02x", $0) }
+                    .joined(),
+                stateDatabasePath: "/private/tmp/state.sqlite",
+                projectID: "project-demo",
+                maximumParallelism: 4,
+                selectedServiceNames: []
+            )
+        )
+
+        #expect(result.status == .deferred)
+        #expect(result.reasonCode == .restartBudgetDeferred)
+        #expect(result.checkpoint == "restart-budget-deferred")
+        #expect(!result.runtimeMutationAttempted)
+        #expect(driver.snapshot().executions == 0)
+    }
+
+    @Test
+    func unattendedReconciliationReportsVerificationOnlyDAGAsConverged() async throws {
+        let manifest = "version: 2\nproject: demo\nservices:\n  api:\n    image: example.invalid/api:latest\n"
+        let desired = service(probes: allProbes())
+        let observed = ObservedRuntimeService(
+            identity: desired.identity,
+            resourceIdentifier: desired.identity.managedResourceIdentifier,
+            image: desired.image,
+            lifecycleState: .running,
+            healthState: .healthy
+        )
+        let prepared = try preparation(
+            desired: [desired],
+            observed: [observed],
+            bindings: [try resourceBinding(for: observed)]
+        )
+        let driver = ScriptedLifecycleCommandDriver(preparation: prepared)
+        let reconciler = UnattendedLifecycleReconciler(
+            readManifest: { _ in manifest },
+            makeDriver: { _ in driver }
+        )
+        let result = try await reconciler.reconcile(
+            request: try makeDaemonReconciliationRequest(
+                manifestPath: "/private/tmp/hostwright.yaml",
+                manifestSHA256: SHA256.hash(data: Data(manifest.utf8))
+                    .map { String(format: "%02x", $0) }
+                    .joined(),
+                stateDatabasePath: "/private/tmp/state.sqlite",
+                projectID: "project-demo",
+                maximumParallelism: 4
+            )
+        )
+
+        #expect(result.status == .converged)
+        #expect(result.reasonCode == .converged)
+        #expect(result.nodeCount > 0)
+        #expect(result.nodeCount == result.completedNodeCount)
+        #expect(driver.snapshot().executions == 1)
+    }
+
+    @Test
+    func unattendedReconciliationRejectsChangedManifestBytesBeforePlanning() async throws {
+        let approved = "version: 2\nproject: demo\nservices:\n  api:\n    image: approved\n"
+        let changed = approved.replacingOccurrences(of: "approved", with: "changed")
+        let driver = ScriptedLifecycleCommandDriver(
+            preparation: try preparation(desired: [service()])
+        )
+        let reconciler = UnattendedLifecycleReconciler(
+            readManifest: { _ in changed },
+            makeDriver: { _ in driver }
+        )
+        do {
+            _ = try await reconciler.reconcile(
+                request: try makeDaemonReconciliationRequest(
+                    manifestPath: "/private/tmp/hostwright.yaml",
+                    manifestSHA256: SHA256.hash(data: Data(approved.utf8))
+                        .map { String(format: "%02x", $0) }
+                        .joined(),
+                    stateDatabasePath: "/private/tmp/state.sqlite",
+                    projectID: "project-demo",
+                    maximumParallelism: 4
+                )
+            )
+            Issue.record("Expected exact manifest confirmation refusal.")
+        } catch let diagnostic as HostwrightDiagnostic {
+            #expect(diagnostic.code == .confirmationMismatch)
+        }
+        #expect(driver.snapshot().executions == 0)
+    }
+
+    @Test
+    func unattendedReconciliationRejectsChangedPolicyTargetBeforeExecution() async throws {
+        let manifest = "version: 2\nproject: demo\nservices:\n  api:\n    image: approved\n"
+        let manifestPath = "/private/tmp/hostwright.yaml"
+        let policyPath = "/private/tmp/hostwright-policy.pem"
+        let manifestDigest = SHA256.hash(data: Data(manifest.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        let approvedPolicy = "approved-policy"
+        let changedPolicy = "changed-policy"
+        let approvedPolicyDigest = SHA256.hash(data: Data(approvedPolicy.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        let changedPolicyDigest = SHA256.hash(data: Data(changedPolicy.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        let manifestTarget = try DaemonConfigurationTarget(
+            kind: .manifest,
+            path: manifestPath,
+            contentSHA256: manifestDigest,
+            byteCount: manifest.utf8.count,
+            device: 1,
+            inode: 1
+        )
+        let policyTarget = try DaemonConfigurationTarget(
+            kind: .policy,
+            path: policyPath,
+            contentSHA256: approvedPolicyDigest,
+            byteCount: approvedPolicy.utf8.count,
+            device: 2,
+            inode: 2
+        )
+        let targets = [manifestTarget, policyTarget]
+        let request = try DaemonReconciliationRequest(
+            manifestPath: manifestPath,
+            manifestSHA256: manifestDigest,
+            configurationSetSHA256: DaemonConfigurationSetDigest.sha256(targets),
+            configurationTargets: targets,
+            stateDatabasePath: "/private/tmp/state.sqlite",
+            projectID: "project-demo",
+            maximumParallelism: 4
+        )
+        let driver = ScriptedLifecycleCommandDriver(
+            preparation: try preparation(desired: [service()])
+        )
+        let policyReads = LockedReadCounter()
+        let reconciler = UnattendedLifecycleReconciler(
+            readManifest: { _ in manifest },
+            readConfiguration: { path, _, _ in
+                if path == manifestPath {
+                    return DaemonConfigurationSnapshot(target: manifestTarget, text: manifest)
+                }
+                if policyReads.increment() == 1 {
+                    return DaemonConfigurationSnapshot(target: policyTarget, text: approvedPolicy)
+                }
+                let changedTarget = try DaemonConfigurationTarget(
+                    kind: .policy,
+                    path: policyPath,
+                    contentSHA256: changedPolicyDigest,
+                    byteCount: changedPolicy.utf8.count,
+                    device: 3,
+                    inode: 3
+                )
+                return DaemonConfigurationSnapshot(target: changedTarget, text: changedPolicy)
+            },
+            makeDriver: { _ in driver }
+        )
+
+        do {
+            _ = try await reconciler.reconcile(request: request)
+            Issue.record("Expected policy target confirmation refusal.")
+        } catch let diagnostic as HostwrightDiagnostic {
+            #expect(diagnostic.code == .confirmationMismatch)
+        }
+        #expect(policyReads.value == 2)
+        #expect(driver.snapshot().executions == 0)
+    }
+
+    @Test
+    func unattendedReconciliationHonorsCancellationBeforePlanning() async throws {
+        let manifest = "version: 2\nproject: demo\nservices:\n  api:\n    image: approved\n"
+        let driver = ScriptedLifecycleCommandDriver(
+            preparation: try preparation(desired: [service()])
+        )
+        let reconciler = UnattendedLifecycleReconciler(
+            readManifest: { _ in manifest },
+            makeDriver: { _ in driver }
+        )
+        let request = try makeDaemonReconciliationRequest(
+            manifestPath: "/private/tmp/hostwright.yaml",
+            manifestSHA256: SHA256.hash(data: Data(manifest.utf8))
+                .map { String(format: "%02x", $0) }
+                .joined(),
+            stateDatabasePath: "/private/tmp/state.sqlite",
+            projectID: "project-demo",
+            maximumParallelism: 4
+        )
+        let task = Task {
+            try await reconciler.reconcile(request: request)
+        }
+        task.cancel()
+        do {
+            _ = try await task.value
+            Issue.record("Expected cancellation.")
+        } catch is CancellationError {
+        }
+        #expect(driver.snapshot().executions == 0)
+    }
+
+    @Test
     func partialSafeHoldRendersExactCanonicalResourceOutcomesAsJSON() throws {
         let preparation = try preparation(desired: [service()])
         let plan = try reviewedPlan(preparation: preparation)
@@ -248,7 +954,8 @@ struct LifecycleCommandRunnerTests {
             planSHA256: plan.planSHA256,
             checkpoint: "\(completed.key):safe-hold",
             completedNodeKeys: [completed.key],
-            recoveryHintRedacted: "Preserve the exact safe-hold checkpoint."
+            recoveryHintRedacted: "Preserve the exact safe-hold checkpoint.",
+            recoveryReasonCode: "rollback.restored-health-failed"
         )
         let driver = ScriptedLifecycleCommandDriver(
             preparation: preparation,
@@ -287,11 +994,90 @@ struct LifecycleCommandRunnerTests {
             "completedNodeKeys": [completed.key],
             "nodeCount": plan.nodes.count,
             "resourceOutcomes": resourceOutcomes,
-            "recoveryHint": execution.recoveryHintRedacted
+            "recoveryHint": execution.recoveryHintRedacted,
+            "recoveryReasonCode": "rollback.restored-health-failed"
         ])
         #expect(result.exitCode == CLIExitCode.partialFailure.rawValue)
         #expect(result.standardOutput.isEmpty)
         #expect(result.standardError == expected)
+    }
+
+    @Test
+    func updateResultExposesVersionedExactRolloutStageAndRevisionIdentities() throws {
+        let policy = RuntimeUpdatePolicy(
+            progressDeadlineSeconds: 60,
+            stableObservationSeconds: 3
+        )
+        let previous = service(
+            image: "example.invalid/api@sha256:\(String(repeating: "1", count: 64))",
+            probes: allProbes(),
+            updatePolicy: policy
+        )
+        let desired = service(
+            image: "example.invalid/api@sha256:\(String(repeating: "2", count: 64))",
+            probes: allProbes(),
+            updatePolicy: policy
+        )
+        let observed = ObservedRuntimeService(
+            identity: previous.identity,
+            resourceIdentifier: previous.identity.managedResourceIdentifier,
+            image: previous.image,
+            lifecycleState: .running,
+            healthState: .healthy
+        )
+        let prepared = try preparation(
+            desired: [desired],
+            previous: DesiredRuntimeState(
+                projectName: "demo",
+                services: [previous]
+            ),
+            observed: [observed],
+            bindings: [try resourceBinding(for: observed)]
+        )
+        let plan = try reviewedPlan(preparation: prepared, command: .update)
+        let stable = try #require(
+            plan.nodes.first { $0.key.hasSuffix("-stable") }
+        )
+        let completed = plan.nodes.prefix {
+            $0.key != stable.key
+        }.map(\.key)
+        let execution = LifecycleSagaExecutionResult(
+            status: .safeHold,
+            operationID: HostwrightResourceUUID.generate(),
+            groupID: HostwrightResourceUUID.generate(),
+            planSHA256: plan.planSHA256,
+            checkpoint: "\(stable.key):safe-hold",
+            completedNodeKeys: Array(completed),
+            recoveryHintRedacted: "Preserve the exact stable-health checkpoint."
+        )
+        let result = LifecycleCommandRunner(
+            options: options(
+                command: .update,
+                dryRun: false,
+                confirmation: plan.planSHA256,
+                output: .json
+            ),
+            driver: ScriptedLifecycleCommandDriver(
+                preparation: prepared,
+                executionResult: execution
+            )
+        ).run()
+        let object = try #require(
+            JSONSerialization.jsonObject(
+                with: Data(result.standardError.utf8)
+            ) as? [String: Any]
+        )
+        let rollouts = try #require(object["rollouts"] as? [[String: Any]])
+        let rollout = try #require(rollouts.first)
+        #expect(rollout["schemaVersion"] as? Int == 1)
+        #expect(rollout["service"] as? String == "api")
+        #expect(rollout["stage"] as? String == "stable")
+        #expect(rollout["status"] as? String == "safe-hold")
+        let candidate = try #require(rollout["candidate"] as? [String: Any])
+        let prior = try #require(rollout["prior"] as? [String: Any])
+        #expect(candidate["stableObservationSeconds"] as? Int == 3)
+        #expect(candidate["livenessConfigured"] as? Bool == true)
+        #expect(candidate["revisionSHA256"] as? String != prior["revisionSHA256"] as? String)
     }
 
     @Test
@@ -1196,6 +1982,7 @@ struct LifecycleCommandRunnerTests {
         mounts: [RuntimeMountReference] = [],
         ports: [RuntimePortMapping] = [],
         probes: RuntimeProbeSet = RuntimeProbeSet(),
+        updatePolicy: RuntimeUpdatePolicy = RuntimeUpdatePolicy(),
         hooks: RuntimeLifecycleHooks = RuntimeLifecycleHooks()
     ) -> DesiredRuntimeService {
         DesiredRuntimeService(
@@ -1211,6 +1998,7 @@ struct LifecycleCommandRunnerTests {
             networks: networks,
             mounts: mounts,
             probes: probes,
+            updatePolicy: updatePolicy,
             hooks: hooks,
             virtualization: false
         )
@@ -1313,6 +2101,53 @@ struct LifecycleCommandRunnerTests {
     }
 }
 
+private func makeDaemonReconciliationRequest(
+    manifestPath: String,
+    manifestSHA256: String,
+    stateDatabasePath: String,
+    projectID: String,
+    maximumParallelism: Int,
+    selectedServiceNames: [String]? = nil,
+    maintenanceAdmission: DaemonMaintenanceAdmission? = nil
+) throws -> DaemonReconciliationRequest {
+    let normalizedPath = URL(fileURLWithPath: manifestPath).standardizedFileURL.path
+    let target = try DaemonConfigurationTarget(
+        kind: .manifest,
+        path: normalizedPath,
+        contentSHA256: manifestSHA256,
+        byteCount: 0,
+        device: 1,
+        inode: 1
+    )
+    return try DaemonReconciliationRequest(
+        manifestPath: normalizedPath,
+        manifestSHA256: manifestSHA256,
+        configurationSetSHA256: DaemonConfigurationSetDigest.sha256([target]),
+        configurationTargets: [target],
+        stateDatabasePath: stateDatabasePath,
+        projectID: projectID,
+        maximumParallelism: maximumParallelism,
+        selectedServiceNames: selectedServiceNames,
+        maintenanceAdmission: maintenanceAdmission
+    )
+}
+
+private final class LockedReadCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    var value: Int {
+        lock.withLock { count }
+    }
+
+    func increment() -> Int {
+        lock.withLock {
+            count += 1
+            return count
+        }
+    }
+}
+
 private struct DriverSnapshot: Equatable {
     var preparations = 0
     var imageChecks = 0
@@ -1330,6 +2165,7 @@ private final class ScriptedLifecycleCommandDriver:
     private let descriptorBodyOverride: Character?
     private let variantBody: Character
     private let executionResult: LifecycleSagaExecutionResult?
+    private let executionHook: ((LifecycleCompiledCommand, LifecycleCLIOptions) throws -> Void)?
     private var counts = DriverSnapshot()
 
     init(
@@ -1337,13 +2173,15 @@ private final class ScriptedLifecycleCommandDriver:
         imageEvidenceIsValid: Bool = true,
         descriptorBody: Character? = nil,
         variantBody: Character = "e",
-        executionResult: LifecycleSagaExecutionResult? = nil
+        executionResult: LifecycleSagaExecutionResult? = nil,
+        executionHook: ((LifecycleCompiledCommand, LifecycleCLIOptions) throws -> Void)? = nil
     ) {
         self.preparation = preparation
         self.imageEvidenceIsValid = imageEvidenceIsValid
         self.descriptorBodyOverride = descriptorBody
         self.variantBody = variantBody
         self.executionResult = executionResult
+        self.executionHook = executionHook
     }
 
     func prepare(options: LifecycleCLIOptions) throws -> LifecycleCommandPreparation {
@@ -1391,6 +2229,7 @@ private final class ScriptedLifecycleCommandDriver:
         lock.withLock {
             counts.executions += 1
         }
+        try executionHook?(compiled, options)
         return executionResult ?? LifecycleSagaExecutionResult(
             status: .succeeded,
             operationID: HostwrightResourceUUID.generate(),

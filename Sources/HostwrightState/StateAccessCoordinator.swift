@@ -8,11 +8,36 @@ enum StateAccessMode {
     case exclusive
 }
 
+public final class OperationMutationFence: @unchecked Sendable {
+    private let descriptor: Int32
+    private let lock = NSLock()
+    private var released = false
+
+    fileprivate init(descriptor: Int32) {
+        self.descriptor = descriptor
+    }
+
+    public func release() {
+        lock.withLock {
+            guard !released else { return }
+            released = true
+            _ = flock(descriptor, LOCK_UN)
+            close(descriptor)
+        }
+    }
+
+    deinit {
+        release()
+    }
+}
+
 struct StateAccessCoordinator {
     let configuration: StateStoreConfiguration
 
     private static let lifecycleFenceThreadKey =
         "dev.hostwright.state-access.exclusive-lifecycle-fence"
+    private static let pendingMaintenanceRecoveryThreadKey =
+        "dev.hostwright.state-access.pending-maintenance-recovery"
 
     func withLock<T>(
         _ mode: StateAccessMode,
@@ -22,8 +47,11 @@ struct StateAccessCoordinator {
         let paths = try configuration.maintenancePaths()
         if Thread.current.threadDictionary[Self.lifecycleFenceThreadKey] as? String
             == paths.accessLockPath {
-            if !allowPendingMaintenance, pathExists(paths.journalPath) {
-                throw StateStoreError.maintenanceRecoveryRequired(journalPath: paths.journalPath)
+            if Thread.current.threadDictionary[Self.pendingMaintenanceRecoveryThreadKey] as? Bool == true {
+                return try body()
+            }
+            if !allowPendingMaintenance, let journal = pendingMaintenanceJournal(paths) {
+                throw StateStoreError.maintenanceRecoveryRequired(journalPath: journal)
             }
             return try body()
         }
@@ -56,23 +84,35 @@ struct StateAccessCoordinator {
             )
         }
 
-        if !allowPendingMaintenance, pathExists(paths.journalPath) {
-            throw StateStoreError.maintenanceRecoveryRequired(journalPath: paths.journalPath)
+        if !allowPendingMaintenance, let journal = pendingMaintenanceJournal(paths) {
+            throw StateStoreError.maintenanceRecoveryRequired(journalPath: journal)
         }
         return try body()
     }
 
-    func withExclusiveLifecycleFence<T>(_ body: () throws -> T) throws -> T {
+    func withExclusiveLifecycleFence<T>(
+        allowPendingMaintenance: Bool = false,
+        _ body: () throws -> T
+    ) throws -> T {
         let paths = try configuration.maintenancePaths()
-        return try withLock(.exclusive) {
+        return try withLock(.exclusive, allowPendingMaintenance: allowPendingMaintenance) {
             let dictionary = Thread.current.threadDictionary
             let previous = dictionary[Self.lifecycleFenceThreadKey]
+            let previousRecovery = dictionary[Self.pendingMaintenanceRecoveryThreadKey]
             dictionary[Self.lifecycleFenceThreadKey] = paths.accessLockPath
+            if allowPendingMaintenance {
+                dictionary[Self.pendingMaintenanceRecoveryThreadKey] = true
+            }
             defer {
                 if let previous {
                     dictionary[Self.lifecycleFenceThreadKey] = previous
                 } else {
                     dictionary.removeObject(forKey: Self.lifecycleFenceThreadKey)
+                }
+                if let previousRecovery {
+                    dictionary[Self.pendingMaintenanceRecoveryThreadKey] = previousRecovery
+                } else {
+                    dictionary.removeObject(forKey: Self.pendingMaintenanceRecoveryThreadKey)
                 }
             }
             return try body()
@@ -100,10 +140,37 @@ struct StateAccessCoordinator {
                 role: "state-access fence"
             )
         }
-        if !allowPendingMaintenance, pathExists(paths.journalPath) {
-            throw StateStoreError.maintenanceRecoveryRequired(journalPath: paths.journalPath)
+        if !allowPendingMaintenance, let journal = pendingMaintenanceJournal(paths) {
+            throw StateStoreError.maintenanceRecoveryRequired(journalPath: journal)
         }
         return try body()
+    }
+
+    func acquireOperationMutationFence(
+        groupID: String
+    ) throws -> OperationMutationFence {
+        guard HostwrightResourceUUID.isValid(groupID) else {
+            throw StateStoreError.invalidRecord(
+                "Operation mutation fencing requires an exact group UUID."
+            )
+        }
+        let paths = try configuration.maintenancePaths()
+        let descriptor = try openSecureLock(
+            paths.accessLockPath + ".operation-" + groupID.lowercased()
+        )
+        do {
+            try acquire(
+                descriptor,
+                operation: LOCK_EX,
+                deadline:
+                    DispatchTime.now().uptimeNanoseconds + 250_000_000,
+                role: "operation mutation fence"
+            )
+            return OperationMutationFence(descriptor: descriptor)
+        } catch {
+            close(descriptor)
+            throw error
+        }
     }
 
     private func acquire(
@@ -127,6 +194,12 @@ struct StateAccessCoordinator {
             }
             usleep(10_000)
         }
+    }
+
+    private func pendingMaintenanceJournal(_ paths: StateMaintenancePaths) -> String? {
+        if pathExists(paths.journalPath) { return paths.journalPath }
+        let retention = paths.journalPath + ".retention-v1"
+        return pathExists(retention) ? retention : nil
     }
 
     private func openSecureLock(_ path: String) throws -> Int32 {

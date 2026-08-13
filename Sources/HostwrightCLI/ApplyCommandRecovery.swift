@@ -1,4 +1,5 @@
 import HostwrightCore
+import HostwrightObservability
 import HostwrightReconciler
 import HostwrightRuntime
 import HostwrightState
@@ -48,7 +49,9 @@ extension ApplyCommandRunner {
         let observed: ObservedRuntimeState
         do {
             observed = try waitForAsync {
-                try await adapter.observe(desiredState: desiredState)
+                try await HostwrightTraceContext.withSpan(.providerObserve) {
+                    try await adapter.observe(desiredState: desiredState)
+                }
             }
         } catch {
             return RuntimeMutationReobservation(recoveredEvent: nil, provedNoEffect: false)
@@ -222,7 +225,7 @@ extension ApplyCommandRunner {
         let severity: StateEventSeverity
         let message: String
         switch status {
-        case .active:
+        case .active, .stablePending:
             eventType = "restart.policy.active"
             severity = .info
             message = "\(managedRestartSentenceLabel(for: action)) succeeded for \(action.identity.displayName); restart attempt budget is reset."
@@ -242,6 +245,10 @@ extension ApplyCommandRunner {
             eventType = "restart.policy.manual-disabled"
             severity = .warning
             message = "Managed start is disabled by restart policy."
+        case .projectBudgetBlocked:
+            eventType = "restart.policy.project-budget-blocked"
+            severity = .warning
+            message = "Managed start is blocked by the project restart budget."
         }
 
         try store.events.append([

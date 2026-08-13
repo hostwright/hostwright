@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import HostwrightCore
+import HostwrightObservability
 import HostwrightReconciler
 import HostwrightRuntime
 import HostwrightSecrets
@@ -75,6 +76,10 @@ struct RecoveryCommandRunner {
                 for record in records {
                     let group = record.group
                     let mode = recoveryMode(for: group)
+                    let checkpoint = group.groupKind == "lifecycle-v1"
+                        ? LifecycleMutationCheckpointRecord(
+                            checkpoint: group.checkpoint
+                        ) : nil
                     lines.append(
                         "- \(group.updatedAt) \(group.plannedActionType) " +
                             "\(group.serviceName ?? "project") status=\(group.status.rawValue) " +
@@ -82,6 +87,13 @@ struct RecoveryCommandRunner {
                     )
                     lines.append("  group: \(group.id)")
                     lines.append("  plan: \(group.planHash)")
+                    if let checkpoint {
+                        lines.append(
+                            "  checkpoint-contract: v\(checkpoint.schemaVersion) " +
+                                "class=\(checkpoint.classification.rawValue) " +
+                                "recovery=\(checkpoint.recovery.rawValue)"
+                        )
+                    }
                     if group.lockOwner != nil || group.lockExpiresAt != nil {
                         lines.append("  lock: owner=\(RuntimeRedactionPolicy.default.redact(group.lockOwner ?? "unknown")) expiresAt=\(group.lockExpiresAt ?? "unknown")")
                     }
@@ -112,6 +124,7 @@ struct RecoveryCommandRunner {
     ) -> CLIRunResult {
         do {
             let store = SQLiteStateStore(configuration: stateStoreConfiguration)
+            HostwrightTraceContext.session?.attach(StateTraceSink(store: store))
             guard let group = try store.operationGroups.load(id: groupID) else {
                 return failure(
                     HostwrightDiagnostic(
@@ -269,7 +282,9 @@ struct RecoveryCommandRunner {
             return CLIRunResult(
                 standardError: CLIJSON.render([
                     "kind": "error",
+                    "schemaVersion": hold.schemaVersion,
                     "code": HostwrightErrorCode.partialFailure.rawValue,
+                    "reasonCode": hold.reasonCode.rawValue,
                     "exitCode": Int(exitCode.rawValue),
                     "message": message,
                     "affectedNodeKeys": affectedNodeKeys,
@@ -280,6 +295,7 @@ struct RecoveryCommandRunner {
         }
         var lines = [
             "\(HostwrightErrorCode.partialFailure.rawValue): \(message)",
+            "Reason: \(hold.reasonCode.rawValue)",
             "Affected nodes: \(affectedNodeKeys.isEmpty ? "none" : affectedNodeKeys.joined(separator: ","))",
             "Operator commands:"
         ]
@@ -369,6 +385,11 @@ private struct SecretPersistedRecoveryDriver {
             timeoutSeconds: request.timeoutSeconds,
             store: store
         )
+        let mutationFence = try hostwrightAcquireExactOperationMutationFence(
+            store: store,
+            group: activeGroup
+        )
+        defer { mutationFence.release() }
         let manager = environment.secretManager()
         let observed = try observation(
             matching: intent.referenceSHA256,

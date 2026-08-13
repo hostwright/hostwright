@@ -84,7 +84,7 @@ public struct OperationGroupRepository: Sendable {
         try store.withValidatedConnection { connection in
             try connection.transaction {
                 let rows = try connection.query(
-                    "SELECT status FROM operation_groups WHERE id = ? LIMIT 1",
+                    "SELECT status, lock_owner, lock_expires_at FROM operation_groups WHERE id = ? LIMIT 1",
                     bindings: [.text(groupID)]
                 )
                 guard let currentStatus = rows.first?.first ?? nil else {
@@ -93,6 +93,15 @@ public struct OperationGroupRepository: Sendable {
                 guard currentStatus == OperationGroupStatus.active.rawValue else {
                     throw StateStoreError.invalidRecord("Operation group '\(groupID)' is already terminal with status '\(currentStatus)'.")
                 }
+                try rebindOwnershipLeases(
+                    groupID: groupID,
+                    expectedOwner: rows[0][1],
+                    expectedExpiry: rows[0][2],
+                    newOwner: nil,
+                    newExpiry: nil,
+                    updatedAt: updatedAt,
+                    on: connection
+                )
                 try connection.run(
                     """
                     UPDATE operation_groups
@@ -109,6 +118,112 @@ public struct OperationGroupRepository: Sendable {
                         .text(groupID)
                     ]
                 )
+            }
+        }
+    }
+
+    public func finishExactLease(
+        groupID: String,
+        expectedFencingToken: String,
+        expectedLockOwner: String,
+        expectedLockExpiresAt: String,
+        status: OperationGroupStatus,
+        checkpoint: String,
+        manualRecoveryHintRedacted: String,
+        updatedAt: String,
+        metadataJSONRedacted: String
+    ) throws {
+        guard status != .active,
+              HostwrightResourceUUID.isValid(expectedFencingToken),
+              !expectedLockOwner.isEmpty,
+              !expectedLockExpiresAt.isEmpty,
+              !checkpoint.trimmingCharacters(
+                  in: .whitespacesAndNewlines
+              ).isEmpty,
+              StateJSON.isObject(metadataJSONRedacted) else {
+            throw StateStoreError.invalidRecord(
+                "Exact operation-group finish requires a terminal state, fence, finite lease, checkpoint, and metadata object."
+            )
+        }
+        let owner = RuntimeRedactionPolicy.default.redact(
+            expectedLockOwner
+        )
+        let hint = RuntimeRedactionPolicy.default.redact(
+            manualRecoveryHintRedacted
+        )
+        let metadata = try StateJSON.redactedJSON(metadataJSONRedacted)
+        try store.withValidatedConnection { connection in
+            try connection.transaction {
+                let rows = try connection.query(
+                    """
+                    SELECT status, fencing_token, lock_owner, lock_expires_at
+                    FROM operation_groups
+                    WHERE id = ?
+                    LIMIT 1
+                    """,
+                    bindings: [.text(groupID)]
+                )
+                guard rows.count == 1,
+                      rows[0][0] == OperationGroupStatus.active.rawValue,
+                      rows[0][1] == expectedFencingToken.lowercased(),
+                      rows[0][2] == owner,
+                      rows[0][3] == expectedLockExpiresAt else {
+                    throw StateStoreError.invalidRecord(
+                        "Operation-group finish lost the exact fenced lease owner or expiry."
+                    )
+                }
+                try rebindOwnershipLeases(
+                    groupID: groupID,
+                    expectedOwner: owner,
+                    expectedExpiry: expectedLockExpiresAt,
+                    newOwner: nil,
+                    newExpiry: nil,
+                    updatedAt: updatedAt,
+                    on: connection
+                )
+                try connection.run(
+                    """
+                    UPDATE operation_groups
+                    SET status = ?, checkpoint = ?, lock_owner = NULL,
+                        lock_expires_at = NULL,
+                        manual_recovery_hint_redacted = ?, updated_at = ?,
+                        metadata_json_redacted = ?
+                    WHERE id = ? AND status = 'active'
+                      AND fencing_token = ? AND lock_owner = ?
+                      AND lock_expires_at = ?
+                    """,
+                    bindings: [
+                        .text(status.rawValue),
+                        .text(checkpoint),
+                        .text(hint),
+                        .text(updatedAt),
+                        .text(metadata),
+                        .text(groupID),
+                        .text(expectedFencingToken.lowercased()),
+                        .text(owner),
+                        .text(expectedLockExpiresAt)
+                    ]
+                )
+                let updated = try connection.query(
+                    """
+                    SELECT status, lock_owner, lock_expires_at
+                    FROM operation_groups
+                    WHERE id = ? AND fencing_token = ?
+                    LIMIT 1
+                    """,
+                    bindings: [
+                        .text(groupID),
+                        .text(expectedFencingToken.lowercased())
+                    ]
+                )
+                guard updated.count == 1,
+                      updated[0][0] == status.rawValue,
+                      updated[0][1] == nil,
+                      updated[0][2] == nil else {
+                    throw StateStoreError.invalidRecord(
+                        "Exact operation-group finish lost its terminal compare-and-swap."
+                    )
+                }
             }
         }
     }
@@ -219,6 +334,15 @@ public struct OperationGroupRepository: Sendable {
                         .text(existingExpiry)
                     ]
                 )
+                try rebindOwnershipLeases(
+                    groupID: groupID,
+                    expectedOwner: owner,
+                    expectedExpiry: existingExpiry,
+                    newOwner: owner,
+                    newExpiry: lockExpiresAt,
+                    updatedAt: updatedAt,
+                    on: connection
+                )
                 let updated = try connection.query(
                     """
                     SELECT checkpoint, lock_expires_at
@@ -262,6 +386,22 @@ public struct OperationGroupRepository: Sendable {
             )
         }
         let owner = RuntimeRedactionPolicy.default.redact(lockOwner)
+        if let current = try load(id: groupID),
+           current.status == .active,
+           current.planHash == expectedPlanHash,
+           current.fencingToken == expectedFencingToken.lowercased(),
+           let currentExpiry = current.lockExpiresAt,
+           currentExpiry > currentTimestamp,
+           try !isHandedOffControllerClaim(
+               group: current,
+               claimant: owner
+           ) {
+            return .activeUnexpired(current)
+        }
+        let mutationFence = try store.acquireOperationMutationFence(
+            groupID: groupID
+        )
+        defer { mutationFence.release() }
         return try store.withValidatedConnection { connection in
             try connection.transaction {
                 let rows = try connection.query(
@@ -292,6 +432,50 @@ public struct OperationGroupRepository: Sendable {
                     )
                 }
                 guard existingExpiry <= currentTimestamp else {
+                    if try isHandedOffControllerClaim(
+                        group: existing,
+                        claimant: owner
+                    ) {
+                        try connection.run(
+                            """
+                            UPDATE operation_groups
+                            SET lock_owner = ?, lock_expires_at = ?,
+                                updated_at = ?
+                            WHERE id = ? AND status = 'active'
+                              AND plan_hash = ? AND fencing_token = ?
+                              AND lock_owner = ? AND lock_expires_at = ?
+                            """,
+                            bindings: [
+                                .text(owner),
+                                .text(lockExpiresAt),
+                                .text(currentTimestamp),
+                                .text(groupID),
+                                .text(expectedPlanHash),
+                                .text(expectedFencingToken.lowercased()),
+                                .text(existing.lockOwner ?? ""),
+                                .text(existingExpiry)
+                            ]
+                        )
+                        try rebindOwnershipLeases(
+                            groupID: groupID,
+                            expectedOwner: existing.lockOwner,
+                            expectedExpiry: existingExpiry,
+                            newOwner: owner,
+                            newExpiry: lockExpiresAt,
+                            updatedAt: currentTimestamp,
+                            on: connection
+                        )
+                        guard let claimed = try load(
+                            id: groupID,
+                            on: connection
+                        ), claimed.lockOwner == owner,
+                           claimed.lockExpiresAt == lockExpiresAt else {
+                            throw StateStoreError.invalidRecord(
+                                "Handed-off operation lease claim lost its single-winner compare-and-swap."
+                            )
+                        }
+                        return .reclaimed(claimed)
+                    }
                     return .activeUnexpired(existing)
                 }
                 try connection.run(
@@ -310,6 +494,15 @@ public struct OperationGroupRepository: Sendable {
                         .text(expectedFencingToken.lowercased()),
                         .text(existingExpiry)
                     ]
+                )
+                try rebindOwnershipLeases(
+                    groupID: groupID,
+                    expectedOwner: existing.lockOwner,
+                    expectedExpiry: existingExpiry,
+                    newOwner: owner,
+                    newExpiry: lockExpiresAt,
+                    updatedAt: currentTimestamp,
+                    on: connection
                 )
                 let loaded = try connection.query(
                     """
@@ -338,6 +531,259 @@ public struct OperationGroupRepository: Sendable {
                 return .reclaimed(reclaimed)
             }
         }
+    }
+
+    public func handoffExpiredActive(
+        groupID: String,
+        expectedPlanHash: String,
+        expectedFencingToken: String,
+        expectedLockOwner: String,
+        expectedLockExpiresAt: String,
+        newLockOwner: String,
+        newLockExpiresAt: String,
+        currentTimestamp: String
+    ) throws -> OperationGroupRecord {
+        let allowedTargets = Set([
+            "hostwright-recovery-resume",
+            "hostwright-recovery-rollback"
+        ])
+        guard HostwrightResourceUUID.isValid(groupID),
+              expectedPlanHash.range(
+                  of: "^[a-f0-9]{64}$",
+                  options: .regularExpression
+              ) != nil,
+              HostwrightResourceUUID.isValid(expectedFencingToken),
+              !expectedLockOwner.isEmpty,
+              expectedLockOwner.utf8.count <= 128,
+              allowedTargets.contains(newLockOwner),
+              expectedLockOwner != newLockOwner,
+              expectedLockExpiresAt <= currentTimestamp,
+              newLockExpiresAt > currentTimestamp else {
+            throw StateStoreError.invalidRecord(
+                "Operation handoff requires an expired exact group, plan, fence, prior lease, and a bounded recovery controller lease."
+            )
+        }
+        let mutationFence = try store.acquireOperationMutationFence(
+            groupID: groupID
+        )
+        defer { mutationFence.release() }
+        return try store.withValidatedConnection { connection in
+            try connection.transaction {
+                guard let current = try load(id: groupID, on: connection),
+                      current.status == .active,
+                      current.planHash == expectedPlanHash,
+                      current.fencingToken ==
+                        expectedFencingToken.lowercased(),
+                      current.lockOwner == expectedLockOwner,
+                      current.lockExpiresAt == expectedLockExpiresAt else {
+                    throw StateStoreError.invalidRecord(
+                        "Operation handoff lost the exact active owner, expiry, plan, or fence."
+                    )
+                }
+                guard current.groupKind == "lifecycle-v1" else {
+                    throw StateStoreError.invalidRecord(
+                        "Operation handoff is unavailable for a mutation kind without a compatible local recovery claimant."
+                    )
+                }
+                let ownershipRows = try connection.query(
+                    """
+                    SELECT id, resource_identifier, resource_type, project_id,
+                           service_name, runtime_adapter, created_at, observed_at,
+                           cleanup_eligible, metadata_json_redacted,
+                           identity_version, resource_uuid, resource_generation,
+                           project_resource_uuid, project_generation,
+                           provider_generation, fencing_token
+                    FROM ownership_records
+                    ORDER BY resource_identifier ASC, runtime_adapter ASC
+                    """
+                )
+                var ownershipMetadataUpdates: [(
+                    id: String,
+                    priorMetadata: String,
+                    nextMetadata: String,
+                    fencingToken: String
+                )] = []
+                for row in ownershipRows {
+                    let ownership = try ownershipRecord(from: row)
+                    guard let authority = try OwnershipAuthorityMetadata.decode(
+                        from: ownership.metadataJSONRedacted
+                    ), authority.operationGroupID == groupID else {
+                        continue
+                    }
+                    try authority.validate(for: ownership)
+                    guard authority.leaseOwner != nil else { continue }
+                    guard authority.leaseOwner == expectedLockOwner else {
+                        throw StateStoreError.invalidRecord(
+                            "Operation handoff found ownership bound to a different lease controller."
+                        )
+                    }
+                    let rebound = OwnershipAuthorityRecord(
+                        controllerID: authority.controllerID,
+                        providerID: authority.providerID,
+                        ownershipProofSHA256:
+                            authority.ownershipProofSHA256,
+                        resourceUUID: authority.resourceUUID,
+                        resourceGeneration: authority.resourceGeneration,
+                        projectResourceUUID:
+                            authority.projectResourceUUID,
+                        projectGeneration: authority.projectGeneration,
+                        providerGeneration: authority.providerGeneration,
+                        fencingToken: authority.fencingToken,
+                        finalizers: authority.finalizers,
+                        deletionTimestamp: authority.deletionTimestamp,
+                        operationGroupID: authority.operationGroupID,
+                        leaseOwner: newLockOwner,
+                        leaseExpiresAt: newLockExpiresAt,
+                        handoffGeneration:
+                            authority.handoffGeneration + 1
+                    )
+                    try rebound.validate(for: ownership)
+                    ownershipMetadataUpdates.append((
+                        id: ownership.id,
+                        priorMetadata: ownership.metadataJSONRedacted,
+                        nextMetadata: try OwnershipAuthorityMetadata.encode(
+                            rebound,
+                            into: ownership.metadataJSONRedacted
+                        ),
+                        fencingToken: ownership.fencingToken
+                    ))
+                }
+                let metadata = try handoffMetadata(
+                    current.metadataJSONRedacted,
+                    from: expectedLockOwner,
+                    to: newLockOwner,
+                    at: currentTimestamp
+                )
+                try connection.run(
+                    """
+                    UPDATE operation_groups
+                    SET lock_owner = ?, lock_expires_at = ?,
+                        updated_at = ?, metadata_json_redacted = ?
+                    WHERE id = ? AND status = 'active'
+                      AND plan_hash = ? AND fencing_token = ?
+                      AND lock_owner = ? AND lock_expires_at = ?
+                    """,
+                    bindings: [
+                        .text(newLockOwner),
+                        .text(newLockExpiresAt),
+                        .text(currentTimestamp),
+                        .text(metadata),
+                        .text(groupID.lowercased()),
+                        .text(expectedPlanHash),
+                        .text(expectedFencingToken.lowercased()),
+                        .text(expectedLockOwner),
+                        .text(expectedLockExpiresAt)
+                    ]
+                )
+                for update in ownershipMetadataUpdates {
+                    try connection.run(
+                        """
+                        UPDATE ownership_records
+                        SET metadata_json_redacted = ?
+                        WHERE id = ? AND fencing_token = ?
+                          AND metadata_json_redacted = ?
+                        """,
+                        bindings: [
+                            .text(update.nextMetadata),
+                            .text(update.id),
+                            .text(update.fencingToken),
+                            .text(update.priorMetadata)
+                        ]
+                    )
+                    let reboundRows = try connection.query(
+                        """
+                        SELECT metadata_json_redacted
+                        FROM ownership_records
+                        WHERE id = ? AND fencing_token = ?
+                        LIMIT 1
+                        """,
+                        bindings: [
+                            .text(update.id),
+                            .text(update.fencingToken)
+                        ]
+                    )
+                    guard reboundRows.first?.first ==
+                            update.nextMetadata else {
+                        throw StateStoreError.invalidRecord(
+                            "Operation handoff lost an exact ownership authority compare-and-swap."
+                        )
+                    }
+                }
+                guard let handedOff = try load(
+                    id: groupID.lowercased(),
+                    on: connection
+                ),
+                handedOff.lockOwner == newLockOwner,
+                handedOff.lockExpiresAt == newLockExpiresAt,
+                handedOff.metadataJSONRedacted == metadata else {
+                    throw StateStoreError.invalidRecord(
+                        "Operation handoff lost its single-winner compare-and-swap."
+                    )
+                }
+                return handedOff
+            }
+        }
+    }
+
+    private func handoffMetadata(
+        _ metadataJSON: String,
+        from priorController: String,
+        to controller: String,
+        at timestamp: String
+    ) throws -> String {
+        guard let data = metadataJSON.data(using: .utf8),
+              var object = try JSONSerialization.jsonObject(with: data)
+                as? [String: Any] else {
+            throw StateStoreError.invalidRecord(
+                "Operation handoff metadata must be a JSON object."
+            )
+        }
+        let previous = object["localLeaseAuthority"]
+            as? [String: Any]
+        let generation = (previous?["handoffGeneration"] as? Int ?? 0) + 1
+        object["localLeaseAuthority"] = [
+            "schemaVersion": 1,
+            "controllerID": controller,
+            "priorControllerID": priorController,
+            "handoffGeneration": generation,
+            "handoffTimestamp": timestamp
+        ]
+        let encoded = try JSONSerialization.data(
+            withJSONObject: object,
+            options: [.sortedKeys, .withoutEscapingSlashes]
+        )
+        guard encoded.count <= 1_048_576,
+              let result = String(data: encoded, encoding: .utf8) else {
+            throw StateStoreError.invalidRecord(
+                "Operation handoff metadata exceeds its bounded JSON contract."
+            )
+        }
+        return try StateJSON.redactedJSON(result)
+    }
+
+    private func isHandedOffControllerClaim(
+        group: OperationGroupRecord,
+        claimant: String
+    ) throws -> Bool {
+        guard let controller = group.lockOwner,
+              [
+                  "hostwright-recovery-resume",
+                  "hostwright-recovery-rollback"
+              ].contains(controller),
+              claimant.hasPrefix(controller + ":"),
+              HostwrightResourceUUID.isValid(
+                  String(claimant.dropFirst(controller.count + 1))
+              ),
+              let data = group.metadataJSONRedacted.data(using: .utf8),
+              let object = try JSONSerialization.jsonObject(with: data)
+                as? [String: Any],
+              let authority = object["localLeaseAuthority"]
+                as? [String: Any],
+              authority["schemaVersion"] as? Int == 1,
+              authority["controllerID"] as? String == controller else {
+            return false
+        }
+        return true
     }
 
     public func resumeInterrupted(
@@ -416,6 +862,15 @@ public struct OperationGroupRepository: Sendable {
                         .text(groupID),
                         .text(expectedFencingToken.lowercased())
                     ]
+                )
+                try rebindOwnershipLeases(
+                    groupID: groupID,
+                    expectedOwner: nil,
+                    expectedExpiry: nil,
+                    newOwner: redactedOwner,
+                    newExpiry: lockExpiresAt,
+                    updatedAt: updatedAt,
+                    on: connection
                 )
                 let loaded = try connection.query(
                     """
@@ -529,6 +984,15 @@ public struct OperationGroupRepository: Sendable {
                         .text(expectedPlanHash),
                         .text(expectedFencingToken.lowercased())
                     ]
+                )
+                try rebindOwnershipLeases(
+                    groupID: groupID,
+                    expectedOwner: nil,
+                    expectedExpiry: nil,
+                    newOwner: redactedOwner,
+                    newExpiry: lockExpiresAt,
+                    updatedAt: updatedAt,
+                    on: connection
                 )
                 let loaded = try connection.query(
                     """
@@ -648,6 +1112,127 @@ public struct OperationGroupRepository: Sendable {
         return try rows.first.map(operationGroupRecord(from:))
     }
 
+    private func load(
+        id: String,
+        on connection: SQLiteConnection
+    ) throws -> OperationGroupRecord? {
+        let rows = try connection.query(
+            """
+            SELECT id, operation_id, group_kind, project_id, service_name, planned_action_type,
+                   status, group_idempotency_key, plan_hash, checkpoint, lock_owner, lock_expires_at,
+                   rollback_available, manual_recovery_hint_redacted, created_at, updated_at,
+                   metadata_json_redacted, fencing_token, intent_json_redacted,
+                   compensation_json_redacted, verification_json_redacted
+            FROM operation_groups
+            WHERE id = ?
+            LIMIT 1
+            """,
+            bindings: [.text(id)]
+        )
+        return try rows.first.map(operationGroupRecord(from:))
+    }
+
+    private func rebindOwnershipLeases(
+        groupID: String,
+        expectedOwner: String?,
+        expectedExpiry: String?,
+        newOwner: String?,
+        newExpiry: String?,
+        updatedAt: String,
+        on connection: SQLiteConnection
+    ) throws {
+        guard (newOwner == nil) == (newExpiry == nil) else {
+            throw StateStoreError.invalidRecord(
+                "Ownership lease transition requires paired replacement owner and expiry values."
+            )
+        }
+        let rows = try connection.query(
+            """
+            SELECT id, resource_identifier, resource_type, project_id,
+                   service_name, runtime_adapter, created_at, observed_at,
+                   cleanup_eligible, metadata_json_redacted,
+                   identity_version, resource_uuid, resource_generation,
+                   project_resource_uuid, project_generation,
+                   provider_generation, fencing_token
+            FROM ownership_records
+            ORDER BY resource_identifier ASC, runtime_adapter ASC
+            """
+        )
+        for row in rows {
+            let ownership = try ownershipRecord(from: row)
+            guard let authority = try OwnershipAuthorityMetadata.decode(
+                from: ownership.metadataJSONRedacted
+            ), authority.operationGroupID == groupID else {
+                continue
+            }
+            try authority.validate(for: ownership)
+            if authority.leaseOwner == nil, expectedOwner != nil {
+                continue
+            }
+            guard authority.leaseOwner == expectedOwner,
+                  authority.leaseExpiresAt == expectedExpiry else {
+                throw StateStoreError.invalidRecord(
+                    "Ownership authority lost the exact operation-group lease transition."
+                )
+            }
+            let rebound = OwnershipAuthorityRecord(
+                controllerID: authority.controllerID,
+                providerID: authority.providerID,
+                ownershipProofSHA256: authority.ownershipProofSHA256,
+                resourceUUID: authority.resourceUUID,
+                resourceGeneration: authority.resourceGeneration,
+                projectResourceUUID: authority.projectResourceUUID,
+                projectGeneration: authority.projectGeneration,
+                providerGeneration: authority.providerGeneration,
+                fencingToken: authority.fencingToken,
+                finalizers: authority.finalizers,
+                deletionTimestamp: authority.deletionTimestamp,
+                operationGroupID: authority.operationGroupID,
+                leaseOwner: newOwner,
+                leaseExpiresAt: newExpiry,
+                handoffGeneration: authority.handoffGeneration +
+                    ((newOwner != nil && newOwner != expectedOwner) ? 1 : 0)
+            )
+            try rebound.validate(for: ownership)
+            let metadata = try OwnershipAuthorityMetadata.encode(
+                rebound,
+                into: ownership.metadataJSONRedacted
+            )
+            try connection.run(
+                """
+                UPDATE ownership_records
+                SET metadata_json_redacted = ?, observed_at = ?
+                WHERE id = ? AND fencing_token = ?
+                  AND metadata_json_redacted = ?
+                """,
+                bindings: [
+                    .text(metadata),
+                    .text(updatedAt),
+                    .text(ownership.id),
+                    .text(ownership.fencingToken),
+                    .text(ownership.metadataJSONRedacted)
+                ]
+            )
+            let updated = try connection.query(
+                """
+                SELECT metadata_json_redacted
+                FROM ownership_records
+                WHERE id = ? AND fencing_token = ?
+                LIMIT 1
+                """,
+                bindings: [
+                    .text(ownership.id),
+                    .text(ownership.fencingToken)
+                ]
+            )
+            guard updated.first?.first == metadata else {
+                throw StateStoreError.invalidRecord(
+                    "Ownership lease transition lost its exact metadata compare-and-swap."
+                )
+            }
+        }
+    }
+
     private func active(projectID: String, on connection: SQLiteConnection) throws -> OperationGroupRecord? {
         let rows = try connection.query(
             """
@@ -682,6 +1267,15 @@ public struct OperationGroupRepository: Sendable {
             "previousCheckpoint": group.checkpoint,
             "previousStatus": group.status.rawValue
         ]))
+        try rebindOwnershipLeases(
+            groupID: group.id,
+            expectedOwner: group.lockOwner,
+            expectedExpiry: group.lockExpiresAt,
+            newOwner: nil,
+            newExpiry: nil,
+            updatedAt: currentTimestamp,
+            on: connection
+        )
         try connection.run(
             """
             UPDATE operation_groups
@@ -747,7 +1341,11 @@ public struct OperationGroupStepRepository: Sendable {
     }
 
     public func append(_ step: OperationGroupStepRecord) throws {
-        try appendValidated(step, expectedFencingToken: nil)
+        try appendValidated(
+            step,
+            expectedFencingToken: nil,
+            expectedLockOwner: nil
+        )
     }
 
     public func append(
@@ -759,12 +1357,37 @@ public struct OperationGroupStepRepository: Sendable {
                 "Operation group step append requires a valid fencing token."
             )
         }
-        try appendValidated(step, expectedFencingToken: expectedFencingToken.lowercased())
+        try appendValidated(
+            step,
+            expectedFencingToken: expectedFencingToken.lowercased(),
+            expectedLockOwner: nil
+        )
+    }
+
+    public func append(
+        _ step: OperationGroupStepRecord,
+        expectedFencingToken: String,
+        expectedLockOwner: String
+    ) throws {
+        guard HostwrightResourceUUID.isValid(expectedFencingToken),
+              !expectedLockOwner.isEmpty,
+              expectedLockOwner.utf8.count <= 128 else {
+            throw StateStoreError.invalidRecord(
+                "Operation group step append requires a valid fence and exact lease owner."
+            )
+        }
+        try appendValidated(
+            step,
+            expectedFencingToken: expectedFencingToken.lowercased(),
+            expectedLockOwner:
+                RuntimeRedactionPolicy.default.redact(expectedLockOwner)
+        )
     }
 
     private func appendValidated(
         _ step: OperationGroupStepRecord,
-        expectedFencingToken: String?
+        expectedFencingToken: String?,
+        expectedLockOwner: String?
     ) throws {
         guard StateJSON.isObject(step.metadataJSONRedacted) else {
             throw StateStoreError.invalidRecord("Operation group step metadata must be a JSON object.")
@@ -775,7 +1398,8 @@ public struct OperationGroupStepRepository: Sendable {
                 if let expectedFencingToken {
                     let groups = try connection.query(
                         """
-                        SELECT status, fencing_token
+                        SELECT status, fencing_token, lock_owner,
+                               lock_expires_at
                         FROM operation_groups
                         WHERE id = ?
                         LIMIT 1
@@ -784,7 +1408,9 @@ public struct OperationGroupStepRepository: Sendable {
                     )
                     guard groups.count == 1,
                           groups[0][0] == OperationGroupStatus.active.rawValue,
-                          groups[0][1] == expectedFencingToken else {
+                          groups[0][1] == expectedFencingToken,
+                          expectedLockOwner.map({ groups[0][2] == $0 }) ?? true,
+                          expectedLockOwner == nil || groups[0][3] != nil else {
                         throw StateStoreError.invalidRecord(
                             "Operation group step fence was lost or the group is no longer active."
                         )

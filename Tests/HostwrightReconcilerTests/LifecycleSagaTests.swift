@@ -2,6 +2,7 @@ import Foundation
 import XCTest
 @testable import HostwrightCore
 @testable import HostwrightManifest
+@testable import HostwrightObservability
 @testable import HostwrightReconciler
 @testable import HostwrightRuntime
 @testable import HostwrightState
@@ -216,6 +217,105 @@ final class LifecyclePlanTests: XCTestCase {
 }
 
 final class LifecycleSagaExecutorTests: XCTestCase {
+    func testSagaPropagatesOneTraceAcrossApplyObserveAndOwningOperation() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+        let session = try HostwrightTraceSession(
+            traceID: "11111111-1111-4111-8111-111111111111",
+            processCorrelationID: "22222222-2222-4222-8222-222222222222",
+            selected: true
+        )
+        session.attach(StateTraceSink(store: fixture.store))
+        let result = try await HostwrightTraceContext.withSession(session) {
+            let root = session.start(.cliRequest)
+            let result = try await HostwrightTraceContext.withSpan(root) {
+                try await LifecycleSagaExecutor(
+                    store: fixture.store,
+                    effects: InspectingLifecycleEffects(store: fixture.store),
+                    validator: ExactLifecycleValidator(),
+                    clock: FixedLifecycleClock()
+                ).execute(
+                    plan: fixture.plan,
+                    operationID: fixture.operationID,
+                    groupID: fixture.groupID,
+                    fencingToken: fixture.fence,
+                    lockOwner: "trace-test"
+                )
+            }
+            _ = session.finish(
+                root,
+                status: .succeeded,
+                attributes: session.rootCompletionAttributes(sampling: "all")
+            )
+            session.complete(status: .succeeded)
+            return result
+        }
+        XCTAssertEqual(result.status, .succeeded)
+        let trace = try fixture.store.traces.completeTrace(session.traceID)
+        XCTAssertEqual(trace.status, .succeeded)
+        XCTAssertTrue(trace.operationIDs.contains(fixture.operationID))
+        XCTAssertTrue(trace.spans.contains { $0.name == .sagaExecute })
+        XCTAssertTrue(trace.spans.contains { $0.name == .providerApply })
+        XCTAssertTrue(trace.spans.contains { $0.name == .providerObserve })
+        XCTAssertTrue(trace.spans.contains { $0.name == .healthEvaluate })
+        XCTAssertTrue(trace.spans.allSatisfy { $0.processCorrelationID == session.processCorrelationID })
+    }
+
+    func testMutationCheckpointTaxonomyClassifiesEverySagaTerminalAndBoundary()
+        throws
+    {
+        let cases: [
+            (String, LifecycleMutationCheckpointClass, LifecycleMutationRecoveryClass)
+        ] = [
+            ("intent-persisted", .intent, .resume),
+            ("create-web:effect-pending", .forwardEffect, .reobserve),
+            ("create-web:verified", .verification, .complete),
+            ("create-web:verified-after-resume", .verification, .complete),
+            ("create-web:compensation-pending", .compensation, .reobserve),
+            ("create-web:compensated", .compensation, .complete),
+            ("create-web:compensation-ambiguous-after-resume", .compensation, .safeHold),
+            ("create-web:compensation-attempts-exhausted", .compensation, .safeHold),
+            ("create-web:compensation-context-stale", .compensation, .safeHold),
+            ("create-web:compensation-failed", .compensation, .safeHold),
+            ("create-web:compensation-record-mismatch", .compensation, .safeHold),
+            ("create-web:compensation-unavailable", .compensation, .safeHold),
+            ("create-web:cancelled-before-effect", .interruption, .resume),
+            ("create-web:cancelled-no-effect", .interruption, .resume),
+            ("create-web:ambiguous-after-resume", .safeHold, .safeHold),
+            ("create-web:ambiguous-effect", .safeHold, .safeHold),
+            ("create-web:accepted-without-effect", .safeHold, .safeHold),
+            ("create-web:context-stale", .safeHold, .safeHold),
+            ("create-web:irreversible-effect-safe-hold", .safeHold, .safeHold),
+            ("create-web:restored-health-safe-hold", .restoredHealth, .safeHold),
+            ("rollback-restored-health-verified", .restoredHealth, .complete),
+            ("rollback-restored-health-safe-hold", .restoredHealth, .safeHold),
+            ("finalizer:started", .finalizer, .reobserve),
+            ("finalizer:failed", .finalizer, .reobserve),
+            ("finalizer:verified", .finalizer, .complete),
+            ("verified", .terminal, .complete),
+            ("compensated", .terminal, .complete)
+        ]
+        for (value, classification, recovery) in cases {
+            let record = try XCTUnwrap(
+                LifecycleMutationCheckpointRecord(checkpoint: value)
+            )
+            XCTAssertEqual(record.schemaVersion, 1)
+            XCTAssertEqual(record.checkpoint, value)
+            XCTAssertEqual(record.classification, classification)
+            XCTAssertEqual(record.recovery, recovery)
+            XCTAssertEqual(
+                record.nodeKey,
+                value.hasPrefix("create-web:") ? "create-web" : nil
+            )
+        }
+        XCTAssertNil(LifecycleMutationCheckpointRecord(checkpoint: ""))
+        XCTAssertNil(
+            LifecycleMutationCheckpointRecord(
+                checkpoint: "create-web:unknown-future-boundary"
+            )
+        )
+    }
+
     func testFinalizerRunsUnderActiveGroupAndResumesSameFence()
         async throws
     {
@@ -287,7 +387,7 @@ final class LifecycleSagaExecutorTests: XCTestCase {
         let repeatedCallCount = await finalizer.callCount()
         let expectedGroups =
             await finalizer.onlyObservedExpectedGroups()
-        XCTAssertEqual(repeatedCallCount, 3)
+        XCTAssertEqual(repeatedCallCount, 2)
         XCTAssertTrue(expectedGroups)
     }
 
@@ -346,6 +446,75 @@ final class LifecycleSagaExecutorTests: XCTestCase {
         XCTAssertEqual(steps.map(\.status), [.started, .succeeded])
     }
 
+    func testDistinctExecutionIdempotencyKeysRepeatOnePlanWithoutDuplicateRetry() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+        let firstKey = String(repeating: "1", count: 64)
+        let secondKey = String(repeating: "2", count: 64)
+        let effects = ScriptedLifecycleEffects(
+            apply: [.accepted, .accepted],
+            observe: [
+                .satisfied(LifecycleNodeVerification(summaryRedacted: "first verified")),
+                .satisfied(LifecycleNodeVerification(summaryRedacted: "second verified"))
+            ]
+        )
+        let executor = LifecycleSagaExecutor(
+            store: fixture.store,
+            effects: effects,
+            validator: ExactLifecycleValidator(),
+            clock: FixedLifecycleClock()
+        )
+
+        for key in [firstKey, secondKey] {
+            let fencingToken = HostwrightResourceUUID.legacy(
+                kind: "lifecycle-fencing",
+                identifier: key
+            )
+            let result = try await executor.execute(
+                plan: fixture.plan,
+                operationID: HostwrightResourceUUID.legacy(
+                    kind: "lifecycle-operation",
+                    identifier: key
+                ),
+                groupID: HostwrightResourceUUID.legacy(
+                    kind: "lifecycle-group",
+                    identifier: key
+                ),
+                fencingToken: fencingToken,
+                lockOwner: "lifecycle-generation-test",
+                groupIdempotencyKey: key
+            )
+            XCTAssertEqual(result.status, .succeeded)
+        }
+
+        let repeated = try await executor.execute(
+            plan: fixture.plan,
+            operationID: HostwrightResourceUUID.legacy(
+                kind: "lifecycle-operation",
+                identifier: secondKey
+            ),
+            groupID: HostwrightResourceUUID.legacy(
+                kind: "lifecycle-group",
+                identifier: secondKey
+            ),
+            fencingToken: HostwrightResourceUUID.legacy(
+                kind: "lifecycle-fencing",
+                identifier: secondKey
+            ),
+            lockOwner: "lifecycle-generation-test",
+            groupIdempotencyKey: secondKey
+        )
+        XCTAssertEqual(repeated.status, .alreadySucceeded)
+        let applyCount = await effects.applyCount()
+        XCTAssertEqual(applyCount, 2)
+        XCTAssertEqual(
+            try fixture.store.operationGroups.loadAll().filter {
+                $0.planHash == fixture.plan.planSHA256
+            }.count,
+            2
+        )
+    }
+
     func testConcurrentExactPlanExecutionRejectsLoserBeforeDuplicateEffect() async throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
@@ -373,6 +542,28 @@ final class LifecycleSagaExecutorTests: XCTestCase {
             )
         }
         await effects.waitUntilApplyStarted()
+        let inFlight = try XCTUnwrap(
+            fixture.store.operationGroups.load(id: fixture.groupID)
+        )
+        XCTAssertThrowsError(
+            try fixture.store.operationGroups.handoffExpiredActive(
+                groupID: inFlight.id,
+                expectedPlanHash: inFlight.planHash,
+                expectedFencingToken: inFlight.fencingToken,
+                expectedLockOwner: try XCTUnwrap(inFlight.lockOwner),
+                expectedLockExpiresAt:
+                    try XCTUnwrap(inFlight.lockExpiresAt),
+                newLockOwner: "hostwright-recovery-resume",
+                newLockExpiresAt: "2100-01-01T00:10:00Z",
+                currentTimestamp: "2099-01-01T00:10:00Z"
+            )
+        ) { error in
+            guard case StateStoreError.databaseLocked(_, _) = error else {
+                return XCTFail(
+                    "An in-flight effect must block lease handoff at the OS fence."
+                )
+            }
+        }
 
         do {
             _ = try await second.execute(
@@ -600,6 +791,144 @@ final class LifecycleSagaExecutorTests: XCTestCase {
         XCTAssertEqual(group.checkpoint, "compensated")
     }
 
+    func testCompensationRequiresRestoredHealthVerificationBeforeCompletion()
+        async throws
+    {
+        for verification in [
+            LifecycleSagaCompensationVerification.verified(
+                LifecycleNodeVerification(
+                    observationSHA256: String(repeating: "a", count: 64),
+                    summaryRedacted: "prior revision healthy"
+                )
+            ),
+            .safeHold(
+                reasonCode: "rollback.restored-health-failed",
+                hintRedacted: "Prior revision readiness failed."
+            )
+        ] {
+            let fixture = try makeFixture(nodeCount: 2)
+            defer { fixture.cleanup() }
+            let effects = CompensationVerifyingLifecycleEffects(
+                failure: normalizedFailure(
+                    category: .rejected,
+                    retry: .never,
+                    recovery: .none,
+                    operationID: fixture.operationID
+                ),
+                verification: verification
+            )
+
+            let result = try await LifecycleSagaExecutor(
+                store: fixture.store,
+                effects: effects,
+                validator: ExactLifecycleValidator(),
+                clock: FixedLifecycleClock()
+            ).execute(
+                plan: fixture.plan,
+                operationID: fixture.operationID,
+                groupID: fixture.groupID,
+                fencingToken: fixture.fence,
+                lockOwner: "lifecycle-restored-health-test"
+            )
+
+            let group = try XCTUnwrap(
+                fixture.store.operationGroups.load(id: fixture.groupID)
+            )
+            switch verification {
+            case .verified:
+                XCTAssertEqual(result.status, .compensated)
+                XCTAssertNil(result.recoveryReasonCode)
+                XCTAssertEqual(group.checkpoint, "compensated")
+                XCTAssertTrue(
+                    group.metadataJSONRedacted.contains(
+                        #""restoredHealth":"verified""#
+                    )
+                )
+            case .safeHold(let reasonCode, _):
+                XCTAssertEqual(result.status, .safeHold)
+                XCTAssertEqual(result.recoveryReasonCode, reasonCode)
+                XCTAssertEqual(
+                    group.checkpoint,
+                    "rollback-restored-health-safe-hold"
+                )
+                XCTAssertTrue(group.metadataJSONRedacted.contains(reasonCode))
+            }
+            let verificationCount = await effects.verificationCount()
+            XCTAssertEqual(verificationCount, 1)
+        }
+    }
+
+    func testCompletedIrreversibleHookSafeHoldsBeforeAnyInverse() async throws {
+        let fixture = try makeCustomFixture(parallelism: 1) { fence in
+            let hook = try LifecyclePlanNode(
+                key: "pre-stop-web",
+                action: .runHook,
+                serviceName: "web",
+                resourceIdentifier: "hostwright-demo-web",
+                resourceUUID: HostwrightResourceUUID.legacy(
+                    kind: "service",
+                    identifier: "project-demo:web"
+                ),
+                resourceGeneration: 1,
+                fencingToken: fence,
+                desiredSpecificationJSONRedacted: #"{"image":"local/web@sha256:abc"}"#
+            )
+            let mutation = try LifecyclePlanNode(
+                key: "create-candidate-web",
+                action: .create,
+                serviceName: "web",
+                resourceIdentifier: "hostwright-demo-web-candidate",
+                resourceUUID: HostwrightResourceUUID.generate(),
+                resourceGeneration: 2,
+                fencingToken: fence,
+                dependencies: [hook.key],
+                compensation: LifecycleCompensation(action: .delete),
+                desiredSpecificationJSONRedacted: #"{"image":"local/web@sha256:def"}"#
+            )
+            return [hook, mutation]
+        }
+        defer { fixture.cleanup() }
+        let failure = normalizedFailure(
+            category: .rejected,
+            retry: .never,
+            recovery: .none,
+            operationID: fixture.operationID
+        )
+        let effects = ScriptedLifecycleEffects(
+            apply: [.accepted, .failed(failure)],
+            observe: [
+                .satisfied(LifecycleNodeVerification(summaryRedacted: "hook completed")),
+                .noEffect(LifecycleNodeVerification(summaryRedacted: "candidate rejected"))
+            ],
+            compensate: []
+        )
+
+        let result = try await LifecycleSagaExecutor(
+            store: fixture.store,
+            effects: effects,
+            validator: ExactLifecycleValidator(),
+            clock: FixedLifecycleClock()
+        ).execute(
+            plan: fixture.plan,
+            operationID: fixture.operationID,
+            groupID: fixture.groupID,
+            fencingToken: fixture.fence,
+            lockOwner: "lifecycle-irreversible-test"
+        )
+
+        XCTAssertEqual(result.status, .safeHold)
+        XCTAssertEqual(
+            result.recoveryReasonCode,
+            LifecycleRecoverySafeHoldReason.irreversibleEffect.rawValue
+        )
+        XCTAssertEqual(
+            result.checkpoint,
+            "pre-stop-web:irreversible-effect-safe-hold"
+        )
+        let compensatedNodeKeys = await effects.compensatedNodeKeys()
+        XCTAssertTrue(compensatedNodeKeys.isEmpty)
+    }
+
     func testForwardDeadlineFailureUsesRollbackContextForCompensation() async throws {
         let fixture = try makeFixture(nodeCount: 2)
         defer { fixture.cleanup() }
@@ -759,11 +1088,6 @@ final class LifecycleSagaExecutorTests: XCTestCase {
             let observations: [LifecycleSagaObservation] =
                 rollbackStatus == .started
                 ? [
-                    .noEffect(
-                        LifecycleNodeVerification(
-                            summaryRedacted: "second create had no effect"
-                        )
-                    ),
                     .satisfied(
                         LifecycleNodeVerification(
                             summaryRedacted:
@@ -771,13 +1095,7 @@ final class LifecycleSagaExecutorTests: XCTestCase {
                         )
                     )
                 ]
-                : [
-                    .noEffect(
-                        LifecycleNodeVerification(
-                            summaryRedacted: "second create had no effect"
-                        )
-                    )
-                ]
+                : []
             let effects = ScriptedLifecycleEffects(
                 apply: [],
                 observe: observations
@@ -1320,7 +1638,7 @@ private actor FailOnceLifecycleFinalizer:
     }
 
     func onlyObservedExpectedGroups() -> Bool {
-        observedStatuses == [.active, .active, .succeeded]
+        observedStatuses == [.active, .active]
     }
 }
 
@@ -1483,6 +1801,70 @@ private actor BlockingLifecycleEffects: LifecycleSagaEffects {
 
     func observationCount() -> Int {
         observedCount
+    }
+}
+
+private actor CompensationVerifyingLifecycleEffects:
+    LifecycleSagaEffects,
+    LifecycleSagaCompensationVerifying
+{
+    private let failure: RuntimeNormalizedFailure
+    private let verification: LifecycleSagaCompensationVerification
+    private var applyIndex = 0
+    private var observeIndex = 0
+    private var verifyCount = 0
+
+    init(
+        failure: RuntimeNormalizedFailure,
+        verification: LifecycleSagaCompensationVerification
+    ) {
+        self.failure = failure
+        self.verification = verification
+    }
+
+    func apply(
+        node: LifecyclePlanNode,
+        context: LifecycleSagaContext
+    ) async -> LifecycleSagaApplyOutcome {
+        defer { applyIndex += 1 }
+        return applyIndex == 0 ? .accepted : .failed(failure)
+    }
+
+    func observe(
+        node: LifecyclePlanNode,
+        context: LifecycleSagaContext
+    ) async -> LifecycleSagaObservation {
+        defer { observeIndex += 1 }
+        if observeIndex == 0 {
+            return .satisfied(
+                LifecycleNodeVerification(summaryRedacted: "first verified")
+            )
+        }
+        return .noEffect(
+            LifecycleNodeVerification(summaryRedacted: "second rejected")
+        )
+    }
+
+    func compensate(
+        compensation: LifecycleCompensation,
+        node: LifecyclePlanNode,
+        context: LifecycleSagaContext
+    ) async -> LifecycleSagaCompensationOutcome {
+        .compensated(
+            LifecycleNodeVerification(summaryRedacted: "first compensated")
+        )
+    }
+
+    func verifyCompensation(
+        plan: LifecyclePlan,
+        context: LifecycleSagaContext
+    ) async -> LifecycleSagaCompensationVerification {
+        verifyCount += 1
+        return verification
+    }
+
+    func verificationCount() -> Int {
+        verifyCount
     }
 }
 

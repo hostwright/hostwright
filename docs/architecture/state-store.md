@@ -21,13 +21,15 @@ Implemented:
 - desired manifest snapshot persistence
 - observed runtime snapshot persistence
 - event ledger
+- bounded schema-v1 trace spans in the event ledger with exact event/operation correlation
 - operation ledger records for mutation safety
 - operation statuses for recorded, succeeded, and failed apply/cleanup attempts
-- ownership records for apply and cleanup decisions
+- ownership records with exact resource/project UUIDs, generations, provider/controller identity, ownership proof, fencing token, deletion intent, finalizers, and the bound local mutation lease
 - health check result records
-- restart policy state records
+- schema-v17 restart policy state and append-only attempt/hold/release history
+- schema-v17 append-only maintenance deferral, cancellation, override, admission, failure, and supersession records in the existing operation ledger
 - restart recovery records
-- operation recovery groups and step records
+- operation recovery groups and step records; `operation_groups` remains the sole project-local mutation lease and fencing authority
 - local redacted diagnostics export from existing state rows
 - real temporary-database integration checks across multiple connections
 - migration checksums, contiguous-history validation, and future-version refusal
@@ -45,17 +47,17 @@ Implemented:
 - recovery at every restore publication checkpoint, including the torn window before a publication checkpoint is durable
 - executable pre-repair rollback when a committed repair database becomes unrecoverable
 - atomic operation-group acquisition coverage across concurrent stores
-- foreground daemon loop event and operation records
+- foreground and exact managed daemon level-trigger events, operations, desired/observed state, health, restart state, and shared lifecycle operation-group/checkpoint records
 
 Not implemented:
 
-- multi-action `hostwright apply`
-- runtime mutation beyond create-missing-service, restart-policy-allowed managed start, restart-policy-allowed managed restart, and exact cleanup-eligible managed container delete
+- runtime mutation outside the implemented lifecycle, image, storage, network, and exact cleanup authorities
 - broad cleanup, image cleanup, volume cleanup, or unmanaged cleanup
 - drift planner
 - GA lifecycle-count, extended hardware-fault, and long-soak qualification
 - arbitrary SQLite page salvage or automatic repair of authoritative records
-- launch agent or background daemon service
+
+Daemon candidate reads do not publish over the authoritative healthy desired revision. The lifecycle saga records the exact desired revision and durable operation-group intent before its first effect. The outer daemon loop persists health, restart, observed-state, event, and reconciliation operation evidence only after the typed saga result. A thrown driver error directs operators to the lifecycle ledger instead of claiming that mutation did not begin.
 
 ## Requirements
 
@@ -79,7 +81,13 @@ The normative path table, environment hooks, command creation semantics, status 
 
 `SQLiteStateStore.migrate()` is the only explicit migration path. Repository reads and writes validate the already-applied schema before accessing tables; they do not create a missing database, create `schema_migrations`, or apply migrations as a side effect.
 
-Schema version 16 is the latest supported state schema. A database migrated by a newer Hostwright release fails closed with an incompatible-schema error. Hostwright does not downgrade state databases or silently convert provider ownership.
+Schema version 17 is the latest supported state schema. A database migrated by a newer Hostwright release fails closed with an incompatible-schema error. Hostwright does not downgrade state databases or silently convert provider ownership. Migration v16→v17 is additive, backup-compatible, and is the only Phase 08 schema migration; no v18 migration is introduced during this phase. Metrics, traces, and support bundles reuse bounded projections and event authority in this schema. Support-bundle creation/deletion receipts use the independent `supportEvidence` retention class, while a private adjacent file-effect journal carries the exact output path and device/inode identity during recovery; bundle content and paths never enter SQLite.
+
+Gate 12 adds no table or migration. Existing event rows project into schema-v1 stream records at read time. An opaque cursor binds the exact event identifier and SHA-256 of the stored redacted row, then resolves the row's current SQLite append position during each shared read lock. Retained cursors therefore survive authoritative `VACUUM`; deleted anchors become explicit retention gaps and modified anchors fail integrity. Cursor/watch reads do not create, migrate, repair, or compact state. See [Durable Events and Local Watches](../reference/events.md).
+
+Gate 13 also adds no table or migration. A schema-v1 metrics snapshot executes bounded aggregate queries inside one read transaction under the shared state fence, validates the fixed series catalog, and binds the result plus the physical source database SHA-256/bytes into `snapshotSHA256`. Metrics retain no independent samples: confirmed compaction affects future counters, histograms, summaries, and SLOs only through the authoritative source-row classes, while gauges reflect current schema-v17 rows. Explicit local export writes a separate operator-owned file and never changes state. See [Bounded Local Metrics and SLOs](../reference/metrics.md).
+
+Gate 14 also adds no table or migration. Schema-v1 trace spans use fixed type `trace.span.v1` and source `hostwright.trace` in `event_ledger`. The trace repository validates canonical UUID context, bounded hierarchy, closed attributes, immutable event/operation links, terminal roots, and a deterministic complete-trace hash. Trace rows retain under the independent `traces` class and are excluded from ordinary event/audit compaction selection. Explicit local export is consent-bound, operator-owned, and never changes state. See [Correlated Local Traces](../reference/traces.md).
 
 Each migration records a checksum in `schema_migrations`. Current builds accept the historical Phase 6 checksum for schema version 1 and record an algorithmic checksum for fresh migrations. If a known migration version has an unexpected checksum, Hostwright fails before reading or writing application records.
 
@@ -128,11 +136,13 @@ Version 7 locks the v0.0.2 identity and recovery foundation:
 - the migration checksum includes the non-SQL backfill implementation revision, so binaries with different transformation logic cannot claim the same schema-v7 migration;
 - a project generation cannot silently change mutation provider.
 
-Phase 04 completes the durable operation DAG/saga executor and Phase 08 completes unattended checkpoint recovery. Schema v10 retains the v9 OCI referrer foundation and adds immutable image-trust verification, exception, and exact subject-manifest evidence. Schema v11 adds immutable SPDX/CycloneDX document bindings to the exact image descriptor, policy, Gate 6 graph, SBOM referrer, normalized component proof, operation group, and optional provenance descriptor/referrer identities. Schema v12 adds immutable signed vulnerability-report bindings, canonical passed signature proof plus proof hash, exact verifier/trust-material/bundle identities, explainable current-policy decisions, and exact expiring/revocable approvals bound to one prior blocked decision, report/referrer, image, vulnerability/signature policy, database identity/version, and blocked-findings digest. Schema v13 adds immutable DSSE-wrapped in-toto Statement v1/SLSA provenance v1 evidence bound to the exact image descriptor, verified Gate 6 graph and referrer, builder and build type, source and dependency materials, bounded invocation/environment policy, signer material, policy hash, operation group, and verification time. Schema v14 adds bounded provider-scoped content accounting, exact ownership references, operator/policy pins, and shared or exclusive-delete leases with UUID fencing, expiry, and conflict guards. Schema v15 adds exact storage volume, attachment, snapshot, backup, hold, orphan, capacity, quota, and admission records with provider, generation, fencing, operation, and lifecycle constraints.
+Phase 04 completes the durable operation DAG/saga executor and Phase 08 completes unattended checkpoint recovery. Schema v10 retains the v9 OCI referrer foundation and adds immutable image-trust verification, exception, and exact subject-manifest evidence. Schema v11 adds immutable SPDX/CycloneDX document bindings to the exact image descriptor, policy, Gate 6 graph, SBOM referrer, normalized component proof, operation group, and optional provenance descriptor/referrer identities. Schema v12 adds immutable signed vulnerability-report bindings, canonical passed signature proof plus proof hash, exact verifier/trust-material/bundle identities, explainable current-policy decisions, and exact expiring/revocable approvals bound to one prior blocked decision, report/referrer, image, vulnerability/signature policy, database identity/version, and blocked-findings digest. Schema v13 adds immutable DSSE-wrapped in-toto Statement v1/SLSA provenance v1 evidence bound to the exact image descriptor, verified Gate 6 graph and referrer, builder and build type, source and dependency materials, bounded invocation/environment policy, signer material, policy hash, operation group, and verification time. Schema v14 adds bounded provider-scoped content accounting, exact ownership references, operator/policy pins, and shared or exclusive-delete leases with UUID fencing, expiry, and conflict guards. Schema v15 adds exact storage volume, attachment, snapshot, backup, hold, orphan, capacity, quota, and admission records with provider, generation, fencing, operation, and lifecycle constraints. Schema v16 adds UUID/fence-bound project networks, attachments, port reservations, DNS instances, certificates, ingress configuration, and service-tunnel sessions. Schema v17 adds bounded workload/project restart policy columns plus append-only `restart_attempt_history` for admitted attempts, denials, holds, stable resets, failures, and exact manual releases. Phase 08 maintenance decisions reuse the existing v17 `operation_ledger`, and Phase 08 ownership authority uses a versioned `hostwrightAuthority` envelope in existing `ownership_records`; no v18 migration, parallel ownership catalog, or parallel lease database is introduced. At most one deferred or override-authorized plan is current per project, a newer validated plan supersedes it transactionally, and the latest transition is defined by append order rather than wall-clock order.
 
 Normalized columns hold identifiers, project names, service names, timestamps, lifecycle states, operation status, event severity, restart status, recovery status, checkpoints, lock lease fields, rollback availability flags, and hashes.
 
 JSON blobs hold ports, networks, mounts, environment snapshots, runtime capabilities, runtime identifiers, event payloads, operation payloads, ownership metadata, health command/output metadata, restart recovery completed-step metadata, and operation recovery metadata. Saga metadata, intent, compensation, and verification payloads are decoded, redacted by key/value, and re-encoded before persistence so redaction cannot corrupt their JSON structure. Invalid saga JSON fails before acquisition or terminal transition. Payload fields, runtime identifiers, failure messages, and manual recovery hints are redacted before persistence.
+
+The `hostwrightAuthority` envelope is a strict schema-v1 local contract. Its deterministic proof binds the exact resource/project UUIDs, resource/project/provider generations, controller, provider, and fencing token. Every runtime mutation binds the ownership row to the exact active finite `operation_groups` lease. A private 0600 per-group OS mutation fence is held from the final exact lease check through external effects, re-observation, evidence, and terminal persistence; expiry reclaim and handoff must acquire the same fence first. A deleting resource records its deletion timestamp and ordered finalizers before the external effect; dependent network/tunnel finalizers complete before the ownership finalizer, and ownership is removed only after fresh exact runtime absence. An expired `lifecycle-v1` lease can transfer only through an exact compare-and-swap over group, plan, fence, prior controller, and prior expiry to the bounded local `resume` or `rollback` controller; the group lease and every bound ownership envelope advance atomically. The first lifecycle recovery process then claims that controller with a unique process owner, so two concurrent recovery processes cannot share the handed-off lease. Other mutation kinds keep their native recovery contracts and are not accepted by this handoff path. This is single-host handoff, not multi-host consensus or a Phase 09 authorization boundary.
 
 Desired environment snapshots never store resolved secret values. `secretEnv` entries persist only redacted markers in `env_json_redacted`; raw `keychain://<service>/<account>` labels and resolved values are not stored in desired-state rows.
 
@@ -140,7 +150,7 @@ Desired environment snapshots never store resolved secret values. `secretEnv` en
 
 `hostwright state integrity` classifies the selected database as:
 
-- `healthy`: SQLite structure, foreign keys, schema v16 ledger/checksums, required tables and indexes, resource/fencing UUIDs, authoritative enums/JSON contracts, and reconstructible projections all pass;
+- `healthy`: SQLite structure, foreign keys, schema v17 ledger/checksums, required tables and indexes, resource/fencing UUIDs, authoritative enums/JSON contracts, and reconstructible projections all pass;
 - `degraded`: authoritative state is valid, but runtime-observation or health projections contain invalid enum/JSON/identity data that can be re-observed safely;
 - `unrecoverable`: SQLite structure, foreign keys, migrations, required schema objects, or authoritative desired/ownership/operation/audit records are invalid.
 
@@ -189,6 +199,10 @@ Repair also requires dry-run plus exact token confirmation. It is allowed only f
 
 Ordinary repository access takes a shared per-database access fence, and writes additionally take the private writer fence. Restore and repair take the exclusive access fence. Existing state, fence, journal, staged, and displaced files are validated without changing their permissions before they are opened, moved, or removed; unmanaged, hard-linked, wrong-owner, wrong-mode, ACL-granting, or path-swapped files fail closed without being repaired in place. Restore records staging intent before creating its temporary SQLite copy, so interruption during copy or verification has an exact cleanup path. A pending maintenance journal blocks every ordinary read, write, and migration—including creation of a missing database—until `hostwright state recover` completes or rolls back the exact recorded checkpoint. Journals and their paths are strict, bounded, `0600`, identity-derived contracts; unsupported, duplicated, or path-injected fields fail closed and remain for inspection.
 
+Schema-v17 retention adds no table or migration. A Manifest-v2 policy defines recovery and pressure bounds for exactly ten classes. Candidate selection reads existing ledgers, rebuildable observation/health projections, verified backup catalog entries, and terminal network tombstones. Terminal unreferenced operation-ledger rows and succeeded unreferenced operation groups are eligible; a selected group removes its exact child steps in the same transaction. Active/interrupted/failed or resource-referenced groups, current authority, unknown timestamps/statuses, incomplete finalizers, and every foreign-key dependency are recovery-critical. Audit/security/trust/provenance/vulnerability/secret/maintenance/operator events are classified separately from ordinary events. Classes whose producers do not exist yet remain explicitly unavailable.
+
+Compaction uses a deterministic exact token, a verified pre-compaction online backup, and a separate strict `0600` retention journal beside the maintenance journal. The exclusive lifecycle fence spans revalidation, one managed deletion transaction, exact backup-directory staging/removal, bounded `VACUUM`, integrity/foreign-key/logical verification, and journal removal. A crash before database commit rolls back; a crash after the transaction but before journal advancement is recognized only by exact candidate absence plus the transaction's unique audit marker. Every later durable checkpoint blocks ordinary access and resumes only through the same `--confirm-compact` token. A crash in the backup rename window first restores the exact same-parent staged identity to the verified catalog name before continuing. Finalization independently proves every candidate and staged backup absent. Integrity or terminal-proof failure preserves the journal and pre-compaction backup for exact restore; it never reports success or deletes further evidence.
+
 Direct database writes by other programs are unsupported. Hostwright serializes all writers that use `SQLiteStateStore`; another process running as the same macOS account can bypass the Hostwright fence by opening SQLite directly. Online backup can read a live WAL-mode source consistently, but filesystem-replacement restore and repair require the external writer to stop so Hostwright can take the exclusive fence and normalize the database to a sidecar-free portable form.
 
 Diagnostics export is a local read-only command:
@@ -205,7 +219,7 @@ For corrupt or non-SQLite state, generate a restore dry-run against a verified c
 
 ## Concurrency And Locking
 
-Hostwright uses SQLite `FULLMUTEX`, a 250 ms busy timeout, `BEGIN IMMEDIATE` for transactional writes, and persistent cross-process coordination files. Reads hold the shared access fence for the complete SQLite connection lifetime. Writes hold that shared access fence plus an exclusive writer fence, so readers can proceed while Hostwright writers and checkpointers are serialized. Restore, repair, and recovery hold the exclusive access fence across validation, journal, rename/transaction, verification, and cleanup. A single 250 ms deadline bounds acquisition of the complete lock set.
+Hostwright uses SQLite `FULLMUTEX`, a 250 ms busy timeout, `BEGIN IMMEDIATE` for transactional writes, and persistent cross-process coordination files. Reads hold the shared access fence for the complete SQLite connection lifetime. Writes hold that shared access fence plus an exclusive writer fence, so readers can proceed while Hostwright writers and checkpointers are serialized. Restore, repair, retention compaction/resume, and recovery hold the exclusive access fence across validation, journal, rename/transaction, verification, and cleanup. A single 250 ms deadline bounds acquisition of the complete lock set.
 
 Real tests verify concurrent readers, serialized writers, bounded lock refusal, uncommitted-write isolation, committed cross-connection visibility, mandatory rollback under cancellation and `SQLITE_FULL`, process termination with open and committed WAL transactions, 1,000 concurrent final-path symlink swaps, unsafe sidecar symlink/mode/hard-link refusal, non-mutating foreign-database refusal, live WAL backup consistency, selected-backup replacement races, every durable checkpoint, ordinary-error rollback after publication, repair rollback after unrecoverable post-commit state, and the torn windows between a copy/rename/transaction and its next journal update.
 
@@ -213,7 +227,7 @@ Read commands validate schema through read-only connections. Write commands run 
 
 ## SQLite Connection And Durability Policy
 
-Authoritative state uses WAL journaling, `synchronous=FULL`, `fullfsync=ON`, and `checkpoint_fullfsync=ON`. Verified backup, restore-stage, rollback, and migration artifacts use sidecar-free DELETE journaling with `synchronous=EXTRA`. Both profiles require foreign keys, cell-size checking, secure deletion, in-memory temporary storage, disabled memory mapping, bounded cache/SQL/value/column limits, zero attached databases, defensive mode, untrusted schema, disabled double-quoted string literals, and disabled loadable extensions when the system SQLite library exposes that switch.
+Authoritative state uses WAL journaling, `synchronous=FULL`, `fullfsync=ON`, and `checkpoint_fullfsync=ON`. Verified backup, restore-stage, rollback, and migration artifacts use sidecar-free DELETE journaling with `synchronous=EXTRA`. Both profiles require foreign keys, cell-size checking, secure deletion, in-memory temporary storage, disabled memory mapping, bounded cache/SQL/value/column limits, zero caller-attached databases, defensive mode, untrusted schema, disabled double-quoted string literals, and disabled loadable extensions when the system SQLite library exposes that switch. Confirmed retention compaction temporarily permits SQLite's one internal `VACUUM` database while the exclusive fence is held, then restores the attached-database limit to zero; no caller-supplied path or `ATTACH` statement is accepted.
 
 SQLite opens the final path with `NOFOLLOW`, records its validated device/inode identity before open, and revalidates the file set immediately after open. The database plus any `-journal`, `-wal`, and `-shm` sidecars must be invoking-user-owned, singly linked regular files with exact mode `0600` and no access-granting ACL. The policy is verified on every connection and is emitted by `state integrity` as `sqlite.connection-policy`; application ownership is emitted as `hostwright.application-identity`.
 
@@ -237,4 +251,4 @@ The connection authorizer denies transaction and savepoint opcodes inside a Host
 
 ## Module Boundary
 
-SQL is not part of the CLI, reconciler, runtime, health, networking, or observability modules. Runtime observation remains behind `RuntimeAdapter`; state persistence records adapter-shaped observed data but does not call the adapter itself.
+SQL is not part of the CLI, reconciler, runtime, health, networking, or observability modules. Runtime observation remains behind `RuntimeAdapter`; state persistence records adapter-shaped observed data but does not call the adapter itself. Event-ledger insertion commits before the state layer invokes the injected local OSLog mirror, so sink filtering or failure cannot roll back durable truth and a failed SQLite transaction cannot fabricate an OSLog success. The mirror receives only fixed event identity/type/source metadata, never the event message or payload.

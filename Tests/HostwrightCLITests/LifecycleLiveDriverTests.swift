@@ -1166,6 +1166,58 @@ final class LifecycleLiveDriverTests: XCTestCase {
         }
     }
 
+    func testPersistedRecoveryRefusesUnknownCheckpointBeforeMutation() throws {
+        try withFixture { fixture in
+            let dryOptions = fixture.options(command: .up, dryRun: true)
+            let liveDriver = LifecycleLiveDriver(
+                environment: fixture.environment,
+                options: dryOptions
+            )
+            let preparation = try liveDriver.prepare(options: dryOptions)
+            let compiled = try LifecycleCommandPlanCompiler().compile(
+                options: dryOptions,
+                preparation: preparation
+            )
+            let sourceGroup = try persistLifecycleGroup(
+                store: fixture.store,
+                plan: compiled.plan,
+                status: .interrupted,
+                completedNodeKeys: [],
+                terminalCheckpoint: "unknown-future-checkpoint"
+            )
+
+            XCTAssertThrowsError(
+                try LifecyclePersistedRecoveryDriver(
+                    environment: fixture.environment
+                ).execute(
+                    LifecyclePersistedRecoveryRequest(
+                        action: .resume,
+                        groupID: sourceGroup.id,
+                        confirmationPlanSHA256: compiled.plan.planSHA256,
+                        stateStoreConfiguration: StateStoreConfiguration(
+                            explicitDatabasePath: fixture.databasePath
+                        ),
+                        timeoutSeconds: 60
+                    )
+                )
+            ) { error in
+                guard case let LifecyclePersistedRecoveryError.safeHold(hold) =
+                        error else {
+                    return XCTFail("Expected an exact recovery safe hold, got \(error).")
+                }
+                XCTAssertEqual(hold.schemaVersion, 1)
+                XCTAssertEqual(hold.reasonCode, .planningIncomplete)
+                XCTAssertTrue(hold.affectedNodeKeys.isEmpty)
+            }
+            XCTAssertEqual(try fixture.adapterSnapshot().mutations, [])
+            XCTAssertEqual(
+                try fixture.store.operationGroups.load(id: sourceGroup.id)?
+                    .checkpoint,
+                "unknown-future-checkpoint"
+            )
+        }
+    }
+
     func testPersistedRecoveryResumeUsesExactInterruptedSaga() throws {
         try withFixture { fixture in
             let dryOptions = fixture.options(command: .up, dryRun: true)
@@ -1212,13 +1264,17 @@ final class LifecycleLiveDriverTests: XCTestCase {
                     timeoutSeconds: 60
                 )
             )
-            XCTAssertEqual(result.status, .succeeded)
+            XCTAssertEqual(
+                result.status,
+                .succeeded,
+                result.recoveryHintRedacted
+            )
             XCTAssertEqual(result.groupID, sourceGroup.id)
             XCTAssertEqual(try fixture.adapterSnapshot().mutations, [.create, .start])
         }
     }
 
-    func testPersistedRecoveryReclaimsExactExpiredActiveLeaseAfterReobservation() throws {
+    func testPersistedRecoveryClaimsExactHandoffAfterReobservation() throws {
         try withFixture { fixture in
             let dryOptions = fixture.options(command: .up, dryRun: true)
             let liveDriver = LifecycleLiveDriver(
@@ -1300,6 +1356,21 @@ final class LifecycleLiveDriverTests: XCTestCase {
                 ),
                 expectedFencingToken: node.fencingToken
             )
+            let handedOff = try fixture.store.operationGroups
+                .handoffExpiredActive(
+                    groupID: groupID,
+                    expectedPlanHash: compiled.plan.planSHA256,
+                    expectedFencingToken: node.fencingToken,
+                    expectedLockOwner: "terminated-recovery-test",
+                    expectedLockExpiresAt: "2000-01-01T00:10:00Z",
+                    newLockOwner: "hostwright-recovery-resume",
+                    newLockExpiresAt: "2099-01-01T00:10:00Z",
+                    currentTimestamp: "2000-01-01T00:11:00Z"
+                )
+            XCTAssertEqual(
+                handedOff.lockOwner,
+                "hostwright-recovery-resume"
+            )
 
             let result = try LifecyclePersistedRecoveryDriver(
                 environment: fixture.environment
@@ -1316,6 +1387,10 @@ final class LifecycleLiveDriverTests: XCTestCase {
             )
 
             XCTAssertEqual(result.status, .succeeded)
+            XCTAssertNil(
+                try fixture.store.operationGroups.load(id: groupID)?
+                    .lockOwner
+            )
             XCTAssertEqual(
                 try fixture.adapterSnapshot().mutations,
                 [.create, .start]
@@ -1506,7 +1581,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
             XCTAssertEqual(resumed.status, .succeeded)
             XCTAssertEqual(
                 try fixture.adapterSnapshot().mutations,
-                [.create, .stop, .stop, .remove]
+                [.create, .start, .stop, .stop, .remove]
             )
             XCTAssertEqual(
                 try fixture.store.desiredStates.loadProject(
@@ -1622,12 +1697,20 @@ final class LifecycleLiveDriverTests: XCTestCase {
                     timeoutSeconds: 60
                 )
             )
-            XCTAssertEqual(result.status, .succeeded)
+            XCTAssertEqual(
+                result.status,
+                .succeeded,
+                result.recoveryHintRedacted
+            )
             let snapshot = try fixture.adapterSnapshot()
-            XCTAssertEqual(snapshot.mutations, [.create, .stop, .stop, .remove])
+            XCTAssertEqual(
+                snapshot.mutations,
+                [.create, .start, .stop, .stop, .remove]
+            )
             XCTAssertEqual(
                 snapshot.mutationResourceUUIDs,
                 [
+                    update.oldResourceUUID,
                     update.oldResourceUUID,
                     update.candidateResourceUUID,
                     update.candidateResourceUUID,
@@ -1644,6 +1727,63 @@ final class LifecycleLiveDriverTests: XCTestCase {
             )
             XCTAssertFalse(
                 snapshot.resourceUUIDs.contains(update.candidateResourceUUID)
+            )
+        }
+    }
+
+    func testPersistedRollbackSafeHoldsWhenRestoredRevisionIsNotRunning()
+        throws
+    {
+        try withFixture(existingManagedResource: true) { fixture in
+            let update = try recoveryUpdateFixture(fixture: fixture)
+            try seedCompletedUpdate(fixture: fixture, update: update)
+            let completedWithoutPriorStop = Set(
+                update.plan.nodes.filter {
+                    update.completedNodeKeys.contains($0.key) &&
+                        $0.action != .stop
+                }.map(\.key)
+            )
+            let sourceGroup = try persistLifecycleGroup(
+                store: fixture.store,
+                plan: update.plan,
+                status: .failed,
+                completedNodeKeys: completedWithoutPriorStop
+            )
+
+            let result = try LifecyclePersistedRecoveryDriver(
+                environment: fixture.environment
+            ).execute(
+                LifecyclePersistedRecoveryRequest(
+                    action: .rollback,
+                    groupID: sourceGroup.id,
+                    confirmationPlanSHA256: update.plan.planSHA256,
+                    stateStoreConfiguration: StateStoreConfiguration(
+                        explicitDatabasePath: fixture.databasePath
+                    ),
+                    timeoutSeconds: 60
+                )
+            )
+
+            XCTAssertEqual(result.status, .safeHold)
+            XCTAssertEqual(
+                result.recoveryReasonCode,
+                LifecycleRecoverySafeHoldReason.restoredHealthFailed.rawValue
+            )
+            XCTAssertTrue(result.checkpoint.contains("restored-health-safe-hold"))
+            let snapshot = try fixture.adapterSnapshot()
+            XCTAssertEqual(snapshot.mutations, [.create, .stop, .stop, .remove])
+            XCTAssertTrue(snapshot.resourceUUIDs.contains(update.oldResourceUUID))
+            XCTAssertFalse(
+                snapshot.resourceUUIDs.contains(update.candidateResourceUUID)
+            )
+            let group = try XCTUnwrap(
+                fixture.store.operationGroups.load(id: result.groupID)
+            )
+            XCTAssertEqual(group.status, .failed)
+            XCTAssertTrue(
+                group.metadataJSONRedacted.contains(
+                    LifecycleRecoverySafeHoldReason.restoredHealthFailed.rawValue
+                )
             )
         }
     }
@@ -1995,12 +2135,15 @@ final class LifecycleLiveDriverTests: XCTestCase {
             let resumed = try driver.execute(request)
             XCTAssertEqual(resumed.status, .succeeded)
             let snapshot = try fixture.adapterSnapshot()
-            XCTAssertEqual(snapshot.mutations, [.create, .stop, .stop, .remove])
+            XCTAssertEqual(
+                snapshot.mutations,
+                [.create, .start, .stop, .stop, .remove]
+            )
             XCTAssertEqual(
                 snapshot.mutationResourceUUIDs.filter {
                     $0 == update.oldResourceUUID
                 }.count,
-                1
+                2
             )
             let sentinelResourceUUID = HostwrightResourceUUID.legacy(
                 kind: "service",
@@ -2299,6 +2442,7 @@ private func recoveryUpdateFixture(
     let completedActions: Set<LifecyclePlanAction> = [
         .create,
         .start,
+        .stop,
         .promote,
         .retire
     ]
@@ -2327,13 +2471,9 @@ private func seedCompletedUpdate(
             $0.resourceUUID == update.oldResourceUUID
         }
     )
-    XCTAssertTrue(
-        try fixture.store.ownership.removeExact(
-            resourceIdentifier: oldRecord.resourceIdentifier,
-            runtimeAdapter: oldRecord.runtimeAdapter,
-            expectedResourceUUID: oldRecord.resourceUUID,
-            expectedFencingToken: oldRecord.fencingToken
-        )
+    try finalizeRetiredOwnershipFixture(
+        store: fixture.store,
+        ownership: oldRecord
     )
     let candidateRecord = OwnershipRecord(
         id: "ownership-candidate",
@@ -2375,6 +2515,114 @@ private func seedCompletedUpdate(
             candidateOwnership: candidateOwnership
         )
     }
+}
+
+private func finalizeRetiredOwnershipFixture(
+    store: SQLiteStateStore,
+    ownership: OwnershipRecord
+) throws {
+    let timestamp = ISO8601DateFormatter().string(from: Date())
+    let expiry = ISO8601DateFormatter().string(
+        from: Date().addingTimeInterval(300)
+    )
+    let fence = HostwrightResourceUUID.generate()
+    let advanced = try XCTUnwrap(
+        store.ownership.advanceFencingToken(
+            resourceIdentifier: ownership.resourceIdentifier,
+            runtimeAdapter: ownership.runtimeAdapter,
+            expectedResourceUUID: ownership.resourceUUID,
+            expectedFencingToken: ownership.fencingToken,
+            newFencingToken: fence,
+            observedAt: timestamp
+        )
+    )
+    let groupID = HostwrightResourceUUID.generate()
+    let operationID = HostwrightResourceUUID.generate()
+    let owner = "hostwright-test-finalizer:\(operationID)"
+    let planHash = String(repeating: "d", count: 64)
+    let group = try XCTUnwrap(
+        store.operationGroups.acquire(
+            OperationGroupRecord(
+                id: groupID,
+                operationID: operationID,
+                groupKind: "cleanup-v1",
+                projectID: advanced.projectID,
+                serviceName: advanced.serviceName,
+                plannedActionType: "deleteManagedContainer",
+                status: .active,
+                groupIdempotencyKey: planHash,
+                planHash: planHash,
+                checkpoint: "ownership-deletion-intent-persisted",
+                lockOwner: owner,
+                lockExpiresAt: expiry,
+                rollbackAvailable: false,
+                manualRecoveryHintRedacted: "",
+                createdAt: timestamp,
+                updatedAt: timestamp,
+                metadataJSONRedacted: "{}",
+                fencingToken: fence,
+                intentJSONRedacted: "{}",
+                compensationJSONRedacted: "[]",
+                verificationJSONRedacted: "{}"
+            ),
+            currentTimestamp: timestamp
+        ).acquired
+    )
+    let previous = try OwnershipAuthorityMetadata.decode(
+        from: advanced.metadataJSONRedacted
+    )
+    let deleting = try OwnershipAuthorityRecord.lifecycle(
+        ownership: advanced,
+        operationGroup: group,
+        finalizerState: .releasing,
+        deletionTimestamp: timestamp,
+        handoffGeneration: (previous?.handoffGeneration ?? 0) + 1
+    )
+    try store.ownership.upsert(
+        OwnershipRecord(
+            id: advanced.id,
+            resourceIdentifier: advanced.resourceIdentifier,
+            resourceType: advanced.resourceType,
+            projectID: advanced.projectID,
+            serviceName: advanced.serviceName,
+            runtimeAdapter: advanced.runtimeAdapter,
+            createdAt: advanced.createdAt,
+            observedAt: timestamp,
+            cleanupEligible: advanced.cleanupEligible,
+            metadataJSONRedacted: try OwnershipAuthorityMetadata.encode(
+                deleting,
+                into: advanced.metadataJSONRedacted
+            ),
+            identityVersion: advanced.identityVersion,
+            resourceUUID: advanced.resourceUUID,
+            resourceGeneration: advanced.resourceGeneration,
+            projectResourceUUID: advanced.projectResourceUUID,
+            projectGeneration: advanced.projectGeneration,
+            providerGeneration: advanced.providerGeneration,
+            fencingToken: advanced.fencingToken
+        )
+    )
+    _ = try store.ownership.markCleanupCompleted(
+        resourceIdentifier: advanced.resourceIdentifier,
+        runtimeAdapter: advanced.runtimeAdapter,
+        expectedResourceUUID: advanced.resourceUUID,
+        expectedFencingToken: advanced.fencingToken,
+        expectedOperationGroupID: group.id,
+        expectedLeaseOwner: owner,
+        expectedLeaseExpiresAt: expiry,
+        observedAt: timestamp
+    )
+    try store.operationGroups.finishExactLease(
+        groupID: group.id,
+        expectedFencingToken: group.fencingToken,
+        expectedLockOwner: owner,
+        expectedLockExpiresAt: expiry,
+        status: .succeeded,
+        checkpoint: "ownership-finalizers-complete",
+        manualRecoveryHintRedacted: "",
+        updatedAt: timestamp,
+        metadataJSONRedacted: "{}"
+    )
 }
 
 private func seedRecoveryCandidate(
@@ -2559,11 +2807,12 @@ private func persistLifecycleGroup(
     try store.operationGroups.finish(
         groupID: groupID,
         status: status,
-        checkpoint: terminalCheckpoint ?? (
-            status == .interrupted
-                ? "interrupted-for-test"
-                : "failed-for-test"
-        ),
+        checkpoint: terminalCheckpoint ?? {
+            let nodeKey = plan.nodes.first?.key ?? "lifecycle"
+            return status == .interrupted
+                ? "\(nodeKey):cancelled-before-effect"
+                : "\(nodeKey):ambiguous-effect"
+        }(),
         manualRecoveryHintRedacted: "test recovery",
         updatedAt: timestamp,
         metadataJSONRedacted: terminalMetadataJSONRedacted

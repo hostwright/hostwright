@@ -402,21 +402,19 @@ public struct DaemonLoopRunner {
     }
 
     private func runIteration(iteration: Int, store: SQLiteStateStore) async throws -> IterationResult {
-        return try await StateUpgradeService(store: store)
-            .withSerializedLifecycleMutation(lockWaitMilliseconds: 30_000) {
-            let traceID = HostwrightResourceUUID.legacy(
-                kind: "daemon-trace",
-                identifier: idGenerator("trace-daemon-\(iteration)")
-            )
-            guard let session = try? HostwrightTraceSession(
-                traceID: traceID,
-                processCorrelationID: HostwrightLogContext.correlationID ?? traceID,
-                selected: HostwrightTraceSession.deterministicSelection(traceID: traceID)
-            ) else {
-                return try await runIterationUntraced(iteration: iteration, store: store)
-            }
-            session.attach(StateTraceSink(store: store))
-            return try await HostwrightTraceContext.withSession(session) {
+        let traceID = HostwrightResourceUUID.legacy(
+            kind: "daemon-trace",
+            identifier: idGenerator("trace-daemon-\(iteration)")
+        )
+        guard let session = try? HostwrightTraceSession(
+            traceID: traceID,
+            processCorrelationID: HostwrightLogContext.correlationID ?? traceID,
+            selected: HostwrightTraceSession.deterministicSelection(traceID: traceID)
+        ) else {
+            return try await runIterationUntraced(iteration: iteration, store: store)
+        }
+        session.attach(StateTraceSink(store: store))
+        return try await HostwrightTraceContext.withSession(session) {
             let root = session.start(
                 .daemonReconciliation,
                 attributes: [
@@ -433,7 +431,7 @@ public struct DaemonLoopRunner {
                         ? "deterministic-1-of-16"
                         : "failure-override"
                     try StateUpgradeService(store: store)
-                        .withSerializedLifecycleMutation(lockWaitMilliseconds: 30_000) {
+                        .withSerializedLifecycleMutation(lockWaitMilliseconds: 250) {
                             _ = session.finish(
                                 root,
                                 status: status,
@@ -445,7 +443,7 @@ public struct DaemonLoopRunner {
                 } catch {
                     let status: HostwrightTraceSpanStatus = error is CancellationError ? .cancelled : .failed
                     try? StateUpgradeService(store: store)
-                        .withSerializedLifecycleMutation(lockWaitMilliseconds: 30_000) {
+                        .withSerializedLifecycleMutation(lockWaitMilliseconds: 250) {
                             _ = session.finish(
                                 root,
                                 status: status,
@@ -455,7 +453,6 @@ public struct DaemonLoopRunner {
                         }
                     throw error
                 }
-            }
             }
         }
     }

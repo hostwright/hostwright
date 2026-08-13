@@ -35,8 +35,10 @@ public struct StateMetricsService: Sendable {
     public func withSnapshot<Value>(
         _ body: (HostwrightMetricsSnapshot) throws -> Value
     ) throws -> Value {
-        try store.withValidatedConnection(readOnly: true) { connection in
-            try body(makeSnapshot(on: connection))
+        try StateAccessCoordinator(configuration: store.configuration).withLock(.shared) {
+            try store.withValidatedConnection(readOnly: true) { connection in
+                try body(makeSnapshot(on: connection))
+            }
         }
     }
 

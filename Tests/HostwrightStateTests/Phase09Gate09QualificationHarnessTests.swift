@@ -248,6 +248,8 @@ final class Phase09Gate09QualificationHarnessTests: XCTestCase {
     XCTAssertTrue(live.contains("type = 'trace.span.v1'"))
     XCTAssertTrue(live.contains("source = 'hostwright.trace'"))
     XCTAssertFalse(live.contains("FROM trace_spans"))
+    XCTAssertTrue(source.contains("process_state=\"$(ps -p \"$pid\" -o state="))
+    XCTAssertTrue(source.contains("[[ \"$process_state\" == Z* ]] && return 0"))
     let quiesce = try XCTUnwrap(live.range(of: "stop_exact_process \"$daemon\""))
     let socketCleanup = try XCTUnwrap(live.range(of: "remove_owned_socket \"$runtime\" \"$socket\""))
     let metrics = try XCTUnwrap(live.range(of: "metrics_exported=0"))

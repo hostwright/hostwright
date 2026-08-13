@@ -180,6 +180,14 @@ live(){
   HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" HOSTWRIGHT_CACHE_DIR="$runtime/cache" HOSTWRIGHT_LOG_DIR="$runtime/logs" "$cli" events --state-db "$state" --project "$live_project" --limit 20 --output json | /usr/bin/jq -e . >/dev/null
   HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" HOSTWRIGHT_CACHE_DIR="$runtime/cache" HOSTWRIGHT_LOG_DIR="$runtime/logs" "$bootstrap" --live --root "$runtime" --state "$state" --socket "$socket" > "$runtime/stream-live.json"
 
+  first_process_identity="$(/usr/bin/awk -F $'\t' -v p="$pid" '$2=="process"&&$7~("pid="p";"){print $7}' "$root/ownership-v1.tsv")"
+  stop_exact_process "$daemon" "$(stat -f '%d' "$daemon")" "$(stat -f '%i' "$daemon")" "$first_process_identity"
+  if HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" capabilities --json >/dev/null 2>&1; then
+    die 'CLI unexpectedly bypassed the unavailable daemon.'
+  fi
+
+  # Metrics and trace confirmation are read-only projections of persisted state.
+  # Quiesce the owned writer first so confirmation is not invalidated by periodic reconciliation.
   metrics_exported=0
   for n in {1..5}; do
     metrics_hash="$(HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" metrics snapshot --state-db "$state" --output json | /usr/bin/jq -er '.snapshotSHA256')"
@@ -204,11 +212,6 @@ live(){
   fi
 
   record_keychain_items "$state"
-  first_process_identity="$(/usr/bin/awk -F $'\t' -v p="$pid" '$2=="process"&&$7~("pid="p";"){print $7}' "$root/ownership-v1.tsv")"
-  stop_exact_process "$daemon" "$(stat -f '%d' "$daemon")" "$(stat -f '%i' "$daemon")" "$first_process_identity"
-  if HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" capabilities --json >/dev/null 2>&1; then
-    die 'CLI unexpectedly bypassed the unavailable daemon.'
-  fi
   pid="$(start_daemon "$runtime" "$daemon" "$config" "$state" restarted "$cli")"
   HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" capabilities --json | /usr/bin/jq -e . >/dev/null
   HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$bootstrap" --resume --root "$runtime" --state "$state" --socket "$socket" > "$runtime/stream-resume.json"

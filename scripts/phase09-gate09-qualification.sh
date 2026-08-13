@@ -224,7 +224,7 @@ live(){
       metrics_export_status=$?
       release_lifecycle_mutation_fence
     fi
-    if ! /usr/bin/grep -q 'HW-METRIC-003' "$runtime/qualification.metrics-export-v1.json" "$runtime/qualification.metrics-export-v1.stderr.log" 2>/dev/null; then
+    if ! /usr/bin/grep -qE 'HW-METRIC-003|HW-CLI-005|authoritative database changed' "$runtime/qualification.metrics-export-v1.json" "$runtime/qualification.metrics-export-v1.stderr.log" 2>/dev/null; then
       /bin/cat "$runtime/qualification.metrics-export-v1.json" "$runtime/qualification.metrics-export-v1.stderr.log" >&2
       die 'Gate 9 metrics export failed for a non-retryable reason.' "$metrics_export_status"
     fi

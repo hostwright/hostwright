@@ -273,6 +273,7 @@ final class Phase09Gate09QualificationHarnessTests: XCTestCase {
     XCTAssertTrue(source.contains("flock($fh, LOCK_EX)"))
     XCTAssertTrue(source.contains("lifecycle-mutation fence identity changed"))
     XCTAssertTrue(live.contains("HW-METRIC-003"))
+    XCTAssertTrue(live.contains("HW-CLI-005|authoritative database changed"))
     XCTAssertTrue(live.contains("else\n      metrics_export_status=$?"))
     XCTAssertTrue(live.contains("metrics snapshot remained unstable across bounded retries"))
     XCTAssertTrue(source.contains("\"$cli\" status \"$config\" --state-db \"$state\" --output json"))

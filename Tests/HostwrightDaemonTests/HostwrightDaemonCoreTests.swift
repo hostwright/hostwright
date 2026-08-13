@@ -317,6 +317,7 @@ final class HostwrightDaemonCoreTests: XCTestCase {
                 configuration: DaemonConfiguration(
                     configPath: "hostwright.yaml",
                     stateDatabasePath: databasePath,
+                    maximumParallelism: 4,
                     maxIterations: 1
                 ),
                 runtimeAdapter: CountingRuntimeAdapter(),

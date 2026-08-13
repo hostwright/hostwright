@@ -43,6 +43,7 @@ final class Phase09Gate09QualificationHarnessTests: XCTestCase {
     XCTAssertTrue(source.contains("qualification.plan-v1.json"))
     XCTAssertTrue(source.contains("^[a-f0-9]{16}$"))
     XCTAssertTrue(source.contains("-o -name 'qualification.*.json'"))
+    XCTAssertTrue(source.contains("-o -name 'qualification.*.stderr.log'"))
     let qualificationTool = try String(
       contentsOf: repository.appendingPathComponent(
         "Sources/HostwrightStreamQualificationTool/main.swift"),

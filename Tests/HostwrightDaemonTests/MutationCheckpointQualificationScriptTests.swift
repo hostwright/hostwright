@@ -106,6 +106,7 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
             "compaction_attempt_limit=5",
             "workload_recovery_attempt_limit=72",
             "workload_recovery_sleep_seconds=5",
+            "workload_recovery_release_generation_limit=2",
             "running_status_failure_limit=3",
             "power_evidence_version=1",
             "qualification_schema_version=2",
@@ -403,8 +404,16 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
                 printf '%s\n' '{"actions":[{"executionAvailability":"unavailable","kind":"proposeStartStoppedService","reason":"Observed service is not running; crash-loop protection blocks managed start after 3/3 attempts.","resourceIdentifier":"hostwright-v2-p08-soa-web-27cc4ed52496a1ebce99ec8846250834"}],"services":[{"observed":{"lifecycle":"exited","resourceIdentifier":"hostwright-v2-p08-soa-web-27cc4ed52496a1ebce99ec8846250834"}}]}'
                 ;;
               restart-budget)
-                printf 'unexpected restart-budget invocation\n' >> "$HOSTWRIGHT_TEST_LIFECYCLE"
-                exit 75
+                case "$2" in
+                  status)
+                    /usr/bin/jq -cn --arg db "$HOSTWRIGHT_TEST_ROOT/state.sqlite" '{released:false,restartBudgets:[{attemptCount:3,holdToken:"8fa82fd543ce2f58953212a98758568f1d4aa95732fd092ee5dbf103989de986",maxAttempts:3,projectAttemptCount:0,projectID:"project-p08-soak-d785738e",projectMaxAttempts:10,reasonClass:"process-exit",releaseGeneration:0,serviceName:"web",status:"crashLoopBlocked"}],schemaVersion:1,stateDatabasePath:$db}'
+                    ;;
+                  release)
+                    printf 'unexpected restart-budget release\n' >> "$HOSTWRIGHT_TEST_LIFECYCLE"
+                    exit 75
+                    ;;
+                  *) exit 64 ;;
+                esac
                 ;;
               *) exit 64 ;;
             esac
@@ -435,7 +444,8 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
             """#,
             arguments: [scriptURL.path, root.path, fakeHostwright.path],
             environment: [
-                "HOSTWRIGHT_TEST_LIFECYCLE": root.appendingPathComponent("lifecycle").path
+                "HOSTWRIGHT_TEST_LIFECYCLE": root.appendingPathComponent("lifecycle").path,
+                "HOSTWRIGHT_TEST_ROOT": root.path
             ]
         )
 
@@ -445,6 +455,92 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
             FileManager.default.fileExists(
                 atPath: root.appendingPathComponent("lifecycle").path
             )
+        )
+    }
+
+    func testAggregateSoakReleasesOneNewHoldGenerationDuringResumedRecovery() throws {
+        let scriptURL = packageRoot().appendingPathComponent(
+            "scripts/phase08-soak-qualification.sh"
+        )
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-soak-next-hold-generation-\(UUID().uuidString.lowercased())",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let fakeHostwright = root.appendingPathComponent("hostwright")
+        try Data(
+            #"""
+            #!/usr/bin/env bash
+            set -euo pipefail
+            case "$1" in
+              status)
+                if [[ -f "$HOSTWRIGHT_TEST_RELEASED" ]]; then
+                  printf '%s\n' '{"actions":[],"services":[{"observed":{"lifecycle":"running","resourceIdentifier":"hostwright-v2-p08-soa-web-27cc4ed52496a1ebce99ec8846250834"}}]}'
+                else
+                  printf '%s\n' '{"actions":[{"executionAvailability":"unavailable","kind":"proposeStartStoppedService","reason":"Observed service is not running; crash-loop protection blocks managed start after 3/3 attempts.","resourceIdentifier":"hostwright-v2-p08-soa-web-27cc4ed52496a1ebce99ec8846250834"}],"services":[{"observed":{"lifecycle":"exited","resourceIdentifier":"hostwright-v2-p08-soa-web-27cc4ed52496a1ebce99ec8846250834"}}]}'
+                fi
+                ;;
+              restart-budget)
+                case "$2" in
+                  status)
+                    /usr/bin/jq -cn --arg db "$HOSTWRIGHT_TEST_ROOT/state.sqlite" '{released:false,restartBudgets:[{attemptCount:3,holdToken:"9fa82fd543ce2f58953212a98758568f1d4aa95732fd092ee5dbf103989de987",maxAttempts:3,projectAttemptCount:0,projectID:"project-p08-soak-d785738e",projectMaxAttempts:10,reasonClass:"process-exit",releaseGeneration:1,serviceName:"web",status:"crashLoopBlocked"}],schemaVersion:1,stateDatabasePath:$db}'
+                    ;;
+                  release)
+                    [[ " $* " == *" --confirm-hold 9fa82fd543ce2f58953212a98758568f1d4aa95732fd092ee5dbf103989de987 "* ]]
+                    [[ ! -e "$HOSTWRIGHT_TEST_RELEASED" ]]
+                    printf 'release\n' > "$HOSTWRIGHT_TEST_LIFECYCLE"
+                    : > "$HOSTWRIGHT_TEST_RELEASED"
+                    /usr/bin/jq -cn --arg db "$HOSTWRIGHT_TEST_ROOT/state.sqlite" '{released:true,restartBudgets:[{attemptCount:0,maxAttempts:3,projectAttemptCount:0,projectID:"project-p08-soak-d785738e",projectMaxAttempts:10,reasonClass:"operator-request",releaseGeneration:2,serviceName:"web",status:"active"}],schemaVersion:1,stateDatabasePath:$db}'
+                    ;;
+                  *) exit 64 ;;
+                esac
+                ;;
+              *) exit 64 ;;
+            esac
+            """#.utf8
+        ).write(to: fakeHostwright)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: fakeHostwright.path
+        )
+
+        let result = try runBash(
+            #"""
+            source "$1"
+            HOSTWRIGHT_PHASE08_SOAK_ROOT="$2"
+            HOSTWRIGHT_PHASE08_SOAK_HOSTWRIGHT="$3"
+            evidence_file="$2/evidence-v2.log"
+            resource_identifier='hostwright-v2-p08-soa-web-27cc4ed52496a1ebce99ec8846250834'
+            resource_uuid='5a2ecf85-5730-82c6-ba84-8693f4df0a1d'
+            project_name='p08-soak-d785738e'
+            daemon_pid=''
+            printf '%s\n' \
+              $'2026-08-13T04:21:01Z\tworkload-stop-injected resource=hostwright-v2-p08-soa-web-27cc4ed52496a1ebce99ec8846250834 sequence=864' \
+              $'2026-08-13T04:24:28Z\tworkload-restart-hold-release-consumed sequence=864 project=project-p08-soak-d785738e service=web holdTokenSHA256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa releaseGeneration=1' \
+              $'2026-08-13T04:24:28Z\tworkload-restart-hold-released sequence=864 project=project-p08-soak-d785738e service=web releaseGeneration=1' \
+              $'2026-08-13T04:28:16Z\tfailure\tThe exact soak workload did not converge during its bounded intentional-fault recovery window.' \
+              > "$evidence_file"
+            verify_exclusive_runtime_inventory() { :; }
+            sleep() { :; }
+            verify_running workload-fault 864
+            grep -F 'workload-restart-hold-release-consumed sequence=864 project=project-p08-soak-d785738e service=web' "$evidence_file" \
+              | grep -Fq 'releaseGeneration=2'
+            grep -Fq 'workload-restart-hold-released sequence=864 project=project-p08-soak-d785738e service=web releaseGeneration=2' "$evidence_file"
+            """#,
+            arguments: [scriptURL.path, root.path, fakeHostwright.path],
+            environment: [
+                "HOSTWRIGHT_TEST_LIFECYCLE": root.appendingPathComponent("lifecycle").path,
+                "HOSTWRIGHT_TEST_RELEASED": root.appendingPathComponent("released").path,
+                "HOSTWRIGHT_TEST_ROOT": root.path
+            ]
+        )
+
+        XCTAssertEqual(result.status, 0, result.output)
+        XCTAssertEqual(
+            try String(contentsOf: root.appendingPathComponent("lifecycle"), encoding: .utf8),
+            "release\n"
         )
     }
 

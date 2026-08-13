@@ -7,6 +7,7 @@ readonly expected_samples=864
 readonly compaction_attempt_limit=5
 readonly workload_recovery_attempt_limit=72
 readonly workload_recovery_sleep_seconds=5
+readonly workload_recovery_release_generation_limit=2
 readonly running_status_failure_limit=3
 readonly daemon_stop_grace_attempts=30
 readonly daemon_stop_proof_attempts=15
@@ -88,7 +89,7 @@ contract() {
   printf '%s\n' 'The global Apple-container inventory must contain no other Hostwright-managed runtime before or throughout the run.'
   printf '%s\n' 'The clean source, executables, template, and private evidence root must remain on writable internal non-removable storage.'
   printf '%s\n' 'Configuration churn, bounded pressure, daemon/workload/helper/runtime faults, and all local observability sinks are exercised serially.'
-  printf '%s\n' 'An intentional workload fault has one bounded six-minute recovery window and may consume only one exact process-exit crash-loop hold release before failing closed.'
+  printf '%s\n' 'An intentional workload fault has one bounded six-minute recovery window per segment; a resume may release only one distinct unconsumed hold generation, with two total generations per sequence before failing closed.'
   printf '%s\n' 'A timestamp-bound real sleep then wake must occur inside a qualified segment; the runner never forces either transition.'
   printf '%s\n' 'Compaction quiesces the foreground daemon for the plan-confirm transaction and always restores a fresh daemon before returning.'
   printf '%s\n' 'Failure preserves evidence and exact resource identity; success performs confirmation-bound owned-only cleanup.'
@@ -655,16 +656,24 @@ workload_restart_hold_release_consumed() {
   ' "$evidence_file"
 }
 
+workload_restart_hold_release_generation_consumed() {
+  local sequence="$1" release_generation="$2"
+  awk -F '\t' \
+      -v prefix="workload-restart-hold-release-consumed sequence=$sequence " \
+      -v generation=" releaseGeneration=$release_generation" '
+    index($2, prefix) == 1 && index($2 " ", generation " ") > 0 { consumed = 1 }
+    END { exit(consumed ? 0 : 1) }
+  ' "$evidence_file"
+}
+
 release_expected_workload_restart_hold() {
   local sequence="$1"
   local project_id="project-${project_name}"
-  local budget_json budget_count budget_status hold_token release_generation service_name
+  local budget_json budget_count budget_status hold_token release_generation next_release_generation service_name
   local release_json hold_token_sha256
   [[ "$sequence" =~ ^[1-9][0-9]*$ && "$sequence" -le "$expected_samples" \
       && "$project_id" =~ ^project-[A-Za-z0-9][A-Za-z0-9._-]{0,126}[A-Za-z0-9]$ ]] \
     || die 'Expected workload restart-hold recovery has invalid identity.' 75
-  workload_restart_hold_release_consumed "$sequence" \
-    && die 'Expected workload restart-hold recovery already consumed its one release for this sequence.' 75
   budget_json="$("$HOSTWRIGHT_PHASE08_SOAK_HOSTWRIGHT" restart-budget status \
     --project "$project_id" --state-db "$HOSTWRIGHT_PHASE08_SOAK_ROOT/state.sqlite" \
     --output json)" \
@@ -707,15 +716,20 @@ release_expected_workload_restart_hold() {
   [[ "$hold_token" =~ ^[a-f0-9]{64}$ && "$release_generation" =~ ^[0-9]+$ \
       && "$service_name" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]] \
     || die 'Expected workload restart-hold recovery found incomplete hold evidence.' 75
+  next_release_generation=$((release_generation + 1))
+  [[ "$next_release_generation" -le "$workload_recovery_release_generation_limit" ]] \
+    || die 'Expected workload restart-hold recovery exhausted its bounded release generations.' 75
+  workload_restart_hold_release_generation_consumed "$sequence" "$next_release_generation" \
+    && die 'Expected workload restart-hold recovery already consumed its one release for this sequence and generation.' 75
   hold_token_sha256="$(printf '%s' "$hold_token" | sha256_text)"
-  record "workload-restart-hold-release-consumed sequence=$sequence project=$project_id service=$service_name holdTokenSHA256=$hold_token_sha256 releaseGeneration=$((release_generation + 1))"
+  record "workload-restart-hold-release-consumed sequence=$sequence project=$project_id service=$service_name holdTokenSHA256=$hold_token_sha256 releaseGeneration=$next_release_generation"
   release_json="$("$HOSTWRIGHT_PHASE08_SOAK_HOSTWRIGHT" restart-budget release \
     --project "$project_id" --service "$service_name" --confirm-hold "$hold_token" \
     --state-db "$HOSTWRIGHT_PHASE08_SOAK_ROOT/state.sqlite" --output json)" \
     || die 'Expected workload restart-hold recovery could not release the exact confirmed hold.' 75
   printf '%s' "$release_json" | /usr/bin/jq -e \
     --arg project "$project_id" --arg service "$service_name" \
-    --argjson generation "$((release_generation + 1))" '
+    --argjson generation "$next_release_generation" '
       .schemaVersion == 1
       and .released == true
       and (.restartBudgets | length) == 1
@@ -728,7 +742,7 @@ release_expected_workload_restart_hold() {
       and (.restartBudgets[0] | has("holdToken") | not)
     ' >/dev/null \
     || die 'Expected workload restart-hold recovery could not verify the released generation.' 75
-  record "workload-restart-hold-released sequence=$sequence project=$project_id service=$service_name releaseGeneration=$((release_generation + 1))"
+  record "workload-restart-hold-released sequence=$sequence project=$project_id service=$service_name releaseGeneration=$next_release_generation"
 }
 
 verify_running() {

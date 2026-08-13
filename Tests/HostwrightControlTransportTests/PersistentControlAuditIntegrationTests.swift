@@ -193,6 +193,37 @@ final class PersistentControlAuditIntegrationTests: XCTestCase {
     XCTAssertTrue(recorder.events.isEmpty)
   }
 
+  func testAllowedObservationAuthorizationDoesNotRewriteMetricsSource() throws {
+    let root = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = SQLiteStateStore(path: root.appendingPathComponent("state.sqlite").path)
+    try store.migrate()
+    let repository = ControlRequestRepository(store: store, now: fixedNow)
+    let recorder = RecordingAuditRecorder()
+    let server = try makeServer(
+      store: store,
+      repository: repository,
+      recorder: recorder,
+      mutatingOperations: [],
+      handler: { _, request, _ in
+        ControlResponseEnvelope(
+          requestID: request.requestID,
+          status: .completed,
+          reasonCode: .completed)
+      })
+    let session = try start(server: server)
+    defer { session.closeClientAndWait() }
+
+    try completeAuthentication(descriptor: session.client)
+    let request = ControlRequestEnvelope(
+      requestID: "metrics-observation-one",
+      operation: "metrics.snapshot",
+      timeoutMilliseconds: 1_000)
+    try write(request, descriptor: session.client)
+    XCTAssertEqual(try readResponse(descriptor: session.client).status, .completed)
+    XCTAssertTrue(recorder.events.isEmpty)
+  }
+
   func testAcceptedReplayUsesAuditDeduplicationAndNeverReinvokesHandler() throws {
     let root = try temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: root) }

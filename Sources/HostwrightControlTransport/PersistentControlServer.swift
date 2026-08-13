@@ -553,19 +553,23 @@ public struct PersistentControlConnectionServer: Sendable {
     let canonicalAuthorization = try ControlPlaneCanonicalJSON.encode(authorization)
     let authorizationDigest = SHA256.hash(data: canonicalAuthorization)
       .map { String(format: "%02x", $0) }.joined()
-    do {
-      try recordAudit(
-        peer: peer,
-        request: request,
-        action: .authorization,
-        outcome: authorization.effect.rawValue,
-        reasonCode: authorization.reasonCode,
-        operationRef: nil,
-        payloadDigest: "sha256:\(authorizationDigest)",
-        stage: "authorization-\(authorizationDigest)"
-      )
-    } catch {
-      if isMutation { throw error }
+    let persistReadOnlyAuthorizationAudit = authorization.effect != .allow
+      || !Self.isObservationOperation(request.operation)
+    if isMutation || persistReadOnlyAuthorizationAudit {
+      do {
+        try recordAudit(
+          peer: peer,
+          request: request,
+          action: .authorization,
+          outcome: authorization.effect.rawValue,
+          reasonCode: authorization.reasonCode,
+          operationRef: nil,
+          payloadDigest: "sha256:\(authorizationDigest)",
+          stage: "authorization-\(authorizationDigest)"
+        )
+      } catch {
+        if isMutation { throw error }
+      }
     }
     guard authorization.effect == .allow else {
       return (
@@ -911,6 +915,13 @@ public struct PersistentControlConnectionServer: Sendable {
       payloadDigest: "sha256:\(responseDigest)",
       stage: stage
     )
+  }
+
+  private static func isObservationOperation(_ operation: String) -> Bool {
+    [
+      "metrics.snapshot", "metrics.export",
+      "traces.inspect", "traces.export"
+    ].contains(operation)
   }
 
   private func recordAudit(

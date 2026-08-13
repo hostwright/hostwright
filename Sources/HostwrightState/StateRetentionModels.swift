@@ -142,6 +142,7 @@ public struct StateRetentionStatus: Codable, Equatable, Sendable {
 public struct StateCompactionPlan: Codable, Equatable, Sendable {
     public let schemaVersion: Int
     public let kind: String
+    public let evaluatedAt: String
     public let policySHA256: String
     public let databaseSHA256: String
     public let databaseBytes: UInt64
@@ -154,7 +155,8 @@ public struct StateCompactionPlan: Codable, Equatable, Sendable {
     public let confirmationToken: String
 
     public init(
-        schemaVersion: Int = 1,
+        schemaVersion: Int = 2,
+        evaluatedAt: String,
         policySHA256: String,
         databaseSHA256: String,
         databaseBytes: UInt64,
@@ -168,6 +170,7 @@ public struct StateCompactionPlan: Codable, Equatable, Sendable {
     ) {
         self.schemaVersion = schemaVersion
         self.kind = "stateCompactionPlan"
+        self.evaluatedAt = evaluatedAt
         self.policySHA256 = policySHA256
         self.databaseSHA256 = databaseSHA256
         self.databaseBytes = databaseBytes

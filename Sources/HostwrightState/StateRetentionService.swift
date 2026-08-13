@@ -51,8 +51,24 @@ public struct StateRetentionService {
         policy: StateRetentionPolicy,
         at date: Date = Date()
     ) throws -> StateCompactionPlan {
-        let snapshot = try makeSnapshot(policy: policy, at: date)
+        let snapshot = try makeSnapshot(
+            policy: policy,
+            at: canonicalEvaluationDate(date)
+        )
         return publicPlan(snapshot)
+    }
+
+    public func compact(
+        policy: StateRetentionPolicy,
+        confirmationToken: String,
+        evaluatedAt: String
+    ) throws -> StateCompactionResult {
+        try compactInternal(
+            policy: policy,
+            confirmationToken: confirmationToken,
+            at: try evaluationDate(evaluatedAt),
+            interruptAfter: nil
+        )
     }
 
     public func compact(
@@ -63,7 +79,7 @@ public struct StateRetentionService {
         try compactInternal(
             policy: policy,
             confirmationToken: confirmationToken,
-            at: date,
+            at: canonicalEvaluationDate(date),
             interruptAfter: nil
         )
     }
@@ -412,7 +428,8 @@ public struct StateRetentionService {
                 }
         )
         let token = StateMaintenanceFileSupport.token([
-            "hostwright-state-compaction-v1",
+            "hostwright-state-compaction-v2",
+            evaluationTimestamp(date),
             policyDigest,
             database.sha256,
             String(database.bytes),
@@ -421,6 +438,7 @@ public struct StateRetentionService {
             blockers.sorted().joined(separator: "|")
         ])
         return StateRetentionSnapshot(
+            evaluatedAt: evaluationTimestamp(date),
             policySHA256: policyDigest,
             database: database,
             pressure: pressure,
@@ -986,6 +1004,7 @@ public struct StateRetentionService {
 
     private func publicPlan(_ snapshot: StateRetentionSnapshot) -> StateCompactionPlan {
         StateCompactionPlan(
+            evaluatedAt: snapshot.evaluatedAt,
             policySHA256: snapshot.policySHA256,
             databaseSHA256: snapshot.database.sha256,
             databaseBytes: snapshot.database.bytes,
@@ -1100,6 +1119,23 @@ public struct StateRetentionService {
         ISO8601DateFormatter().date(from: value)
     }
 
+    private func canonicalEvaluationDate(_ date: Date) -> Date {
+        Date(timeIntervalSince1970: floor(date.timeIntervalSince1970))
+    }
+
+    private func evaluationTimestamp(_ date: Date) -> String {
+        ISO8601DateFormatter().string(from: canonicalEvaluationDate(date))
+    }
+
+    private func evaluationDate(_ value: String) throws -> Date {
+        let formatter = ISO8601DateFormatter()
+        guard let date = formatter.date(from: value),
+              formatter.string(from: date) == value else {
+            throw StateMaintenanceError.confirmationMismatch
+        }
+        return canonicalEvaluationDate(date)
+    }
+
     private func validateConfirmation(_ value: String) throws {
         guard value.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil else {
             throw StateMaintenanceError.confirmationMismatch
@@ -1208,6 +1244,7 @@ public struct StateRetentionService {
 }
 
 private struct StateRetentionSnapshot {
+    let evaluatedAt: String
     let policySHA256: String
     let database: StateFileFingerprint
     let pressure: StateRetentionPressure

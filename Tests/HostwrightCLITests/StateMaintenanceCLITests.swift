@@ -6,6 +6,7 @@ import XCTest
 final class StateMaintenanceCLITests: XCTestCase {
     func testParserRecognizesCompleteStateMaintenanceSurface() throws {
         let token = String(repeating: "a", count: 64)
+        let evaluatedAt = "2026-08-12T11:30:00Z"
         XCTAssertEqual(
             try CLICommand.parse(arguments: ["state", "integrity", "--json"]),
             .state(action: .integrity, stateDatabasePath: nil, output: .json)
@@ -39,11 +40,16 @@ final class StateMaintenanceCLITests: XCTestCase {
             )
         )
         XCTAssertEqual(
-            try CLICommand.parse(arguments: ["state", "compact", "hostwright.yaml", "--confirm-compact", token]),
+            try CLICommand.parse(arguments: [
+                "state", "compact", "hostwright.yaml",
+                "--confirm-compact", token,
+                "--evaluated-at", evaluatedAt
+            ]),
             .state(
                 action: .compact(
                     manifestPath: "hostwright.yaml",
-                    confirmation: .confirmed(token: token)
+                    confirmation: .confirmed(token: token),
+                    evaluatedAt: evaluatedAt
                 ),
                 stateDatabasePath: nil,
                 output: .text
@@ -57,6 +63,12 @@ final class StateMaintenanceCLITests: XCTestCase {
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["state", "backup", "--state-db", "/a", "--state-db", "/b"]))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["state", "unknown"]))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["state", "compact", "hostwright.yaml"]))
+        XCTAssertThrowsError(try CLICommand.parse(arguments: [
+            "state", "compact", "hostwright.yaml", "--confirm-compact", token
+        ]))
+        XCTAssertThrowsError(try CLICommand.parse(arguments: [
+            "state", "compact", "hostwright.yaml", "--dry-run", "--evaluated-at", evaluatedAt
+        ]))
     }
 
     func testCLIBackupCatalogDryRunRestoreAndConfirmedRestoreRoundTrip() throws {
@@ -242,6 +254,7 @@ final class StateMaintenanceCLITests: XCTestCase {
 
             let confirmed = HostwrightCLI.run(arguments: [
                 "state", "compact", manifestPath, "--confirm-compact", plan.confirmationToken,
+                "--evaluated-at", plan.evaluatedAt,
                 "--state-db", store.path, "--json"
             ])
             XCTAssertEqual(confirmed.exitCode, 0, confirmed.standardError)

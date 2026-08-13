@@ -61,3 +61,11 @@ The evidence comment records the exact commit, `Dirty: false`, OS, hardware, run
 ## Evidence Storage
 
 Schemas, runners, and sanitized reviewed evidence may be committed. Machine-local paths, hostnames, account names, credentials, raw secrets, and unrelated resource identifiers must not be committed. CI or release artifacts retain full command logs after redaction; public docs summarize only evidence that passed for the exact reviewed commit.
+
+## Cumulative Soak Checkpoints
+
+The Phase 08 single-host soak is a cumulative checkpointed qualification. It requires exactly 864 committed five-minute intervals, totaling 259,200 qualified seconds. Each checkpoint is hash-chained to its predecessor and binds the qualification, physical host, source, executables, configuration, state integrity, project, exact owned runtime, and immutable runtime-inventory evidence. A process exit, reboot, power loss, or operator pause ends the current segment; it does not invalidate earlier checkpoints whose complete chain still validates. Time between segments and incomplete intervals never counts.
+
+`scripts/phase08-soak-qualification.sh status` validates the chain without rewriting it. `resume` reconstructs the derived sample ledger, preserves partial writes separately, reuses only exact completed fault receipts, and continues with the next sequence. Changed source, binary, template, image, host port, physical host, ownership, runtime inventory, or checkpoint data fails before mutation. The required real sleep and full wake must occur in order inside one recorded qualified segment.
+
+The live-runtime portion must execute where the real macOS, OSLog, launchd, SQLite, and Apple `container` boundaries are available. A VM that cannot run that exact Apple-container boundary is not equivalent live-runtime evidence. For isolation from a maintainer's daily machine, use a dedicated physical or remote Apple-silicon Mac; otherwise run resumable segments on the bound Mac and allow normal sleeps or shutdowns between checkpoints.

@@ -1,6 +1,7 @@
 import Darwin
 import CryptoKit
 import Foundation
+import Synchronization
 import XCTest
 @testable import HostwrightDaemonCore
 @testable import HostwrightCore
@@ -1398,6 +1399,93 @@ final class HostwrightDaemonCoreTests: XCTestCase {
         }
     }
 
+    func testTransientStateAccessContentionBacksOffAndResumesWithoutExiting() async throws {
+        try await withTemporaryDirectory { directory in
+            let databasePath = directory.appendingPathComponent("state.sqlite").path
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            let coordinator = StateAccessCoordinator(configuration: store.configuration)
+            let lockAcquired = DispatchSemaphore(value: 0)
+            let releaseFence = DispatchSemaphore(value: 0)
+            let fenceReleased = DispatchSemaphore(value: 0)
+            let backgroundFailure = Mutex<String?>(nil)
+            let shouldArmContention = Mutex(true)
+            let releaseCompleted = Mutex(false)
+            defer {
+                releaseFence.signal()
+            }
+
+            let clock = HookedDaemonClock {
+                releaseFence.signal()
+                let completed = fenceReleased.wait(timeout: .now() + 2) == .success
+                releaseCompleted.withLock { $0 = completed }
+            }
+            let runner = DaemonLoopRunner(
+                configuration: DaemonConfiguration(
+                    configPath: "hostwright.yaml",
+                    stateDatabasePath: databasePath,
+                    cadenceSeconds: 1,
+                    maxBackoffSeconds: 2,
+                    maxIterations: 2
+                ),
+                runtimeAdapter: CountingRuntimeAdapter(),
+                reconciliationDriver: ScriptedDaemonReconciliationDriver(),
+                clock: clock,
+                instanceLock: ScriptedDaemonLock(),
+                readConfig: { _ in
+                    let arm = shouldArmContention.withLock { value in
+                        defer { value = false }
+                        return value
+                    }
+                    if arm {
+                        DispatchQueue.global(qos: .userInitiated).async {
+                            do {
+                                try coordinator.withExclusiveLifecycleFence {
+                                    lockAcquired.signal()
+                                    guard releaseFence.wait(timeout: .now() + 5) == .success else {
+                                        throw StateStoreError.databaseLocked(
+                                            path: databasePath,
+                                            message: "the test maintenance release deadline expired"
+                                        )
+                                    }
+                                }
+                            } catch {
+                                backgroundFailure.withLock { $0 = String(describing: error) }
+                            }
+                            fenceReleased.signal()
+                        }
+                        guard lockAcquired.wait(timeout: .now() + 2) == .success else {
+                            throw StateStoreError.databaseLocked(
+                                path: databasePath,
+                                message: "the test maintenance fence was not acquired"
+                            )
+                        }
+                    }
+                    return Self.singleServiceManifest
+                },
+                idGenerator: DeterministicIDs().next
+            )
+
+            let summary = try await runner.run()
+
+            XCTAssertTrue(releaseCompleted.withLock { $0 })
+            XCTAssertNil(backgroundFailure.withLock { $0 })
+            XCTAssertEqual(summary.iterations, 2)
+            XCTAssertEqual(summary.failedIterations, 1)
+            XCTAssertEqual(summary.successfulIterations, 1)
+            XCTAssertEqual(clock.sleepDurations, [1])
+            let events = try store.events.loadAll()
+            let recovery = try XCTUnwrap(events.first {
+                $0.type == "daemon.backoff" && $0.message.contains("state-access contention")
+            })
+            XCTAssertFalse(recovery.message.contains(databasePath))
+            XCTAssertEqual(
+                try store.operations.loadAll().filter { $0.plannedActionType == "daemon.reconcile" }.count,
+                1
+            )
+        }
+    }
+
     func testManifestFailuresAreClassifiedWithoutRuntimeCode() async throws {
         try await withTemporaryDirectory { directory in
             let databasePath = directory.appendingPathComponent("state.sqlite").path
@@ -1741,6 +1829,29 @@ private final class ManualDaemonClock: DaemonClock {
             return .scheduled
         }
         return wakeReasons.removeFirst()
+    }
+}
+
+private final class HookedDaemonClock: DaemonClock {
+    private let onFirstSleep: () -> Void
+    private var firstSleepPending = true
+    private(set) var sleepDurations: [Int] = []
+
+    init(onFirstSleep: @escaping () -> Void) {
+        self.onFirstSleep = onFirstSleep
+    }
+
+    func timestamp() -> String {
+        "2026-07-07T00:00:00Z"
+    }
+
+    func sleep(seconds: Int) async throws -> DaemonWakeReason {
+        sleepDurations.append(seconds)
+        if firstSleepPending {
+            firstSleepPending = false
+            onFirstSleep()
+        }
+        return .scheduled
     }
 }
 

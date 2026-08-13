@@ -1049,6 +1049,7 @@ public enum CLICommand: Equatable, Sendable {
         var backupID: String?
         var dryRun = false
         var confirmationToken: String?
+        var compactionEvaluatedAt: String?
         var manifestPath: String?
         var index = 2
         if operation == "retention" || operation == "compact" {
@@ -1132,6 +1133,15 @@ public enum CLICommand: Equatable, Sendable {
                     flag: "--confirm-compact"
                 )
                 index += 2
+            case "--evaluated-at":
+                guard operation == "compact", compactionEvaluatedAt == nil,
+                      index + 1 < arguments.count else {
+                    throw CLIUsageError("state compact accepts one value after --evaluated-at.")
+                }
+                compactionEvaluatedAt = try parseCompactionEvaluationTimestamp(
+                    arguments[index + 1]
+                )
+                index += 2
             default:
                 throw CLIUsageError("state \(operation) does not support argument '\(arguments[index])'.")
             }
@@ -1159,9 +1169,13 @@ public enum CLICommand: Equatable, Sendable {
             guard let manifestPath, dryRun != (confirmationToken != nil) else {
                 throw CLIUsageError("state compact requires a manifest and exactly one of --dry-run or --confirm-compact <token>.")
             }
+            guard dryRun ? compactionEvaluatedAt == nil : compactionEvaluatedAt != nil else {
+                throw CLIUsageError("confirmed state compact requires the exact --evaluated-at value emitted by its dry-run plan.")
+            }
             action = .compact(
                 manifestPath: manifestPath,
-                confirmation: dryRun ? .dryRun : .confirmed(token: confirmationToken ?? "")
+                confirmation: dryRun ? .dryRun : .confirmed(token: confirmationToken ?? ""),
+                evaluatedAt: compactionEvaluatedAt
             )
         case "restore":
             guard let backupID else {
@@ -1501,6 +1515,17 @@ public enum CLICommand: Equatable, Sendable {
     ) throws -> String {
         guard value.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil else {
             throw CLIUsageError("\(flag) requires the exact 64-character token emitted by the dry-run plan.")
+        }
+        return value
+    }
+
+    private static func parseCompactionEvaluationTimestamp(_ value: String) throws -> String {
+        let formatter = ISO8601DateFormatter()
+        guard let date = formatter.date(from: value),
+              formatter.string(from: date) == value else {
+            throw CLIUsageError(
+                "--evaluated-at requires the exact canonical RFC3339 UTC value emitted by the dry-run plan."
+            )
         }
         return value
     }
@@ -2832,7 +2857,11 @@ public enum StateCLIAction: Equatable, Sendable {
     case repair(confirmation: StateMutationConfirmation)
     case recover
     case retention(manifestPath: String)
-    case compact(manifestPath: String, confirmation: StateMutationConfirmation)
+    case compact(
+        manifestPath: String,
+        confirmation: StateMutationConfirmation,
+        evaluatedAt: String?
+    )
 }
 
 public enum StateMutationConfirmation: Equatable, Sendable {

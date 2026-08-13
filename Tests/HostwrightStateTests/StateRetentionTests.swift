@@ -130,6 +130,50 @@ final class StateRetentionTests: XCTestCase {
         }
     }
 
+    func testConfirmationUsesTheExactPlanEvaluationTimeAcrossProcessDelay() throws {
+        try withStore { store, _ in
+            try appendEvent(
+                id: "stable-target",
+                timestamp: "2026-01-01T00:00:00Z",
+                type: "runtime.changed",
+                to: store
+            )
+            try appendEvent(
+                id: "crossing-target",
+                timestamp: "2026-08-01T11:00:30Z",
+                type: "runtime.changed",
+                to: store
+            )
+            let service = try StateRetentionService(store: store)
+            let policy = policy()
+            let plannedAt = try XCTUnwrap(
+                ISO8601DateFormatter().date(from: "2026-08-01T12:00:00Z")
+            )
+            let plan = try service.compactionPlan(policy: policy, at: plannedAt)
+
+            XCTAssertEqual(plan.schemaVersion, 2)
+            XCTAssertEqual(plan.evaluatedAt, "2026-08-01T12:00:00Z")
+            XCTAssertEqual(status(.events, in: plan).candidateRecords, 1)
+            XCTAssertThrowsError(try service.compact(
+                policy: policy,
+                confirmationToken: plan.confirmationToken,
+                at: plannedAt.addingTimeInterval(120)
+            )) { error in
+                XCTAssertEqual(error as? StateMaintenanceError, .confirmationMismatch)
+            }
+
+            let result = try service.compact(
+                policy: policy,
+                confirmationToken: plan.confirmationToken,
+                evaluatedAt: plan.evaluatedAt
+            )
+            XCTAssertEqual(result.deletedRecords[.events], 1)
+            let remaining = Set(try store.events.loadAll().map(\.id))
+            XCTAssertFalse(remaining.contains("stable-target"))
+            XCTAssertTrue(remaining.contains("crossing-target"))
+        }
+    }
+
     func testSecurityAndOperatorEvidenceUsesTheAuditRetentionClass() throws {
         try withStore { store, _ in
             let protectedTypes = [

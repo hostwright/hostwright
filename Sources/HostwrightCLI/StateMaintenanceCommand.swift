@@ -93,7 +93,7 @@ struct StateMaintenanceCommandRunner {
                         ? CLIJSON.codable(report)
                         : render(report)
                 )
-            case .compact(let manifestPath, let confirmation):
+            case .compact(let manifestPath, let confirmation, let evaluatedAt):
                 let policy = try retentionPolicy(manifestPath)
                 switch confirmation {
                 case .dryRun:
@@ -104,9 +104,16 @@ struct StateMaintenanceCommandRunner {
                             : render(plan)
                     )
                 case .confirmed(let token):
+                    guard let evaluatedAt else {
+                        return failure(
+                            code: .commandUsage,
+                            message: "Confirmed state compaction requires its exact dry-run evaluation time."
+                        )
+                    }
                     let result = try StateRetentionService(store: store).compact(
                         policy: policy,
-                        confirmationToken: token
+                        confirmationToken: token,
+                        evaluatedAt: evaluatedAt
                     )
                     return CLIRunResult(
                         standardOutput: output == .json
@@ -302,6 +309,7 @@ struct StateMaintenanceCommandRunner {
     private func render(_ plan: StateCompactionPlan) -> String {
         var lines = [
             "Hostwright state compaction dry-run",
+            "Evaluated at: \(plan.evaluatedAt)",
             "Policy SHA-256: \(plan.policySHA256)",
             "Database bytes: \(plan.databaseBytes)",
             "Pressure: \(plan.pressure.rawValue)",

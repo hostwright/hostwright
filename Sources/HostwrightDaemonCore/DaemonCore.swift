@@ -303,6 +303,7 @@ public struct DaemonLoopRunner {
         var successfulIterations = 0
         var failedIterations = 0
         var consecutiveFailures = 0
+        var deferredStateContentionFailures = 0
 
         while !shutdownToken.isShutdownRequested {
             if let maxIterations = configuration.maxIterations, iterations >= maxIterations {
@@ -310,11 +311,30 @@ public struct DaemonLoopRunner {
             }
 
             iterations += 1
-            let result = try await runIteration(iteration: iterations, store: store)
+            let result: IterationResult
+            do {
+                result = try await runIteration(iteration: iterations, store: store)
+            } catch let error as StateStoreError where Self.isTransientStateContention(error) {
+                if deferredStateContentionFailures < 1_024 {
+                    deferredStateContentionFailures += 1
+                }
+                result = .failure
+            }
             switch result {
             case .success:
                 successfulIterations += 1
                 consecutiveFailures = 0
+                if deferredStateContentionFailures > 0 {
+                    let count = deferredStateContentionFailures
+                    if try recordLifecycleEventIfStateAvailable(
+                        store: store,
+                        type: "daemon.backoff",
+                        severity: .warning,
+                        message: "hostwrightd resumed after \(count) transient state-access contention failure(s)."
+                    ) {
+                        deferredStateContentionFailures = 0
+                    }
+                }
             case .failure:
                 failedIterations += 1
                 consecutiveFailures += 1
@@ -329,12 +349,15 @@ public struct DaemonLoopRunner {
 
             let delay = delaySeconds(iteration: iterations, consecutiveFailures: consecutiveFailures)
             if consecutiveFailures > 0 {
-                try recordLifecycleEvent(
+                let recorded = try recordLifecycleEventIfStateAvailable(
                     store: store,
                     type: "daemon.backoff",
                     severity: .warning,
                     message: "hostwrightd backing off for \(delay) second(s) after \(consecutiveFailures) consecutive failure(s)."
                 )
+                if !recorded && deferredStateContentionFailures == 0 {
+                    deferredStateContentionFailures = 1
+                }
             }
 
             let wakeReason = try await clock.sleep(seconds: delay)
@@ -1552,6 +1575,32 @@ public struct DaemonLoopRunner {
                 payloadJSONRedacted: payload(["mode": configuration.mode.rawValue])
             )
         ])
+    }
+
+    private func recordLifecycleEventIfStateAvailable(
+        store: SQLiteStateStore,
+        type: String,
+        severity: StateEventSeverity,
+        message: String
+    ) throws -> Bool {
+        do {
+            try recordLifecycleEvent(
+                store: store,
+                type: type,
+                severity: severity,
+                message: message
+            )
+            return true
+        } catch let error as StateStoreError where Self.isTransientStateContention(error) {
+            return false
+        }
+    }
+
+    private static func isTransientStateContention(_ error: StateStoreError) -> Bool {
+        if case .databaseLocked = error {
+            return true
+        }
+        return false
     }
 
     public static func deterministicJitter(iteration: Int, maximum: Int) -> Int {

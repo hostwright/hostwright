@@ -180,7 +180,7 @@ live(){
   HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" HOSTWRIGHT_CACHE_DIR="$runtime/cache" HOSTWRIGHT_LOG_DIR="$runtime/logs" "$cli" exec probe --manifest "$config" --state-db "$state" --no-stdin -- python3 -c 'print("gate09-exec")' >/dev/null
   HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" HOSTWRIGHT_CACHE_DIR="$runtime/cache" HOSTWRIGHT_LOG_DIR="$runtime/logs" "$cli" events --state-db "$state" --project "$live_project" --limit 20 --output json | /usr/bin/jq -e . >/dev/null
   HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" HOSTWRIGHT_CACHE_DIR="$runtime/cache" HOSTWRIGHT_LOG_DIR="$runtime/logs" "$bootstrap" --live --root "$runtime" --state "$state" --socket "$socket" > "$runtime/stream-live.json"
-  trace_id="$(/usr/bin/sqlite3 "$state" 'SELECT trace_id FROM trace_spans ORDER BY started_at DESC LIMIT 1;')"
+  trace_id="$(/usr/bin/sqlite3 "$state" "SELECT json_extract(payload_json_redacted, '\$.traceID') FROM event_ledger WHERE type = 'trace.span.v1' AND source = 'hostwright.trace' ORDER BY rowid DESC LIMIT 1;")"
   if [[ -n "$trace_id" ]]; then
     trace_hash="$(HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" traces inspect --state-db "$state" --trace-id "$trace_id" --output json | /usr/bin/jq -er --arg id "$trace_id" '.traces[] | select(.traceID == $id) | .traceSHA256')"
     HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" traces export --state-db "$state" --trace-id "$trace_id" --output-path "$runtime/trace.json" --confirm-trace "$trace_hash" --output json | /usr/bin/jq -e . >/dev/null

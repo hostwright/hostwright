@@ -291,9 +291,9 @@ private extension CLIControlRouteTests {
             entry("ownership.handoff", ["ownership", "handoff", "--group", id, "--confirm-plan", confirmation, "--confirm-fence", otherID, "--from-controller", "hostwright-cli:operation", "--from-expiry", "2026-08-03T00:00:00Z", "--to-controller", "resume", "--lease-seconds", "60"], "handoff", true),
 
             entry("metrics.snapshot", ["metrics", "snapshot"], "snapshot", false, jsonSuffix: ["--output", "json"]),
-            entry("metrics.export", ["metrics", "export", "--output-path", "/tmp/metrics.json", "--confirm-snapshot", confirmation], "export", true, jsonSuffix: ["--output", "json"]),
+            entry("metrics.export", ["metrics", "export", "--output-path", "/tmp/metrics.json", "--confirm-snapshot", confirmation], "export", false, jsonSuffix: ["--output", "json"]),
             entry("traces.inspect", ["traces", "inspect", "--trace-id", id], "inspect", false),
-            entry("traces.export", ["traces", "export", "--trace-id", id, "--output-path", "/tmp/trace.json", "--confirm-trace", confirmation], "export", true),
+            entry("traces.export", ["traces", "export", "--trace-id", id, "--output-path", "/tmp/trace.json", "--confirm-trace", confirmation], "export", false),
 
             entry("recovery.inspect", ["recovery"], "recovery", false, jsonSuffix: ["--output", "json"]),
             entry("recovery.resume", ["recovery", "resume", "--group", id, "--confirm-plan", confirmation], "resume", true, jsonSuffix: ["--output", "json"]),

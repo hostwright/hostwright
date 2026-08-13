@@ -408,12 +408,10 @@ public struct CLIControlRoute: Equatable, Sendable {
         case .ownership(let options):
             if case .status = options.action { return false }
             return true
-        case .metrics(let options):
-            if case .snapshot = options.action { return false }
-            return true
-        case .traces(let options):
-            if case .inspect = options.action { return false }
-            return true
+        case .metrics:
+            return false
+        case .traces:
+            return false
         case .supportBundle(let options):
             switch options.action {
             case .status, .preview: return false

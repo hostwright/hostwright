@@ -430,21 +430,27 @@ public struct DaemonLoopRunner {
                     let sampling = status == .succeeded
                         ? "deterministic-1-of-16"
                         : "failure-override"
-                    _ = session.finish(
-                        root,
-                        status: status,
-                        attributes: session.rootCompletionAttributes(sampling: sampling)
-                    )
-                    session.complete(status: status)
+                    try StateUpgradeService(store: store)
+                        .withSerializedLifecycleMutation(lockWaitMilliseconds: 30_000) {
+                            _ = session.finish(
+                                root,
+                                status: status,
+                                attributes: session.rootCompletionAttributes(sampling: sampling)
+                            )
+                            session.complete(status: status)
+                        }
                     return result
                 } catch {
                     let status: HostwrightTraceSpanStatus = error is CancellationError ? .cancelled : .failed
-                    _ = session.finish(
-                        root,
-                        status: status,
-                        attributes: session.rootCompletionAttributes(sampling: "failure-override")
-                    )
-                    session.complete(status: status)
+                    try? StateUpgradeService(store: store)
+                        .withSerializedLifecycleMutation(lockWaitMilliseconds: 30_000) {
+                            _ = session.finish(
+                                root,
+                                status: status,
+                                attributes: session.rootCompletionAttributes(sampling: "failure-override")
+                            )
+                            session.complete(status: status)
+                        }
                     throw error
                 }
             }

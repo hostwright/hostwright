@@ -186,17 +186,10 @@ live(){
     HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" traces export --state-db "$state" --trace-id "$trace_id" --output-path "$runtime/trace.json" --confirm-trace "$trace_hash" --output json | /usr/bin/jq -e . >/dev/null
   fi
 
-  first_process_identity="$(/usr/bin/awk -F $'\t' -v p="$pid" '$2=="process"&&$7~("pid="p";"){print $7}' "$root/ownership-v1.tsv")"
-  stop_exact_process "$daemon" "$(stat -f '%d' "$daemon")" "$(stat -f '%i' "$daemon")" "$first_process_identity"
-  remove_owned_socket "$runtime" "$socket"
-  if HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" capabilities --json >/dev/null 2>&1; then
-    die 'CLI unexpectedly bypassed the unavailable daemon.'
-  fi
-
-  # Metrics and trace confirmation are read-only projections of persisted state.
-  # Quiesce the owned writer first so confirmation is not invalidated by periodic reconciliation.
+  # Metrics require the authenticated CLI/daemon path, so capture the bounded
+  # confirmation while the daemon is available before quiescing its writer.
   metrics_exported=0
-  for n in {1..5}; do
+  for n in {1..60}; do
     metrics_hash="$(HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" metrics snapshot --state-db "$state" --output json | /usr/bin/jq -er '.snapshotSHA256')"
     if HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" metrics export --state-db "$state" --output-path "$runtime/metrics.json" --confirm-snapshot "$metrics_hash" --output json > "$runtime/qualification.metrics-export-v1.json" 2> "$runtime/qualification.metrics-export-v1.stderr.log"; then
       /usr/bin/jq -e . "$runtime/qualification.metrics-export-v1.json" >/dev/null || die 'Gate 9 metrics export returned invalid JSON.' 66
@@ -212,6 +205,14 @@ live(){
     /bin/sleep 1
   done
   [[ "$metrics_exported" == 1 ]] || die 'Gate 9 metrics snapshot remained unstable across bounded retries.' 124
+
+  first_process_identity="$(/usr/bin/awk -F $'\t' -v p="$pid" '$2=="process"&&$7~("pid="p";"){print $7}' "$root/ownership-v1.tsv")"
+  stop_exact_process "$daemon" "$(stat -f '%d' "$daemon")" "$(stat -f '%i' "$daemon")" "$first_process_identity"
+  remove_owned_socket "$runtime" "$socket"
+  if HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" capabilities --json >/dev/null 2>&1; then
+    die 'CLI unexpectedly bypassed the unavailable daemon.'
+  fi
+
   record_keychain_items "$state"
   pid="$(start_daemon "$runtime" "$daemon" "$config" "$state" restarted "$cli")"
   HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" capabilities --json | /usr/bin/jq -e . >/dev/null

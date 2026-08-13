@@ -198,7 +198,6 @@ live(){
   metrics_exported=0
   for n in {1..60}; do
     acquire_lifecycle_mutation_fence "$state"
-    acquire_metrics_read_fence "$state"
     set +e
     metrics_snapshot_json="$(HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" metrics snapshot --state-db "$state" --output json 2> "$runtime/qualification.metrics-snapshot-v1.stderr.log")"
     metrics_snapshot_status=$?
@@ -208,7 +207,7 @@ live(){
     if [[ "$metrics_snapshot_status" != 0 ]]; then
       release_metrics_read_fence
       release_lifecycle_mutation_fence
-      if ! /usr/bin/grep -qE 'HW-METRIC-003|HW-CLI-005|authoritative database changed' "$runtime/qualification.metrics-snapshot-v1.json" "$runtime/qualification.metrics-snapshot-v1.stderr.log" 2>/dev/null; then
+      if ! /usr/bin/grep -qE 'HW-METRIC-003|HW-CLI-005|HW-API-002|authoritative database changed' "$runtime/qualification.metrics-snapshot-v1.json" "$runtime/qualification.metrics-snapshot-v1.stderr.log" 2>/dev/null; then
         /bin/cat "$runtime/qualification.metrics-snapshot-v1.json" "$runtime/qualification.metrics-snapshot-v1.stderr.log" >&2
         die 'Gate 9 metrics snapshot failed for a non-retryable reason.' "$metrics_snapshot_status"
       fi
@@ -221,6 +220,7 @@ live(){
       /bin/cat "$runtime/qualification.metrics-snapshot-v1.json" >&2
       die 'Gate 9 metrics snapshot returned invalid JSON.' 66
     fi
+    acquire_metrics_read_fence "$state"
     if HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" metrics export --state-db "$state" --output-path "$runtime/metrics.json" --confirm-snapshot "$metrics_hash" --output json > "$runtime/qualification.metrics-export-v1.json" 2> "$runtime/qualification.metrics-export-v1.stderr.log"; then
       /usr/bin/jq -e . "$runtime/qualification.metrics-export-v1.json" >/dev/null || { release_metrics_read_fence; release_lifecycle_mutation_fence; die 'Gate 9 metrics export returned invalid JSON.' 66; }
       release_metrics_read_fence

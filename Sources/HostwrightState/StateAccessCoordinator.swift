@@ -141,12 +141,12 @@ struct StateAccessCoordinator {
             deadline: deadline,
             role: "state-access fence"
         )
-        if mode == .write {
+        if mode == .shared || mode == .write {
             let descriptor = try openSecureLock(paths.accessLockPath + ".writer")
             writerDescriptor = descriptor
             try acquire(
                 descriptor,
-                operation: LOCK_EX,
+                operation: mode == .write ? LOCK_EX : LOCK_SH,
                 deadline: deadline,
                 role: "state-writer fence"
             )

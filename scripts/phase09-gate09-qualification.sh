@@ -189,9 +189,9 @@ live(){
     HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" traces export --state-db "$state" --trace-id "$trace_id" --output-path "$runtime/trace.json" --confirm-trace "$trace_hash" --output json | /usr/bin/jq -e . >/dev/null
   fi
 
-  # Metrics require the authenticated CLI/daemon path. Fence only the direct
-  # snapshot read: the subsequent API export must reacquire the same lifecycle
-  # lock itself, so holding our exclusive fence across export would deadlock it.
+  # Metrics require the authenticated CLI/daemon path. Observation authorization
+  # is non-persisting, so keep the lifecycle fence across the snapshot and its
+  # confirmed export as one stable read-only observation transaction.
   metrics_exported=0
   for n in {1..60}; do
     acquire_lifecycle_mutation_fence "$state"
@@ -201,8 +201,8 @@ live(){
     set -e
     printf '%s' "$metrics_snapshot_json" > "$runtime/qualification.metrics-snapshot-v1.json"
     chmod 600 "$runtime/qualification.metrics-snapshot-v1.json" "$runtime/qualification.metrics-snapshot-v1.stderr.log"
-    release_lifecycle_mutation_fence
     if [[ "$metrics_snapshot_status" != 0 ]]; then
+      release_lifecycle_mutation_fence
       if ! /usr/bin/grep -qE 'HW-METRIC-003|HW-CLI-005|authoritative database changed' "$runtime/qualification.metrics-snapshot-v1.json" "$runtime/qualification.metrics-snapshot-v1.stderr.log" 2>/dev/null; then
         /bin/cat "$runtime/qualification.metrics-snapshot-v1.json" "$runtime/qualification.metrics-snapshot-v1.stderr.log" >&2
         die 'Gate 9 metrics snapshot failed for a non-retryable reason.' "$metrics_snapshot_status"
@@ -211,15 +211,18 @@ live(){
       continue
     fi
     if ! metrics_hash="$(printf '%s' "$metrics_snapshot_json" | /usr/bin/jq -er '.snapshotSHA256')"; then
+      release_lifecycle_mutation_fence
       /bin/cat "$runtime/qualification.metrics-snapshot-v1.json" >&2
       die 'Gate 9 metrics snapshot returned invalid JSON.' 66
     fi
     if HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" metrics export --state-db "$state" --output-path "$runtime/metrics.json" --confirm-snapshot "$metrics_hash" --output json > "$runtime/qualification.metrics-export-v1.json" 2> "$runtime/qualification.metrics-export-v1.stderr.log"; then
-      /usr/bin/jq -e . "$runtime/qualification.metrics-export-v1.json" >/dev/null || die 'Gate 9 metrics export returned invalid JSON.' 66
+      /usr/bin/jq -e . "$runtime/qualification.metrics-export-v1.json" >/dev/null || { release_lifecycle_mutation_fence; die 'Gate 9 metrics export returned invalid JSON.' 66; }
+      release_lifecycle_mutation_fence
       metrics_exported=1
       break
     else
       metrics_export_status=$?
+      release_lifecycle_mutation_fence
     fi
     if ! /usr/bin/grep -q 'HW-METRIC-003' "$runtime/qualification.metrics-export-v1.json" "$runtime/qualification.metrics-export-v1.stderr.log" 2>/dev/null; then
       /bin/cat "$runtime/qualification.metrics-export-v1.json" "$runtime/qualification.metrics-export-v1.stderr.log" >&2

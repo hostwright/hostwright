@@ -282,14 +282,14 @@ public struct DaemonLoopRunner {
         defer { configurationMonitor?.stop() }
 
         let store = SQLiteStateStore(configuration: configuration.stateStoreConfiguration)
-        return try await StateUpgradeService(store: store)
+        try StateUpgradeService(store: store)
             .withBoundedStateAccessWait(lockWaitMilliseconds: 30_000) {
-                try await runStatefulLoop(store: store)
+                _ = try StateUpgradeService(store: store).migrateToLatestWithVerifiedBackup()
             }
+        return try await runStatefulLoop(store: store)
     }
 
     private func runStatefulLoop(store: SQLiteStateStore) async throws -> DaemonRunSummary {
-        _ = try StateUpgradeService(store: store).migrateToLatestWithVerifiedBackup()
         try controlService?.start()
         defer { controlService?.stop() }
         try recordLifecycleEvent(
@@ -476,6 +476,8 @@ public struct DaemonLoopRunner {
             let configurationSetSHA256 = DaemonConfigurationSetDigest.sha256(configurationTargets)
             try configurationMonitor?.replace(paths: configurationTargets.map(\.path))
             configurationValidated = true
+            let iterationResult: IterationResult = try await StateUpgradeService(store: store)
+                .withSerializedLifecycleMutation(lockWaitMilliseconds: 250) {
             let mapping = ManifestRuntimeMapper.map(manifest)
             let projectID = "project-\(mapping.desiredState.projectName)"
             currentProjectID = projectID
@@ -728,6 +730,8 @@ public struct DaemonLoopRunner {
                 )
             ])
             return iterationSucceeded ? .success : .failure
+            }
+            return iterationResult
         } catch {
             let diagnostic = daemonDiagnostic(for: error)
             let message = RuntimeRedactionPolicy.default.redact(diagnostic.message)

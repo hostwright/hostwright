@@ -58,7 +58,7 @@ final class HostwrightDaemonCoreTests: XCTestCase {
             try store.migrate()
             try store.configuration.prepareStateAccessFoundation()
             let lockPath = try store.configuration.maintenancePaths().accessLockPath
-            let descriptor = open(lockPath, O_RDWR | O_NOFOLLOW | O_CLOEXEC)
+            let descriptor = open(lockPath, O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o600)
             XCTAssertGreaterThanOrEqual(descriptor, 0)
             XCTAssertEqual(flock(descriptor, LOCK_EX | LOCK_NB), 0)
             let release = Task.detached {
@@ -100,6 +100,52 @@ final class HostwrightDaemonCoreTests: XCTestCase {
             XCTAssertEqual(summary.iterations, 1)
             XCTAssertEqual(summary.successfulIterations, 1)
             XCTAssertEqual(summary.failedIterations, 0)
+        }
+    }
+
+    func testDaemonIterationWaitsForLifecycleMutationFenceBeforeStateWrites() async throws {
+        try await withTemporaryDirectory { directory in
+            let databasePath = directory.appendingPathComponent("state.sqlite").path
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            try store.configuration.prepareStateAccessFoundation()
+            let lockPath = try store.configuration.maintenancePaths().accessLockPath + ".lifecycle-mutation"
+            let descriptor = open(lockPath, O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o600)
+            XCTAssertGreaterThanOrEqual(descriptor, 0)
+            XCTAssertEqual(flock(descriptor, LOCK_EX | LOCK_NB), 0)
+            let release = Task.detached {
+                try? await Task.sleep(for: .milliseconds(400))
+                _ = flock(descriptor, LOCK_UN)
+                close(descriptor)
+            }
+
+            let runner = DaemonLoopRunner(
+                configuration: DaemonConfiguration(
+                    configPath: "hostwright.yaml",
+                    stateDatabasePath: databasePath,
+                    maxIterations: 1
+                ),
+                runtimeAdapter: CountingRuntimeAdapter(),
+                reconciliationDriver: ScriptedDaemonReconciliationDriver(),
+                clock: ManualDaemonClock(),
+                instanceLock: ScriptedDaemonLock(),
+                readConfig: { _ in
+                    """
+                    version: 2
+                    project: demo
+                    services:
+                      api:
+                        image: ghcr.io/example/api:latest
+                    """
+                },
+                idGenerator: DeterministicIDs().next
+            )
+
+            let startedAt = Date()
+            let summary = try await runner.run()
+            await release.value
+            XCTAssertEqual(summary.successfulIterations, 1)
+            XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(startedAt), 0.300)
         }
     }
 

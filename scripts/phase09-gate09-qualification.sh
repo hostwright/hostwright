@@ -124,7 +124,7 @@ live(){
   swift build --jobs 1 --product hostwright-control
   swift build --jobs 1 --product hostwrightd
   swift build --jobs 1 --product hostwright-stream-qualification
-  local bin runtime cli control daemon bootstrap config state socket pid resource output first_process_identity metrics_hash metrics_exported metrics_export_status trace_id trace_hash n
+  local bin runtime cli control daemon bootstrap config state socket pid resource output first_process_identity metrics_hash metrics_exported metrics_export_status metrics_snapshot_json metrics_snapshot_status trace_id trace_hash n
   bin="$(swift build --show-bin-path)"
   runtime="$(short_live_runtime)"
   mkdir "$runtime"
@@ -190,7 +190,24 @@ live(){
   # confirmation while the daemon is available before quiescing its writer.
   metrics_exported=0
   for n in {1..60}; do
-    metrics_hash="$(HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" metrics snapshot --state-db "$state" --output json | /usr/bin/jq -er '.snapshotSHA256')"
+    set +e
+    metrics_snapshot_json="$(HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" metrics snapshot --state-db "$state" --output json 2> "$runtime/qualification.metrics-snapshot-v1.stderr.log")"
+    metrics_snapshot_status=$?
+    set -e
+    printf '%s' "$metrics_snapshot_json" > "$runtime/qualification.metrics-snapshot-v1.json"
+    chmod 600 "$runtime/qualification.metrics-snapshot-v1.json" "$runtime/qualification.metrics-snapshot-v1.stderr.log"
+    if [[ "$metrics_snapshot_status" != 0 ]]; then
+      if ! /usr/bin/grep -qE 'HW-METRIC-003|HW-CLI-005|authoritative database changed' "$runtime/qualification.metrics-snapshot-v1.json" "$runtime/qualification.metrics-snapshot-v1.stderr.log" 2>/dev/null; then
+        /bin/cat "$runtime/qualification.metrics-snapshot-v1.json" "$runtime/qualification.metrics-snapshot-v1.stderr.log" >&2
+        die 'Gate 9 metrics snapshot failed for a non-retryable reason.' "$metrics_snapshot_status"
+      fi
+      /bin/sleep 1
+      continue
+    fi
+    if ! metrics_hash="$(printf '%s' "$metrics_snapshot_json" | /usr/bin/jq -er '.snapshotSHA256')"; then
+      /bin/cat "$runtime/qualification.metrics-snapshot-v1.json" >&2
+      die 'Gate 9 metrics snapshot returned invalid JSON.' 66
+    fi
     if HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" metrics export --state-db "$state" --output-path "$runtime/metrics.json" --confirm-snapshot "$metrics_hash" --output json > "$runtime/qualification.metrics-export-v1.json" 2> "$runtime/qualification.metrics-export-v1.stderr.log"; then
       /usr/bin/jq -e . "$runtime/qualification.metrics-export-v1.json" >/dev/null || die 'Gate 9 metrics export returned invalid JSON.' 66
       metrics_exported=1

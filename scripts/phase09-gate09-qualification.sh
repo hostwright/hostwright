@@ -189,21 +189,19 @@ live(){
     HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" traces export --state-db "$state" --trace-id "$trace_id" --output-path "$runtime/trace.json" --confirm-trace "$trace_hash" --output json | /usr/bin/jq -e . >/dev/null
   fi
 
-  # Hold the exact lifecycle-mutation fence so the daemon remains available for
-  # authenticated read-only metrics while no reconciliation writer can change
-  # the authoritative snapshot.
-  acquire_lifecycle_mutation_fence "$state"
-
-  # Metrics require the authenticated CLI/daemon path, so capture the bounded
-  # confirmation while the daemon is available before quiescing its writer.
+  # Metrics require the authenticated CLI/daemon path. Fence only the direct
+  # snapshot read: the subsequent API export must reacquire the same lifecycle
+  # lock itself, so holding our exclusive fence across export would deadlock it.
   metrics_exported=0
   for n in {1..60}; do
+    acquire_lifecycle_mutation_fence "$state"
     set +e
     metrics_snapshot_json="$(HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" metrics snapshot --state-db "$state" --output json 2> "$runtime/qualification.metrics-snapshot-v1.stderr.log")"
     metrics_snapshot_status=$?
     set -e
     printf '%s' "$metrics_snapshot_json" > "$runtime/qualification.metrics-snapshot-v1.json"
     chmod 600 "$runtime/qualification.metrics-snapshot-v1.json" "$runtime/qualification.metrics-snapshot-v1.stderr.log"
+    release_lifecycle_mutation_fence
     if [[ "$metrics_snapshot_status" != 0 ]]; then
       if ! /usr/bin/grep -qE 'HW-METRIC-003|HW-CLI-005|authoritative database changed' "$runtime/qualification.metrics-snapshot-v1.json" "$runtime/qualification.metrics-snapshot-v1.stderr.log" 2>/dev/null; then
         /bin/cat "$runtime/qualification.metrics-snapshot-v1.json" "$runtime/qualification.metrics-snapshot-v1.stderr.log" >&2
@@ -230,8 +228,6 @@ live(){
     /bin/sleep 1
   done
   [[ "$metrics_exported" == 1 ]] || die 'Gate 9 metrics snapshot remained unstable across bounded retries.' 124
-
-  release_lifecycle_mutation_fence
 
   first_process_identity="$(/usr/bin/awk -F $'\t' -v p="$pid" '$2=="process"&&$7~("pid="p";"){print $7}' "$root/ownership-v1.tsv")"
   stop_exact_process "$daemon" "$(stat -f '%d' "$daemon")" "$(stat -f '%i' "$daemon")" "$first_process_identity"

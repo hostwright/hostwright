@@ -124,6 +124,7 @@ let package = Package(
         .library(name: "HostwrightRegistry", targets: ["HostwrightRegistry"]),
         .library(name: "HostwrightSecrets", targets: ["HostwrightSecrets"]),
         .library(name: "HostwrightStorage", targets: ["HostwrightStorage"]),
+        .library(name: "HostwrightCluster", targets: ["HostwrightCluster"]),
         .library(
             name: "HostwrightStorageHelper",
             targets: ["HostwrightStorageHelper"]
@@ -535,6 +536,10 @@ let package = Package(
             ]
         ),
         .target(
+            name: "HostwrightCluster",
+            dependencies: ["HostwrightCore"]
+        ),
+        .target(
             name: "HostwrightStorageHelper",
             dependencies: ["HostwrightStorage"],
             linkerSettings: [
@@ -883,6 +888,10 @@ let package = Package(
                 "HostwrightStorage",
                 "HostwrightTestSupport"
             ]
+        ),
+        .testTarget(
+            name: "HostwrightClusterTests",
+            dependencies: ["HostwrightCluster"]
         )
     ]
 )

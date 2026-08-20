@@ -352,6 +352,7 @@ public enum HostwrightCompose {
             message.contains("tab indentation") ||
             message.contains("only 2-space indentation") ||
             message.contains("unterminated quoted scalar") ||
+            message.contains("unexpected characters after a quoted scalar") ||
             message.contains("unsupported escape sequence") ||
             message.contains("must separate values") ||
             message.contains("trailing comma") ||
@@ -528,8 +529,61 @@ public enum HostwrightCompose {
             if service.platform != HostwrightPlatform() {
                 add("\(serviceRoot).platform", "Compose export cannot preserve Hostwright platform semantics in this contract.")
             }
-            if service.resources != nil {
-                add("\(serviceRoot).resources", "Compose export cannot preserve Hostwright resource semantics in this contract.")
+            if let resources = service.resources {
+                if resources.requests.cpus == nil {
+                    add(
+                        "\(serviceRoot).resources.requests.cpus",
+                        "Compose export requires an explicit request CPU value for its exact four-field capacity subset."
+                    )
+                }
+                if resources.requests.memory == nil {
+                    add(
+                        "\(serviceRoot).resources.requests.memory",
+                        "Compose export requires an explicit request memory value for its exact four-field capacity subset."
+                    )
+                }
+                if resources.limits?.cpus == nil {
+                    add(
+                        "\(serviceRoot).resources.limits.cpus",
+                        "Compose export requires an explicit limit CPU value for its exact four-field capacity subset."
+                    )
+                }
+                if resources.limits?.memory == nil {
+                    add(
+                        "\(serviceRoot).resources.limits.memory",
+                        "Compose export requires an explicit limit memory value for its exact four-field capacity subset."
+                    )
+                }
+                if let memory = resources.requests.memory, composeMemory(memory) == nil {
+                    add(
+                        "\(serviceRoot).resources.requests.memory",
+                        "Compose export requires request memory to fit its signed 64-bit b, k, m, or g byte-value subset."
+                    )
+                }
+                if let memory = resources.limits?.memory, composeMemory(memory) == nil {
+                    add(
+                        "\(serviceRoot).resources.limits.memory",
+                        "Compose export requires limit memory to fit its signed 64-bit b, k, m, or g byte-value subset."
+                    )
+                }
+                if resources.requests.disk != nil || resources.limits?.disk != nil {
+                    add("\(serviceRoot).resources.disk", "Compose export cannot preserve Hostwright disk resource semantics in this contract.")
+                }
+                if resources.requests.io != nil || resources.limits?.io != nil {
+                    add("\(serviceRoot).resources.io", "Compose export cannot preserve Hostwright I/O resource semantics in this contract.")
+                }
+                if resources.requests.network != nil || resources.limits?.network != nil {
+                    add("\(serviceRoot).resources.network", "Compose export cannot preserve Hostwright network resource semantics in this contract.")
+                }
+                if resources.requests.process != nil || resources.limits?.process != nil {
+                    add("\(serviceRoot).resources.process", "Compose export cannot preserve Hostwright process resource semantics in this contract.")
+                }
+            }
+            if let scheduling = service.scheduling, !scheduling.isEmpty {
+                add(
+                    "\(serviceRoot).scheduling",
+                    "Compose export cannot preserve Hostwright scheduling or accelerator semantics in this contract."
+                )
             }
             if service.user != nil {
                 add("\(serviceRoot).user", "Compose export cannot preserve Hostwright user semantics in this contract.")
@@ -688,6 +742,23 @@ public enum HostwrightCompose {
             if let restart = service.restart {
                 lines.append("    restart: \(quoted(restart.policy))")
             }
+            if let resources = service.resources,
+               let limits = resources.limits,
+               let requestCPUs = resources.requests.cpus,
+               let requestMemory = resources.requests.memory,
+               let composeRequestMemory = composeMemory(requestMemory),
+               let limitCPUs = limits.cpus,
+               let limitMemory = limits.memory,
+               let composeLimitMemory = composeMemory(limitMemory) {
+                lines.append("    deploy:")
+                lines.append("      resources:")
+                lines.append("        reservations:")
+                lines.append("          cpus: \(quoted(String(requestCPUs)))")
+                lines.append("          memory: \(quoted(composeRequestMemory))")
+                lines.append("        limits:")
+                lines.append("          cpus: \(quoted(String(limitCPUs)))")
+                lines.append("          memory: \(quoted(composeLimitMemory))")
+            }
         }
 
         return lines.joined(separator: "\n") + "\n"
@@ -712,7 +783,26 @@ public enum HostwrightCompose {
         if current.volumes.sorted() != desired.volumes.sorted() { fields.append("volumes") }
         if current.health != desired.health { fields.append("healthcheck") }
         if current.restart != desired.restart { fields.append("restart") }
+        if current.resources != desired.resources { fields.append("deploy.resources") }
         return fields.sorted()
+    }
+
+    private static func composeMemory(_ value: String) -> String? {
+        let unitMapping: [(manifest: String, compose: String, multiplier: UInt64)] = [
+            ("GiB", "g", 1_073_741_824),
+            ("MiB", "m", 1_048_576),
+            ("KiB", "k", 1_024),
+            ("B", "b", 1),
+        ]
+        guard let unit = unitMapping.first(where: { value.hasSuffix($0.manifest) }),
+              let amount = UInt64(value.dropLast(unit.manifest.count)) else {
+            return nil
+        }
+        let bytes = amount.multipliedReportingOverflow(by: unit.multiplier)
+        guard !bytes.overflow, bytes.partialValue <= UInt64(Int64.max) else {
+            return nil
+        }
+        return "\(amount)\(unit.compose)"
     }
 
     private static func inlineArray(_ values: [String]) -> String {

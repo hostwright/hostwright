@@ -8,6 +8,88 @@ import XCTest
 @testable import HostwrightCLI
 
 final class CLIControlAuthorizationScopeTests: XCTestCase {
+    func testComposeAuthorizationUsesBoundedLiveReaderAndFailsClosedForUnsafeInputs() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-compose-scope-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: root,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700]
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let validURL = root.appendingPathComponent("valid.yaml")
+        let oversizedURL = root.appendingPathComponent("oversized.yaml")
+        let symlinkURL = root.appendingPathComponent("symlink.yaml")
+        let malformedURL = root.appendingPathComponent("malformed.yaml")
+        let projectlessURL = root.appendingPathComponent("projectless.yaml")
+        let otherProjectURL = root.appendingPathComponent("other-project.yaml")
+        let unreadableURL = root.appendingPathComponent("missing.yaml")
+        try Data("version: 3\nproject: bounded-scope\nservices: {}\n".utf8)
+            .write(to: validURL)
+        try Data(repeating: 0x61, count: ManifestParser.maximumUTF8Bytes + 1)
+            .write(to: oversizedURL)
+        try Data("version: [".utf8).write(to: malformedURL)
+        try Data("version: 3\nservices: {}\n".utf8).write(to: projectlessURL)
+        try Data("version: 3\nproject: other-scope\nservices: {}\n".utf8)
+            .write(to: otherProjectURL)
+        try FileManager.default.createSymbolicLink(
+            at: symlinkURL,
+            withDestinationURL: validURL
+        )
+
+        var environment = CLIEnvironment.live
+        environment.readTextFile = { _ in
+            XCTFail("Compose authorization must not invoke the unbounded reader.")
+            throw POSIXError(.EFBIG)
+        }
+        func resolve(_ path: String) throws -> CLIControlAuthorizationScope {
+            let arguments = ["export-stack", path, "--output", "json"]
+            return try CLIControlAuthorizationScopeResolver.resolve(
+                command: CLICommand.parse(arguments: arguments),
+                arguments: arguments,
+                environment: environment
+            )
+        }
+
+        XCTAssertEqual(
+            try resolve(validURL.path).projectIdentifier,
+            HostwrightResourceUUID.legacy(
+                kind: "project",
+                identifier: "project-bounded-scope"
+            )
+        )
+        for path in [
+            oversizedURL.path,
+            symlinkURL.path,
+            malformedURL.path,
+            projectlessURL.path,
+            unreadableURL.path,
+        ] {
+            XCTAssertThrowsError(try resolve(path)) { error in
+                let diagnostic = error as? HostwrightDiagnostic
+                XCTAssertEqual(diagnostic?.code, .controlAPIInvalid)
+                XCTAssertEqual(
+                    diagnostic?.message,
+                    "The Compose manifest cannot establish an exact Control API project scope."
+                )
+            }
+        }
+
+        let updateArguments = [
+            "plan-stack-update", validURL.path, otherProjectURL.path, "--output", "json",
+        ]
+        XCTAssertThrowsError(try CLIControlAuthorizationScopeResolver.resolve(
+            command: CLICommand.parse(arguments: updateArguments),
+            arguments: updateArguments,
+            environment: environment
+        )) { error in
+            XCTAssertEqual((error as? HostwrightDiagnostic)?.code, .controlAPIInvalid)
+        }
+    }
+
     func testApplyAuthorizationScopeWaitsForStateAccessFenceContention() throws {
         try withFixture { fixture in
             let arguments = [

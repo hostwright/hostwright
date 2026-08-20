@@ -146,33 +146,10 @@ public final class DockerProxyServer: @unchecked Sendable {
                     closeConnection: !request.keepAlive
                 )
             case .info, .containersList, .containerInspect, .imagesList, .imageInspect, .events:
-                do {
-                    let body = try adapter.read(
-                        endpoint: endpoint,
-                        timeoutMilliseconds: configuration.requestTimeoutMilliseconds,
-                        isCancelled: isCancelled
-                    )
-                    guard body.count <= DockerHTTPCodec.maximumResponseBytes,
-                          Self.isJSON(body) else {
-                        return DockerHTTPCodec.errorResponse(
-                            .controlRejected,
-                            apiVersion: negotiated
-                        )
-                    }
-                    return Self.response(
-                        statusCode: 200,
-                        version: negotiated,
-                        body: body,
-                        closeConnection: !request.keepAlive
-                    )
-                } catch let error as DockerControlAdapterError {
-                    return Self.adapterErrorResponse(error, version: negotiated)
-                } catch {
-                    return DockerHTTPCodec.errorResponse(
-                        .controlRejected,
-                        apiVersion: negotiated
-                    )
-                }
+                return DockerHTTPCodec.errorResponse(
+                    .unsupportedOperation,
+                    apiVersion: negotiated
+                )
             }
         } catch {
             return DockerHTTPCodec.errorResponse(.internalError)
@@ -196,7 +173,8 @@ public final class DockerProxyServer: @unchecked Sendable {
         case .invalidTarget: return DockerHTTPCodec.errorResponse(.badRequest)
         case .unsupportedAPIVersion: return DockerHTTPCodec.errorResponse(.unsupportedAPIVersion)
         case .methodNotAllowed: return DockerHTTPCodec.errorResponse(.methodNotAllowed)
-        case .unsupportedOperation: return DockerHTTPCodec.errorResponse(.unsupportedOperation)
+        case .unsupportedOperation, .unsupportedQuery:
+            return DockerHTTPCodec.errorResponse(.unsupportedOperation)
         }
     }
 

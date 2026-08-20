@@ -5,10 +5,12 @@ This document describes the Phase 13 Docker Engine surface implemented by
 claim or a Docker client conformance report. The executable contract is
 [`phase13-docker-engine-v1.json`](../../contracts/v0.0.2/phase13-docker-engine-v1.json).
 
-The proxy is a local, read-only HTTP/1.1 endpoint. It sends container, image,
-info, and one-shot event reads through the Phase 09 `PersistentControlClient`
-and `CLIControlRoute`; it does not read runtime or state directly. Ping and
-version are local responses and do not contact the Control API.
+The proxy is a local, read-only HTTP/1.1 endpoint. Ping and version are local
+responses. Container, image, info, and event request shapes are recognized for
+version negotiation, but they are deliberately unsupported: the proxy returns
+a stable JSON `404` before any Control API operation, runtime access, state
+access, or manifest read. No non-local Docker-authoritative producer exists in
+this contract.
 
 ## Negotiation and endpoints
 
@@ -21,23 +23,25 @@ any Control API request.
 
 The advertised read matrix is:
 
-| Method | Path | Authority | Control operation |
+| Method | Path | Behavior | Status |
 | --- | --- | --- | --- |
-| `HEAD`, `GET` | `/{version}/_ping` | proxy-local | — |
-| `GET` | `/{version}/version` | proxy-local | — |
-| `GET` | `/{version}/info` | Phase 09 Control API | `status` |
-| `GET` | `/{version}/containers/json` | Phase 09 Control API | `status` |
-| `GET` | `/{version}/containers/{id}/json` | Phase 09 Control API | `inspect` |
-| `GET` | `/{version}/images/json` | Phase 09 Control API | `status` |
-| `GET` | `/{version}/images/{reference}/json` | Phase 09 Control API | `image` |
-| `GET` | `/{version}/events` | Phase 09 Control API | `events` (one-shot read) |
+| `HEAD`, `GET` | `/{version}/_ping` | proxy-local response | `200` |
+| `GET` | `/{version}/version` | proxy-local response | `200` |
+| `GET` | `/{version}/info` | unsupported before Control API | `404` |
+| `GET` | `/{version}/containers/json` | unsupported before Control API | `404` |
+| `GET` | `/{version}/containers/{id}/json` | unsupported before Control API | `404` |
+| `GET` | `/{version}/images/json` | unsupported before Control API | `404` |
+| `GET` | `/{version}/images/{reference}/json` | unsupported before Control API | `404` |
+| `GET` | `/{version}/events` | unsupported before Control API | `404` |
 
 The same endpoint paths may be used without a version prefix; negotiation
 still occurs and the response advertises the chosen API version. Each
-advertised endpoint is covered for all four supported versions. Mutating
+advertised endpoint is covered for all four supported versions. Advertising a
+non-local path means the proxy recognizes and rejects that versioned request;
+it is not a successful-read or Control API support claim. Mutating
 container/image operations, networks, volumes, build/pull, exec/attach/log
-streams, event streams, and protocol upgrades are not advertised. They fail
-explicitly before a control request.
+streams, event streams, and protocol upgrades are not advertised. They also
+fail explicitly before a control request.
 
 ## HTTP boundary
 
@@ -49,9 +53,14 @@ headers, an exact `Content-Length`, and JSON `{ "message": "..." }` errors.
 The foreground daemon handles one request per Unix-socket connection and then
 closes it; `HEAD` preserves the response length while suppressing the body.
 
-Control failures are reduced to stable unavailable/rejected messages. Raw
-control errors, paths, tokens, and other details are not returned to the
-Docker client.
+Non-empty query intent is rejected before endpoint dispatch and query values
+are never reflected. Malformed query syntax returns a stable JSON `400`;
+well-formed but unsupported query intent returns the same redacted `404` as
+other unsupported operations. Cancellation is checked first and returns
+`499`, including for a recognized non-local read. Non-local reads never make a
+Control API request, so this contract publishes no Control-unavailable
+response. Paths, tokens, manifest contents, and other details are not returned
+to the Docker client.
 
 The Docker client matrix and live Docker Desktop evidence remain separate
 gates. This slice does not start Docker Desktop, create containers, or claim

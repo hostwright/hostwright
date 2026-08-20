@@ -54,6 +54,8 @@ final class CLIControlRouteTests: XCTestCase {
             (["volume", "prune", "--dry-run"], true),
             (["exec", "api", "--no-stdin", "--", "/bin/true"], true),
             (["inspect", "api"], false),
+            (["export-stack", "hostwright.yaml"], false),
+            (["plan-stack-update", "current.yaml", "desired.yaml"], false),
         ]
 
         for (arguments, expectedMutation) in cases {
@@ -62,6 +64,24 @@ final class CLIControlRouteTests: XCTestCase {
                 expectedMutation,
                 arguments.joined(separator: " ")
             )
+        }
+    }
+
+    func testComposeExportAndUpdatePlanRoutesArePersistentUnaryAndReadOnly() throws {
+        let cases: [[String]] = [
+            ["export-stack", "hostwright.yaml", "--output", "json"],
+            ["plan-stack-update", "current.yaml", "desired.yaml", "--output", "json"],
+        ]
+
+        for arguments in cases {
+            let route = try CLIControlRoute.classify(arguments: arguments)
+            XCTAssertEqual(route.transport, .persistentControlAPI)
+            XCTAssertEqual(route.execution, .unary)
+            XCTAssertFalse(route.mutating)
+            XCTAssertEqual(route.output, .json)
+            let request = request(route: route)
+            XCTAssertNil(request.idempotencyKey)
+            XCTAssertEqual(try CLIControlRoute.validate(request: request), route)
         }
     }
 
@@ -419,6 +439,8 @@ private extension CLIControlRouteTests {
             .init(command: "migrate", arguments: ["migrate", "preview", "hostwright.yaml"], transport: .persistentControlAPI),
             .init(command: "init", arguments: ["init"], transport: .persistentControlAPI),
             .init(command: "import-stack", arguments: ["import-stack", "compose.yaml"], transport: .persistentControlAPI),
+            .init(command: "export-stack", arguments: ["export-stack", "hostwright.yaml"], transport: .persistentControlAPI),
+            .init(command: "plan-stack-update", arguments: ["plan-stack-update", "current.yaml", "desired.yaml"], transport: .persistentControlAPI),
             .init(command: "validate", arguments: ["validate", "hostwright.yaml"], transport: .persistentControlAPI),
             .init(command: "plan", arguments: ["plan", "hostwright.yaml"], transport: .persistentControlAPI),
             .init(command: "status", arguments: ["status", "hostwright.yaml"], transport: .persistentControlAPI),

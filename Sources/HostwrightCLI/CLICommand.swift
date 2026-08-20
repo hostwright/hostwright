@@ -274,6 +274,8 @@ public enum CLICommand: Equatable, Sendable {
     case migrateManifestPreview(path: String, output: CLIOutputFormat)
     case initManifest
     case importStack(path: String, output: CLIOutputFormat, teamProfilePath: String?)
+    case exportStack(path: String, output: CLIOutputFormat)
+    case planStackUpdate(currentPath: String, desiredPath: String, output: CLIOutputFormat)
     case validate(path: String, teamProfilePath: String?)
     case plan(path: String, output: CLIOutputFormat, teamProfilePath: String?)
     case status(
@@ -364,6 +366,10 @@ public enum CLICommand: Equatable, Sendable {
             return .initManifest
         case "import-stack":
             return try importStackCommand(arguments: arguments)
+        case "export-stack":
+            return try exportStackCommand(arguments: arguments)
+        case "plan-stack-update":
+            return try planStackUpdateCommand(arguments: arguments)
         case "validate":
             return try validateCommand(arguments: arguments)
         case "plan":
@@ -1664,6 +1670,99 @@ public enum CLICommand: Equatable, Sendable {
             throw CLIUsageError("import-stack requires a stack file path.")
         }
         return .importStack(path: path, output: parsed.output, teamProfilePath: parsed.teamProfilePath)
+    }
+
+    private static func exportStackCommand(arguments: [String]) throws -> CLICommand {
+        let parsed = try parseComposeSourcePaths(
+            arguments: arguments,
+            commandName: "export-stack",
+            requiredPathCount: 1
+        )
+        return .exportStack(path: parsed.paths[0], output: parsed.output)
+    }
+
+    private static func planStackUpdateCommand(arguments: [String]) throws -> CLICommand {
+        let parsed = try parseComposeSourcePaths(
+            arguments: arguments,
+            commandName: "plan-stack-update",
+            requiredPathCount: 2
+        )
+        return .planStackUpdate(
+            currentPath: parsed.paths[0],
+            desiredPath: parsed.paths[1],
+            output: parsed.output
+        )
+    }
+
+    private static func parseComposeSourcePaths(
+        arguments: [String],
+        commandName: String,
+        requiredPathCount: Int
+    ) throws -> (paths: [String], output: CLIOutputFormat) {
+        var paths: [String] = []
+        var output: CLIOutputFormat = .text
+        var outputSelected = false
+        var index = 1
+        while index < arguments.count {
+            let argument = arguments[index]
+            if argument == "--output" {
+                guard !outputSelected else {
+                    throw CLIUsageError("\(commandName) accepts --output at most once.")
+                }
+                output = try parseOutputValue(
+                    arguments: arguments,
+                    index: index,
+                    commandName: commandName
+                )
+                outputSelected = true
+                index += 2
+                continue
+            }
+            guard !argument.hasPrefix("-") else {
+                throw CLIUsageError("\(commandName) does not support flag '\(argument)'.")
+            }
+            let path = argument.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !path.isEmpty, path.utf8.count <= 4_096, !path.contains("\0") else {
+                throw CLIUsageError(
+                    "\(commandName) requires non-empty manifest paths of at most 4096 UTF-8 bytes."
+                )
+            }
+            let normalized = normalizeComposeSourcePath(path)
+            guard normalized.utf8.count <= 4_096 else {
+                throw CLIUsageError(
+                    "\(commandName) requires normalized manifest paths of at most 4096 UTF-8 bytes."
+                )
+            }
+            paths.append(normalized)
+            index += 1
+        }
+        guard paths.count == requiredPathCount else {
+            let requirement = requiredPathCount == 1
+                ? "one manifest path"
+                : "current and desired manifest paths"
+            throw CLIUsageError("\(commandName) requires exactly \(requirement).")
+        }
+        return (paths, output)
+    }
+
+    private static func normalizeComposeSourcePath(_ path: String) -> String {
+        let absolute = path.hasPrefix("/")
+        var components: [Substring] = []
+        for component in path.split(separator: "/", omittingEmptySubsequences: true) {
+            if component == "." { continue }
+            if component == ".." {
+                if let last = components.last, last != ".." {
+                    components.removeLast()
+                } else if !absolute {
+                    components.append(component)
+                }
+                continue
+            }
+            components.append(component)
+        }
+        let joined = components.joined(separator: "/")
+        if absolute { return joined.isEmpty ? "/" : "/" + joined }
+        return joined.isEmpty ? "." : joined
     }
 
     private static func applyCommand(arguments: [String]) throws -> CLICommand {

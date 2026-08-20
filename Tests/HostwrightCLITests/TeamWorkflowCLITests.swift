@@ -485,6 +485,9 @@ final class TeamWorkflowCLITests: XCTestCase {
         services:
           api:
             image: \(digestImage)
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
             command: ["serve"]
             ports:
               - "8080:8080"
@@ -523,6 +526,14 @@ final class TeamWorkflowCLITests: XCTestCase {
           api:
             image: \(digestImage)
             command: ["serve"]
+            deploy:
+              resources:
+                reservations:
+                  cpus: "1"
+                  memory: 512m
+                limits:
+                  cpus: "1"
+                  memory: 512m
             ports:
               - "8080:8080"
 

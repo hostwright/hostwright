@@ -120,6 +120,48 @@ final class HostwrightCommandRunnerTests: XCTestCase {
         XCTAssertTrue(log.streamRoutes.isEmpty)
     }
 
+    func testComposeScopeResolutionRejectsBeforePersistentTransportDispatch() {
+        let log = CallLog()
+        let cliEnvironment = CLIEnvironment(
+            fileExists: { _ in false },
+            readTextFile: { _ in "version: 3\nservices: {}\n" },
+            writeTextFile: { _, _ in throw ParityError.unexpectedWrite },
+            executablePath: { _ in nil },
+            swiftVersion: { "Swift test" },
+            platformSnapshot: {
+                PlatformSnapshot(macOSMajorVersion: 26, architecture: "arm64")
+            },
+            operatingSystemDescription: { "macOS test" }
+        )
+        let environment = HostwrightCommandTransportEnvironment(
+            socketPath: { "/tmp/hostwright.sock" },
+            persistentSend: { socketPath, request in
+                log.recordPersistent(socketPath: socketPath, request: request)
+                return completedResponse(requestID: request.requestID, result: CLIRunResult())
+            },
+            bootstrapSend: { _ in throw ParityError.unexpectedRoute },
+            streamRun: { _, _, _ in throw ParityError.unexpectedRoute },
+            authorizationScope: { command, arguments in
+                try CLIControlAuthorizationScopeResolver.resolve(
+                    command: command,
+                    arguments: arguments,
+                    environment: cliEnvironment
+                )
+            },
+            requestID: { "request-1" },
+            workingDirectory: { "/client/project" }
+        )
+
+        let result = HostwrightCommandRunner.run(
+            arguments: ["export-stack", "projectless.yaml", "--output", "json"],
+            environment: environment
+        )
+
+        XCTAssertNotEqual(result.exitCode, 0)
+        XCTAssertTrue(result.standardError.contains(HostwrightErrorCode.controlAPIInvalid.rawValue))
+        XCTAssertTrue(log.persistentRequests.isEmpty)
+    }
+
     func testPersistentExecutorPreservesDirectResultsForSuccessDryRunAndConfirmationFailure() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(
             "hostwright-command-parity-\(UUID().uuidString)",
@@ -132,6 +174,7 @@ final class HostwrightCommandRunnerTests: XCTestCase {
         )
         defer { try? FileManager.default.removeItem(at: root) }
         let manifestPath = root.appendingPathComponent("hostwright.yaml").path
+        let desiredManifestPath = root.appendingPathComponent("desired.yaml").path
         let composePath = root.appendingPathComponent("compose.yaml").path
         let manifest = """
         version: 3
@@ -139,14 +182,30 @@ final class HostwrightCommandRunnerTests: XCTestCase {
         services:
           api:
             image: ghcr.io/example/api:latest
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 2, memory: 1GiB}
         """
+        let desiredManifest = manifest.replacingOccurrences(
+            of: "ghcr.io/example/api:latest",
+            with: "ghcr.io/example/api:next"
+        )
         let compose = """
         name: parity
         services:
           api:
             image: ghcr.io/example/api:latest
+            deploy:
+              resources:
+                reservations:
+                  cpus: "1"
+                  memory: 512m
+                limits:
+                  cpus: "2"
+                  memory: 1g
         """
         try manifest.write(toFile: manifestPath, atomically: true, encoding: .utf8)
+        try desiredManifest.write(toFile: desiredManifestPath, atomically: true, encoding: .utf8)
         try compose.write(toFile: composePath, atomically: true, encoding: .utf8)
         let cliEnvironment = parityCLIEnvironment(root: root)
         let transportEnvironment = HostwrightCommandTransportEnvironment(
@@ -178,6 +237,13 @@ final class HostwrightCommandRunnerTests: XCTestCase {
             ["plan", manifestPath, "--output", "json"],
             ["import-stack", composePath],
             ["import-stack", composePath, "--output", "json"],
+            ["export-stack", manifestPath],
+            ["export-stack", manifestPath, "--output", "json"],
+            ["plan-stack-update", manifestPath, desiredManifestPath],
+            [
+                "plan-stack-update", manifestPath, desiredManifestPath,
+                "--output", "json",
+            ],
             ["image", "prune", "--dry-run"],
             ["volume", "prune", "--dry-run"],
             ["secret", "check", "keychain://hostwright.test/missing"],

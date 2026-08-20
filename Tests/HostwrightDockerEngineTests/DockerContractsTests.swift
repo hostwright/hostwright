@@ -168,4 +168,147 @@ final class DockerContractsTests: XCTestCase {
             XCTAssertEqual(error as? DockerEndpointError, .unsupportedOperation)
         }
     }
+
+    func testPublishedContractMatchesFailClosedNonLocalReadBoundary() throws {
+        let root = repositoryRoot()
+        let contractURL = root.appendingPathComponent(
+            "contracts/v0.0.2/phase13-docker-engine-v1.json"
+        )
+        let data = try Data(contentsOf: contractURL)
+        let object = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        let api = try XCTUnwrap(object["api"] as? [String: Any])
+        XCTAssertEqual(api["minimum"] as? String, "1.52")
+        XCTAssertEqual(api["maximum"] as? String, "1.55")
+        XCTAssertEqual(
+            api["supported"] as? [String],
+            ["1.52", "1.53", "1.54", "1.55"]
+        )
+        let endpoints = try XCTUnwrap(object["endpoints"] as? [[String: Any]])
+        let localPaths: Set<String> = ["/{version}/_ping", "/{version}/version"]
+        let nonLocalPaths: Set<String> = [
+            "/{version}/info",
+            "/{version}/containers/json",
+            "/{version}/containers/{id}/json",
+            "/{version}/images/json",
+            "/{version}/images/{reference}/json",
+            "/{version}/events",
+        ]
+
+        XCTAssertEqual(
+            Set(endpoints.compactMap { $0["path"] as? String }),
+            localPaths.union(nonLocalPaths)
+        )
+        for endpoint in endpoints {
+            let path = try XCTUnwrap(endpoint["path"] as? String)
+            XCTAssertTrue(endpoint["controlOperation"] is NSNull, path)
+            if localPaths.contains(path) {
+                XCTAssertEqual(endpoint["authority"] as? String, "local", path)
+                XCTAssertEqual(endpoint["status"] as? Int, 200, path)
+                XCTAssertNil(endpoint["dispatch"], path)
+            } else {
+                XCTAssertTrue(nonLocalPaths.contains(path), path)
+                XCTAssertEqual(endpoint["authority"] as? String, "unsupported", path)
+                XCTAssertEqual(endpoint["status"] as? Int, 404, path)
+                XCTAssertEqual(endpoint["dispatch"] as? String, "none", path)
+            }
+        }
+
+        let errors = try XCTUnwrap(object["errors"] as? [String: Any])
+        XCTAssertNil(errors["controlUnavailableStatus"])
+        XCTAssertEqual(errors["unsupportedStatus"] as? Int, 404)
+        XCTAssertEqual(
+            errors["unsupportedMessage"] as? String,
+            "The requested Docker operation is not supported by Hostwright."
+        )
+        XCTAssertEqual(errors["malformedRequestStatus"] as? Int, 400)
+        XCTAssertEqual(errors["cancellationStatus"] as? Int, 499)
+        XCTAssertEqual(
+            errors["cancellationOrdering"] as? String,
+            "before-endpoint-dispatch"
+        )
+        XCTAssertEqual(
+            errors["nonEmptyQueryIntent"] as? String,
+            "unsupported-before-endpoint-dispatch"
+        )
+        XCTAssertEqual(errors["redaction"] as? String, "stable-message-only")
+
+        let reference = try String(
+            contentsOf: root.appendingPathComponent("docs/reference/docker-engine.md"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(reference.contains("stable JSON `404` before any Control API operation"))
+        XCTAssertTrue(reference.contains("Cancellation is checked first and returns\n`499`"))
+        XCTAssertTrue(reference.contains("publishes no Control-unavailable\nresponse"))
+        XCTAssertFalse(reference.contains("| Phase 09 Control API |"))
+        XCTAssertFalse(reference.contains("`503`"))
+    }
+
+    func testEndpointQueriesFailClosedWithoutDiscardingIntent() throws {
+        XCTAssertEqual(
+            try DockerEndpoint.resolve(method: .get, target: "/v1.52/containers/json?"),
+            .containersList
+        )
+
+        for target in [
+            "/v1.52/_ping?verbose=1",
+            "/v1.52/version?format=json",
+            "/v1.52/info?details=1",
+            "/v1.52/containers/json?all=1",
+            "/v1.52/containers/abc123/json?size=1",
+            "/v1.52/images/json?digests=1",
+            "/v1.52/images/library%2Falpine/json?manifests=1",
+            "/v1.52/events?since=1",
+            "/events?until=2",
+        ] {
+            XCTAssertThrowsError(
+                try DockerEndpoint.resolve(method: .get, target: target),
+                target
+            ) { error in
+                XCTAssertEqual(error as? DockerEndpointError, .unsupportedQuery, target)
+            }
+        }
+    }
+
+    func testEndpointRejectsMalformedAmbiguousDuplicateAndOversizedQueries() throws {
+        let malformedTargets = [
+            "/v1.52/events?since=%",
+            "/v1.52/events?since=%0",
+            "/v1.52/events?since=%GG",
+            "/v1.52/events?=1",
+            "/v1.52/events?since=",
+            "/v1.52/events?since",
+            "/v1.52/events?since=1&&until=2",
+            "/v1.52/events?since=1&since=2",
+            "/v1.52/events?since=1&%73ince=2",
+            "/v1.52/events?since=1?until=2",
+            "/v1.52/events?since=1#fragment",
+            "/v1.52/events?bad%00key=1",
+            "/v1.52/events?since=bad%0Avalue",
+        ]
+        for target in malformedTargets {
+            XCTAssertThrowsError(
+                try DockerEndpoint.resolve(method: .get, target: target),
+                target
+            ) { error in
+                XCTAssertEqual(error as? DockerEndpointError, .invalidTarget, target)
+            }
+        }
+
+        let oversized = "/v1.52/events?since="
+            + String(repeating: "1", count: DockerEndpoint.maximumQueryBytes)
+        XCTAssertThrowsError(
+            try DockerEndpoint.resolve(method: .get, target: oversized)
+        ) { error in
+            XCTAssertEqual(error as? DockerEndpointError, .invalidTarget)
+        }
+    }
+
+    private func repositoryRoot() -> URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+    }
 }

@@ -32,9 +32,21 @@ public enum CLIControlCommandExecutor {
             )
         }
         let command = try CLICommand.parse(arguments: route.arguments)
+        try validateComposeDeclaredScopeBeforeInputRead(
+            command: command,
+            declaredScope: route.authorizationScope
+        )
+        if isComposeAuthorizationCommand(command) {
+            return CLIControlPreparedCommand(
+                request: request,
+                route: route,
+                environment: commandEnvironment
+            )
+        }
         let snapshotEnvironment = try snapshottingCommandInputs(
             command: command,
-            environment: commandEnvironment
+            environment: commandEnvironment,
+            workingDirectory: route.workingDirectory
         )
         let authoritativeScope = try CLIControlAuthorizationScopeResolver.resolve(
             command: command,
@@ -64,6 +76,32 @@ public enum CLIControlCommandExecutor {
         )
     }
 
+    private static func isComposeAuthorizationCommand(_ command: CLICommand) -> Bool {
+        switch command {
+        case .exportStack, .planStackUpdate: true
+        default: false
+        }
+    }
+
+    private static func validateComposeDeclaredScopeBeforeInputRead(
+        command: CLICommand,
+        declaredScope: CLIControlAuthorizationScope
+    ) throws {
+        switch command {
+        case .exportStack, .planStackUpdate:
+            guard let projectIdentifier = declaredScope.projectIdentifier,
+                  HostwrightResourceUUID.isValid(projectIdentifier),
+                  declaredScope.resourceIdentifier == nil else {
+                throw HostwrightDiagnostic(
+                    code: .controlAPIInvalid,
+                    message: "Compose control commands require an exact project authorization scope."
+                )
+            }
+        default:
+            break
+        }
+    }
+
     public static func execute(
         prepared: CLIControlPreparedCommand
     ) throws -> ControlResponseEnvelope {
@@ -81,28 +119,45 @@ public enum CLIControlCommandExecutor {
             )
         }
         let command = try CLICommand.parse(arguments: route.arguments)
+        let executionEnvironment: CLIEnvironment
+        if isComposeAuthorizationCommand(command) {
+            executionEnvironment = try snapshottingCommandInputs(
+                command: command,
+                environment: prepared.environment,
+                workingDirectory: route.workingDirectory
+            )
+        } else {
+            executionEnvironment = prepared.environment
+        }
         return try CLIControlAuthorizationScopeResolver.withExecutionAuthorizationFence(
             command: command,
             arguments: route.arguments,
             authorizedScope: route.authorizationScope,
-            environment: prepared.environment,
+            environment: executionEnvironment,
             mutating: prepared.route.mutating
         ) {
             let result = HostwrightCLI.run(
                 arguments: route.arguments,
-                environment: prepared.environment
+                environment: executionEnvironment
             )
-            return ControlResponseEnvelope(
-                requestID: request.requestID,
-                status: result.exitCode == 0 ? .completed : .error,
-                reasonCode: result.exitCode == 0 ? .completed : .internalError,
-                result: try CLIControlResultContract.value(result),
-                error: result.exitCode == 0 ? nil : SanitizedError(
-                    code: "cliExitNonZero",
-                    message: "The delegated CLI command returned a non-zero exit status."
-                )
-            )
+            return try response(requestID: request.requestID, result: result)
         }
+    }
+
+    private static func response(
+        requestID: String,
+        result: CLIRunResult
+    ) throws -> ControlResponseEnvelope {
+        ControlResponseEnvelope(
+            requestID: requestID,
+            status: result.exitCode == 0 ? .completed : .error,
+            reasonCode: result.exitCode == 0 ? .completed : .internalError,
+            result: try CLIControlResultContract.value(result),
+            error: result.exitCode == 0 ? nil : SanitizedError(
+                code: "cliExitNonZero",
+                message: "The delegated CLI command returned a non-zero exit status."
+            )
+        )
     }
 
     public static func execute(
@@ -117,20 +172,39 @@ public enum CLIControlCommandExecutor {
 
     private static func snapshottingCommandInputs(
         command: CLICommand,
-        environment: CLIEnvironment
+        environment: CLIEnvironment,
+        workingDirectory: String?
     ) throws -> CLIEnvironment {
         switch command {
         case .importStack(let path, _, let teamProfilePath):
             return try snapshottingTextFiles(
                 [path, teamProfilePath].compactMap { $0 },
                 environment: environment,
-                validateManifest: false
+                validateManifest: false,
+                workingDirectory: workingDirectory
+            )
+        case .exportStack(let path, _):
+            return try snapshottingTextFiles(
+                [path],
+                environment: environment,
+                validateManifest: false,
+                workingDirectory: workingDirectory,
+                maximumUTF8Bytes: ManifestParser.maximumUTF8Bytes
+            )
+        case .planStackUpdate(let currentPath, let desiredPath, _):
+            return try snapshottingTextFiles(
+                [currentPath, desiredPath],
+                environment: environment,
+                validateManifest: false,
+                workingDirectory: workingDirectory,
+                maximumUTF8Bytes: ManifestParser.maximumUTF8Bytes
             )
         case .migrateManifestPreview(let path, _):
             return try snapshottingTextFiles(
                 [path],
                 environment: environment,
-                validateManifest: false
+                validateManifest: false,
+                workingDirectory: workingDirectory
             )
         default:
             break
@@ -140,31 +214,97 @@ public enum CLIControlCommandExecutor {
         return try snapshottingTextFiles(
             [manifestPath],
             environment: environment,
-            validateManifest: true
+            validateManifest: true,
+            workingDirectory: workingDirectory
         )
     }
 
     private static func snapshottingTextFiles(
         _ paths: [String],
         environment: CLIEnvironment,
-        validateManifest: Bool
+        validateManifest: Bool,
+        workingDirectory: String?,
+        maximumUTF8Bytes: Int? = nil
     ) throws -> CLIEnvironment {
         var snapshots: [String: String] = [:]
+        var snapshotFailures: [String: ManifestParseError] = [:]
         for path in paths {
-            let text = try environment.readTextFile(path)
-            if validateManifest { _ = try ManifestValidator.validated(text) }
-            snapshots[path] = text
+            let identity = canonicalInputIdentity(path, workingDirectory: workingDirectory)
+            guard snapshots[identity] == nil else { continue }
+            do {
+                let text = if let maximumUTF8Bytes {
+                    try environment.readBoundedTextFile(path, maximumUTF8Bytes)
+                } else {
+                    try environment.readTextFile(path)
+                }
+                if let maximumUTF8Bytes, text.utf8.count > maximumUTF8Bytes {
+                    snapshots[identity] = String(repeating: "x", count: maximumUTF8Bytes + 1)
+                    continue
+                }
+                if validateManifest { _ = try ManifestValidator.validated(text) }
+                snapshots[identity] = text
+            } catch let error as ManifestParseError where maximumUTF8Bytes != nil {
+                snapshotFailures[identity] = error
+                snapshots[identity] = ""
+            } catch where maximumUTF8Bytes != nil {
+                snapshotFailures[identity] = .failed([
+                    ManifestIssue(
+                        code: .manifestFileIOFailed,
+                        message: "Manifest file could not be read safely.",
+                        path: "$"
+                    ),
+                ])
+                snapshots[identity] = ""
+            }
         }
         var snapshot = environment
         let originalExists = environment.fileExists
         let originalRead = environment.readTextFile
+        let originalBoundedRead = environment.readBoundedTextFile
         snapshot.fileExists = { candidate in
-            snapshots[candidate] != nil || originalExists(candidate)
+            snapshots[canonicalInputIdentity(
+                candidate,
+                workingDirectory: workingDirectory
+            )] != nil || originalExists(candidate)
         }
         snapshot.readTextFile = { candidate in
-            if let text = snapshots[candidate] { return text }
+            let identity = canonicalInputIdentity(
+                candidate,
+                workingDirectory: workingDirectory
+            )
+            if let failure = snapshotFailures[identity] { throw failure }
+            if let text = snapshots[identity] { return text }
             return try originalRead(candidate)
         }
+        snapshot.readBoundedTextFile = { candidate, maximumBytes in
+            let identity = canonicalInputIdentity(
+                candidate,
+                workingDirectory: workingDirectory
+            )
+            if let failure = snapshotFailures[identity] { throw failure }
+            if let text = snapshots[identity] {
+                guard text.utf8.count <= maximumBytes else {
+                    return String(repeating: "x", count: maximumBytes + 1)
+                }
+                return text
+            }
+            return try originalBoundedRead(candidate, maximumBytes)
+        }
         return snapshot
+    }
+
+    private static func canonicalInputIdentity(
+        _ path: String,
+        workingDirectory: String?
+    ) -> String {
+        if path.hasPrefix("/") {
+            return URL(fileURLWithPath: path).standardizedFileURL.path
+        }
+        if let workingDirectory {
+            return URL(fileURLWithPath: workingDirectory, isDirectory: true)
+                .appendingPathComponent(path)
+                .standardizedFileURL.path
+        }
+        return URL(fileURLWithPath: path).standardizedFileURL.path
     }
 }

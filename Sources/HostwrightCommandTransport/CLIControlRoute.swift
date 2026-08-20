@@ -470,8 +470,8 @@ public struct CLIControlRoute: Equatable, Sendable {
     ) -> Bool {
         switch command {
         case .version, .help, .capabilities, .observabilityStatus, .runtimeProviders,
-             .paths, .migrateManifestPreview, .importStack, .validate, .plan, .status,
-             .logs, .doctor:
+             .paths, .migrateManifestPreview, .importStack, .exportStack,
+             .planStackUpdate, .validate, .plan, .status, .logs, .doctor:
             return false
         case .runtimeMigrate, .apply, .lifecycle, .cleanup, .benchmark, .extensionCheck,
              .initManifest:

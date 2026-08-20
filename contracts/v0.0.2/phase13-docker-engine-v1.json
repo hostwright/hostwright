@@ -24,16 +24,17 @@
     "upgrade": "rejected"
   },
   "endpoints": [
-    { "methods": ["HEAD", "GET"], "path": "/{version}/_ping", "authority": "local", "controlOperation": null },
-    { "methods": ["GET"], "path": "/{version}/version", "authority": "local", "controlOperation": null },
-    { "methods": ["GET"], "path": "/{version}/info", "authority": "control-api", "controlOperation": "status" },
-    { "methods": ["GET"], "path": "/{version}/containers/json", "authority": "control-api", "controlOperation": "status" },
-    { "methods": ["GET"], "path": "/{version}/containers/{id}/json", "authority": "control-api", "controlOperation": "inspect" },
-    { "methods": ["GET"], "path": "/{version}/images/json", "authority": "control-api", "controlOperation": "status" },
-    { "methods": ["GET"], "path": "/{version}/images/{reference}/json", "authority": "control-api", "controlOperation": "image" },
-    { "methods": ["GET"], "path": "/{version}/events", "authority": "control-api", "controlOperation": "events", "delivery": "one-shot-read" }
+    { "methods": ["HEAD", "GET"], "path": "/{version}/_ping", "authority": "local", "controlOperation": null, "status": 200 },
+    { "methods": ["GET"], "path": "/{version}/version", "authority": "local", "controlOperation": null, "status": 200 },
+    { "methods": ["GET"], "path": "/{version}/info", "authority": "unsupported", "controlOperation": null, "status": 404, "dispatch": "none" },
+    { "methods": ["GET"], "path": "/{version}/containers/json", "authority": "unsupported", "controlOperation": null, "status": 404, "dispatch": "none" },
+    { "methods": ["GET"], "path": "/{version}/containers/{id}/json", "authority": "unsupported", "controlOperation": null, "status": 404, "dispatch": "none" },
+    { "methods": ["GET"], "path": "/{version}/images/json", "authority": "unsupported", "controlOperation": null, "status": 404, "dispatch": "none" },
+    { "methods": ["GET"], "path": "/{version}/images/{reference}/json", "authority": "unsupported", "controlOperation": null, "status": 404, "dispatch": "none" },
+    { "methods": ["GET"], "path": "/{version}/events", "authority": "unsupported", "controlOperation": null, "status": 404, "dispatch": "none" }
   ],
   "unsupported": {
+    "advertisedNonLocalReads": "explicit-404-before-control",
     "mutations": "explicit-404-before-control",
     "streams": "explicit-404-before-control",
     "upgrades": "explicit-426-before-control",
@@ -42,7 +43,12 @@
   "errors": {
     "contentType": "application/json",
     "shape": { "message": "string" },
-    "controlUnavailableStatus": 503,
+    "unsupportedStatus": 404,
+    "unsupportedMessage": "The requested Docker operation is not supported by Hostwright.",
+    "malformedRequestStatus": 400,
+    "cancellationStatus": 499,
+    "cancellationOrdering": "before-endpoint-dispatch",
+    "nonEmptyQueryIntent": "unsupported-before-endpoint-dispatch",
     "redaction": "stable-message-only"
   },
   "security": {

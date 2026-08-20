@@ -95,6 +95,62 @@ final class DockerProxyProcessIntegrationTests: XCTestCase {
             String(decoding: malformed, as: UTF8.self),
             "HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 51\r\nContent-Type: application/json\r\n\r\n{\"message\":\"The Docker request target is invalid.\"}"
         )
+
+        let unsupportedQuery = try exchange(
+            path: proxy.socketPath,
+            fragments: [Data(
+                "GET /v1.52/_ping?verbose=credential-fixture-value HTTP/1.1\r\nHost: docker\r\n\r\n".utf8
+            )]
+        )
+        let unsupportedQueryText = String(decoding: unsupportedQuery, as: UTF8.self)
+        XCTAssertTrue(unsupportedQueryText.contains("HTTP/1.1 404 Not Found"))
+        XCTAssertTrue(unsupportedQueryText.contains(
+            "{\"message\":\"The requested Docker operation is not supported by Hostwright.\"}"
+        ))
+        XCTAssertFalse(unsupportedQueryText.contains("credential-fixture-value"))
+
+        let malformedQuery = try exchange(
+            path: proxy.socketPath,
+            fragments: [Data(
+                "GET /v1.52/_ping?verbose=% HTTP/1.1\r\nHost: docker\r\n\r\n".utf8
+            )]
+        )
+        XCTAssertTrue(String(decoding: malformedQuery, as: UTF8.self).contains(
+            "{\"message\":\"The Docker request target is invalid.\"}"
+        ))
+    }
+
+    func testExecutableDoesNotInterpretHostileCWDManifestAsDockerContainer() throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let hostileManifest = """
+        version: 3
+        project: hostile-default
+        services:
+          hostile-service:
+            image: ghcr.io/example/should-never-run:latest
+        """
+        try Data(hostileManifest.utf8).write(
+            to: root.appendingPathComponent("hostwright.yaml"),
+            options: .withoutOverwriting
+        )
+        let proxy = try launchProxy(root: root)
+        defer { stopProxy(proxy) }
+
+        let response = try exchange(
+            path: proxy.socketPath,
+            fragments: [Data(
+                "GET /v1.52/containers/hostile-service/json HTTP/1.1\r\nHost: docker\r\n\r\n".utf8
+            )]
+        )
+        let text = String(decoding: response, as: UTF8.self)
+
+        XCTAssertTrue(text.contains("HTTP/1.1 404 Not Found"))
+        XCTAssertTrue(text.contains(
+            "The requested Docker operation is not supported by Hostwright."
+        ))
+        XCTAssertFalse(text.contains("hostile-default"))
+        XCTAssertFalse(text.contains("should-never-run"))
     }
 
     func testExecutableRecoversOwnedStaleSocketAndTerminatesCleanly() throws {
@@ -159,6 +215,7 @@ final class DockerProxyProcessIntegrationTests: XCTestCase {
             "--socket", socketPath,
             "--control-socket", controlPath,
         ]
+        process.currentDirectoryURL = root
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         try process.run()

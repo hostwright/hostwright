@@ -88,7 +88,7 @@ final class DockerProxyTests: XCTestCase {
         XCTAssertEqual(calls.count, 0)
     }
 
-    func testReadEndpointUsesCLIControlRouteAndNeverDirectRuntimeAccess() throws {
+    func testContainerInspectFailsUnsupportedBeforeControlDispatch() throws {
         let recorder = RequestRecorder()
         let adapter = DockerControlAdapter(sendRequest: { request in
             recorder.record(request)
@@ -107,19 +107,81 @@ final class DockerProxyTests: XCTestCase {
             adapter: adapter
         )
 
-        let response = server.handle(try request("GET /v1.52/containers/json"))
-        XCTAssertEqual(response.statusCode, 200)
-        XCTAssertEqual(recorder.count, 1)
-        let controlRequest = try XCTUnwrap(recorder.request)
-        XCTAssertEqual(controlRequest.operation, "status")
-        let route = try XCTUnwrap(
-            try CLIControlRoute.validate(request: controlRequest)
+        let response = server.handle(try request("GET /v1.52/containers/abc123/json"))
+        XCTAssertEqual(response.statusCode, 404)
+        XCTAssertEqual(
+            String(decoding: response.body, as: UTF8.self),
+            "{\"message\":\"The requested Docker operation is not supported by Hostwright.\"}"
         )
-        XCTAssertEqual(route.dockerEndpoint, "containers.list")
-        XCTAssertFalse(route.mutating)
+        XCTAssertThrowsError(try adapter.route(for: .containerInspect(id: "abc123"))) {
+            XCTAssertEqual($0 as? DockerControlAdapterError, .unsupportedEndpoint)
+        }
+        XCTAssertThrowsError(try adapter.read(endpoint: .containerInspect(id: "abc123"))) {
+            XCTAssertEqual($0 as? DockerControlAdapterError, .unsupportedEndpoint)
+        }
+        XCTAssertEqual(recorder.count, 0)
     }
 
-    func testEveryAdvertisedControlReadUsesTheControlRouteAcrossAllVersions() throws {
+    func testQueryIntentIsRejectedBeforeAnyControlDispatch() throws {
+        let recorder = RequestRecorder()
+        let adapter = DockerControlAdapter(sendRequest: { request in
+            recorder.record(request)
+            return ControlResponseEnvelope(
+                requestID: request.requestID,
+                status: .completed,
+                reasonCode: .completed,
+                result: .object(["unexpected": .bool(true)])
+            )
+        })
+        let server = try DockerProxyServer(
+            configuration: DockerProxyConfiguration(
+                socketPath: "/tmp/hostwright-docker-query-test.sock",
+                controlSocketPath: "/private/tmp/hostwright-control-query-test.sock"
+            ),
+            adapter: adapter
+        )
+
+        for target in [
+            "/v1.52/_ping?verbose=1",
+            "/v1.52/containers/json?all=1",
+            "/v1.53/containers/abc123/json?size=1",
+            "/v1.54/images/json?digests=1",
+            "/v1.55/images/library%2Falpine/json?manifests=1",
+            "/events?since=1",
+        ] {
+            let response = server.handle(try request("GET " + target))
+            XCTAssertEqual(response.statusCode, 404, target)
+            XCTAssertEqual(
+                String(decoding: response.body, as: UTF8.self),
+                "{\"message\":\"The requested Docker operation is not supported by Hostwright.\"}",
+                target
+            )
+        }
+        XCTAssertEqual(recorder.count, 0)
+
+        for target in [
+            "/v1.52/events?since=%",
+            "/v1.52/events?since=1&since=2",
+            "/v1.52/events?since=1&%73ince=2",
+            "/v1.52/events?=1",
+            "/v1.52/events?since=",
+        ] {
+            let response = server.handle(try request("GET " + target))
+            XCTAssertEqual(response.statusCode, 400, target)
+            XCTAssertEqual(
+                String(decoding: response.body, as: UTF8.self),
+                "{\"message\":\"The Docker request target is invalid.\"}",
+                target
+            )
+        }
+        XCTAssertEqual(recorder.count, 0)
+
+        let emptyQuery = server.handle(try request("GET /v1.52/containers/json?"))
+        XCTAssertEqual(emptyQuery.statusCode, 404)
+        XCTAssertEqual(recorder.count, 0)
+    }
+
+    func testEveryAdvertisedRemoteReadFailsUnsupportedWithoutControlDispatch() throws {
         let recorder = RequestRecorder()
         let adapter = DockerControlAdapter(sendRequest: { request in
             recorder.record(request)
@@ -137,30 +199,30 @@ final class DockerProxyTests: XCTestCase {
             ),
             adapter: adapter
         )
-        let reads: [(path: String, operation: String, endpoint: String)] = [
-            ("info", "status", "info"),
-            ("containers/json", "status", "containers.list"),
-            ("containers/abc123/json", "inspect", "containers.inspect"),
-            ("images/json", "status", "images.list"),
-            ("images/library%2Falpine/json", "image", "images.inspect"),
-            ("events", "events", "events"),
+        let paths = [
+            "info",
+            "containers/json",
+            "containers/abc123/json",
+            "images/json",
+            "images/library%2Falpine/json",
+            "events",
         ]
 
         for version in DockerAPIVersion.supported {
-            for read in reads {
-                let response = server.handle(try request("GET /v" + version.rawValue + "/" + read.path))
-                XCTAssertEqual(response.statusCode, 200, read.path)
-                let controlRequest = try XCTUnwrap(recorder.requests.last)
-                let route = try XCTUnwrap(try CLIControlRoute.validate(request: controlRequest))
-                XCTAssertEqual(route.operation, read.operation)
-                XCTAssertEqual(route.dockerEndpoint, read.endpoint)
-                XCTAssertFalse(route.mutating)
+            for path in paths {
+                let response = server.handle(try request("GET /v" + version.rawValue + "/" + path))
+                XCTAssertEqual(response.statusCode, 404, path)
+                XCTAssertEqual(
+                    String(decoding: response.body, as: UTF8.self),
+                    "{\"message\":\"The requested Docker operation is not supported by Hostwright.\"}",
+                    path
+                )
             }
         }
-        XCTAssertEqual(recorder.requests.count, DockerAPIVersion.supported.count * reads.count)
+        XCTAssertEqual(recorder.count, 0)
     }
 
-    func testControlUnavailableIsRedactedAndCancellationPrecedesControlCall() throws {
+    func testUnsupportedReadIsRedactedAndCancellationNeverReachesControl() throws {
         let calls = CallRecorder()
         let adapter = DockerControlAdapter(sendRequest: { request in
             calls.append(request)
@@ -178,19 +240,22 @@ final class DockerProxyTests: XCTestCase {
             adapter: adapter
         )
 
-        let unavailable = server.handle(try request("GET /v1.52/info"))
-        XCTAssertEqual(unavailable.statusCode, 503)
-        let unavailableBody = String(decoding: unavailable.body, as: UTF8.self)
-        XCTAssertFalse(unavailableBody.contains("credential-fixture-value"))
-        XCTAssertEqual(unavailableBody, "{\"message\":\"The Hostwright Control API is unavailable.\"}")
-        XCTAssertEqual(calls.count, 1)
+        let unsupported = server.handle(try request("GET /v1.52/info"))
+        XCTAssertEqual(unsupported.statusCode, 404)
+        let unsupportedBody = String(decoding: unsupported.body, as: UTF8.self)
+        XCTAssertFalse(unsupportedBody.contains("credential-fixture-value"))
+        XCTAssertEqual(
+            unsupportedBody,
+            "{\"message\":\"The requested Docker operation is not supported by Hostwright.\"}"
+        )
+        XCTAssertEqual(calls.count, 0)
 
         let cancelled = server.handle(
             try request("GET /v1.52/info"),
             isCancelled: { true }
         )
         XCTAssertEqual(cancelled.statusCode, 499)
-        XCTAssertEqual(calls.count, 1)
+        XCTAssertEqual(calls.count, 0)
     }
 
     func testHeadPingSuppressesBodyWhilePreservingContentLength() throws {

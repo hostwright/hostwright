@@ -120,6 +120,9 @@ public enum StackFileImporter {
         var projectDeclaredFrom: String?
         var currentServiceIndex: Int?
         var currentSection: StackSection?
+        var currentDeploySection: DeploySection?
+        var currentResourceSet: ComposeResourceSetKind?
+        var resourceParseStates: [ComposeResourceParseState] = []
         var ignoredUnsupportedIndent: Int?
 
         for (zeroBasedIndex, originalLine) in lines.enumerated() {
@@ -144,6 +147,14 @@ public enum StackFileImporter {
                     error(
                         "Unsupported YAML feature or tab indentation. \(limitation)",
                         line: lineNumber,
+                        path: composeSyntaxPath(
+                            trimmed,
+                            currentServiceIndex: currentServiceIndex,
+                            currentSection: currentSection,
+                            currentDeploySection: currentDeploySection,
+                            currentResourceSet: currentResourceSet,
+                            manifest: manifest
+                        ),
                         policyReasonCode: PolicyReasonCode.untrustedManifestUnsupportedField.rawValue
                     )
                 )
@@ -154,6 +165,8 @@ public enum StackFileImporter {
             case 0:
                 currentServiceIndex = nil
                 currentSection = nil
+                currentDeploySection = nil
+                currentResourceSet = nil
                 if trimmed.hasPrefix("name:") || trimmed.hasPrefix("project:") {
                     let source = fieldName(trimmed)
                     guard let parsedValue = parseScalar(
@@ -196,8 +209,11 @@ public enum StackFileImporter {
                 }
                 let name = String(trimmed.dropLast())
                 manifest.services.append(HostwrightService(name: name, image: nil))
+                resourceParseStates.append(ComposeResourceParseState())
                 currentServiceIndex = manifest.services.count - 1
                 currentSection = nil
+                currentDeploySection = nil
+                currentResourceSet = nil
             case 4:
                 guard let serviceIndex = currentServiceIndex else {
                     diagnostics.append(error("Service fields must appear under a service name.", line: lineNumber))
@@ -210,6 +226,9 @@ public enum StackFileImporter {
                     manifest: &manifest,
                     diagnostics: &diagnostics,
                     currentSection: &currentSection,
+                    currentDeploySection: &currentDeploySection,
+                    currentResourceSet: &currentResourceSet,
+                    resourceParseState: &resourceParseStates[serviceIndex],
                     ignoredUnsupportedIndent: &ignoredUnsupportedIndent,
                     indent: indent
                 )
@@ -224,7 +243,49 @@ public enum StackFileImporter {
                     section: section,
                     serviceIndex: serviceIndex,
                     manifest: &manifest,
-                    diagnostics: &diagnostics
+                    diagnostics: &diagnostics,
+                    currentDeploySection: &currentDeploySection,
+                    currentResourceSet: &currentResourceSet,
+                    resourceParseState: &resourceParseStates[serviceIndex],
+                    ignoredUnsupportedIndent: &ignoredUnsupportedIndent,
+                    indent: indent
+                )
+            case 8:
+                guard let serviceIndex = currentServiceIndex,
+                      currentSection == .deploy,
+                      currentDeploySection == .resources else {
+                    diagnostics.append(error("Nested values must appear under deploy.resources in the supported import subset.", line: lineNumber))
+                    continue
+                }
+                parseDeployResourcesField(
+                    trimmed,
+                    lineNumber: lineNumber,
+                    serviceIndex: serviceIndex,
+                    manifest: &manifest,
+                    diagnostics: &diagnostics,
+                    currentResourceSet: &currentResourceSet,
+                    resourceParseState: &resourceParseStates[serviceIndex],
+                    ignoredUnsupportedIndent: &ignoredUnsupportedIndent,
+                    indent: indent
+                )
+            case 10:
+                guard let serviceIndex = currentServiceIndex,
+                      currentSection == .deploy,
+                      currentDeploySection == .resources,
+                      let resourceSet = currentResourceSet else {
+                    diagnostics.append(error("Resource values must appear under deploy.resources.reservations or deploy.resources.limits.", line: lineNumber))
+                    continue
+                }
+                parseComposeResourceField(
+                    trimmed,
+                    lineNumber: lineNumber,
+                    resourceSet: resourceSet,
+                    serviceIndex: serviceIndex,
+                    manifest: &manifest,
+                    diagnostics: &diagnostics,
+                    resourceParseState: &resourceParseStates[serviceIndex],
+                    ignoredUnsupportedIndent: &ignoredUnsupportedIndent,
+                    indent: indent
                 )
             default:
                 diagnostics.append(
@@ -291,12 +352,27 @@ public enum StackFileImporter {
         )
     }
 
-    private enum StackSection {
+    private enum StackSection: Equatable {
         case environment
         case ports
         case volumes
         case healthcheck
         case restart
+        case deploy
+    }
+
+    private enum DeploySection: Equatable {
+        case resources
+    }
+
+    private enum ComposeResourceSetKind: String {
+        case reservations
+        case limits
+    }
+
+    private struct ComposeResourceParseState {
+        var sections: Set<String> = []
+        var fields: Set<String> = []
     }
 
     private static func parseServiceField(
@@ -306,9 +382,15 @@ public enum StackFileImporter {
         manifest: inout HostwrightManifest,
         diagnostics: inout [StackImportDiagnostic],
         currentSection: inout StackSection?,
+        currentDeploySection: inout DeploySection?,
+        currentResourceSet: inout ComposeResourceSetKind?,
+        resourceParseState: inout ComposeResourceParseState,
         ignoredUnsupportedIndent: inout Int?,
         indent: Int
     ) {
+        currentDeploySection = nil
+        currentResourceSet = nil
+
         if trimmed == "environment:" {
             currentSection = .environment
         } else if trimmed == "ports:" {
@@ -319,6 +401,20 @@ public enum StackFileImporter {
             currentSection = .healthcheck
         } else if trimmed == "restart:" {
             currentSection = .restart
+        } else if trimmed == "deploy:" {
+            let path = composeServicePath(
+                manifest: manifest,
+                serviceIndex: serviceIndex,
+                suffix: "deploy"
+            )
+            guard resourceParseState.sections.insert("deploy").inserted else {
+                diagnostics.append(duplicateComposeResourceValue(path: path, line: lineNumber))
+                currentSection = nil
+                ignoredUnsupportedIndent = indent
+                return
+            }
+            manifest.services[serviceIndex].resources = HostwrightResources()
+            currentSection = .deploy
         } else if trimmed.hasPrefix("image:") {
             manifest.services[serviceIndex].image = parseScalar(
                 value(after: "image:", in: trimmed),
@@ -360,7 +456,12 @@ public enum StackFileImporter {
         section: StackSection,
         serviceIndex: Int,
         manifest: inout HostwrightManifest,
-        diagnostics: inout [StackImportDiagnostic]
+        diagnostics: inout [StackImportDiagnostic],
+        currentDeploySection: inout DeploySection?,
+        currentResourceSet: inout ComposeResourceSetKind?,
+        resourceParseState: inout ComposeResourceParseState,
+        ignoredUnsupportedIndent: inout Int?,
+        indent: Int
     ) {
         switch section {
         case .environment:
@@ -442,7 +543,356 @@ public enum StackFileImporter {
             } else {
                 diagnostics.append(unsupportedField(trimmed, context: "restart", line: lineNumber))
             }
+        case .deploy:
+            let servicePath = composeServicePath(
+                manifest: manifest,
+                serviceIndex: serviceIndex,
+                suffix: "deploy"
+            )
+            guard trimmed == "resources:" else {
+                let path = "\(servicePath).\(fieldName(trimmed))"
+                diagnostics.append(
+                    unsupportedField(
+                        trimmed,
+                        context: "deploy",
+                        line: lineNumber,
+                        path: path
+                    )
+                )
+                if trimmed.hasSuffix(":") {
+                    ignoredUnsupportedIndent = indent
+                }
+                currentDeploySection = nil
+                currentResourceSet = nil
+                return
+            }
+            let path = "\(servicePath).resources"
+            guard resourceParseState.sections.insert("deploy.resources").inserted else {
+                diagnostics.append(duplicateComposeResourceValue(path: path, line: lineNumber))
+                ignoredUnsupportedIndent = indent
+                currentDeploySection = nil
+                currentResourceSet = nil
+                return
+            }
+            currentDeploySection = .resources
+            currentResourceSet = nil
         }
+    }
+
+    private static func parseDeployResourcesField(
+        _ trimmed: String,
+        lineNumber: Int,
+        serviceIndex: Int,
+        manifest: inout HostwrightManifest,
+        diagnostics: inout [StackImportDiagnostic],
+        currentResourceSet: inout ComposeResourceSetKind?,
+        resourceParseState: inout ComposeResourceParseState,
+        ignoredUnsupportedIndent: inout Int?,
+        indent: Int
+    ) {
+        let servicePath = composeServicePath(
+            manifest: manifest,
+            serviceIndex: serviceIndex,
+            suffix: "deploy.resources"
+        )
+        let field = fieldName(trimmed)
+        guard trimmed == "reservations:" || trimmed == "limits:" else {
+            diagnostics.append(
+                unsupportedField(
+                    trimmed,
+                    context: "deploy.resources",
+                    line: lineNumber,
+                    path: "\(servicePath).\(field)"
+                )
+            )
+            if trimmed.hasSuffix(":") {
+                ignoredUnsupportedIndent = indent
+            }
+            currentResourceSet = nil
+            return
+        }
+
+        let sectionKey = "deploy.resources.\(field)"
+        let path = "\(servicePath).\(field)"
+        guard resourceParseState.sections.insert(sectionKey).inserted else {
+            diagnostics.append(duplicateComposeResourceValue(path: path, line: lineNumber))
+            ignoredUnsupportedIndent = indent
+            currentResourceSet = nil
+            return
+        }
+
+        let resourceSet = ComposeResourceSetKind(rawValue: field)!
+        if resourceSet == .limits {
+            var resources = manifest.services[serviceIndex].resources ?? HostwrightResources()
+            resources.limits = HostwrightResourceSet()
+            manifest.services[serviceIndex].resources = resources
+        }
+        currentResourceSet = resourceSet
+    }
+
+    private static func parseComposeResourceField(
+        _ trimmed: String,
+        lineNumber: Int,
+        resourceSet: ComposeResourceSetKind,
+        serviceIndex: Int,
+        manifest: inout HostwrightManifest,
+        diagnostics: inout [StackImportDiagnostic],
+        resourceParseState: inout ComposeResourceParseState,
+        ignoredUnsupportedIndent: inout Int?,
+        indent: Int
+    ) {
+        let field = fieldName(trimmed)
+        let path = composeServicePath(
+            manifest: manifest,
+            serviceIndex: serviceIndex,
+            suffix: "deploy.resources.\(resourceSet.rawValue).\(field)"
+        )
+        guard field == "cpus" || field == "memory" else {
+            diagnostics.append(
+                unsupportedField(
+                    trimmed,
+                    context: "deploy.resources.\(resourceSet.rawValue)",
+                    line: lineNumber,
+                    path: path
+                )
+            )
+            if trimmed.hasSuffix(":") {
+                ignoredUnsupportedIndent = indent
+            }
+            return
+        }
+
+        let fieldKey = "deploy.resources.\(resourceSet.rawValue).\(field)"
+        guard resourceParseState.fields.insert(fieldKey).inserted else {
+            diagnostics.append(duplicateComposeResourceValue(path: path, line: lineNumber))
+            return
+        }
+
+        let rawValue = value(after: "\(field):", in: trimmed)
+        switch field {
+        case "cpus":
+            guard let cpus = parseComposeCPUs(
+                rawValue,
+                lineNumber: lineNumber,
+                path: path,
+                diagnostics: &diagnostics
+            ) else {
+                return
+            }
+            updateComposeResourceSet(
+                resourceSet,
+                serviceIndex: serviceIndex,
+                manifest: &manifest
+            ) { values in
+                values.cpus = cpus
+            }
+        case "memory":
+            guard let memory = parseComposeMemory(
+                rawValue,
+                lineNumber: lineNumber,
+                path: path,
+                diagnostics: &diagnostics
+            ) else {
+                return
+            }
+            updateComposeResourceSet(
+                resourceSet,
+                serviceIndex: serviceIndex,
+                manifest: &manifest
+            ) { values in
+                values.memory = memory
+            }
+        default:
+            return
+        }
+    }
+
+    private static func parseComposeCPUs(
+        _ rawValue: String,
+        lineNumber: Int,
+        path: String,
+        diagnostics: inout [StackImportDiagnostic]
+    ) -> Int? {
+        guard let value = parseScalar(
+            rawValue,
+            lineNumber: lineNumber,
+            fieldName: path,
+            diagnostics: &diagnostics,
+            diagnosticPath: path
+        ) else {
+            return nil
+        }
+        let pattern = #"^[1-9][0-9]*$"#
+        guard value.range(of: pattern, options: .regularExpression) != nil,
+              let cpus = Int(value),
+              String(cpus) == value else {
+            diagnostics.append(
+                invalidComposeResourceValue(
+                    "Compose \(path) must be a normalized positive whole CPU count representable by Hostwright Manifest v3, such as \"1\".",
+                    path: path,
+                    line: lineNumber
+                )
+            )
+            return nil
+        }
+        return cpus
+    }
+
+    private static func parseComposeMemory(
+        _ rawValue: String,
+        lineNumber: Int,
+        path: String,
+        diagnostics: inout [StackImportDiagnostic]
+    ) -> String? {
+        guard let value = parseScalar(
+            rawValue,
+            lineNumber: lineNumber,
+            fieldName: path,
+            diagnostics: &diagnostics,
+            diagnosticPath: path
+        ) else {
+            return nil
+        }
+
+        let units: [(compose: String, manifest: String, multiplier: UInt64)] = [
+            ("kb", "KiB", 1_024),
+            ("mb", "MiB", 1_048_576),
+            ("gb", "GiB", 1_073_741_824),
+            ("b", "B", 1),
+            ("k", "KiB", 1_024),
+            ("m", "MiB", 1_048_576),
+            ("g", "GiB", 1_073_741_824),
+        ]
+        let normalizedValue = value.lowercased()
+        guard let unit = units.first(where: { normalizedValue.hasSuffix($0.compose) }) else {
+            diagnostics.append(invalidComposeMemoryValue(path: path, line: lineNumber))
+            return nil
+        }
+
+        let amountText = String(normalizedValue.dropLast(unit.compose.count))
+        let pattern = #"^[1-9][0-9]*$"#
+        guard amountText.range(of: pattern, options: .regularExpression) != nil,
+              let amount = UInt64(amountText),
+              String(amount) == amountText else {
+            diagnostics.append(invalidComposeMemoryValue(path: path, line: lineNumber))
+            return nil
+        }
+        let multiplied = amount.multipliedReportingOverflow(by: unit.multiplier)
+        guard !multiplied.overflow, multiplied.partialValue <= UInt64(Int64.max) else {
+            diagnostics.append(
+                invalidComposeResourceValue(
+                    "Compose \(path) exceeds the signed 64-bit byte capacity of the Compose resource contract.",
+                    path: path,
+                    line: lineNumber
+                )
+            )
+            return nil
+        }
+        return "\(amount)\(unit.manifest)"
+    }
+
+    private static func updateComposeResourceSet(
+        _ resourceSet: ComposeResourceSetKind,
+        serviceIndex: Int,
+        manifest: inout HostwrightManifest,
+        update: (inout HostwrightResourceSet) -> Void
+    ) {
+        var resources = manifest.services[serviceIndex].resources ?? HostwrightResources()
+        switch resourceSet {
+        case .reservations:
+            update(&resources.requests)
+        case .limits:
+            var limits = resources.limits ?? HostwrightResourceSet()
+            update(&limits)
+            resources.limits = limits
+        }
+        manifest.services[serviceIndex].resources = resources
+    }
+
+    private static func invalidComposeMemoryValue(
+        path: String,
+        line: Int
+    ) -> StackImportDiagnostic {
+        invalidComposeResourceValue(
+            "Compose \(path) must be a normalized positive byte value with an explicit case-insensitive b, k, kb, m, mb, g, or gb unit, such as \"512M\".",
+            path: path,
+            line: line
+        )
+    }
+
+    private static func invalidComposeResourceValue(
+        _ message: String,
+        path: String,
+        line: Int
+    ) -> StackImportDiagnostic {
+        StackImportDiagnostic(
+            code: .manifestParseFailed,
+            severity: .error,
+            message: message,
+            line: line,
+            path: path,
+            policyReasonCode: PolicyReasonCode.untrustedManifestUnsupportedField.rawValue
+        )
+    }
+
+    private static func duplicateComposeResourceValue(
+        path: String,
+        line: Int
+    ) -> StackImportDiagnostic {
+        invalidComposeResourceValue(
+            "Compose \(path) must be declared exactly once; duplicate capacity declarations are ambiguous.",
+            path: path,
+            line: line
+        )
+    }
+
+    private static func composeServicePath(
+        manifest: HostwrightManifest,
+        serviceIndex: Int,
+        suffix: String
+    ) -> String {
+        "$.services.\(manifest.services[serviceIndex].name).\(suffix)"
+    }
+
+    private static func composeSyntaxPath(
+        _ trimmed: String,
+        currentServiceIndex: Int?,
+        currentSection: StackSection?,
+        currentDeploySection: DeploySection?,
+        currentResourceSet: ComposeResourceSetKind?,
+        manifest: HostwrightManifest
+    ) -> String? {
+        guard let serviceIndex = currentServiceIndex else { return nil }
+        let field = fieldName(trimmed)
+        if currentSection == .deploy {
+            if currentDeploySection == .resources {
+                if let currentResourceSet {
+                    return composeServicePath(
+                        manifest: manifest,
+                        serviceIndex: serviceIndex,
+                        suffix: "deploy.resources.\(currentResourceSet.rawValue).\(field)"
+                    )
+                }
+                return composeServicePath(
+                    manifest: manifest,
+                    serviceIndex: serviceIndex,
+                    suffix: "deploy.resources.\(field)"
+                )
+            }
+            return composeServicePath(
+                manifest: manifest,
+                serviceIndex: serviceIndex,
+                suffix: "deploy.\(field)"
+            )
+        }
+        if field == "deploy" {
+            return composeServicePath(
+                manifest: manifest,
+                serviceIndex: serviceIndex,
+                suffix: "deploy"
+            )
+        }
+        return nil
     }
 
     private static func explicitHostPathVolumeError(_ volume: String) -> ((Int) -> StackImportDiagnostic)? {
@@ -490,11 +940,16 @@ public enum StackFileImporter {
             subject: "Imported \(fieldName) inline array",
             limitation: limitation
         )
-        diagnostics.append(contentsOf: parsed.issues.map(importParseIssue))
+        diagnostics.append(contentsOf: parsed.issues.map { importParseIssue($0) })
         return parsed.issues.isEmpty ? parsed.values : []
     }
 
-    private static func unsupportedField(_ trimmed: String, context: String, line: Int) -> StackImportDiagnostic {
+    private static func unsupportedField(
+        _ trimmed: String,
+        context: String,
+        line: Int,
+        path: String? = nil
+    ) -> StackImportDiagnostic {
         let field = fieldName(trimmed)
         let decision: PolicyDecision
         if exposureFields.contains(field) {
@@ -513,6 +968,7 @@ public enum StackFileImporter {
         return error(
             "\(limitation) \(fieldScope) \(decision.message)",
             line: line,
+            path: path,
             policyReasonCode: decision.reasonCode.rawValue
         )
     }
@@ -528,6 +984,7 @@ public enum StackFileImporter {
     private static func error(
         _ message: String,
         line: Int? = nil,
+        path: String? = nil,
         policyReasonCode: String? = nil
     ) -> StackImportDiagnostic {
         StackImportDiagnostic(
@@ -535,6 +992,7 @@ public enum StackFileImporter {
             severity: .error,
             message: message,
             line: line,
+            path: path,
             policyReasonCode: policyReasonCode
         )
     }
@@ -577,7 +1035,8 @@ public enum StackFileImporter {
         _ rawValue: String,
         lineNumber: Int,
         fieldName: String,
-        diagnostics: inout [StackImportDiagnostic]
+        diagnostics: inout [StackImportDiagnostic],
+        diagnosticPath: String? = nil
     ) -> String? {
         let parsed = RestrictedYAMLSubsetParser.parseScalar(
             rawValue,
@@ -585,14 +1044,20 @@ public enum StackFileImporter {
             subject: "imported \(fieldName)",
             limitation: limitation
         )
-        diagnostics.append(contentsOf: parsed.issues.map(importParseIssue))
+        diagnostics.append(contentsOf: parsed.issues.map {
+            importParseIssue($0, path: diagnosticPath)
+        })
         return parsed.value
     }
 
-    private static func importParseIssue(_ issue: RestrictedYAMLParseIssue) -> StackImportDiagnostic {
+    private static func importParseIssue(
+        _ issue: RestrictedYAMLParseIssue,
+        path: String? = nil
+    ) -> StackImportDiagnostic {
         error(
             issue.message,
             line: issue.line,
+            path: path,
             policyReasonCode: PolicyReasonCode.untrustedManifestUnsupportedField.rawValue
         )
     }
@@ -607,7 +1072,7 @@ public enum HostwrightManifestEmitter {
             "services:"
         ]
 
-        for service in manifest.services {
+        for service in manifest.services.sorted(by: { $0.name < $1.name }) {
             lines.append("  \(service.name):")
             if let image = service.image {
                 lines.append("    image: \(image)")

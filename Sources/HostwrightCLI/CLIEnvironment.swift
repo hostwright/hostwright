@@ -5,6 +5,7 @@ import HostwrightControlSecurity
 import HostwrightCore
 import HostwrightDaemonCore
 import HostwrightHealth
+import HostwrightManifest
 import HostwrightObservability
 import HostwrightRegistry
 import HostwrightRuntime
@@ -14,6 +15,7 @@ import HostwrightStorage
 public struct CLIEnvironment: @unchecked Sendable {
     public var fileExists: (String) -> Bool
     public var readTextFile: (String) throws -> String
+    public var readBoundedTextFile: (String, Int) throws -> String
     public var writeTextFile: (String, String) throws -> Void
     public var writeNewTextFile: (String, String) throws -> Void
     public var executablePath: (String) -> String?
@@ -75,6 +77,7 @@ public struct CLIEnvironment: @unchecked Sendable {
     public init(
         fileExists: @escaping (String) -> Bool,
         readTextFile: @escaping (String) throws -> String,
+        readBoundedTextFile: ((String, Int) throws -> String)? = nil,
         writeTextFile: @escaping (String, String) throws -> Void,
         writeNewTextFile: @escaping (String, String) throws -> Void = { path, text in
             try hostwrightCreateNewTextFile(path: path, text: text)
@@ -177,6 +180,16 @@ public struct CLIEnvironment: @unchecked Sendable {
     ) {
         self.fileExists = fileExists
         self.readTextFile = readTextFile
+        self.readBoundedTextFile = readBoundedTextFile ?? { path, maximumBytes in
+            guard maximumBytes > 0, maximumBytes < Int.max else {
+                throw CLITextFileReadError.invalidLimit
+            }
+            let text = try readTextFile(path)
+            guard text.utf8.count <= maximumBytes else {
+                return String(repeating: "x", count: maximumBytes + 1)
+            }
+            return text
+        }
         self.writeTextFile = writeTextFile
         self.writeNewTextFile = writeNewTextFile
         self.executablePath = executablePath
@@ -276,6 +289,12 @@ public struct CLIEnvironment: @unchecked Sendable {
     public static let live = CLIEnvironment(
         fileExists: { FileManager.default.fileExists(atPath: $0) },
         readTextFile: { try String(contentsOfFile: $0, encoding: .utf8) },
+        readBoundedTextFile: { path, maximumBytes in
+            try hostwrightReadBoundedUTF8TextFile(
+                path: path,
+                maximumBytes: maximumBytes
+            )
+        },
         writeTextFile: { path, text in try text.write(toFile: path, atomically: true, encoding: .utf8) },
         writeNewTextFile: { path, text in
             try hostwrightCreateNewTextFile(path: path, text: text)
@@ -387,6 +406,7 @@ public extension CLIEnvironment {
         var scoped = self
         let originalFileExists = fileExists
         let originalReadTextFile = readTextFile
+        let originalReadBoundedTextFile = readBoundedTextFile
         let originalWriteTextFile = writeTextFile
         let originalWriteNewTextFile = writeNewTextFile
         let originalExecutablePath = executablePath
@@ -400,6 +420,9 @@ public extension CLIEnvironment {
         }
         scoped.fileExists = { originalFileExists(resolve($0)) }
         scoped.readTextFile = { try originalReadTextFile(resolve($0)) }
+        scoped.readBoundedTextFile = { path, maximumBytes in
+            try originalReadBoundedTextFile(resolve(path), maximumBytes)
+        }
         scoped.writeTextFile = { try originalWriteTextFile(resolve($0), $1) }
         scoped.writeNewTextFile = { try originalWriteNewTextFile(resolve($0), $1) }
         scoped.executablePath = { value in
@@ -410,6 +433,85 @@ public extension CLIEnvironment {
         }
         return scoped
     }
+}
+
+private enum CLITextFileReadError: Error {
+    case invalidLimit
+    case unsafeFile
+    case changedDuringRead
+    case readFailed
+}
+
+func hostwrightReadBoundedUTF8TextFile(
+    path: String,
+    maximumBytes: Int
+) throws -> String {
+    guard maximumBytes > 0, maximumBytes < Int.max else {
+        throw CLITextFileReadError.invalidLimit
+    }
+    let descriptor = Darwin.open(
+        path,
+        O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC
+    )
+    guard descriptor >= 0 else {
+        throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+    }
+    defer { _ = Darwin.close(descriptor) }
+
+    var opened = stat()
+    guard fstat(descriptor, &opened) == 0,
+          opened.st_mode & S_IFMT == S_IFREG,
+          opened.st_size >= 0 else {
+        throw CLITextFileReadError.unsafeFile
+    }
+
+    var data = Data()
+    data.reserveCapacity(min(Int(opened.st_size), maximumBytes + 1))
+    var buffer = [UInt8](repeating: 0, count: 16 * 1_024)
+    while data.count <= maximumBytes {
+        let remaining = maximumBytes + 1 - data.count
+        let count = Darwin.read(descriptor, &buffer, min(buffer.count, remaining))
+        if count < 0, errno == EINTR { continue }
+        guard count >= 0 else {
+            throw CLITextFileReadError.readFailed
+        }
+        if count == 0 { break }
+        data.append(contentsOf: buffer.prefix(count))
+    }
+    guard data.count <= maximumBytes else {
+        var oversizedFinal = stat()
+        guard fstat(descriptor, &oversizedFinal) == 0,
+              oversizedFinal.st_mode & S_IFMT == S_IFREG,
+              oversizedFinal.st_dev == opened.st_dev,
+              oversizedFinal.st_ino == opened.st_ino else {
+            throw CLITextFileReadError.changedDuringRead
+        }
+        return String(repeating: "x", count: maximumBytes + 1)
+    }
+
+    var final = stat()
+    guard fstat(descriptor, &final) == 0,
+          final.st_mode & S_IFMT == S_IFREG,
+          final.st_dev == opened.st_dev,
+          final.st_ino == opened.st_ino,
+          final.st_size == opened.st_size,
+          final.st_size == data.count,
+          final.st_mtimespec.tv_sec == opened.st_mtimespec.tv_sec,
+          final.st_mtimespec.tv_nsec == opened.st_mtimespec.tv_nsec,
+          final.st_ctimespec.tv_sec == opened.st_ctimespec.tv_sec,
+          final.st_ctimespec.tv_nsec == opened.st_ctimespec.tv_nsec else {
+        throw CLITextFileReadError.changedDuringRead
+    }
+    guard let text = String(data: data, encoding: .utf8) else {
+        throw ManifestParseError.failed([
+            ManifestIssue(
+                code: .manifestParseFailed,
+                message: "Manifest must be valid UTF-8 text.",
+                path: "$"
+            )
+        ])
+    }
+    return text
 }
 
 @usableFromInline

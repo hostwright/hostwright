@@ -93,14 +93,20 @@ public enum CLIControlAuthorizationScopeResolver {
         let explicitServices = options("--service", in: arguments)
         let manifestPath = manifestPath(for: command)
         let directProject = directProjectIdentifier(for: command)
+        let composeProject = try composeAuthorizationProject(
+            for: command,
+            environment: environment
+        )
         let projectStateID: String?
-        if let directProject {
+        if let composeProject {
+            projectStateID = "project-\(composeProject)"
+        } else if let directProject {
             projectStateID = directProject.hasPrefix("project-")
                 ? directProject : "project-\(directProject)"
         } else if let explicitProject {
             projectStateID = explicitProject.hasPrefix("project-")
                 ? explicitProject : "project-\(explicitProject)"
-        } else if let manifestPath {
+        } else if let manifestPath, !isComposeAuthorizationCommand(command) {
             let text = try environment.readTextFile(manifestPath)
             guard let project = try ManifestValidator.validated(text).project, !project.isEmpty else {
                 throw HostwrightDiagnostic(
@@ -173,10 +179,18 @@ public enum CLIControlAuthorizationScopeResolver {
             }
     }
 
+    private static func isComposeAuthorizationCommand(_ command: CLICommand) -> Bool {
+        switch command {
+        case .exportStack, .planStackUpdate: true
+        default: false
+        }
+    }
+
     public static func manifestPath(for command: CLICommand) -> String? {
         switch command {
         case .runtimeMigrate(let options): return options.manifestPath
-        case .validate(let path, _), .plan(let path, _, _), .status(let path, _, _, _),
+        case .exportStack(let path, _), .validate(let path, _),
+             .plan(let path, _, _), .status(let path, _, _, _),
              .apply(let path, _, _, _, _, _), .cleanup(let path, _, _, _, _):
             return path
         case .lifecycle(let options): return options.manifestPath
@@ -189,6 +203,62 @@ public enum CLIControlAuthorizationScopeResolver {
         case .diagnostics(_, _, _, let manifestPath): return manifestPath
         default: return nil
         }
+    }
+
+    private static func composeAuthorizationProject(
+        for command: CLICommand,
+        environment: CLIEnvironment
+    ) throws -> String? {
+        switch command {
+        case .exportStack(let path, _):
+            return try requiredManifestAuthorizationProject(
+                path: path,
+                environment: environment
+            )
+        case .planStackUpdate(let currentPath, let desiredPath, _):
+            let current = try requiredManifestAuthorizationProject(
+                path: currentPath,
+                environment: environment
+            )
+            let desired = try requiredManifestAuthorizationProject(
+                path: desiredPath,
+                environment: environment
+            )
+            guard current == desired else {
+                throw composeAuthorizationFailure()
+            }
+            return current
+        default:
+            return nil
+        }
+    }
+
+    private static func requiredManifestAuthorizationProject(
+        path: String,
+        environment: CLIEnvironment
+    ) throws -> String {
+        do {
+            let manifest = try ManifestParser.parse(
+                hostwrightReadBoundedManifestText(
+                    path: path,
+                    maximumBytes: ManifestParser.maximumUTF8Bytes,
+                    environment: environment
+                )
+            )
+            guard let project = manifest.project, !project.isEmpty else {
+                throw composeAuthorizationFailure()
+            }
+            return project
+        } catch {
+            throw composeAuthorizationFailure()
+        }
+    }
+
+    private static func composeAuthorizationFailure() -> HostwrightDiagnostic {
+        HostwrightDiagnostic(
+            code: .controlAPIInvalid,
+            message: "The Compose manifest cannot establish an exact Control API project scope."
+        )
     }
 
     private static func directProjectIdentifier(for command: CLICommand) -> String? {

@@ -216,6 +216,26 @@ func hostwrightReadManifestText(path: String, environment: CLIEnvironment) throw
     }
 }
 
+func hostwrightReadBoundedManifestText(
+    path: String,
+    maximumBytes: Int,
+    environment: CLIEnvironment
+) throws -> String {
+    do {
+        return try environment.readBoundedTextFile(path, maximumBytes)
+    } catch let error as ManifestParseError {
+        throw error
+    } catch {
+        throw ManifestParseError.failed([
+            ManifestIssue(
+                code: .manifestFileIOFailed,
+                message: "Manifest file could not be read safely.",
+                path: "$"
+            ),
+        ])
+    }
+}
+
 func hostwrightReadLocalText(path: String, role: String, environment: CLIEnvironment) throws -> String {
     do {
         return try environment.readTextFile(path)
@@ -552,6 +572,24 @@ enum CLIJSON {
                 sourcePath: path,
                 result: result,
                 teamPolicy: teamPolicy
+            )
+        )
+    }
+
+    static func composeExport(path: String, result: ComposeExportResult) -> String {
+        codable(ComposeExportEnvelope(sourcePath: path, result: result))
+    }
+
+    static func composeUpdatePlan(
+        currentPath: String,
+        desiredPath: String,
+        plan: ComposeUpdatePlan
+    ) -> String {
+        codable(
+            ComposeUpdatePlanEnvelope(
+                currentPath: currentPath,
+                desiredPath: desiredPath,
+                plan: plan
             )
         )
     }
@@ -1191,6 +1229,65 @@ private struct ComposeImportTeamPolicy: Encodable {
     let profileHash: String
     let manifestHash: String
     let approvalRequiredForMutation: Bool
+}
+
+private struct ComposeExportEnvelope: Encodable {
+    let kind = "composeExport"
+    let sourcePath: String
+    let result: ComposeExportResult
+
+    private enum CodingKeys: String, CodingKey {
+        case kind
+        case sourcePath
+        case schemaVersion
+        case contractVersion
+        case succeeded
+        case composeText
+        case lossReport
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(sourcePath, forKey: .sourcePath)
+        try container.encode(result.schemaVersion, forKey: .schemaVersion)
+        try container.encode(result.contractVersion, forKey: .contractVersion)
+        try container.encode(result.succeeded, forKey: .succeeded)
+        try container.encode(result.composeText, forKey: .composeText)
+        try container.encode(result.lossReport, forKey: .lossReport)
+    }
+}
+
+private struct ComposeUpdatePlanEnvelope: Encodable {
+    let kind = "composeUpdatePlan"
+    let currentPath: String
+    let desiredPath: String
+    let plan: ComposeUpdatePlan
+
+    private enum CodingKeys: String, CodingKey {
+        case kind
+        case currentPath
+        case desiredPath
+        case schemaVersion
+        case contractVersion
+        case accepted
+        case mutatesRuntime
+        case changes
+        case lossReport
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(currentPath, forKey: .currentPath)
+        try container.encode(desiredPath, forKey: .desiredPath)
+        try container.encode(plan.schemaVersion, forKey: .schemaVersion)
+        try container.encode(plan.contractVersion, forKey: .contractVersion)
+        try container.encode(plan.accepted, forKey: .accepted)
+        try container.encode(plan.mutatesRuntime, forKey: .mutatesRuntime)
+        try container.encode(plan.changes, forKey: .changes)
+        try container.encode(plan.lossReport, forKey: .lossReport)
+    }
 }
 
 private extension Dictionary where Key == String, Value == Any {

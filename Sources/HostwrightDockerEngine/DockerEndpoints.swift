@@ -4,10 +4,13 @@ public enum DockerEndpointError: Error, Equatable, Sendable {
     case invalidTarget
     case unsupportedAPIVersion
     case unsupportedOperation
+    case unsupportedQuery
     case methodNotAllowed
 }
 
 public enum DockerEndpoint: Equatable, Hashable, Sendable {
+    public static let maximumQueryBytes = 2 * 1_024
+
     case ping
     case version
     case info
@@ -45,6 +48,9 @@ public enum DockerEndpoint: Equatable, Hashable, Sendable {
         let parsed = try splitTarget(target)
         if let version = parsed.version, !version.isSupported {
             throw DockerEndpointError.unsupportedAPIVersion
+        }
+        guard !parsed.hasQueryIntent else {
+            throw DockerEndpointError.unsupportedQuery
         }
         let components = parsed.path
             .split(separator: "/", omittingEmptySubsequences: true)
@@ -121,12 +127,17 @@ public enum DockerEndpoint: Equatable, Hashable, Sendable {
     }
 
     public static func unversionedPath(_ target: String) throws -> String {
-        try splitTarget(target).path
+        let parsed = try splitTarget(target)
+        guard !parsed.hasQueryIntent else {
+            throw DockerEndpointError.unsupportedQuery
+        }
+        return parsed.path
     }
 
     private struct ParsedTarget {
         let version: DockerAPIVersion?
         let path: String
+        let hasQueryIntent: Bool
     }
 
     private static func splitTarget(_ target: String) throws -> ParsedTarget {
@@ -134,8 +145,20 @@ public enum DockerEndpoint: Equatable, Hashable, Sendable {
               target.utf8.count <= DockerHTTPCodec.maximumRequestLineBytes else {
             throw DockerEndpointError.invalidTarget
         }
-        let path = target.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init)
-            ?? target
+        guard !target.contains("#") else {
+            throw DockerEndpointError.invalidTarget
+        }
+        let path: String
+        let hasQueryIntent: Bool
+        if let delimiter = target.firstIndex(of: "?") {
+            path = String(target[..<delimiter])
+            let query = String(target[target.index(after: delimiter)...])
+            try validateQuery(query)
+            hasQueryIntent = !query.isEmpty
+        } else {
+            path = target
+            hasQueryIntent = false
+        }
         guard !path.contains("//"), !path.contains("\\") else {
             throw DockerEndpointError.invalidTarget
         }
@@ -151,9 +174,54 @@ public enum DockerEndpoint: Equatable, Hashable, Sendable {
             }
             let remainder = components.dropFirst().joined(separator: "/")
             guard !remainder.isEmpty else { throw DockerEndpointError.invalidTarget }
-            return ParsedTarget(version: version, path: "/" + remainder)
+            return ParsedTarget(
+                version: version,
+                path: "/" + remainder,
+                hasQueryIntent: hasQueryIntent
+            )
         }
-        return ParsedTarget(version: nil, path: path)
+        return ParsedTarget(version: nil, path: path, hasQueryIntent: hasQueryIntent)
+    }
+
+    private static func validateQuery(_ query: String) throws {
+        guard query.utf8.count <= maximumQueryBytes,
+              !query.contains("?"),
+              !query.contains("#") else {
+            throw DockerEndpointError.invalidTarget
+        }
+        guard !query.isEmpty else { return }
+
+        let fields = query.split(separator: "&", omittingEmptySubsequences: false)
+        guard fields.count <= 64 else {
+            throw DockerEndpointError.invalidTarget
+        }
+        var decodedKeys = Set<String>()
+        for field in fields {
+            guard !field.isEmpty,
+                  let separator = field.firstIndex(of: "="),
+                  separator == field.lastIndex(of: "=") else {
+                throw DockerEndpointError.invalidTarget
+            }
+            let rawKey = String(field[..<separator])
+            let rawValue = String(field[field.index(after: separator)...])
+            guard let key = decodeQueryComponent(rawKey),
+                  let value = decodeQueryComponent(rawValue),
+                  !key.isEmpty,
+                  !value.isEmpty,
+                  decodedKeys.insert(key).inserted else {
+                throw DockerEndpointError.invalidTarget
+            }
+        }
+    }
+
+    private static func decodeQueryComponent(_ value: String) -> String? {
+        guard let decoded = value.removingPercentEncoding,
+              decoded.unicodeScalars.allSatisfy({ scalar in
+                  scalar.value >= 0x20 && scalar.value != 0x7F
+              }) else {
+            return nil
+        }
+        return decoded
     }
 
     private static func decodePathComponent(_ value: String) throws -> String {

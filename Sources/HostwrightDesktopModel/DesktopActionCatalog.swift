@@ -259,7 +259,11 @@ public enum DesktopActionFailureContract {
             value.range(
                 of: "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$",
                 options: .regularExpression
-            ) != nil
+            ) != nil,
+            [
+                "control.", "daemon.", "discovery.", "events.",
+                "logs.", "status.", "transport.",
+            ].contains(where: value.hasPrefix)
         else {
             return fallbackCode
         }
@@ -556,11 +560,13 @@ public enum DesktopActionCatalog {
         _ kind: DesktopGUIActionKind,
         command: String?
     ) -> DesktopGUIActionDescriptor {
-        DesktopGUIActionDescriptor(
+        let confirmationReview = command.flatMap { cliAction(command: $0)?.confirmationReview }
+            ?? .notRequired
+        return DesktopGUIActionDescriptor(
             identifier: identifier,
             kind: kind,
             command: command,
-            confirmationReview: .notRequired
+            confirmationReview: confirmationReview
         )
     }
 

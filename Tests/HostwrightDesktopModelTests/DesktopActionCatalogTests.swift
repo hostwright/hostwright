@@ -114,6 +114,15 @@ final class DesktopActionCatalogTests: XCTestCase {
                 DesktopActionCatalog.cliAction(command: $0) != nil
             }
         )
+        XCTAssertTrue(
+            DesktopActionCatalog.guiActions.compactMap { action in
+                action.command.flatMap { command in
+                    DesktopActionCatalog.cliAction(command: command).map {
+                        action.confirmationReview == $0.confirmationReview
+                    }
+                }
+            }.allSatisfy { $0 }
+        )
     }
 
     func testUnexposedAndMutatingInventoryActionsFailClosedWithReviewBoundaries() throws {
@@ -191,5 +200,11 @@ final class DesktopActionCatalogTests: XCTestCase {
         XCTAssertEqual(unsafe.code, "desktop.action.failed")
         XCTAssertEqual(unsafe.message, "The desktop control action failed.")
         XCTAssertFalse(unsafe.message.contains("another-secret"))
+
+        let arbitraryCode = DesktopActionFailureContract.redact(
+            actionIdentifier: DesktopAccessibilityIdentifier.statusRefresh,
+            error: DesktopControlFailure(code: "secret123", message: "hidden")
+        )
+        XCTAssertEqual(arbitraryCode.code, "desktop.action.failed")
     }
 }

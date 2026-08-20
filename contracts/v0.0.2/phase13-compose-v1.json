@@ -5,7 +5,7 @@
   "operations": {
     "import": {
       "input": "bounded Compose YAML text",
-      "output": "canonical Hostwright manifest text and canonical Compose YAML text",
+      "output": "versioned import/loss envelope; canonical text is present only when every Hostwright v3 requirement is representable",
       "runtime": "none",
       "controlAPI": "none"
     },
@@ -57,6 +57,8 @@
   "boundaries": {
     "unknownFields": "reject before producing output",
     "unsupportedSemantics": "reject with deterministic loss paths; never silently drop",
+    "resourceAdmission": "Hostwright manifest v3 requires explicit CPU and memory requests and limits. This source-only contract accepts no Compose resource mapping, does not infer capacity, and rejects Compose deploy resources; executable imports therefore return HW-COMPOSE-004 and no output text.",
+    "resourceExport": "Hostwright v3 resource semantics are not representable by this canonical Compose subset and return HW-COMPOSE-003 before export or update changes are produced.",
     "execution": "not implemented by this source-only contract slice",
     "DockerComposeParity": "not claimed",
     "fileWrites": "none"

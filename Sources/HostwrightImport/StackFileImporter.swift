@@ -13,6 +13,7 @@ public struct StackImportDiagnostic: Equatable, Sendable {
     public let severity: StackImportDiagnosticSeverity
     public let message: String
     public let line: Int?
+    public let path: String?
     public let policyReasonCode: String?
 
     public init(
@@ -20,12 +21,14 @@ public struct StackImportDiagnostic: Equatable, Sendable {
         severity: StackImportDiagnosticSeverity,
         message: String,
         line: Int? = nil,
+        path: String? = nil,
         policyReasonCode: String? = nil
     ) {
         self.code = code
         self.severity = severity
         self.message = message
         self.line = line
+        self.path = path
         self.policyReasonCode = policyReasonCode
     }
 
@@ -245,6 +248,7 @@ public enum StackFileImporter {
                 severity: .error,
                 message: issue.message,
                 line: issue.line,
+                path: issue.path,
                 policyReasonCode: nil
             )
         })
@@ -262,7 +266,8 @@ public enum StackFileImporter {
                     code: issue.code,
                     severity: .error,
                     message: issue.message,
-                    line: issue.line
+                    line: issue.line,
+                    path: issue.path
                 )
             })
         } catch {

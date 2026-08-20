@@ -372,6 +372,12 @@ public enum HostwrightCompose {
         _ diagnostic: StackImportDiagnostic,
         source: String
     ) -> String {
+        if let path = diagnostic.path {
+            return path
+        }
+        if let service = serviceName(from: diagnostic.message) {
+            return "$.services.\(service)"
+        }
         guard let lineNumber = diagnostic.line else { return "$.document" }
         let lines = source.components(separatedBy: .newlines)
         guard lines.indices.contains(lineNumber - 1) else { return "$.lines[\(lineNumber)]" }
@@ -405,6 +411,15 @@ public enum HostwrightCompose {
             return "$.\(topLevel).\(field)"
         }
         return "$.lines[\(lineNumber)]"
+    }
+
+    private static func serviceName(from message: String) -> String? {
+        guard message.hasPrefix("Service '"),
+              let end = message.dropFirst("Service '".count).firstIndex(of: "'") else {
+            return nil
+        }
+        let name = String(message[message.index(message.startIndex, offsetBy: "Service '".count)..<end])
+        return name.isEmpty ? nil : name
     }
 
     private static func yamlFieldName(_ trimmed: String) -> String {

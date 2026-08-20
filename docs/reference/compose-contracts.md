@@ -41,6 +41,15 @@ the Phase 09 Control API, registries, or state. Export refuses Hostwright-only
 policy, networking, storage, lifecycle, probe, secret, and structured endpoint
 semantics that this Compose subset cannot preserve.
 
+Manifest v3 admission additionally requires explicit CPU and memory requests
+and limits for every executable service. This source-only slice accepts no
+Compose resource mapping: the stack importer intentionally rejects Compose
+`deploy` and does not infer capacity. Consequently, every executable Compose
+input returns an unsuccessful `HW-COMPOSE-004` import envelope with no manifest
+or canonical Compose text. Likewise, a valid Hostwright v3 manifest's resource
+block is an explicit `HW-COMPOSE-003` export/update loss; it is never silently
+dropped.
+
 ## Loss and update planning
 
 Losses have stable `HW-COMPOSE-001` through `HW-COMPOSE-005` codes, a

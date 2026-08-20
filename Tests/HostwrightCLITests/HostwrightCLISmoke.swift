@@ -714,21 +714,19 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertEqual(existingFiles.files[HostwrightIdentity.manifestFileName], "project: existing\nservices:\n")
     }
 
-    func testImportStackPrintsConvertedManifestWithoutWritingFiles() throws {
+    func testImportStackFailsClosedForMissingV3ResourcesWithoutWritingFiles() throws {
         let files = FileBox(files: ["compose.yaml": safeStackFile])
 
         let result = HostwrightCLI.run(arguments: ["import-stack", "compose.yaml"], environment: environment(files: files))
 
-        XCTAssertEqual(result.exitCode, 0)
-        XCTAssertEqual(result.standardError, "")
-        XCTAssertTrue(result.standardOutput.contains("version: 3\nproject: demo"))
-        XCTAssertTrue(result.standardOutput.contains("image: ghcr.io/example/api:latest"))
-        XCTAssertTrue(result.standardOutput.contains("env:\n      APP_ENV: development"))
+        XCTAssertEqual(result.exitCode, CLIExitCode.validation.rawValue)
+        XCTAssertEqual(result.standardOutput, "")
+        XCTAssertTrue(result.standardError.contains("resources must declare explicit requests and limits"))
         XCTAssertNil(files.files[HostwrightIdentity.manifestFileName])
-        XCTAssertNoThrow(try ManifestValidator.validated(result.standardOutput))
+        XCTAssertEqual(files.files, ["compose.yaml": safeStackFile])
     }
 
-    func testImportStackJSONOutputUsesVersionedComposeEnvelopeWithoutWritingFiles() throws {
+    func testImportStackJSONReportsV3ResourceLossDeterministicallyWithoutWritingFiles() throws {
         let stack = """
         version: "3.9"
         name: demo
@@ -742,25 +740,27 @@ final class HostwrightCLITests: XCTestCase {
         let result = HostwrightCLI.run(arguments: ["import-stack", "compose.yaml", "--output", "json"], environment: environment(files: files))
         let repeated = HostwrightCLI.run(arguments: ["import-stack", "compose.yaml", "--output", "json"], environment: environment(files: files))
 
-        XCTAssertEqual(result.exitCode, 0)
-        XCTAssertEqual(result.standardError, "")
+        XCTAssertEqual(result.exitCode, CLIExitCode.validation.rawValue)
+        XCTAssertEqual(result.standardOutput, "")
         XCTAssertEqual(repeated, result)
         XCTAssertEqual(files.files, ["compose.yaml": stack])
-        let object = try jsonObject(result.standardOutput)
+        let object = try jsonObject(result.standardError)
         XCTAssertEqual(object["kind"] as? String, "composeImport")
         XCTAssertEqual(object["sourcePath"] as? String, "compose.yaml")
         XCTAssertEqual(object["schemaVersion"] as? Int, 1)
         XCTAssertEqual(object["contractVersion"] as? String, "v1")
-        XCTAssertEqual(object["succeeded"] as? Bool, true)
-        XCTAssertTrue((object["manifestText"] as? String)?.contains("project: demo") == true)
-        XCTAssertTrue((object["canonicalComposeText"] as? String)?.contains("name: \"demo\"") == true)
+        XCTAssertEqual(object["succeeded"] as? Bool, false)
+        XCTAssertTrue(object["manifestText"] is NSNull)
+        XCTAssertTrue(object["canonicalComposeText"] is NSNull)
         let lossReport = try XCTUnwrap(object["lossReport"] as? [String: Any])
         XCTAssertEqual(lossReport["operation"] as? String, "import")
         let losses = try XCTUnwrap(lossReport["losses"] as? [[String: Any]])
-        XCTAssertEqual(losses.count, 1)
-        XCTAssertEqual(losses.first?["severity"] as? String, "warning")
-        XCTAssertFalse(result.standardOutput.contains("\"warnings\""))
-        XCTAssertFalse(result.standardOutput.contains("\"manifest\""))
+        XCTAssertTrue(losses.contains {
+            $0["code"] as? String == "HW-COMPOSE-004" &&
+                $0["path"] as? String == "$.services.api"
+        })
+        XCTAssertFalse(result.standardError.contains("\"warnings\""))
+        XCTAssertFalse(result.standardError.contains("\"manifest\""))
     }
 
     func testImportStackJSONErrorsUseVersionedComposeLossEnvelopeAndFailClosed() throws {

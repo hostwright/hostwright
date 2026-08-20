@@ -240,7 +240,7 @@ final class HostwrightImportTests: XCTestCase {
         })
     }
 
-    func testComposeContractRoundTripsCanonicalSubset() throws {
+    func testComposeImportReportsV3ResourceAdmissionAtTheServicePath() {
         let source = """
             name: demo
             services:
@@ -262,42 +262,15 @@ final class HostwrightImportTests: XCTestCase {
             """
 
         let imported = HostwrightCompose.importDocument(source)
-        XCTAssertTrue(imported.succeeded)
-        XCTAssertEqual(imported.schemaVersion, 1)
-        XCTAssertEqual(imported.contractVersion, "v1")
-        XCTAssertTrue(imported.lossReport.losses.isEmpty)
-
-        let manifest = try ManifestValidator.validated(try XCTUnwrap(imported.manifestText))
-        let exported = HostwrightCompose.exportDocument(manifest)
-        XCTAssertTrue(exported.succeeded)
-        XCTAssertEqual(exported.lossReport.losses, [])
+        XCTAssertFalse(imported.succeeded)
+        XCTAssertNil(imported.manifestText)
+        XCTAssertNil(imported.canonicalComposeText)
+        XCTAssertEqual(imported.lossReport.losses.map(\.code), [.invalidManifest])
+        XCTAssertEqual(imported.lossReport.losses.map(\.path), ["$.services.api"])
         XCTAssertEqual(
-            exported.composeText,
-            """
-            name: "demo"
-            services:
-              api:
-                image: "ghcr.io/example/api:1"
-                command: ["serve", "--port", "8080"]
-                ports:
-                  - "8080:8080"
-                volumes:
-                  - "./data:/data:rw"
-                environment:
-                  APP_ENV: "development"
-                  PUBLIC_URL: "http://localhost:8080"
-                healthcheck:
-                  test: ["CMD", "curl", "http://localhost:8080/health"]
-                  interval: "10s"
-                restart: "unless-stopped"
-
-            """
+            imported.lossReport.losses.first?.message,
+            "Service 'api' resources must declare explicit requests and limits, including CPU and memory, for an executable v3 service."
         )
-
-        let roundTripped = HostwrightCompose.importDocument(try XCTUnwrap(exported.composeText))
-        XCTAssertTrue(roundTripped.succeeded)
-        XCTAssertEqual(roundTripped.manifestText, imported.manifestText)
-        XCTAssertEqual(roundTripped.canonicalComposeText, exported.composeText)
     }
 
     func testComposeImportReportsStablePathsAndRejectsUnknownSemantics() {
@@ -352,6 +325,7 @@ final class HostwrightImportTests: XCTestCase {
                 HostwrightService(
                     name: "api",
                     image: "ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    resources: executableResources,
                     labels: ["team": "platform"]
                 )
             ]
@@ -360,20 +334,24 @@ final class HostwrightImportTests: XCTestCase {
         let result = HostwrightCompose.exportDocument(manifest)
         XCTAssertFalse(result.succeeded)
         XCTAssertNil(result.composeText)
-        XCTAssertEqual(result.lossReport.losses.map(\.code), [.exportLoss, .exportLoss])
+        XCTAssertEqual(result.lossReport.losses.map(\.code), [.exportLoss, .exportLoss, .exportLoss])
         XCTAssertEqual(
             result.lossReport.losses.map(\.path),
-            ["$.imagePolicy", "$.services.api.labels"]
+            ["$.imagePolicy", "$.services.api.labels", "$.services.api.resources"]
         )
         XCTAssertTrue(result.lossReport.losses.allSatisfy { $0.severity == .error })
     }
 
-    func testComposeUpdatePlanIsDeterministicAndNonMutating() {
+    func testComposeUpdatePlanRejectsV3ResourceSemanticsWithoutMutation() {
         let current = HostwrightManifest(
             version: HostwrightManifest.currentVersion,
             project: "demo",
             services: [
-                HostwrightService(name: "api", image: "ghcr.io/example/api:1")
+                HostwrightService(
+                    name: "api",
+                    image: "ghcr.io/example/api:1",
+                    resources: executableResources
+                )
             ]
         )
         let desired = HostwrightManifest(
@@ -383,9 +361,14 @@ final class HostwrightImportTests: XCTestCase {
                 HostwrightService(
                     name: "api",
                     image: "ghcr.io/example/api:2",
+                    resources: executableResources,
                     env: ["APP_ENV": "production"]
                 ),
-                HostwrightService(name: "worker", image: "ghcr.io/example/worker:1")
+                HostwrightService(
+                    name: "worker",
+                    image: "ghcr.io/example/worker:1",
+                    resources: executableResources
+                )
             ]
         )
 
@@ -393,32 +376,40 @@ final class HostwrightImportTests: XCTestCase {
         let second = HostwrightCompose.planUpdate(current: current, desired: desired)
 
         XCTAssertEqual(first, second)
-        XCTAssertTrue(first.accepted)
-        XCTAssertTrue(first.lossReport.canProceed)
+        XCTAssertFalse(first.accepted)
+        XCTAssertFalse(first.lossReport.canProceed)
         XCTAssertFalse(first.mutatesRuntime)
-        XCTAssertEqual(first.changes.map(\.kind), [.updateService, .addService])
-        XCTAssertEqual(first.changes.map(\.serviceName), ["api", "worker"])
-        XCTAssertEqual(first.changes.first?.fields, ["env", "image"])
-        XCTAssertEqual(first.changes.last?.fields, ["service"])
+        XCTAssertEqual(first.changes, [])
+        XCTAssertEqual(
+            first.lossReport.losses.map(\.path),
+            [
+                "$.current.services.api.resources",
+                "$.desired.services.api.resources",
+                "$.desired.services.worker.resources",
+            ]
+        )
     }
 
     func testComposeUpdatePlanRejectsProjectMismatchBeforePlanningChanges() {
         let current = HostwrightManifest(
             version: HostwrightManifest.currentVersion,
             project: "old",
-            services: [HostwrightService(name: "api", image: "ghcr.io/example/api:1")]
+            services: [HostwrightService(name: "api", image: "ghcr.io/example/api:1", resources: executableResources)]
         )
         let desired = HostwrightManifest(
             version: HostwrightManifest.currentVersion,
             project: "new",
-            services: [HostwrightService(name: "api", image: "ghcr.io/example/api:2")]
+            services: [HostwrightService(name: "api", image: "ghcr.io/example/api:2", resources: executableResources)]
         )
 
         let plan = HostwrightCompose.planUpdate(current: current, desired: desired)
         XCTAssertFalse(plan.accepted)
         XCTAssertTrue(plan.changes.isEmpty)
-        XCTAssertEqual(plan.lossReport.losses.map(\.code), [.updateRejected])
-        XCTAssertEqual(plan.lossReport.losses.map(\.path), ["$.project"])
+        XCTAssertEqual(plan.lossReport.losses.map(\.code), [.exportLoss, .exportLoss, .updateRejected])
+        XCTAssertEqual(
+            plan.lossReport.losses.map(\.path),
+            ["$.current.services.api.resources", "$.desired.services.api.resources", "$.project"]
+        )
         XCTAssertFalse(plan.mutatesRuntime)
     }
 
@@ -442,7 +433,18 @@ final class HostwrightImportTests: XCTestCase {
         )
         XCTAssertEqual(object["contractVersion"] as? String, "v1")
         XCTAssertEqual(object["schemaVersion"] as? Int, 1)
-        XCTAssertEqual(object["succeeded"] as? Bool, true)
+        XCTAssertEqual(object["succeeded"] as? Bool, false)
         XCTAssertEqual(object["canonicalComposeText"] as? String, result.canonicalComposeText)
+        let lossReport = try XCTUnwrap(object["lossReport"] as? [String: Any])
+        let losses = try XCTUnwrap(lossReport["losses"] as? [[String: Any]])
+        XCTAssertEqual(losses.first?["code"] as? String, "HW-COMPOSE-004")
+        XCTAssertEqual(losses.first?["path"] as? String, "$.services.api")
+    }
+
+    private var executableResources: HostwrightResources {
+        HostwrightResources(
+            requests: HostwrightResourceSet(cpus: 1, memory: "512MiB"),
+            limits: HostwrightResourceSet(cpus: 1, memory: "512MiB")
+        )
     }
 }

@@ -61,6 +61,9 @@ final class CLIControlCommandExecutorTests: XCTestCase {
         services:
           api:
             image: ghcr.io/example/api:latest
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
         """
         let environment = environment(
             logSink: capture,
@@ -94,6 +97,9 @@ final class CLIControlCommandExecutorTests: XCTestCase {
         services:
           api:
             image: ghcr.io/example/api:latest
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
         """
         let environment = environment(
             logSink: capture,
@@ -130,6 +136,9 @@ final class CLIControlCommandExecutorTests: XCTestCase {
         services:
           api:
             image: ghcr.io/example/api:latest
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
         """
         let swapped = """
         version: 3
@@ -137,6 +146,9 @@ final class CLIControlCommandExecutorTests: XCTestCase {
         services:
           api:
             image: ghcr.io/example/other:latest
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
         """
         let reads = LockedCounter()
         let environment = environment(
@@ -165,7 +177,7 @@ final class CLIControlCommandExecutorTests: XCTestCase {
         XCTAssertFalse(result.standardOutput.contains("swapped-after-authorization"))
     }
 
-    func testImportStackUnaryControlReturnsVersionedComposeEnvelopeWithoutWritesOrRuntime() throws {
+    func testImportStackUnaryControlReportsV3ResourceLossWithoutWritesOrRuntime() throws {
         let compose = """
         name: gate09-import
         services:
@@ -191,21 +203,24 @@ final class CLIControlCommandExecutorTests: XCTestCase {
         ))
         let result = try CLIControlResultContract.result(from: response)
 
-        XCTAssertEqual(response.status, .completed)
-        XCTAssertEqual(result.exitCode, 0)
+        XCTAssertEqual(response.status, .error)
+        XCTAssertEqual(result.exitCode, CLIExitCode.validation.rawValue)
         XCTAssertEqual(reads.value, 1)
-        XCTAssertEqual(result.standardError, "")
+        XCTAssertEqual(result.standardOutput, "")
         let output = try XCTUnwrap(
-            try JSONSerialization.jsonObject(with: Data(result.standardOutput.utf8)) as? [String: Any]
+            try JSONSerialization.jsonObject(with: Data(result.standardError.utf8)) as? [String: Any]
         )
         XCTAssertEqual(output["kind"] as? String, "composeImport")
         XCTAssertEqual(output["schemaVersion"] as? Int, 1)
         XCTAssertEqual(output["contractVersion"] as? String, "v1")
-        XCTAssertEqual(output["succeeded"] as? Bool, true)
-        XCTAssertTrue((output["manifestText"] as? String)?.contains("project: gate09-import") == true)
+        XCTAssertEqual(output["succeeded"] as? Bool, false)
+        XCTAssertTrue(output["manifestText"] is NSNull)
         let lossReport = try XCTUnwrap(output["lossReport"] as? [String: Any])
         XCTAssertEqual(lossReport["operation"] as? String, "import")
-        XCTAssertTrue((lossReport["losses"] as? [[String: Any]])?.isEmpty == true)
+        XCTAssertTrue((lossReport["losses"] as? [[String: Any]])?.contains {
+            $0["code"] as? String == "HW-COMPOSE-004" &&
+                $0["path"] as? String == "$.services.api"
+        } == true)
     }
 
     func testStreamRouteIsRejectedForUnaryExecutor() throws {

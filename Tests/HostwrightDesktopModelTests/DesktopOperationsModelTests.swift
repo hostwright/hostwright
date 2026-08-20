@@ -293,6 +293,82 @@ final class DesktopOperationsModelTests: XCTestCase {
         XCTAssertEqual(model.connectionState, .disconnected)
     }
 
+    func testActionAvailabilityTracksConnectionStreamsAndObservedLogResources() async throws {
+        let model = DesktopOperationsModel(
+            transport: ScriptedTransport { request in
+                if request.operation == "daemon" {
+                    return Self.completed(
+                        request: request,
+                        result: .object([
+                            "exitCode": .integer(0),
+                            "resultSchemaVersion": .integer(1),
+                            "standardError": .string(""),
+                            "standardOutput": .string(Self.daemonHealthJSON),
+                        ])
+                    )
+                }
+                return Self.completed(request: request, result: Self.statusJSON)
+            }
+        )
+
+        XCTAssertEqual(
+            model.actionAvailability(for: DesktopAccessibilityIdentifier.statusRefresh).reason,
+            .disconnected
+        )
+        XCTAssertEqual(
+            model.actionAvailability(for: DesktopAccessibilityIdentifier.eventsCancel).reason,
+            .streamNotRunning
+        )
+
+        model.connect()
+        for _ in 0..<20 {
+            if model.connectionState == .connected && !model.projects.isEmpty { break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        XCTAssertEqual(
+            model.actionAvailability(for: DesktopAccessibilityIdentifier.statusRefresh).state,
+            .available
+        )
+        XCTAssertEqual(
+            model.actionAvailability(for: DesktopAccessibilityIdentifier.eventsRefresh).state,
+            .available
+        )
+        XCTAssertEqual(
+            model.actionAvailability(for: DesktopAccessibilityIdentifier.selectedLogsOpen).reason,
+            .requiresService
+        )
+        XCTAssertEqual(
+            model.actionAvailability(
+                for: DesktopAccessibilityIdentifier.selectedLogsOpen,
+                context: DesktopActionAvailabilityContext(serviceID: "missing")
+            ).reason,
+            .requiresService
+        )
+        XCTAssertEqual(
+            model.actionAvailability(
+                for: DesktopAccessibilityIdentifier.selectedLogsOpen,
+                context: DesktopActionAvailabilityContext(serviceID: "web")
+            ).state,
+            .available
+        )
+
+        model.disconnect()
+        XCTAssertEqual(
+            model.actionAvailability(for: DesktopAccessibilityIdentifier.statusRefresh).reason,
+            .disconnected
+        )
+
+        let unavailable = DesktopOperationsModel.live(
+            homeDirectory: "/Users/tester",
+            environment: ["HOSTWRIGHT_APPLICATION_SUPPORT_DIR": "relative"]
+        )
+        XCTAssertEqual(
+            unavailable.actionAvailability(for: DesktopAccessibilityIdentifier.statusRefresh).reason,
+            .controlEndpointUnavailable
+        )
+    }
+
     nonisolated private static let daemonHealthJSON = """
     {
       "schemaVersion": 1,

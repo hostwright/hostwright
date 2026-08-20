@@ -1,16 +1,20 @@
+import Darwin
 import Foundation
 import HostwrightControlTransport
 import HostwrightDockerEngine
 
 @main
 enum HostwrightDockerProxyMain {
-    static func main() {
+    nonisolated static func main() {
         do {
             let options = try options(arguments: Array(CommandLine.arguments.dropFirst()))
             if options.help {
                 print("hostwright-docker-proxy --socket <absolute-path> --control-socket <absolute-path>")
                 return
             }
+            let cancellation = SignalCancellationLatch()
+            let signalSources = makeSignalSources(cancellation: cancellation)
+            defer { signalSources.forEach { $0.cancel() } }
             let configuration = try DockerProxyConfiguration(
                 socketPath: options.socketPath!,
                 controlSocketPath: options.controlSocketPath!
@@ -23,7 +27,10 @@ enum HostwrightDockerProxyMain {
                 socketPath: configuration.socketPath,
                 recoverStaleSocket: true
             )
-            try DockerProxyDaemon(server: server, listener: listener).run()
+            let daemon = DockerProxyDaemon(server: server, listener: listener)
+            try withExtendedLifetime(signalSources) {
+                try daemon.run(isCancelled: { cancellation.isCancelled })
+            }
         } catch {
             FileHandle.standardError.write(
                 Data("hostwright-docker-proxy: failed safely (\(String(describing: error)))\n".utf8)
@@ -66,4 +73,38 @@ enum HostwrightDockerProxyMain {
 
 private enum UsageError: Error {
     case invalid
+}
+
+private func makeSignalSources(
+    cancellation: SignalCancellationLatch
+) -> [DispatchSourceSignal] {
+    [SIGTERM, SIGINT].map { signalNumber in
+        Darwin.signal(signalNumber, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(
+            signal: signalNumber,
+            queue: DispatchQueue.global(qos: .utility)
+        )
+        source.setEventHandler {
+            cancellation.cancel()
+        }
+        source.resume()
+        return source
+    }
+}
+
+private final class SignalCancellationLatch: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+
+    var isCancelled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+
+    func cancel() {
+        lock.lock()
+        value = true
+        lock.unlock()
+    }
 }

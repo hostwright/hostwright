@@ -339,6 +339,8 @@ public final class DockerProxyDaemon: @unchecked Sendable {
                 continue
             } catch DockerSocketError.peerMismatch {
                 continue
+            } catch DockerSocketError.cancelled {
+                continue
             } catch DockerSocketError.socketIdentityChanged {
                 throw DockerSocketError.socketIdentityChanged
             }

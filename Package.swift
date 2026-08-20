@@ -539,7 +539,12 @@ let package = Package(
             name: "HostwrightCluster",
             dependencies: [
                 "HostwrightCore",
-                "HostwrightControlPlane"
+                "HostwrightControlPlane",
+                .product(name: "X509", package: "swift-certificates")
+            ],
+            linkerSettings: [
+                .linkedFramework("LocalAuthentication"),
+                .linkedFramework("Security")
             ]
         ),
         .target(
@@ -894,7 +899,10 @@ let package = Package(
         ),
         .testTarget(
             name: "HostwrightClusterTests",
-            dependencies: ["HostwrightCluster"],
+            dependencies: [
+                "HostwrightCluster",
+                .product(name: "X509", package: "swift-certificates")
+            ],
             resources: [
                 .process("Fixtures")
             ]

@@ -8,6 +8,7 @@ public enum ClusterSessionError: Error, Equatable, CustomStringConvertible, Send
     case duplicateCredential
     case credentialNotFound
     case credentialRevoked
+    case credentialGenerationAuthorityUnavailable
     case challengeCapacityExceeded
     case invalidChallenge(String)
     case challengeNotIssued
@@ -41,6 +42,8 @@ public enum ClusterSessionError: Error, Equatable, CustomStringConvertible, Send
         case .duplicateCredential: "Cluster session credential is duplicated."
         case .credentialNotFound: "Cluster session credential is unavailable."
         case .credentialRevoked: "Cluster session credential is revoked."
+        case .credentialGenerationAuthorityUnavailable:
+            "Cluster session certificate-generation authority is unavailable."
         case .challengeCapacityExceeded: "Cluster session challenge capacity is exhausted."
         case .invalidChallenge(let field): "Cluster session challenge is invalid: \(field)."
         case .challengeNotIssued: "Cluster session challenge was not issued by this authority."
@@ -82,11 +85,80 @@ public enum ClusterSessionContract {
     public static let maximumSessionLifetimeMilliseconds: UInt64 = 86_400_000
 }
 
+public struct ClusterSessionX509CredentialBinding: Codable, Equatable, Hashable, Sendable {
+    public let identity: ClusterCertificateIdentity
+    public let leafCertificateSHA256: String
+    public let authorityCertificateSHA256: String
+
+    public init(
+        identity: ClusterCertificateIdentity,
+        leafCertificateSHA256: String,
+        authorityCertificateSHA256: String
+    ) throws {
+        self.identity = identity
+        self.leafCertificateSHA256 = leafCertificateSHA256
+        self.authorityCertificateSHA256 = authorityCertificateSHA256
+        try validate()
+    }
+
+    public func validate() throws {
+        guard identity.role == .nodeAgentClient,
+              Self.isCanonicalSHA256(leafCertificateSHA256),
+              Self.isCanonicalSHA256(authorityCertificateSHA256) else {
+            throw ClusterSessionError.invalidCredentialMaterial
+        }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        try self.init(
+            identity: container.decode(ClusterCertificateIdentity.self, forKey: .identity),
+            leafCertificateSHA256: container.decode(
+                String.self,
+                forKey: .leafCertificateSHA256
+            ),
+            authorityCertificateSHA256: container.decode(
+                String.self,
+                forKey: .authorityCertificateSHA256
+            )
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(identity, forKey: .identity)
+        try container.encode(leafCertificateSHA256, forKey: .leafCertificateSHA256)
+        try container.encode(
+            authorityCertificateSHA256,
+            forKey: .authorityCertificateSHA256
+        )
+    }
+
+    private static func isCanonicalSHA256(_ value: String) -> Bool {
+        value.utf8.count == 64
+            && value.utf8.allSatisfy {
+                ($0 >= 48 && $0 <= 57) || ($0 >= 97 && $0 <= 102)
+            }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case identity
+        case leafCertificateSHA256
+        case authorityCertificateSHA256
+    }
+}
+
+public enum ClusterSessionCredentialProvenance: Equatable, Hashable, Sendable {
+    case legacy
+    case x509(ClusterSessionX509CredentialBinding)
+}
+
 public struct ClusterSessionCredential: Codable, Equatable, Hashable, Sendable {
     public let credentialID: String
     public let subjectID: String
     public let nodeID: ClusterNodeID
     public let p256X963PublicKey: Data
+    public let provenance: ClusterSessionCredentialProvenance
 
     public init(
         credentialID: String,
@@ -98,6 +170,80 @@ public struct ClusterSessionCredential: Codable, Equatable, Hashable, Sendable {
         self.subjectID = subjectID
         self.nodeID = nodeID
         self.p256X963PublicKey = p256X963PublicKey
+        self.provenance = .legacy
+        try validate()
+    }
+
+    public init(
+        credentialID: String,
+        subjectID: String,
+        nodeID: ClusterNodeID,
+        p256X963PublicKey: Data,
+        x509Binding: ClusterSessionX509CredentialBinding
+    ) throws {
+        self.credentialID = credentialID
+        self.subjectID = subjectID
+        self.nodeID = nodeID
+        self.p256X963PublicKey = p256X963PublicKey
+        self.provenance = .x509(x509Binding)
+        try validate()
+    }
+
+    public init(
+        x509Binding: ClusterSessionX509CredentialBinding,
+        p256X963PublicKey: Data
+    ) throws {
+        try self.init(
+            credentialID: Self.x509CredentialID(
+                leafCertificateSHA256: x509Binding.leafCertificateSHA256
+            ),
+            subjectID: Self.x509SubjectID(identity: x509Binding.identity),
+            nodeID: x509Binding.identity.nodeID,
+            p256X963PublicKey: p256X963PublicKey,
+            x509Binding: x509Binding
+        )
+    }
+
+    public var x509Binding: ClusterSessionX509CredentialBinding? {
+        guard case .x509(let binding) = provenance else { return nil }
+        return binding
+    }
+
+    public static func x509CredentialID(
+        leafCertificateSHA256: String
+    ) -> String {
+        "x509-sha256:\(leafCertificateSHA256)"
+    }
+
+    public static func x509SubjectID(
+        identity: ClusterCertificateIdentity
+    ) -> String {
+        "cluster:\(identity.clusterID.rawValue)"
+            + ":node:\(identity.nodeID.rawValue):g\(identity.generation.value)"
+    }
+
+    private static func resemblesX509Subject(_ value: String) -> Bool {
+        value.hasPrefix("cluster:")
+            && value.contains(":node:")
+            && value.range(of: ":g", options: .backwards) != nil
+    }
+
+    private static func isCanonicalX509CredentialID(_ value: String) -> Bool {
+        value.hasPrefix("x509-sha256:")
+    }
+
+    private init(
+        credentialID: String,
+        subjectID: String,
+        nodeID: ClusterNodeID,
+        p256X963PublicKey: Data,
+        provenance: ClusterSessionCredentialProvenance
+    ) throws {
+        self.credentialID = credentialID
+        self.subjectID = subjectID
+        self.nodeID = nodeID
+        self.p256X963PublicKey = p256X963PublicKey
+        self.provenance = provenance
         try validate()
     }
 
@@ -110,16 +256,66 @@ public struct ClusterSessionCredential: Codable, Equatable, Hashable, Sendable {
         guard (try? P256.Signing.PublicKey(x963Representation: p256X963PublicKey)) != nil else {
             throw ClusterSessionError.invalidCredentialMaterial
         }
+        switch provenance {
+        case .legacy:
+            guard !Self.isCanonicalX509CredentialID(credentialID),
+                  !Self.resemblesX509Subject(subjectID) else {
+                throw ClusterSessionError.invalidCredentialMaterial
+            }
+        case .x509(let binding):
+            try binding.validate()
+            guard credentialID == Self.x509CredentialID(
+                leafCertificateSHA256: binding.leafCertificateSHA256
+            ),
+                  subjectID == Self.x509SubjectID(identity: binding.identity),
+                  nodeID == binding.identity.nodeID else {
+                throw ClusterSessionError.invalidCredentialMaterial
+            }
+        }
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        try self.init(
-            credentialID: container.decode(String.self, forKey: .credentialID),
-            subjectID: container.decode(String.self, forKey: .subjectID),
-            nodeID: container.decode(ClusterNodeID.self, forKey: .nodeID),
-            p256X963PublicKey: container.decode(Data.self, forKey: .p256X963PublicKey)
+        let credentialID = try container.decode(String.self, forKey: .credentialID)
+        let subjectID = try container.decode(String.self, forKey: .subjectID)
+        let nodeID = try container.decode(ClusterNodeID.self, forKey: .nodeID)
+        let publicKey = try container.decode(Data.self, forKey: .p256X963PublicKey)
+        let kind = try container.decodeIfPresent(CredentialKind.self, forKey: .kind)
+        let binding = try container.decodeIfPresent(
+            ClusterSessionX509CredentialBinding.self,
+            forKey: .x509Binding
         )
+        let provenance: ClusterSessionCredentialProvenance
+        switch (kind, binding) {
+        case (nil, nil), (.some(.legacy), nil):
+            provenance = .legacy
+        case (.some(.x509), .some(let binding)):
+            provenance = .x509(binding)
+        default:
+            throw ClusterSessionError.invalidCredentialMaterial
+        }
+        try self.init(
+            credentialID: credentialID,
+            subjectID: subjectID,
+            nodeID: nodeID,
+            p256X963PublicKey: publicKey,
+            provenance: provenance
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(credentialID, forKey: .credentialID)
+        try container.encode(subjectID, forKey: .subjectID)
+        try container.encode(nodeID, forKey: .nodeID)
+        try container.encode(p256X963PublicKey, forKey: .p256X963PublicKey)
+        switch provenance {
+        case .legacy:
+            try container.encode(CredentialKind.legacy, forKey: .kind)
+        case .x509(let binding):
+            try container.encode(CredentialKind.x509, forKey: .kind)
+            try container.encode(binding, forKey: .x509Binding)
+        }
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -127,6 +323,13 @@ public struct ClusterSessionCredential: Codable, Equatable, Hashable, Sendable {
         case subjectID
         case nodeID
         case p256X963PublicKey
+        case kind
+        case x509Binding
+    }
+
+    private enum CredentialKind: String, Codable {
+        case legacy
+        case x509
     }
 }
 
@@ -160,6 +363,17 @@ public struct ClusterSessionCredentialCatalog: Codable, Equatable, Sendable {
         var container = encoder.singleValueContainer()
         try container.encode(credentials)
     }
+}
+
+/// Current-generation admission for certificate-derived session credentials.
+/// Implementations must derive their answer from authoritative generation
+/// state and the supplied operation time rather than from the caller-supplied
+/// credential alone.
+public protocol ClusterSessionCredentialGenerationAuthorizing: Sendable {
+    func permits(
+        _ credential: ClusterSessionCredential,
+        nowMilliseconds: UInt64
+    ) throws -> Bool
 }
 
 public struct ClusterSessionChallenge: Codable, Equatable, Sendable {
@@ -625,6 +839,8 @@ public final class ClusterSessionAuthority: @unchecked Sendable, ClusterSessionA
     }
 
     private let credentials: ClusterSessionCredentialCatalog
+    private let credentialGenerationAuthorizer:
+        (any ClusterSessionCredentialGenerationAuthorizing)?
     private let lock = NSLock()
     private var membershipEpoch: ClusterMembershipEpoch
     private var nextFencingToken: UInt64 = 1
@@ -638,6 +854,8 @@ public final class ClusterSessionAuthority: @unchecked Sendable, ClusterSessionA
         nodeID: ClusterNodeID,
         membershipEpoch: ClusterMembershipEpoch = .initial,
         credentials: ClusterSessionCredentialCatalog,
+        credentialGenerationAuthorizer:
+            (any ClusterSessionCredentialGenerationAuthorizing)? = nil,
         challengeLifetimeMilliseconds: UInt64 = 5_000,
         sessionLifetimeMilliseconds: UInt64 = 300_000
     ) throws {
@@ -651,6 +869,7 @@ public final class ClusterSessionAuthority: @unchecked Sendable, ClusterSessionA
         self.nodeID = nodeID
         self.membershipEpoch = membershipEpoch
         self.credentials = credentials
+        self.credentialGenerationAuthorizer = credentialGenerationAuthorizer
         self.challengeLifetimeMilliseconds = challengeLifetimeMilliseconds
         self.sessionLifetimeMilliseconds = sessionLifetimeMilliseconds
     }
@@ -666,7 +885,10 @@ public final class ClusterSessionAuthority: @unchecked Sendable, ClusterSessionA
         nowMilliseconds: UInt64,
         validForMilliseconds: UInt64? = nil
     ) throws -> ClusterSessionChallenge {
-        let credential = try credential(for: credentialID)
+        let credential = try credential(
+            for: credentialID,
+            nowMilliseconds: nowMilliseconds
+        )
         let lifetime = validForMilliseconds ?? challengeLifetimeMilliseconds
         guard (1...ClusterSessionContract.maximumChallengeLifetimeMilliseconds)
             .contains(lifetime) else {
@@ -751,6 +973,11 @@ public final class ClusterSessionAuthority: @unchecked Sendable, ClusterSessionA
               credential.nodeID == challenge.nodeID else {
             throw ClusterSessionError.credentialNotFound
         }
+        try validateCertificateGeneration(
+            for: credential,
+            retiredError: .credentialRevoked,
+            nowMilliseconds: nowMilliseconds
+        )
 
         pending.consumed = true
         pendingChallenges[challenge.challengeID] = pending
@@ -889,6 +1116,21 @@ public final class ClusterSessionAuthority: @unchecked Sendable, ClusterSessionA
         guard !revokedCredentialIDs.contains(session.credentialID) else {
             throw ClusterSessionError.sessionFenced
         }
+        guard let credential = credentials.resolve(
+            credentialID: session.credentialID
+        ) else {
+            throw ClusterSessionError.sessionFenced
+        }
+        do {
+            try validateCertificateGeneration(
+                for: credential,
+                retiredError: .sessionFenced,
+                nowMilliseconds: nowMilliseconds
+            )
+        } catch ClusterSessionError.sessionFenced {
+            sessions[session.sessionID]?.state = .fenced
+            throw ClusterSessionError.sessionFenced
+        }
         guard nowMilliseconds >= session.issuedAtMilliseconds else {
             throw ClusterSessionError.sessionNotYetValid
         }
@@ -1005,7 +1247,10 @@ public final class ClusterSessionAuthority: @unchecked Sendable, ClusterSessionA
         return record.state
     }
 
-    private func credential(for credentialID: String) throws -> ClusterSessionCredential {
+    private func credential(
+        for credentialID: String,
+        nowMilliseconds: UInt64
+    ) throws -> ClusterSessionCredential {
         try ClusterSessionValidation.identifier(credentialID, field: "credentialID")
         lock.lock()
         defer { lock.unlock() }
@@ -1018,7 +1263,41 @@ public final class ClusterSessionAuthority: @unchecked Sendable, ClusterSessionA
         guard credential.nodeID == nodeID else {
             throw ClusterSessionError.credentialNotFound
         }
+        try validateCertificateGeneration(
+            for: credential,
+            retiredError: .credentialRevoked,
+            nowMilliseconds: nowMilliseconds
+        )
         return credential
+    }
+
+    private func validateCertificateGeneration(
+        for credential: ClusterSessionCredential,
+        retiredError: ClusterSessionError,
+        nowMilliseconds: UInt64
+    ) throws {
+        guard case .x509(let binding) = credential.provenance else {
+            return
+        }
+        guard binding.identity.clusterID == clusterID,
+              binding.identity.nodeID == nodeID else {
+            throw retiredError
+        }
+        guard let credentialGenerationAuthorizer else {
+            throw ClusterSessionError.credentialGenerationAuthorityUnavailable
+        }
+        do {
+            guard try credentialGenerationAuthorizer.permits(
+                credential,
+                nowMilliseconds: nowMilliseconds
+            ) else {
+                throw retiredError
+            }
+        } catch let error as ClusterSessionError {
+            throw error
+        } catch {
+            throw ClusterSessionError.credentialGenerationAuthorityUnavailable
+        }
     }
 
     private func fenceActiveSessions(forSubject subjectID: String) {

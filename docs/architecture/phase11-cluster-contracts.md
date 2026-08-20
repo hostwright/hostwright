@@ -1,17 +1,28 @@
 # Phase 11 Cluster Contracts
 
-Status: dependency-safe contract slices for P11-C01 (#220), the contract
-portion of P11-C03 (#222), authenticated node agents P11-C05 (#224), and
-cluster fencing P11-C07 (#226), plus an opt-in qualification of the pinned
-Darwin artifact's private install and cleanup path. This document does not
-claim live etcd health, quorum/fault, VM, Apple Container, physical
-multi-host, or release qualification.
+Status: dependency-safe contract slices for P11-C01 (#220), cluster CA and
+mTLS peer trust P11-C02 (#221), the contract portion of P11-C03 (#222),
+authenticated node agents P11-C05 (#224), and cluster fencing P11-C07 (#226),
+plus an opt-in qualification of the pinned Darwin artifact's private install
+and cleanup path. This document does not claim a live mTLS transport, live etcd
+health, quorum/fault, VM, Apple Container, physical multi-host, or release
+qualification.
 
 The implementation is isolated in the `HostwrightCluster` target:
 
 - [`ClusterMembership.swift`](../../Sources/HostwrightCluster/ClusterMembership.swift)
   owns cluster identity, membership intent, join tokens, plans, transition
   records, recovery records, deterministic hashes, and quorum-safe planning.
+- [`ClusterCertificateTrust.swift`](../../Sources/HostwrightCluster/ClusterCertificateTrust.swift)
+  owns public cluster-CA trust bundles, exact peer identity and certificate
+  validation, bounded rotation overlap, revocation, and the authenticated
+  node-client bridge into the cluster-session contract.
+- [`ClusterCertificateLifecycle.swift`](../../Sources/HostwrightCluster/ClusterCertificateLifecycle.swift)
+  owns non-exportable macOS Keychain CA/leaf credentials, private public-only
+  metadata, sequential generation rotation, and crash recovery.
+- [`ClusterNodeAgentTransportSecurity.swift`](../../Sources/HostwrightCluster/ClusterNodeAgentTransportSecurity.swift)
+  owns the source-only client/server adapter from lifecycle identities and
+  certificate trust into authenticated cluster sessions and handoffs.
 - [`ManagedEtcdArtifact.swift`](../../Sources/HostwrightCluster/ManagedEtcdArtifact.swift)
   owns the pinned artifact descriptor, archive acceptance boundary, private
   layout, process configuration, snapshot/restore plans, and exact cleanup
@@ -44,6 +55,113 @@ Voter removal preserves the current quorum and refuses a change that would
 leave no voter or fewer surviving voters than the current quorum. Replacement
 is planned as learner join, learner promotion, then old-voter removal so the
 old voter remains present until the replacement is a voter.
+
+## Cluster certificate trust contract
+
+`ClusterCertificateAuthority` accepts only a bounded DER-encoded, self-signed
+P-256 root with the exact Hostwright CA URI, critical CA and key-signing
+constraints, no extended-key usage, and a single cluster/generation binding.
+`ClusterCertificateTrustBundle` contains public certificates and fingerprint
+revocations only. It permits one current authority or one sequential
+old/current overlap; a second concurrent rotation, nonsequential generation,
+cross-cluster authority, duplicate authority, malformed fingerprint, or
+attempt to revoke a trust anchor fails closed.
+
+Peer identities use one canonical URI that binds cluster UUID, node UUID,
+role, and certificate generation. `ClusterMutualTLSVerifier` requires the
+exact URI as the sole SAN, P-256/ecdsa-with-SHA-256, a non-CA leaf, digital
+signature key usage, the role's exact client/server EKU set, explicit validity,
+an unrevoked fingerprint, and a two-certificate path to the generation's
+pinned authority with network fetching disabled. Only a verified
+`node-agent-client` peer can derive a deterministic, non-secret
+`ClusterSessionCredential`; the resulting public key is exercised through the
+existing challenge/proof authority in tests.
+
+`ClusterCertificateLifecycle` is the production credential owner behind this
+public trust contract. It generates a permanent, non-extractable P-256 CA key
+and one permanent, non-extractable leaf key for each requested role in macOS
+Keychain. Every item has an exact cluster/node/generation/role tag and an
+operation-bound ownership label; resolution uses the persisted opaque item
+references and exact ownership attributes rather than an ambient identity
+search. Issued certificates use the
+same sole URI SAN and exact CA, key-usage, and role-specific EKU constraints
+that `ClusterMutualTLSVerifier` enforces. The lifecycle returns `SecIdentity`
+handles and the public certificate chain, never private-key bytes.
+
+Only public DER, fingerprints, canonical identities, and bounded opaque
+Keychain persistent references are stored outside Keychain. The containing
+directory is current-user-owned mode `0700`; canonical metadata and journal
+files are mode `0600`, digest-bound, size-bounded, opened without following
+symlinks, fsynced, and atomically renamed under a cross-process file lock.
+Malformed encoding, altered digests, unsafe ownership or permissions, item
+collisions, mismatched public keys, and missing or changed persistent-reference
+targets fail closed.
+
+Bootstrap and rotation first persist a `creating` journal, generate and verify
+all exact-scoped Keychain items, persist an `activating` journal with their
+public evidence, then atomically publish metadata. Restart recovery compensates
+an incomplete create only when the items carry that journal operation's exact
+ownership ID; a later foreign scope collision fails closed without deletion.
+Recovery otherwise idempotently finishes activation. Structural ownership and
+certificate-chain validation is separate from current-time credential use, so
+an expired generation can still be rotated or retired while identity use stays
+fail-closed. Rotation permits one
+sequential current/retiring overlap; retirement journals the complete retiring
+evidence, exact-deletes only those certificate/key pairs, publishes the
+single-generation metadata, and replays safely if a crash occurred after
+either delete or publish. Locked-Keychain and denied noninteractive access do
+not fall back to an untrusted credential source.
+
+Certificate-derived session credentials are admitted only after lifecycle
+recovery has validated the digest-bound metadata against its exact
+noninteractive Keychain certificate/key pairs under the cross-process lock.
+Admission also checks the bound leaf and authority validity interval at the
+session operation's explicit millisecond timestamp. Both exact generations
+remain valid during the published overlap. Once retirement
+publishes single-generation metadata, every later challenge, authentication,
+session validation, and handoff authorization fences the retired generation;
+the current generation remains valid only while its certificate is valid.
+Missing, expired, noncanonical, tampered, stale metadata-only, or unrecoverable
+transition state fails closed instead of treating a caller-supplied credential
+catalog as generation authority. This decision is durable across lifecycle
+restart even though live session records themselves remain source-only and
+in-memory in this slice.
+
+The focused lifecycle tests create an isolated temporary Keychain and private
+temporary metadata directory; they neither select nor enumerate the user's
+login Keychain and delete the isolated Keychain after each case. This slice
+still does not open a network listener or claim a live TLS handshake. Reciprocal
+network transport and live authenticated qualification remain P11-C05 work.
+
+## Node-agent transport security adapter
+
+`ClusterNodeAgentTransportSecurityAdapter` prepares one immutable transport
+security configuration without opening a listener or connection. Its client
+side requires the active `node-agent-client` lifecycle identity and the exact
+expected server node and generation; its server side requires the active
+`node-agent-server` identity and the exact expected client node and generation.
+The adapter matches the `SecIdentity` leaf and one-authority public chain to the
+lifecycle evidence, exposes only the opaque identity handle and public chain,
+and revalidates the local certificate at construction and before every peer
+authentication. Retiring local credentials cannot prepare a new adapter.
+
+Peer authentication delegates to `ClusterMutualTLSVerifier`, so the cluster,
+node, role, generation, validity, revocation, key usage, and pinned two-item
+chain remain one fail-closed policy. A specifically expected retiring peer can
+finish during the bounded authority overlap, but an absent generation fails
+before authentication and must not be inferred from certificate input. The
+server result derives the exact public `ClusterSessionCredential`; its handoff
+helper first binds cluster, node, and subject to that authenticated certificate
+and then invokes `ClusterSessionHandoffAuthorizing` for the complete live
+session, expiry, revocation, epoch, and fencing checks.
+
+The adapter holds a trust-bundle snapshot. Rotation, retirement, or revocation
+publishes a new snapshot and requires a replacement adapter before accepting
+new peer authentication. Focused tests use real ephemeral certificates and
+non-exportable keys in isolated temporary Keychains. This contract prepares the
+security callbacks a later transport may consume; it does not claim a Network
+framework integration, TLS handshake, network socket, listener, or physical
+multi-host qualification.
 
 ## Authenticated cluster-session contract
 
@@ -91,6 +209,15 @@ and the monotonic fence, so altered, stale, expired, revoked, or malformed
 handoffs fail closed. The handoff is neither a credential nor a transport
 protocol and carries no persistence semantics.
 
+Credentials derived from verified node-agent certificates additionally require
+the lifecycle-backed generation authority. Their exact certificate and
+authority fingerprints, cluster/node/generation identity, canonical subject,
+node identity, and public key must still match a recovered, Keychain-backed
+current or overlapping lifecycle generation at the explicit authorization
+time. Retirement or certificate expiry therefore fences already-issued
+handoffs at the next authorization boundary rather than allowing them to
+survive until ordinary session expiry.
+
 `ClusterNodeAgentLocalTransport` is the bounded P11-C05 producer for a local
 node-agent subprocess. It requires a concrete `ClusterSessionAuthority`,
 creates the handoff through `bootstrapConsumer`, reauthorizes it through
@@ -105,9 +232,9 @@ cancellation that terminates the owned subprocess. There is no network,
 persistence, CA/mTLS, or multi-host behavior in this slice.
 
 This source-only authority is the admission and fencing contract, not a claim
-of durable replicated session storage, a CA/mTLS transport, or live node-agent
-qualification. Persistent CA/session records and reciprocal network transport
-remain P11-C02/P11-C05 work. The Phase 08 runtime lock is released, but
+of durable replicated session storage, an mTLS network transport, or live
+node-agent qualification. Durable session records and reciprocal network
+transport remain P11-C05 work. The Phase 08 runtime lock is released, but
 physical multi-host evidence and live authenticated member health remain
 unclaimed.
 
@@ -190,5 +317,5 @@ qualification accepts only the pinned official Darwin archive, executes the
 installed binary's version check, validates canonical provenance, and removes
 only exact owned paths. Live authenticated health, quorum/fault behavior, VM
 qualification, and physical multi-host evidence remain blocked by the missing
-CA/mTLS and lab prerequisites; the Phase 08 runtime release does not claim
-those cells.
+mTLS transport integration and lab prerequisites; the Phase 08 runtime release
+does not claim those cells.

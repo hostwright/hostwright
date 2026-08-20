@@ -68,15 +68,18 @@ later requests may replenish it, each accepted request consumes one unit, and
 the response reports the remaining window. Teardown clears the window.
 
 Authentication is a required boundary before dispatch. The production
-`ClusterSessionGuestAgentAuthenticationBoundary` retains one real Phase 11
-`ClusterAuthenticatedSession` and calls `ClusterSessionAuthorizing` for every
-request, binding `request.ownerID` to the authenticated session subject. Phase
-11 therefore remains authoritative for strict challenge/proof validation,
-expiry, revocation fencing, membership epochs, and monotonic session fencing;
-no credential or handshake message is copied into the guest-agent lifecycle
-wire. The portable executable remains wired to
-`UnavailableGuestAgentAuthenticationBoundary` because the future node-agent
-transport that supplies an authenticated session is not yet present; it
+`ClusterSessionGuestAgentAuthenticationBoundary` retains only a credential-free
+Phase 11 `ClusterSessionHandoff`, produced by
+`ClusterSessionAuthority.bootstrapConsumer(from:subjectID:nowMilliseconds:)`.
+Immediately before every request it calls
+`ClusterSessionHandoffAuthorizing.authorize(_:subjectID:nowMilliseconds:)`,
+binding `request.ownerID` to the handoff subject. Phase 11 therefore remains
+authoritative for strict challenge/proof validation, expiry, revocation
+fencing, membership epochs, and monotonic session fencing; no credential,
+challenge, proof, or authenticated session is retained by the guest-agent
+boundary or copied into the lifecycle wire. The portable executable remains
+wired to `UnavailableGuestAgentAuthenticationBoundary` because the future
+node-agent transport that supplies a real handoff is not yet present; it
 returns an explicit error before lifecycle state can change and contains no
 credential bypass.
 

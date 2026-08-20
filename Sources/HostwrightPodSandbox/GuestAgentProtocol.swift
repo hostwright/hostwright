@@ -79,6 +79,7 @@ public enum GuestAgentErrorCode: String, Codable, CaseIterable, Sendable {
     case authenticationContextMismatch
     case sessionNotFound
     case sessionBindingMismatch
+    case handoffBindingMismatch
     case sessionNotYetValid
     case sessionExpired
     case sessionClosed

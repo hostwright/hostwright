@@ -219,6 +219,8 @@ public final class GuestAgentDispatcher: @unchecked Sendable {
             .sessionNotFound
         case .sessionBindingMismatch:
             .sessionBindingMismatch
+        case .handoffBindingMismatch:
+            .handoffBindingMismatch
         case .sessionNotYetValid:
             .sessionNotYetValid
         case .sessionExpired:

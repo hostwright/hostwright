@@ -37,9 +37,13 @@ struct HostwrightPodSandboxGuestMain {
             } else {
                 machine = PodSandboxLifecycleStateMachine()
             }
+            // No node-agent transport can supply a real ClusterSessionHandoff here.
+            // Retain the library injection seam while this entry point fails closed.
+            let authenticationBoundary: any GuestAgentAuthenticationBoundary =
+                UnavailableGuestAgentAuthenticationBoundary()
             let dispatcher = GuestAgentDispatcher(
                 machine: machine,
-                authenticationBoundary: UnavailableGuestAgentAuthenticationBoundary()
+                authenticationBoundary: authenticationBoundary
             )
             try GuestAgentServer(dispatcher: dispatcher).run()
         } catch {

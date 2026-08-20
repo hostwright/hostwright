@@ -208,7 +208,6 @@ then rechecks active state, expiry, credential revocation, membership epoch,
 and the monotonic fence, so altered, stale, expired, revoked, or malformed
 handoffs fail closed. The handoff is neither a credential nor a transport
 protocol and carries no persistence semantics.
-
 Credentials derived from verified node-agent certificates additionally require
 the lifecycle-backed generation authority. Their exact certificate and
 authority fingerprints, cluster/node/generation identity, canonical subject,

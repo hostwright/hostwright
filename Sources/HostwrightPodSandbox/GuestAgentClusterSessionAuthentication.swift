@@ -1,19 +1,19 @@
 import Foundation
 import HostwrightCluster
 
-/// Binds one Phase 11 authenticated session to the guest-agent request owner.
-/// Credentials and handshake messages stay outside the guest-agent lifecycle wire.
+/// Binds one credential-free Phase 11 handoff to the guest-agent request owner.
+/// The authority revalidates the handoff immediately before guest dispatch.
 public struct ClusterSessionGuestAgentAuthenticationBoundary:
     GuestAgentAuthenticationBoundary,
     Sendable
 {
-    private let authorizer: any ClusterSessionAuthorizing
-    private let session: ClusterAuthenticatedSession
+    private let authorizer: any ClusterSessionHandoffAuthorizing
+    private let handoff: ClusterSessionHandoff
     private let nowMilliseconds: @Sendable () -> UInt64
 
     public init(
-        authorizer: any ClusterSessionAuthorizing,
-        session: ClusterAuthenticatedSession,
+        authorizer: any ClusterSessionHandoffAuthorizing,
+        handoff: ClusterSessionHandoff,
         nowMilliseconds: @escaping @Sendable () -> UInt64 = {
             let milliseconds = Date().timeIntervalSince1970 * 1_000
             guard milliseconds >= 0, milliseconds <= Double(UInt64.max) else {
@@ -22,18 +22,18 @@ public struct ClusterSessionGuestAgentAuthenticationBoundary:
             return UInt64(milliseconds)
         }
     ) throws {
-        try session.validate()
+        try handoff.validate()
         self.authorizer = authorizer
-        self.session = session
+        self.handoff = handoff
         self.nowMilliseconds = nowMilliseconds
     }
 
     public func authorize(_ request: GuestAgentEnvelope) throws {
-        guard request.ownerID == session.subjectID else {
+        guard request.ownerID == handoff.subjectID else {
             throw ClusterSessionError.sessionIdentityMismatch
         }
         try authorizer.authorize(
-            session,
+            handoff,
             subjectID: request.ownerID,
             nowMilliseconds: nowMilliseconds()
         )

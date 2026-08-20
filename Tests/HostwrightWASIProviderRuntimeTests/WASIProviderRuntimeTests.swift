@@ -207,8 +207,12 @@ final class HostwrightWASIProviderSecurityTests: XCTestCase {
     }
     let contents = try String(contentsOf: ledger, encoding: .utf8)
     XCTAssertTrue(contents.contains("\tprocess\tprovider-worker\t/usr/bin/false\t"), contents)
-    XCTAssertTrue(contents.contains(";command_sha256="), contents)
-    XCTAssertTrue(contents.contains(";start_sha256="), contents)
+    let rows = contents.split(separator: "\n").map(String.init)
+    let identity = try XCTUnwrap(rows.last?.split(separator: "\t").last.map(String.init))
+    XCTAssertNotNil(identity.range(
+      of: "^pid=[1-9][0-9]*;command_sha256=[a-f0-9]{64};start_sha256=[a-f0-9]{64}$",
+      options: .regularExpression
+    ), contents)
   }
 }
 

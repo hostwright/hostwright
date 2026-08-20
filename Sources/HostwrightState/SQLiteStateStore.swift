@@ -145,6 +145,23 @@ public struct SQLiteStateStore: StateStore {
             .acquireOperationMutationFence(groupID: groupID)
     }
 
+    public func withReadObservationFence<T>(
+        waitTimeoutNanoseconds: UInt64 = 30_000_000_000,
+        _ body: () throws -> T
+    ) throws -> T {
+        guard (1...30_000_000_000).contains(waitTimeoutNanoseconds) else {
+            throw StateStoreError.invalidRecord(
+                "read-observation wait timeout is outside the bounded range"
+            )
+        }
+        try configuration.prepareStateAccessFoundation()
+        return try StateAccessCoordinator(configuration: configuration).withLock(
+            .observation,
+            waitTimeoutNanoseconds: waitTimeoutNanoseconds,
+            body
+        )
+    }
+
     public func schemaVersion() throws -> Int {
         try configuration.validate()
         let versions = try MigrationRunner().appliedVersions(in: self)

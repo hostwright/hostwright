@@ -194,7 +194,7 @@ final class AdmissionControlOperationsTests: XCTestCase {
     ControlPeerIdentityRecord(
       subjectID: subjectID, userID: 501,
       codeIdentity: CodeIdentity(
-        teamIdentifier: "993YC3JY4Q", signingIdentifier: "hostwright-test",
+        teamIdentifier: "993YC3JY4Q", signingIdentifier: "hostwright-test-\(subjectID)",
         codeDirectoryHash: String(repeating: hash, count: 40), validationMode: .installedRequirement),
       declaredBySubjectID: declaredBy, declaredAt: timestamp, updatedAt: timestamp)
   }
@@ -211,7 +211,7 @@ final class AdmissionControlOperationsTests: XCTestCase {
         peer: UnixPeerIdentity(
           effectiveUID: 501, effectiveGID: 20, pid: 123, pidVersion: 1, auditSessionID: 1,
           codeIdentity: CodeIdentity(
-            teamIdentifier: "993YC3JY4Q", signingIdentifier: "hostwright-test",
+            teamIdentifier: "993YC3JY4Q", signingIdentifier: "hostwright-test-\(subjectID)",
             codeDirectoryHash: codeHash, validationMode: .installedRequirement)),
         subject: LocalSubject(identifier: subjectID, userID: 501, codeIdentityHash: codeHash)))
   }

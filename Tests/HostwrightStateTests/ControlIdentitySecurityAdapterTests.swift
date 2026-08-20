@@ -36,18 +36,31 @@ final class ControlIdentitySecurityAdapterTests: XCTestCase {
     }
   }
 
-  func testInstalledRequirementAllowsCDHashRotationButRejectsDuplicateIdentity() throws {
+  func testInstalledRequirementRequiresAtomicCDHashRotationAndRejectsOldHash() throws {
     try withAdapter { store, adapter, identity in
-      let rotated = try adapter.resolve(
-        userID: identity.userID,
-        codeIdentity: CodeIdentity(
-          teamIdentifier: identity.codeIdentity.teamIdentifier,
-          signingIdentifier: identity.codeIdentity.signingIdentifier,
-          codeDirectoryHash: String(repeating: "b", count: 40),
-          validationMode: identity.codeIdentity.validationMode
-        )
+      let replacement = CodeIdentity(
+        teamIdentifier: identity.codeIdentity.teamIdentifier,
+        signingIdentifier: identity.codeIdentity.signingIdentifier,
+        codeDirectoryHash: String(repeating: "b", count: 40),
+        validationMode: identity.codeIdentity.validationMode
       )
+      XCTAssertThrowsError(try adapter.resolve(
+        userID: identity.userID,
+        codeIdentity: replacement
+      ))
+      let stored = try store.controlIdentities.rotateInstalledCodeIdentity(
+        subjectID: identity.subjectID,
+        expectedGeneration: identity.generation,
+        replacement: replacement,
+        updatedAt: "2026-08-02T20:02:00Z"
+      )
+      let rotated = try adapter.resolve(userID: identity.userID, codeIdentity: replacement)
       XCTAssertEqual(rotated.localSubject.identifier, identity.subjectID)
+      XCTAssertEqual(stored.subjectID, identity.subjectID)
+      XCTAssertThrowsError(try adapter.resolve(
+        userID: identity.userID,
+        codeIdentity: identity.codeIdentity
+      ))
       XCTAssertThrowsError(
         try store.controlIdentities.declare(
           ControlPeerIdentityRecord(

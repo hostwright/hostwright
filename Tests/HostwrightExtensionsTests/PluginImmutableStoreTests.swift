@@ -780,7 +780,7 @@ final class PluginImmutableStoreTests: XCTestCase {
         packageVersion: String = "1.0.0",
         moduleData: Data = Data("valid-wasm-module".utf8)
     ) throws -> VerifiedPackageFixture {
-        let sourceRoot = try temporaryRoot(prefix: "hostwright-plugin-source")
+        let sourceRoot = try physicalTemporaryRoot(prefix: "hostwright-plugin-source")
         let signer = try TestCMSSigner(commonName: "Hostwright Plugin Test")
         let expectedSource = PluginSource(kind: .localDirectory, locator: sourceRoot.path)
         let files: [String: Data] = [
@@ -870,6 +870,15 @@ final class PluginImmutableStoreTests: XCTestCase {
             try? FileManager.default.removeItem(at: root)
         }
         return root
+    }
+
+    private func physicalTemporaryRoot(prefix: String) throws -> URL {
+        let root = try temporaryRoot(prefix: prefix)
+        guard let resolved = realpath(root.path, nil) else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        defer { free(resolved) }
+        return URL(fileURLWithPath: String(cString: resolved), isDirectory: true)
     }
 
     private func lstatMetadata(_ path: String) throws -> stat {

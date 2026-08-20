@@ -262,7 +262,7 @@ The exact encoded shape is in
 [`phase09-profile-v1.json`](../../contracts/v0.0.2/phase09-profile-v1.json).
 
 Migration boundaries are fixed and each migration creates and verifies an
-existing-style pre-migration backup. Old binaries seeing schemas 18–21 refuse
+existing-style pre-migration backup. Old binaries seeing schemas 18–22 refuse
 safely; rollback restores the corresponding backup rather than performing a
 down-migration.
 
@@ -272,6 +272,7 @@ down-migration.
 | 18 → 19 | audit segments/records, key metadata, retention anchors |
 | 19 → 20 | roles/bindings/delegations, policies/exceptions, workload profiles |
 | 20 → 21 | plugin packages/provenance/grants/activations/revocations/quarantine/rollback |
+| 21 → 22 | one active installed-identity bucket with atomic same-subject code-hash rotation |
 
 The exhaustive table identifiers are frozen in
 [`phase09-migration-plan-v18-v21.json`](../../contracts/v0.0.2/phase09-migration-plan-v18-v21.json).
@@ -358,7 +359,10 @@ temporary files. The package is qualification evidence, not a release artifact.
 Packages contain a canonical manifest, immutable content digests, compatibility
 range, grants, provenance, and CMS signature. Sources are explicit local
 directories or configured HTTPS registries via existing brokered networking;
-there is no default public registry. Installation is immutable and
+there is no default public registry. A local source must use its exact lexical
+canonical path and that path's `realpath` must be identical; symlink aliases and
+noncanonical spellings fail before discovery or lifecycle persistence, and the
+daemon never rewrites signed provenance. Installation is immutable and
 digest-addressed; activation selects a verified digest after staging and health
 checking, update is atomic, and rollback selects a prior verified digest.
 Revocation cancels sessions, terminates provider instances, invalidates caches,
@@ -367,15 +371,32 @@ artifacts recorded in that plugin's ownership ledger. The package and invocation
 fixtures are [`phase09-plugin-v1.json`](../../contracts/v0.0.2/phase09-plugin-v1.json)
 and [`phase09-plugin-invocation-v1.json`](../../contracts/v0.0.2/phase09-plugin-invocation-v1.json).
 
-Gate 12 implements this lifecycle in schema v21 and the authenticated
-`plugin.*` Control API. A per-install signer identifier and bounded DER
-certificate make trust approval explicit; both the provenance signature over
-the immutable package digest and the manifest signature over the canonical
-signature-free payload must verify. Compatibility uses a bounded AND-only
+Gate 12 implements this lifecycle in schema v22 and the authenticated
+`plugin.*` Control API. The daemon loads bounded DER certificates only from the
+out-of-band, root-owned authority at
+`/Library/Application Support/Hostwright/plugin-trusted-signers-v1`; every
+directory component and authority file must remain root-owned and not writable
+by group or other users. The daemon never creates or modifies this authority,
+and Hostwright exposes no command or Control API that provisions it. A system
+administrator must provision the canonical manifest and public DER certificates
+externally; an absent authority permits no plugin package verification. A caller
+may reference a configured signer identifier but cannot supply or alter trust material. Unknown
+signers and legacy caller-certificate fields fail closed. Multiple active
+certificates may overlap for a stable signer identifier during rotation. Both
+the provenance signature over the immutable package digest and the manifest
+signature over the canonical signature-free payload must verify against the
+same configured certificate. Compatibility uses a bounded AND-only
 semantic-version range, and update accepts only a version greater than every
 installed version for the same identifier. The manifest is the complete
 dependency closure: undeclared files, traversal, symlinks, special files,
 content substitution, and signer substitution fail closed.
+
+Absence of the fixed authority path is the only state that loads an empty trust
+set while allowing daemon startup. Once the path exists, an empty, partial,
+malformed, extra-entry, unreadable, or otherwise unsafe authority is globally
+startup-fatal. External root provisioning must assemble and validate the complete
+directory separately and publish it atomically; staged population of the live
+authority path is unsupported.
 
 The immutable store records rollback/install intent before effects, copies
 through descriptor-safe reads into a private stage, records exact file and
@@ -403,7 +424,7 @@ pipeline and persistence authority. Recommended module boundaries are:
 | --- | --- | ---: |
 | `HostwrightControlPlane` | public envelopes, schemas, fixtures, reason codes | 1 |
 | `HostwrightDaemonCore` | socket listener, sessions, request pipeline, drain/restart | 2–3 |
-| `HostwrightState` | v18–v21 records, verified backup/restore | 2–5, 12 |
+| `HostwrightState` | v18–v22 records, verified backup/restore | 2–5, 12 |
 | `HostwrightPolicy` | RBAC, admission, profile evaluation | 5–7 |
 | `HostwrightObservability` | audit verification/export and stream health | 4, 8 |
 | provider/plugin modules | WASI, XPC, package lifecycle | 10–12 |
@@ -454,9 +475,20 @@ formal evidence by the dispatcher or by a fixture substitution.
 
 Gate 15 is the single continuous macOS qualification. It binds current Gates
 1–14 evidence, signed/notarized identities, owned-resource ledgers, and the
-same-process continuous-time sample chain. A failed or interrupted root is
-retained and cannot be resumed with a replacement process or partial elapsed
-time.
+same-process continuous-time sample chain. Its runner and daemon identities are
+versioned kernel-derived bindings over each canonical executable path, complete
+argv, and exact process start time, and each observed state database must report
+the current schema v22 authority. A failed or interrupted root is retained and
+cannot be resumed with a replacement process or partial elapsed time. The
+qualification-only tool is rooted at
+`Qualification/HostwrightPhase09QualificationTool`, is not reachable from any
+declared product. The process-boundary checker permits only the two explicitly
+named qualification executable paths (`Qualification/HostwrightPhase09QualificationTool`
+and `Tests/HostwrightTunnelQualificationTool`) outside `Sources`. The regular
+`HostwrightTestSupport` target is test-only, must remain at
+`Tests/HostwrightTestSupport`, and is rejected from every product closure. The
+shipped-product lint gate verifies the full local target graph and rejects
+`Foundation.Process` from every product closure.
 
 Gate 16 is local closure verification in
 [`phase09-gate16-qualification.sh`](../../scripts/phase09-gate16-qualification.sh).

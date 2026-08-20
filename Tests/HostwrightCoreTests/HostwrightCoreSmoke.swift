@@ -28,6 +28,8 @@ final class HostwrightCoreTests: XCTestCase {
         let securityReference = try read("docs/reference/security-safety.md", root: root)
         let installReference = try read("docs/reference/install.md", root: root)
         let limitations = try read("docs/reference/limitations.md", root: root)
+        let lint = try read("scripts/lint.sh", root: root)
+        let shippedBoundary = try read("scripts/check-shipped-process-boundary.py", root: root)
         let sources = root.appendingPathComponent("Sources", isDirectory: true)
         let enumerator = try XCTUnwrap(FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil))
         var processCallSites: [String] = []
@@ -47,6 +49,21 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertTrue(securityReference.contains("[Secure Process Execution](process-execution.md)"))
         XCTAssertTrue(installReference.contains("[secure process execution boundary](process-execution.md)"))
         XCTAssertTrue(limitations.contains("Phase 02 issue #116 is implemented"))
+        XCTAssertTrue(
+            lint.contains(
+                "swift package dump-package | python3 scripts/check-shipped-process-boundary.py"
+            )
+        )
+        XCTAssertTrue(
+            lint.contains("python3 scripts/check-shipped-process-boundary.py --self-test")
+        )
+        XCTAssertTrue(
+            shippedBoundary.contains(
+                #"QUALIFICATION_PATH = "Qualification/HostwrightPhase09QualificationTool""#
+            )
+        )
+        XCTAssertTrue(shippedBoundary.contains("product {product_name} reaches qualification target"))
+        XCTAssertTrue(shippedBoundary.contains("shipped product closure contains Process callsite"))
         XCTAssertEqual(processCallSites, [])
         XCTAssertFalse(
             FileManager.default.fileExists(

@@ -33,7 +33,8 @@ public struct SQLiteControlIdentitySecurityAdapter: Sendable {
     }
     let matches = identities.filter {
       guard $0.userID == userID,
-        $0.codeIdentity.validationMode == codeIdentity.validationMode
+        $0.codeIdentity.validationMode == codeIdentity.validationMode,
+        $0.codeIdentity.codeDirectoryHash == codeIdentity.codeDirectoryHash
       else { return false }
       switch codeIdentity.validationMode {
       case .installedRequirement:
@@ -42,7 +43,6 @@ public struct SQLiteControlIdentitySecurityAdapter: Sendable {
       case .pinnedAdHoc:
         return $0.codeIdentity.teamIdentifier == nil
           && $0.codeIdentity.signingIdentifier == codeIdentity.signingIdentifier
-          && $0.codeIdentity.codeDirectoryHash == codeIdentity.codeDirectoryHash
       }
     }
     guard let identity = matches.first else {

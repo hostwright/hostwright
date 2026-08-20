@@ -685,7 +685,7 @@ public enum HostwrightCLI {
       hostwright extension check --declaration <absolute-path> --executable <absolute-path> [--output text|json]
       hostwright extension list [--identifier <id>] [--output text|json]
       hostwright extension status (--identifier <id>|--digest <sha256>) [--output text|json]
-      hostwright extension (discover|install|update) --source <absolute-directory|https-url> --signer <id> --signer-certificate <absolute-der-path> [--output text|json]
+      hostwright extension (discover|install|update) --source <absolute-directory|https-url> --signer <configured-id> [--output text|json]
       hostwright extension activate --digest <sha256> [--expected-activation-generation <n>] [--output text|json]
       hostwright extension rollback --identifier <id> [--expected-activation-generation <n>] [--output text|json]
       hostwright extension revoke --revocation-id <id> --target-kind package|signer --target <digest|signer> --reason <reason> [--output text|json]

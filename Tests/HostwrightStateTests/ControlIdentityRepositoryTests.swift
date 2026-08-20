@@ -92,6 +92,169 @@ final class ControlIdentityRepositoryTests: XCTestCase {
     }
   }
 
+  func testInstalledHashRotationIsAtomicRetiresOldHashAndPreservesSubjectRBAC() throws {
+    try withStore { store in
+      let owner = identity(subjectID: "owner", declaredBy: "owner")
+      try store.controlIdentities.bootstrap(owner)
+      try store.rbac.bootstrapDefaultRolesAndOwner(
+        subjectID: owner.subjectID,
+        timestamp: declaredAt
+      )
+      let oldSession = session(subjectID: owner.subjectID)
+      try store.controlIdentities.persistSession(oldSession)
+      let replacement = codeIdentity(hashCharacter: "b")
+
+      try store.withConnection { connection in
+        try connection.execute(
+          """
+          CREATE TRIGGER fail_identity_rotation
+          BEFORE UPDATE OF code_directory_hash ON peer_identities
+          BEGIN SELECT RAISE(ABORT, 'injected identity rotation rollback'); END
+          """
+        )
+      }
+      XCTAssertThrowsError(try store.controlIdentities.rotateInstalledCodeIdentity(
+        subjectID: owner.subjectID,
+        expectedGeneration: owner.generation,
+        replacement: replacement,
+        updatedAt: "2026-08-02T20:02:00Z"
+      ))
+      XCTAssertEqual(
+        try store.controlIdentities.loadIdentity(owner.subjectID)?.codeIdentity,
+        owner.codeIdentity
+      )
+      XCTAssertNil(try store.controlIdentities.loadSession(oldSession.sessionID)?.revokedAt)
+      XCTAssertEqual(try store.withConnection(readOnly: true) { connection in
+        try connection.query(
+          "SELECT COUNT(*) FROM identity_revocations WHERE target_kind = 'codeHash'"
+        ).first?.first
+      }, "0")
+      try store.withConnection { connection in
+        try connection.execute("DROP TRIGGER fail_identity_rotation")
+      }
+
+      let rotated = try store.controlIdentities.rotateInstalledCodeIdentity(
+        subjectID: owner.subjectID,
+        expectedGeneration: owner.generation,
+        replacement: replacement,
+        updatedAt: "2026-08-02T20:03:00Z"
+      )
+      XCTAssertEqual(rotated.subjectID, owner.subjectID)
+      XCTAssertEqual(rotated.codeIdentity, replacement)
+      XCTAssertEqual(rotated.generation, owner.generation + 1)
+      XCTAssertNotNil(try store.controlIdentities.loadSession(oldSession.sessionID)?.revokedAt)
+      XCTAssertTrue(try store.rbac.listBindings().contains(where: {
+        $0.subjectID == owner.subjectID && $0.roleID == "owner"
+      }))
+      XCTAssertThrowsError(try store.controlIdentities.persistSession(oldSession))
+    }
+  }
+
+  func testInstalledHashRotationRetiresSharedHashOnlyAfterLastActiveIdentityMoves() throws {
+    try withStore { store in
+      let owner = identity(subjectID: "owner", declaredBy: "owner", userID: 501)
+      let peer = identity(subjectID: "peer", declaredBy: owner.subjectID, userID: 502)
+      try store.controlIdentities.bootstrap(owner)
+      try store.controlIdentities.declare(peer)
+
+      let ownerSession = session(
+        subjectID: owner.subjectID,
+        sessionID: "owner-old-hash-session",
+        effectiveUID: owner.userID
+      )
+      let peerSession = session(
+        subjectID: peer.subjectID,
+        sessionID: "peer-old-hash-session",
+        effectiveUID: peer.userID
+      )
+      try store.controlIdentities.persistSession(ownerSession)
+      try store.controlIdentities.persistSession(peerSession)
+
+      let rotatedOwner = try store.controlIdentities.rotateInstalledCodeIdentity(
+        subjectID: owner.subjectID,
+        expectedGeneration: owner.generation,
+        replacement: codeIdentity(hashCharacter: "b"),
+        updatedAt: "2026-08-02T20:02:00Z"
+      )
+      XCTAssertEqual(rotatedOwner.codeIdentity.codeDirectoryHash, digest("b"))
+      XCTAssertNotNil(
+        try store.controlIdentities.loadSession(ownerSession.sessionID)?.revokedAt
+      )
+      XCTAssertEqual(
+        try store.controlIdentities.validateActiveSession(
+          peerSession.sessionID,
+          daemonGeneration: peerSession.daemonGeneration,
+          at: "2026-08-02T20:02:30Z"
+        ),
+        peerSession
+      )
+      XCTAssertEqual(
+        try globalCodeHashRetirementCount(digest("a"), in: store),
+        0
+      )
+
+      let rotatedPeer = try store.controlIdentities.rotateInstalledCodeIdentity(
+        subjectID: peer.subjectID,
+        expectedGeneration: peer.generation,
+        replacement: codeIdentity(hashCharacter: "c"),
+        updatedAt: "2026-08-02T20:03:00Z"
+      )
+      XCTAssertEqual(rotatedPeer.codeIdentity.codeDirectoryHash, digest("c"))
+      XCTAssertNotNil(
+        try store.controlIdentities.loadSession(peerSession.sessionID)?.revokedAt
+      )
+      XCTAssertEqual(
+        try globalCodeHashRetirementCount(digest("a"), in: store),
+        1
+      )
+      XCTAssertThrowsError(
+        try store.controlIdentities.validateActiveSession(
+          peerSession.sessionID,
+          daemonGeneration: peerSession.daemonGeneration,
+          at: "2026-08-02T20:03:30Z"
+        )
+      )
+    }
+  }
+
+  func testInstalledHashRotationFailsClosedOnPreexistingGlobalRetirement() throws {
+    try withStore { store in
+      let owner = identity(subjectID: "owner", declaredBy: "owner")
+      try store.controlIdentities.bootstrap(owner)
+      try store.withConnection { connection in
+        try connection.run(
+          """
+          INSERT INTO identity_revocations (
+              revocation_id, target_kind, target_identifier, reason,
+              actor_subject_id, revoked_at
+          ) VALUES (?, 'codeHash', ?, ?, ?, ?)
+          """,
+          bindings: [
+            .text("preexisting-global-retirement"),
+            .text(owner.codeIdentity.codeDirectoryHash),
+            .text("injected inconsistent active-state fixture"),
+            .text(owner.subjectID),
+            .text("2026-08-02T20:01:30Z"),
+          ]
+        )
+      }
+
+      XCTAssertThrowsError(
+        try store.controlIdentities.rotateInstalledCodeIdentity(
+          subjectID: owner.subjectID,
+          expectedGeneration: owner.generation,
+          replacement: codeIdentity(hashCharacter: "b"),
+          updatedAt: "2026-08-02T20:02:00Z"
+        )
+      )
+      XCTAssertEqual(try store.controlIdentities.loadIdentity(owner.subjectID), owner)
+      XCTAssertEqual(
+        try globalCodeHashRetirementCount(owner.codeIdentity.codeDirectoryHash, in: store),
+        1
+      )
+    }
+  }
+
   func testRejectsInvalidIdentityAndCredentialBoundaries() throws {
     try withStore { store in
       let invalidTeam = ControlPeerIdentityRecord(
@@ -160,7 +323,9 @@ final class ControlIdentityRepositoryTests: XCTestCase {
   func testExpiryAndAllRevocationTargetsTakeEffectImmediately() throws {
     try withStore { store in
       try store.controlIdentities.bootstrap(identity(subjectID: "owner", declaredBy: "owner"))
-      let target = identity(subjectID: "target", declaredBy: "owner", hashCharacter: "b")
+      let target = identity(
+        subjectID: "target", declaredBy: "owner", hashCharacter: "b",
+        signingIdentifier: "dev.hostwright.target")
       try store.controlIdentities.declare(target)
       let targetSession = session(
         subjectID: "target", sessionID: "target-session", hashCharacter: "b")
@@ -180,7 +345,8 @@ final class ControlIdentityRepositoryTests: XCTestCase {
 
       let credentialIdentity = identity(
         subjectID: "credential-target", declaredBy: "owner", hashCharacter: "c",
-        credentialID: "credential-target", credentialPublicKeyBase64: signingKeyBase64()
+        credentialID: "credential-target", credentialPublicKeyBase64: signingKeyBase64(),
+        signingIdentifier: "dev.hostwright.credential-target"
       )
       try store.controlIdentities.declare(credentialIdentity)
       let credentialSession = session(
@@ -193,18 +359,23 @@ final class ControlIdentityRepositoryTests: XCTestCase {
       XCTAssertNotNil(try store.controlIdentities.loadIdentity("credential-target")?.revokedAt)
       XCTAssertNotNil(try store.controlIdentities.loadSession("credential-session")?.revokedAt)
 
-      let hashIdentity = identity(subjectID: "hash-target", declaredBy: "owner", hashCharacter: "d")
+      let hashIdentity = identity(
+        subjectID: "hash-target", declaredBy: "owner", hashCharacter: "d",
+        signingIdentifier: "dev.hostwright.hash-target")
       try store.controlIdentities.declare(hashIdentity)
       try store.controlIdentities.revoke(revocation("hash-target", .codeHash, digest("d")))
       XCTAssertNotNil(try store.controlIdentities.loadIdentity("hash-target")?.revokedAt)
       XCTAssertThrowsError(
         try store.controlIdentities.declare(
-          identity(subjectID: "hash-reuse", declaredBy: "owner", hashCharacter: "d")
+          identity(
+            subjectID: "hash-reuse", declaredBy: "owner", hashCharacter: "d",
+            signingIdentifier: "dev.hostwright.hash-reuse")
         )
       )
 
       let sessionIdentity = identity(
-        subjectID: "session-target", declaredBy: "owner", hashCharacter: "e")
+        subjectID: "session-target", declaredBy: "owner", hashCharacter: "e",
+        signingIdentifier: "dev.hostwright.session-target")
       try store.controlIdentities.declare(sessionIdentity)
       let sessionTarget = session(
         subjectID: "session-target", sessionID: "session-target", hashCharacter: "e")
@@ -264,14 +435,18 @@ final class ControlIdentityRepositoryTests: XCTestCase {
   private func identity(
     subjectID: String,
     declaredBy: String,
+    userID: UInt32 = 501,
     validationMode: CodeValidationMode = .installedRequirement,
     hashCharacter: Character = "a",
     credentialID: String? = nil,
-    credentialPublicKeyBase64: String? = nil
+    credentialPublicKeyBase64: String? = nil,
+    signingIdentifier: String = "dev.hostwright.client"
   ) -> ControlPeerIdentityRecord {
     ControlPeerIdentityRecord(
-      subjectID: subjectID, userID: 501,
-      codeIdentity: codeIdentity(validationMode: validationMode, hashCharacter: hashCharacter),
+      subjectID: subjectID, userID: userID,
+      codeIdentity: codeIdentity(
+        validationMode: validationMode, hashCharacter: hashCharacter,
+        signingIdentifier: signingIdentifier),
       credentialID: credentialID, credentialPublicKeyBase64: credentialPublicKeyBase64,
       declaredBySubjectID: declaredBy, declaredAt: declaredAt,
       credentialExpiresAt: credentialID == nil ? nil : "2026-08-03T20:00:00Z",
@@ -281,11 +456,12 @@ final class ControlIdentityRepositoryTests: XCTestCase {
 
   private func codeIdentity(
     validationMode: CodeValidationMode = .installedRequirement,
-    hashCharacter: Character = "a"
+    hashCharacter: Character = "a",
+    signingIdentifier: String = "dev.hostwright.client"
   ) -> CodeIdentity {
     CodeIdentity(
       teamIdentifier: validationMode == .installedRequirement ? "993YC3JY4Q" : nil,
-      signingIdentifier: "dev.hostwright.client", codeDirectoryHash: digest(hashCharacter),
+      signingIdentifier: signingIdentifier, codeDirectoryHash: digest(hashCharacter),
       validationMode: validationMode
     )
   }
@@ -293,6 +469,7 @@ final class ControlIdentityRepositoryTests: XCTestCase {
   private func session(
     subjectID: String,
     sessionID: String = "owner-session",
+    effectiveUID: UInt32 = 501,
     hashCharacter: Character = "a",
     credentialID: String? = nil,
     expiresAt: String = "2026-08-02T22:00:00Z"
@@ -300,7 +477,8 @@ final class ControlIdentityRepositoryTests: XCTestCase {
     ControlSessionRecord(
       sessionID: sessionID, subjectID: subjectID, daemonGeneration: 1,
       serverNonceSHA256: digest("f"), socketDevice: 1, socketInode: 2,
-      effectiveUID: 501, effectiveGID: 20, pid: 123, pidVersion: 1, auditSessionID: 1,
+      effectiveUID: effectiveUID, effectiveGID: 20, pid: 123, pidVersion: 1,
+      auditSessionID: 1,
       codeDirectoryHash: digest(hashCharacter), credentialID: credentialID,
       createdAt: declaredAt, expiresAt: expiresAt, updatedAt: updatedAt
     )
@@ -315,6 +493,22 @@ final class ControlIdentityRepositoryTests: XCTestCase {
       revocationID: id, targetKind: targetKind, targetIdentifier: target,
       reason: "security test", actorSubjectID: "owner", revokedAt: "2026-08-02T20:30:00Z"
     )
+  }
+
+  private func globalCodeHashRetirementCount(
+    _ hash: String,
+    in store: SQLiteStateStore
+  ) throws -> Int {
+    try store.withConnection(readOnly: true) { connection in
+      Int(try XCTUnwrap(connection.query(
+        """
+        SELECT COUNT(*)
+        FROM identity_revocations
+        WHERE target_kind = 'codeHash' AND target_identifier = ?
+        """,
+        bindings: [.text(hash)]
+      ).first?.first ?? nil)) ?? -1
+    }
   }
 
   private func signingKeyBase64() -> String {

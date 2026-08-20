@@ -109,7 +109,8 @@ final class Phase09Gate15QualificationHarnessTests: XCTestCase {
     try withRoot { root, environment in
       XCTAssertEqual(try run(["prepare", "15"], environment: environment).status, 0)
       let marker = root.appendingPathComponent("run-started-v1.json")
-      try Data("{\"runnerPID\":99999999,\"runnerStartIdentity\":\"1.1\",\"status\":\"runner-started\"}\n".utf8).write(to: marker)
+      let identity = "v1.\(String(repeating: "a", count: 64)).\(String(repeating: "b", count: 64)).1.1"
+      try Data("{\"runnerPID\":99999999,\"runnerStartIdentity\":\"\(identity)\",\"status\":\"runner-started\"}\n".utf8).write(to: marker)
       try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: marker.path)
       let stale = try run(["run", "15"], environment: environment)
       XCTAssertEqual(stale.status, 73, stale.stderr)
@@ -119,6 +120,82 @@ final class Phase09Gate15QualificationHarnessTests: XCTestCase {
       XCTAssertEqual(manifest?["status"] as? String, "failed")
       XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("active-run-v1").path))
     }
+  }
+
+  func testLiveRunMarkerRequiresTheKernelDerivedIdentityForTheSamePID() throws {
+    let markerIdentity = strongIdentity("a", "b", seconds: 1, microseconds: 2)
+    let otherIdentity = strongIdentity("c", "d", seconds: 3, microseconds: 4)
+
+    try withRoot { root, environment in
+      XCTAssertEqual(try run(["prepare", "15"], environment: environment).status, 0)
+      try seedLiveRun(root: root, processID: getpid(), identity: markerIdentity)
+      var matching = environment
+      matching["HOSTWRIGHT_PHASE09_HARNESS_TEST_PROCESS_IDENTITY"] = markerIdentity
+      let duplicate = try run(["run", "15"], environment: matching)
+      XCTAssertEqual(duplicate.status, 75, duplicate.stderr)
+      XCTAssertTrue(duplicate.stderr.contains("already live runner"), duplicate.stderr)
+    }
+
+    try withRoot { root, environment in
+      XCTAssertEqual(try run(["prepare", "15"], environment: environment).status, 0)
+      try seedLiveRun(root: root, processID: getpid(), identity: markerIdentity)
+      var replaced = environment
+      replaced["HOSTWRIGHT_PHASE09_HARNESS_TEST_PROCESS_IDENTITY"] = otherIdentity
+      let stale = try run(["run", "15"], environment: replaced)
+      XCTAssertEqual(stale.status, 73, stale.stderr)
+      XCTAssertTrue(stale.stderr.contains("permanently frozen"), stale.stderr)
+      XCTAssertTrue(FileManager.default.fileExists(
+        atPath: root.appendingPathComponent("failure-v1.tsv").path))
+    }
+
+    try withRoot { root, environment in
+      XCTAssertEqual(try run(["prepare", "15"], environment: environment).status, 0)
+      try seedLiveRun(
+        root: root, processID: getpid(), identity: markerIdentity, toolMode: 0o777)
+      var tampered = environment
+      tampered["HOSTWRIGHT_PHASE09_HARNESS_TEST_PROCESS_IDENTITY"] = markerIdentity
+      let stale = try run(["run", "15"], environment: tampered)
+      XCTAssertEqual(stale.status, 73, stale.stderr)
+      XCTAssertTrue(stale.stderr.contains("permanently frozen"), stale.stderr)
+    }
+
+    try withRoot { root, environment in
+      XCTAssertEqual(try run(["prepare", "15"], environment: environment).status, 0)
+      try seedLiveRun(
+        root: root,
+        processID: getpid(),
+        identity: markerIdentity,
+        toolDigest: "tampered-qualification-tool")
+      var tampered = environment
+      tampered["HOSTWRIGHT_PHASE09_HARNESS_TEST_PROCESS_IDENTITY"] = markerIdentity
+      let stale = try run(["run", "15"], environment: tampered)
+      XCTAssertEqual(stale.status, 73, stale.stderr)
+      XCTAssertTrue(stale.stderr.contains("permanently frozen"), stale.stderr)
+    }
+
+    for stringifiedField in ["toolDevice", "toolInode", "toolMode"] {
+      try withRoot { root, environment in
+        XCTAssertEqual(try run(["prepare", "15"], environment: environment).status, 0)
+        try seedLiveRun(
+          root: root,
+          processID: getpid(),
+          identity: markerIdentity,
+          stringifiedToolField: stringifiedField)
+        var tampered = environment
+        tampered["HOSTWRIGHT_PHASE09_HARNESS_TEST_PROCESS_IDENTITY"] = markerIdentity
+        let stale = try run(["run", "15"], environment: tampered)
+        XCTAssertEqual(stale.status, 73, "\(stringifiedField): \(stale.stderr)")
+        XCTAssertTrue(
+          stale.stderr.contains("permanently frozen"),
+          "\(stringifiedField): \(stale.stderr)")
+      }
+    }
+
+    let source = try String(contentsOf: qualificationHarness, encoding: .utf8)
+    XCTAssertTrue(source.contains("process-identity --pid \"$pid\""))
+    XCTAssertTrue(source.contains("\"$live_start\" == \"$marker_start\""))
+    XCTAssertTrue(source.contains(".toolDigest // empty"))
+    XCTAssertTrue(source.contains(".toolMode // -1"))
   }
 
   func testElapsedResumeIsRejectedBeforeCells() throws {
@@ -167,7 +244,7 @@ final class Phase09Gate15QualificationHarnessTests: XCTestCase {
     let qualification = try String(contentsOf: qualificationHarness, encoding: .utf8)
     let live = try String(contentsOf: liveHarness, encoding: .utf8)
     let tool = try String(
-      contentsOf: repository.appendingPathComponent("Sources/HostwrightPhase09QualificationTool/main.swift"),
+      contentsOf: repository.appendingPathComponent("Qualification/HostwrightPhase09QualificationTool/main.swift"),
       encoding: .utf8
     )
     let combined = qualification + "\n" + live + "\n" + tool
@@ -180,7 +257,7 @@ final class Phase09Gate15QualificationHarnessTests: XCTestCase {
     let qualification = try String(contentsOf: qualificationHarness, encoding: .utf8)
     let live = try String(contentsOf: liveHarness, encoding: .utf8)
     let tool = try String(
-      contentsOf: repository.appendingPathComponent("Sources/HostwrightPhase09QualificationTool/main.swift"),
+      contentsOf: repository.appendingPathComponent("Qualification/HostwrightPhase09QualificationTool/main.swift"),
       encoding: .utf8
     )
     for required in [
@@ -282,7 +359,7 @@ final class Phase09Gate15QualificationHarnessTests: XCTestCase {
     let live = try String(contentsOf: liveHarness, encoding: .utf8)
     let qualification = try String(contentsOf: qualificationHarness, encoding: .utf8)
     let tool = try String(
-      contentsOf: repository.appendingPathComponent("Sources/HostwrightPhase09QualificationTool/main.swift"),
+      contentsOf: repository.appendingPathComponent("Qualification/HostwrightPhase09QualificationTool/main.swift"),
       encoding: .utf8
     )
     XCTAssertTrue(live.contains("readonly canonical_tool_path='/Users/dev/Documents/hostwright-phase09/.build/release/HostwrightPhase09QualificationTool'"))
@@ -314,7 +391,7 @@ final class Phase09Gate15QualificationHarnessTests: XCTestCase {
 
   func testProviderRuntimeAndSleepFieldsRequireIndependentTrustedObservation() throws {
     let tool = try String(
-      contentsOf: repository.appendingPathComponent("Sources/HostwrightPhase09QualificationTool/main.swift"),
+      contentsOf: repository.appendingPathComponent("Qualification/HostwrightPhase09QualificationTool/main.swift"),
       encoding: .utf8
     )
     XCTAssertTrue(tool.contains("Gate15ObservationBinding.validate"))
@@ -350,7 +427,7 @@ final class Phase09Gate15QualificationHarnessTests: XCTestCase {
     let qualification = try String(contentsOf: qualificationHarness, encoding: .utf8)
     let live = try String(contentsOf: liveHarness, encoding: .utf8)
     let tool = try String(
-      contentsOf: repository.appendingPathComponent("Sources/HostwrightPhase09QualificationTool/main.swift"),
+      contentsOf: repository.appendingPathComponent("Qualification/HostwrightPhase09QualificationTool/main.swift"),
       encoding: .utf8
     )
     XCTAssertTrue(qualification.contains("validate_complete_sample_ledger reuse"))
@@ -378,7 +455,7 @@ final class Phase09Gate15QualificationHarnessTests: XCTestCase {
     let qualification = try String(contentsOf: qualificationHarness, encoding: .utf8)
     let live = try String(contentsOf: liveHarness, encoding: .utf8)
     let tool = try String(
-      contentsOf: repository.appendingPathComponent("Sources/HostwrightPhase09QualificationTool/main.swift"),
+      contentsOf: repository.appendingPathComponent("Qualification/HostwrightPhase09QualificationTool/main.swift"),
       encoding: .utf8
     )
     for source in [qualification, live] {
@@ -402,9 +479,15 @@ final class Phase09Gate15QualificationHarnessTests: XCTestCase {
 
   func testQualificationToolIsNotPublishedAsAReleaseProduct() throws {
     let package = try String(contentsOf: repository.appendingPathComponent("Package.swift"), encoding: .utf8)
+    let lint = try String(
+      contentsOf: repository.appendingPathComponent("scripts/lint.sh"), encoding: .utf8)
     XCTAssertTrue(package.contains("name: \"HostwrightPhase09QualificationTool\""))
+    XCTAssertTrue(package.contains("dependencies: [\"HostwrightCore\"]"))
+    XCTAssertTrue(package.contains("path: \"Qualification/HostwrightPhase09QualificationTool\""))
     XCTAssertTrue(package.contains("name: \"HostwrightPhase09QualificationToolTests\""))
     XCTAssertFalse(package.contains(".executable(name: \"hostwright-phase09-qualification\""))
+    XCTAssertTrue(lint.contains("swift package dump-package | python3 scripts/check-shipped-process-boundary.py"))
+    XCTAssertTrue(lint.contains("scripts/check-shipped-process-boundary.py --self-test"))
   }
 
   private struct Result {
@@ -455,6 +538,57 @@ final class Phase09Gate15QualificationHarnessTests: XCTestCase {
       "HOSTWRIGHT_PHASE09_GATE_ROOT": canonicalRoot.path,
     ]
     try body(canonicalRoot, environment)
+  }
+
+  private func seedLiveRun(
+    root: URL,
+    processID: Int32,
+    identity: String,
+    toolMode: Int = 0o755,
+    toolDigest: String = "testing-qualification-tool",
+    stringifiedToolField: String? = nil
+  ) throws {
+    let rootLock = root.appendingPathComponent("active-run-v1", isDirectory: true)
+    let gateLock = root.deletingLastPathComponent()
+      .appendingPathComponent(".phase09-gate15-active-v1", isDirectory: true)
+    try FileManager.default.createDirectory(at: rootLock, withIntermediateDirectories: false)
+    try FileManager.default.createDirectory(at: gateLock, withIntermediateDirectories: false)
+    try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: rootLock.path)
+    try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: gateLock.path)
+    var marker: [String: Any] = [
+      "schema": "hostwright.phase09.gate15.run-started.v1",
+      "runnerPID": Int(processID),
+      "runnerStartIdentity": identity,
+      "status": "runner-started",
+      "root": root.path,
+      "toolPath": "/Users/dev/Documents/hostwright-phase09/.build/release/HostwrightPhase09QualificationTool",
+      "toolDevice": 0,
+      "toolInode": 0,
+      "toolMode": toolMode,
+      "toolDigest": toolDigest,
+    ]
+    if let stringifiedToolField {
+      marker[stringifiedToolField] = String(describing: marker[stringifiedToolField]!)
+    }
+    let state: [String: Any] = [
+      "runnerPID": Int(processID),
+      "runnerStartIdentity": identity,
+      "status": "running",
+    ]
+    for (name, object) in [
+      ("run-started-v1.json", marker),
+      ("runner-state-v1.json", state),
+    ] {
+      let path = root.appendingPathComponent(name)
+      try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]).write(to: path)
+      try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path.path)
+    }
+  }
+
+  private func strongIdentity(
+    _ path: Character, _ command: Character, seconds: UInt64, microseconds: UInt64
+  ) -> String {
+    "v1.\(String(repeating: String(path), count: 64)).\(String(repeating: String(command), count: 64)).\(seconds).\(microseconds)"
   }
 
   private func canonical(_ url: URL) throws -> URL {

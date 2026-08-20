@@ -144,7 +144,7 @@ final class SecurePluginPackageTests: XCTestCase {
         XCTAssertEqual(verified.manifest, fixture.manifest)
         XCTAssertEqual(verified.manifestData, fixture.manifestData)
         XCTAssertEqual(verified.packageDigest, fixture.packageDigest)
-        XCTAssertEqual(verified.sourceDirectoryURL, fixture.root.standardizedFileURL)
+        XCTAssertEqual(verified.sourceDirectoryURL, fixture.root)
     }
 
     func testVerifierRejectsNonCanonicalManifestAndUndeclaredDependency() throws {
@@ -551,7 +551,12 @@ final class SecurePluginPackageTests: XCTestCase {
         addTeardownBlock {
             try? FileManager.default.removeItem(at: url)
         }
-        return url
+        guard let resolved = realpath(url.path, nil) else {
+            XCTFail("Could not resolve the plugin fixture root")
+            return url
+        }
+        defer { free(resolved) }
+        return URL(fileURLWithPath: String(cString: resolved), isDirectory: true)
     }
 
     private func assertDiagnostic<T>(

@@ -1,6 +1,7 @@
 import CryptoKit
 import Darwin
 import Foundation
+import HostwrightCore
 
 public struct Gate15QualificationError: Error, Equatable, CustomStringConvertible {
   public let code: String
@@ -1341,8 +1342,14 @@ public struct Gate15ContinuityLedger {
           observation.observedAtUTC.count <= 40,
           observation.runner.pid > 0,
           observation.daemon.pid > 0,
-          observation.runner.startIdentity.range(of: "^[A-Za-z0-9._:-]{1,128}$", options: .regularExpression) != nil,
-          observation.daemon.startIdentity.range(of: "^[A-Za-z0-9._:-]{1,128}$", options: .regularExpression) != nil else {
+          observation.runner.startIdentity.range(
+            of: "^v1\\.[a-f0-9]{64}\\.[a-f0-9]{64}\\.[0-9]+\\.[0-9]+$",
+            options: .regularExpression
+          ) != nil,
+          observation.daemon.startIdentity.range(
+            of: "^v1\\.[a-f0-9]{64}\\.[a-f0-9]{64}\\.[0-9]+\\.[0-9]+$",
+            options: .regularExpression
+          ) != nil else {
       throw Gate15QualificationError("invalidIdentity", "process and boot identities must be present and bounded.")
     }
     guard observation.executable.sha256.range(of: "^sha256:[0-9a-f]{64}$", options: .regularExpression) != nil,
@@ -1354,7 +1361,7 @@ public struct Gate15ContinuityLedger {
     guard observation.stateDatabase.identityDigest.range(of: "^sha256:[0-9a-f]{64}$", options: .regularExpression) != nil,
           observation.stateDatabase.sizeBytes > 0,
           observation.stateDatabase.integrity == "verified",
-          observation.stateDatabase.schema > 0,
+          observation.stateDatabase.schema == UInt64(HostwrightContractVersions.stateSchema),
           observation.runtime.imageDigest.range(of: "^sha256:[0-9a-f]{64}$", options: .regularExpression) != nil,
           observation.runtime.inventoryDigest.range(of: "^sha256:[0-9a-f]{64}$", options: .regularExpression) != nil,
           !observation.runtime.runtimeUUID.contains("/"),
@@ -2151,23 +2158,15 @@ public struct Gate15SystemProcessIdentityProvider: Gate15ProcessIdentityProvider
   }
 
   public func lookup(pid: Int32) throws -> Gate15ProcessIdentity {
-    guard pid > 0 else {
-      throw Gate15QualificationError("processIdentityUnavailable", "process ID must be positive.")
-    }
-    var info = proc_bsdinfo()
-    let size = proc_pidinfo(
-      pid,
-      PROC_PIDTBSDINFO,
-      0,
-      &info,
-      Int32(MemoryLayout<proc_bsdinfo>.size)
-    )
-    guard size == Int32(MemoryLayout<proc_bsdinfo>.size) else {
+    let identity: HostwrightDarwinProcessIdentity
+    do {
+      identity = try HostwrightDarwinProcessIdentity.lookup(processID: pid)
+    } catch {
       throw Gate15QualificationError("processIdentityUnavailable", "the process start identity is unavailable.")
     }
     return Gate15ProcessIdentity(
       pid: pid,
-      startIdentity: "\(info.pbi_start_tvsec).\(info.pbi_start_tvusec)"
+      startIdentity: identity.strongIdentity
     )
   }
 }
@@ -2994,12 +2993,13 @@ public enum Gate15ToolCommand: Equatable {
   case contract
   case diagnose
   case prepare
+  case processIdentity(pid: Int32)
   case run(root: URL)
   case status(root: URL)
 
   public static func parse(_ arguments: [String]) throws -> Gate15ToolCommand {
     guard let first = arguments.first else {
-      throw Gate15QualificationError("usage", "usage: contract|diagnose|prepare|run --root PATH|status --root PATH")
+      throw Gate15QualificationError("usage", "usage: contract|diagnose|prepare|process-identity --pid PID|run --root PATH|status --root PATH")
     }
     switch first {
     case "contract":
@@ -3011,6 +3011,13 @@ public enum Gate15ToolCommand: Equatable {
     case "prepare":
       guard arguments.count == 1 else { throw Gate15QualificationError("usage", "prepare accepts no arguments.") }
       return .prepare
+    case "process-identity":
+      guard arguments.count == 3, arguments[1] == "--pid",
+            arguments[2].range(of: "^[1-9][0-9]*$", options: .regularExpression) != nil,
+            let pid = Int32(arguments[2]), pid > 0 else {
+        throw Gate15QualificationError("usage", "process-identity requires --pid PID.")
+      }
+      return .processIdentity(pid: pid)
     case "run", "status":
       guard arguments.count == 3, arguments[1] == "--root", arguments[2].hasPrefix("/") else {
         throw Gate15QualificationError("usage", "\(first) requires --root PATH.")
@@ -3044,6 +3051,9 @@ public enum Gate15QualificationTool {
         formal: false,
         reason: "formal root preparation belongs to the shell qualification harness"
       ))
+    case .processIdentity(let pid):
+      let identity = try Gate15SystemProcessIdentityProvider().lookup(pid: pid)
+      return Data(identity.startIdentity.utf8)
     case .status(let root):
       return try status(root: root, environment: environment)
     case .run(let root):

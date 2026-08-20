@@ -17,7 +17,8 @@ readonly state_header=$'gate\tcell\tstatus\tsource_digest\tconfig_digest\ttoolch
 readonly ownership_header=$'recorded_at\ttype\tidentifier\tpath\tdevice\tinode\tidentity'
 
 root='' parent='' source_commit='' source_digest_value='' config_digest_value=''
-toolchain_digest_value='' root_lock_created=0 gate_lock_created=0 run_succeeded=0 cleanup_completed=0
+toolchain_digest_value='' process_identity_tool=''
+root_lock_created=0 gate_lock_created=0 run_succeeded=0 cleanup_completed=0
 
 die() { printf '%s\n' "$1" >&2; exit "${2:-70}"; }
 now() { /bin/date -u +%Y-%m-%dT%H:%M:%SZ; }
@@ -166,22 +167,34 @@ record_artifact() {
 }
 
 record_process() {
-  local pid="$1" executable="$2" identifier="$3" command start
+  local pid="$1" executable="$2" identifier="$3" identity
   [[ "$pid" =~ ^[1-9][0-9]*$ && -f "$executable" && ! -L "$executable" ]] || die 'provider-worker process identity is unsafe.'
-  command="$(ps -p "$pid" -o command=)"; start="$(ps -p "$pid" -o lstart=)"
-  printf '%s\tprocess\t%s\t%s\t%s\t%s\tpid=%s;command_sha256=%s;start_sha256=%s\n' \
-    "$(now)" "$identifier" "$executable" "$(stat -f '%d' "$executable")" "$(stat -f '%i' "$executable")" "$pid" "$(printf '%s' "$command" | stream_sha)" "$(printf '%s' "$start" | stream_sha)" >> "$root/ownership-v1.tsv"
+  identity="$(revalidate_process_identity "$pid" "$executable")"
+  printf '%s\tprocess\t%s\t%s\t%s\t%s\t%s\n' \
+    "$(now)" "$identifier" "$executable" "$(stat -f '%d' "$executable")" "$(stat -f '%i' "$executable")" "$identity" >> "$root/ownership-v1.tsv"
+}
+
+revalidate_process_identity() {
+  local pid="$1" executable="$2" identity
+  [[ -n "$process_identity_tool" && -f "$process_identity_tool" && ! -L "$process_identity_tool" ]] \
+    || die 'provider-worker identity revalidation tool is unavailable; cleanup is refused.'
+  identity="$("$process_identity_tool" --process-identity "$pid" --expected-executable "$executable")" \
+    || die 'provider-worker identity revalidation failed; cleanup is refused.'
+  [[ "$identity" =~ ^pid=[1-9][0-9]*\;command_sha256=[a-f0-9]{64}\;start_sha256=[a-f0-9]{64}$ ]] \
+    || die 'provider-worker identity revalidation returned an invalid token; cleanup is refused.'
+  printf '%s\n' "$identity"
 }
 
 stop_exact_process() {
-  local path="$1" device="$2" inode="$3" identity="$4" pid command_sha start_sha command start n
+  local path="$1" device="$2" inode="$3" identity="$4" pid command_sha start_sha current_identity n
   pid="${identity#pid=}"; pid="${pid%%;*}"
   command_sha="${identity#*command_sha256=}"; command_sha="${command_sha%%;*}"
   start_sha="${identity#*start_sha256=}"; start_sha="${start_sha%%;*}"
   [[ "$pid" =~ ^[1-9][0-9]*$ && -f "$path" && ! -L "$path" && "$(stat -f '%d' "$path")" == "$device" && "$(stat -f '%i' "$path")" == "$inode" ]] || die 'provider-worker identity changed; cleanup is refused.'
   kill -0 "$pid" 2>/dev/null || return 0
-  command="$(ps -p "$pid" -o command=)"; start="$(ps -p "$pid" -o lstart=)"
-  [[ "$(printf '%s' "$command" | stream_sha)" == "$command_sha" && "$(printf '%s' "$start" | stream_sha)" == "$start_sha" ]] || die 'provider-worker identity changed; cleanup is refused.'
+  current_identity="$(revalidate_process_identity "$pid" "$path")"
+  [[ "$current_identity" == "$identity" && "$command_sha" =~ ^[a-f0-9]{64}$ && "$start_sha" =~ ^[a-f0-9]{64}$ ]] \
+    || die 'provider-worker identity changed; cleanup is refused.'
   kill -TERM "$pid"
   for n in {1..50}; do kill -0 "$pid" 2>/dev/null || return 0; /bin/sleep .1; done
   die 'owned provider-worker did not stop; cleanup is frozen.' 124
@@ -224,6 +237,7 @@ live() {
   record_artifact temporary-file guest-reference "$reference"
   record_artifact temporary-file guest-adversarial "$adversarial"
   qualification="$host_bin/hostwright-wasi-provider-qualification"
+  process_identity_tool="$qualification"
   HOSTWRIGHT_WASI_PROVIDER_WORKER="$host_bin/hostwright-wasi-provider-worker" \
     HOSTWRIGHT_WASI_OWNERSHIP_LEDGER="$root/ownership-v1.tsv" \
     "$qualification" --reference "$reference" --adversarial "$adversarial"

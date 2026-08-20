@@ -698,7 +698,7 @@ update_run_started_from_request() {
   runner_pid="$(/usr/bin/jq -r '.runnerPID' "$request")"
   runner_start="$(/usr/bin/jq -r '.runnerStartIdentity' "$request")"
   requested_at="$(/usr/bin/jq -r '.requestedAtUTC' "$request")"
-  [[ "$runner_pid" =~ ^[1-9][0-9]*$ && "$runner_start" =~ ^[0-9]+\.[0-9]+$ ]] \
+  [[ "$runner_pid" =~ ^[1-9][0-9]*$ && "$runner_start" =~ ^v1\.[a-f0-9]{64}\.[a-f0-9]{64}\.[0-9]+\.[0-9]+$ ]] \
     || die 'Gate 15 launch request does not identify a valid runner.' 74
   printf '%s\n%s\n' "$lock_info_header" \
     "$(printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' "$root" "$runner_pid" "$runner_start" "$requested_at" \
@@ -754,7 +754,7 @@ publish_launch_authorization() {
   nonce="$(/usr/bin/jq -r '.nonce' <<< "$request_json")"
   requested_at="$(/usr/bin/jq -r '.requestedAtUTC' <<< "$request_json")"
   [[ "$request_schema" == 'hostwright.phase09.gate15.launch-request.v1' && "$request_root" == "$root" \
-    && "$runner_pid" =~ ^[1-9][0-9]*$ && "$runner_start" =~ ^[0-9]+\.[0-9]+$ \
+    && "$runner_pid" =~ ^[1-9][0-9]*$ && "$runner_start" =~ ^v1\.[a-f0-9]{64}\.[a-f0-9]{64}\.[0-9]+\.[0-9]+$ \
     && "$request_boot" =~ ^[A-Fa-f0-9-]{36}$ \
     && "$nonce" =~ ^[a-f0-9]{64}$ && "$requested_at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?Z$ ]] \
     || die 'Gate 15 launch request is not bound to the exact runner and UTC endpoint.' 124

@@ -4,6 +4,7 @@ import HostwrightCore
 
 enum StateAccessMode {
     case shared
+    case observation
     case write
     case exclusive
 }
@@ -141,7 +142,7 @@ struct StateAccessCoordinator {
             deadline: deadline,
             role: "state-access fence"
         )
-        if mode == .shared || mode == .write {
+        if mode == .observation || mode == .write {
             let descriptor = try openSecureLock(paths.accessLockPath + ".writer")
             writerDescriptor = descriptor
             try acquire(

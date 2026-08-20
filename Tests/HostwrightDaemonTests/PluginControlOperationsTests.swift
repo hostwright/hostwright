@@ -54,6 +54,128 @@ final class PluginControlOperationsTests: XCTestCase {
     }
   }
 
+  func testCallerSuppliedTrustMaterialIsRejectedBeforePersistence() throws {
+    try withFixture { fixture in
+      let package = try fixture.makePackage(version: "1.0.0")
+      var body = fixture.installBody(package)
+      body["trustedSignerCertificateDER"] = .string(fixture.signer.certificateDER.base64EncodedString())
+
+      let response = try XCTUnwrap(fixture.handle(request(
+        "plugin.install", idempotencyKey: "legacy-caller-trust", body: body)))
+
+      XCTAssertEqual(response.status, .rejected)
+      XCTAssertEqual(response.error?.code, "invalidPluginRequest")
+      XCTAssertTrue(try fixture.repository.listPackages().isEmpty)
+    }
+  }
+
+  func testInstallRequiresDaemonConfiguredSignerAuthority() throws {
+    try withFixture(configureTrust: false) { fixture in
+      let package = try fixture.makePackage(version: "1.0.0")
+      let response = try XCTUnwrap(fixture.handle(request(
+        "plugin.install", idempotencyKey: "missing-daemon-trust",
+        body: fixture.installBody(package))))
+
+      XCTAssertEqual(response.status, .rejected)
+      XCTAssertEqual(response.error?.code, "invalidPluginRequest")
+      XCTAssertTrue(try fixture.repository.listPackages().isEmpty)
+    }
+  }
+
+  func testUnconfiguredSelfSignedSignerCannotInfluenceVerification() throws {
+    try withFixture { fixture in
+      let attacker = try CMSFixtureSigner(commonName: "Caller Controlled Plugin Signer")
+      let package = try fixture.makePackage(
+        version: "1.0.0", signer: attacker,
+        signerIdentifier: "dev.hostwright.attacker-signer")
+      let response = try XCTUnwrap(fixture.handle(request(
+        "plugin.install", idempotencyKey: "caller-self-signed",
+        body: fixture.installBody(
+          package, signerIdentifier: "dev.hostwright.attacker-signer"))))
+
+      XCTAssertEqual(response.status, .rejected)
+      XCTAssertEqual(response.error?.code, "invalidPluginRequest")
+      XCTAssertTrue(try fixture.repository.listPackages().isEmpty)
+    }
+  }
+
+  func testLocalSourceRejectsSymlinkAndLexicallyNoncanonicalPathsBeforeMutation() throws {
+    try withFixture { fixture in
+      func assertRequestSourceDiffersFromSignedCanonical(
+        _ requestPackage: PackageFixture, canonicalPackage: PackageFixture
+      ) throws {
+        let manifestURL = URL(
+          fileURLWithPath: canonicalPackage.source.locator, isDirectory: true
+        ).appendingPathComponent(PluginPackageVerifier.manifestFileName)
+        let manifest = try JSONDecoder().decode(
+          PluginPackageManifest.self, from: Data(contentsOf: manifestURL))
+        XCTAssertEqual(manifest.provenance.source, canonicalPackage.source)
+        XCTAssertNotEqual(requestPackage.source, canonicalPackage.source)
+      }
+
+      let symlinkTarget = try fixture.makePackage(version: "1.0.0")
+      let symlinkAlias = fixture.root.appendingPathComponent(
+        "source-alias-\(UUID().uuidString)", isDirectory: true)
+      try FileManager.default.createSymbolicLink(
+        at: symlinkAlias,
+        withDestinationURL: URL(fileURLWithPath: symlinkTarget.source.locator, isDirectory: true))
+      let symlinked = PackageFixture(
+        source: PluginSource(kind: .localDirectory, locator: symlinkAlias.path))
+      try assertRequestSourceDiffersFromSignedCanonical(
+        symlinked, canonicalPackage: symlinkTarget)
+
+      let noncanonicalTarget = try fixture.makePackage(version: "1.0.1")
+      let noncanonical = PackageFixture(
+        source: PluginSource(
+          kind: .localDirectory, locator: noncanonicalTarget.source.locator + "/."))
+      try assertRequestSourceDiffersFromSignedCanonical(
+        noncanonical, canonicalPackage: noncanonicalTarget)
+
+      let nonexistentTarget = try fixture.makePackage(version: "1.0.2")
+      let nonexistent = PackageFixture(
+        source: PluginSource(
+          kind: .localDirectory,
+          locator: URL(fileURLWithPath: nonexistentTarget.source.locator, isDirectory: true)
+            .deletingLastPathComponent().appendingPathComponent(
+              "missing-source-\(UUID().uuidString)", isDirectory: true).path))
+      try assertRequestSourceDiffersFromSignedCanonical(
+        nonexistent, canonicalPackage: nonexistentTarget)
+      let storageBefore = try fixture.immutableStoreEntries()
+
+      for (index, package) in [symlinked, noncanonical, nonexistent].enumerated() {
+        for operation in ["plugin.discover", "plugin.install"] {
+          let response = try XCTUnwrap(fixture.handle(request(
+            operation,
+            idempotencyKey: operation == "plugin.install" ? "invalid-local-\(index)" : nil,
+            body: fixture.installBody(package))))
+
+          XCTAssertEqual(response.status, .rejected, "\(operation) accepted \(package.source.locator)")
+          XCTAssertEqual(response.reasonCode, .invalidRequest)
+          XCTAssertEqual(response.error?.code, "invalidPluginRequest")
+          XCTAssertTrue(try fixture.repository.listPackages().isEmpty)
+          XCTAssertEqual(try fixture.immutableStoreEntries(), storageBefore)
+        }
+      }
+    }
+  }
+
+  func testCanonicalLocalSourceRemainsAcceptedForDiscoverAndInstall() throws {
+    try withFixture { fixture in
+      let package = try fixture.makePackage(version: "1.0.0")
+
+      let discovered = try XCTUnwrap(fixture.handle(request(
+        "plugin.discover", body: fixture.installBody(package))))
+      XCTAssertEqual(discovered.status, .completed)
+      XCTAssertTrue(try fixture.repository.listPackages().isEmpty)
+
+      let installed = try XCTUnwrap(fixture.handle(request(
+        "plugin.install", idempotencyKey: "canonical-local-source",
+        body: fixture.installBody(package))))
+      XCTAssertEqual(installed.status, .completed)
+      XCTAssertEqual(try fixture.repository.listPackages().count, 1)
+    }
+  }
+
   func testGetAndStatusRejectRequestsWithBothSelectors() throws {
     try withFixture { fixture in
       let installed = try fixture.install(try fixture.makePackage(version: "1.0.0"))
@@ -260,7 +382,8 @@ final class PluginControlOperationsTests: XCTestCase {
   }
 
   private func withFixture(
-    subjects: [String] = [], _ body: (Fixture) throws -> Void
+    subjects: [String] = [], configureTrust: Bool = true,
+    _ body: (Fixture) throws -> Void
   ) throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(
       "hostwright-plugin-control-\(UUID().uuidString)", isDirectory: true)
@@ -282,23 +405,27 @@ final class PluginControlOperationsTests: XCTestCase {
         createdAt: timestamp, updatedAt: timestamp))
     }
     let callbacks = CallbackRecorder()
+    let signer = try CMSFixtureSigner(commonName: "Hostwright Plugin Control Test")
     let runtime = PluginControlRuntime(
       repository: store.plugins,
       immutableStore: try PluginImmutableStore(rootURL: root.appendingPathComponent("plugins", isDirectory: true)),
       healthCheck: { package, _ in try callbacks.check(package.packageDigest) },
       activeHealthCheck: { identifier, _ in callbacks.checkActive(identifier) },
-      revokeProvider: { callbacks.revoke($0) })
+      revokeProvider: { callbacks.revoke($0) },
+      trustedSignerCertificates: configureTrust
+        ? ["dev.hostwright.plugin-signer": [signer.certificateDER]] : [:])
     try body(Fixture(
       root: root, databasePath: databasePath, repository: store.plugins,
       authorizer: RBACAuthorizationEngine(repository: store.rbac), runtime: runtime,
-      callbacks: callbacks, peer: peer(subjectID: "owner", hash: String(repeating: "a", count: 40))))
+      callbacks: callbacks, signer: signer,
+      peer: peer(subjectID: "owner", hash: String(repeating: "a", count: 40))))
   }
 
   private func identity(_ subjectID: String, hash: String) -> ControlPeerIdentityRecord {
     ControlPeerIdentityRecord(
       subjectID: subjectID, userID: 501,
       codeIdentity: CodeIdentity(
-        teamIdentifier: "993YC3JY4Q", signingIdentifier: "hostwright-test",
+        teamIdentifier: "993YC3JY4Q", signingIdentifier: "hostwright-test-\(subjectID)",
         codeDirectoryHash: String(repeating: hash, count: 40), validationMode: .installedRequirement),
       declaredBySubjectID: "owner", declaredAt: timestamp, updatedAt: timestamp)
   }
@@ -311,7 +438,7 @@ final class PluginControlOperationsTests: XCTestCase {
         peer: UnixPeerIdentity(
           effectiveUID: 501, effectiveGID: 20, pid: 123, pidVersion: 1, auditSessionID: 1,
           codeIdentity: CodeIdentity(
-            teamIdentifier: "993YC3JY4Q", signingIdentifier: "hostwright-test",
+            teamIdentifier: "993YC3JY4Q", signingIdentifier: "hostwright-test-\(subjectID)",
             codeDirectoryHash: hash, validationMode: .installedRequirement)),
         subject: LocalSubject(identifier: subjectID, userID: 501, codeIdentityHash: hash)))
   }
@@ -323,6 +450,7 @@ final class PluginControlOperationsTests: XCTestCase {
     let authorizer: RBACAuthorizationEngine
     let runtime: PluginControlRuntime
     let callbacks: CallbackRecorder
+    let signer: CMSFixtureSigner
     let peer: AuthenticatedControlPeer
 
     func handle(_ request: ControlRequestEnvelope) -> ControlResponseEnvelope? {
@@ -334,16 +462,30 @@ final class PluginControlOperationsTests: XCTestCase {
     func withPeer(subjectID: String, hash: String) -> Fixture {
       Fixture(
         root: root, databasePath: databasePath, repository: repository, authorizer: authorizer,
-        runtime: runtime, callbacks: callbacks,
+        runtime: runtime, callbacks: callbacks, signer: signer,
         peer: PluginControlOperationsTests().peer(subjectID: subjectID, hash: hash))
     }
 
-    func makePackage(version: String) throws -> PackageFixture {
-      let sourceRoot = root.appendingPathComponent("source-\(UUID().uuidString)", isDirectory: true)
+    func makePackage(
+      version: String, signer packageSigner: CMSFixtureSigner? = nil,
+      signerIdentifier: String = "dev.hostwright.plugin-signer",
+      sourceLocator: ((URL) throws -> String)? = nil
+    ) throws -> PackageFixture {
+      let signer = packageSigner ?? self.signer
+      let requestedRoot = root.appendingPathComponent(
+        "source-\(UUID().uuidString)", isDirectory: true)
       try FileManager.default.createDirectory(
-        at: sourceRoot, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
-      let signer = try CMSFixtureSigner(commonName: "Hostwright Plugin Control Test")
-      let source = PluginSource(kind: .localDirectory, locator: sourceRoot.path)
+        at: requestedRoot, withIntermediateDirectories: false,
+        attributes: [.posixPermissions: 0o700])
+      guard let resolvedRoot = realpath(requestedRoot.path, nil) else {
+        throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+      }
+      defer { free(resolvedRoot) }
+      let sourceRoot = URL(
+        fileURLWithPath: String(cString: resolvedRoot), isDirectory: true)
+      let source = PluginSource(
+        kind: .localDirectory,
+        locator: try sourceLocator?(sourceRoot) ?? sourceRoot.path)
       let files = [
         "Resources/config.json": Data("{\"version\":\"\(version)\"}".utf8),
         "plugin.wasm": Data("valid-wasm-module-\(version)".utf8),
@@ -359,7 +501,6 @@ final class PluginControlOperationsTests: XCTestCase {
         return PluginContentDigest(path: path, digest: digest(data))
       }
       let packageDigest = try PluginPackageVerifier.packageDigest(contentDigests: contentDigests)
-      let signerIdentifier = "dev.hostwright.plugin-signer"
       let provenance = PluginProvenance(
         checksum: packageDigest,
         signature: try signer.sign(Data(packageDigest.utf8)).base64EncodedString(),
@@ -382,14 +523,21 @@ final class PluginControlOperationsTests: XCTestCase {
       let manifestURL = sourceRoot.appendingPathComponent(PluginPackageVerifier.manifestFileName)
       try ControlPlaneCanonicalJSON.encode(manifest).write(to: manifestURL)
       XCTAssertEqual(chmod(manifestURL.path, 0o600), 0)
-      return PackageFixture(source: source, certificateDER: signer.certificateDER)
+      return PackageFixture(source: source)
     }
 
-    func installBody(_ package: PackageFixture) -> [String: ControlPlaneJSONValue] {
+    func immutableStoreEntries() throws -> [String] {
+      try FileManager.default.subpathsOfDirectory(
+        atPath: runtime.immutableStore.rootURL.path).sorted()
+    }
+
+    func installBody(
+      _ package: PackageFixture,
+      signerIdentifier: String = "dev.hostwright.plugin-signer"
+    ) -> [String: ControlPlaneJSONValue] {
       [
         "source": PluginControlOperationsTests().value(package.source),
-        "trustedSignerIdentifier": .string("dev.hostwright.plugin-signer"),
-        "trustedSignerCertificateDER": .string(package.certificateDER.base64EncodedString()),
+        "trustedSignerIdentifier": .string(signerIdentifier),
       ]
     }
 
@@ -419,7 +567,6 @@ final class PluginControlOperationsTests: XCTestCase {
 
 private struct PackageFixture {
   let source: PluginSource
-  let certificateDER: Data
 }
 
 private final class CallbackRecorder: @unchecked Sendable {

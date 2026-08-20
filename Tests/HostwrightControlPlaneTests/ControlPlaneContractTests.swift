@@ -451,6 +451,22 @@ final class ControlPlaneContractTests: XCTestCase {
       [.discovered, .verified, .staged, .active, .rollback, .quarantined, .revoked, .uninstalled])
   }
 
+  func testPluginSourceRequiresLexicalCanonicalityWithoutChangingHTTPS() throws {
+    XCTAssertNoThrow(
+      try PluginSource(kind: .localDirectory, locator: "/private/tmp/plugin-source").validate())
+    for locator in [
+      "/private/tmp/../tmp/plugin-source", "/private/tmp/plugin-source/.",
+      "/private//tmp/plugin-source", "relative/plugin-source",
+    ] {
+      XCTAssertThrowsError(
+        try PluginSource(kind: .localDirectory, locator: locator).validate(), locator)
+    }
+    XCTAssertNoThrow(
+      try PluginSource(
+        kind: .httpsRegistry,
+        locator: "https://registry.example.com/plugins/weather").validate())
+  }
+
   func testXPCProtocolAndExactEntitlement() throws {
     XCTAssertEqual(
       XPCServiceContract.requiredEntitlements, ["com.apple.security.app-sandbox": .bool(true)])

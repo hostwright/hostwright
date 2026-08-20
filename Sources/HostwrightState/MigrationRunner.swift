@@ -3827,5 +3827,18 @@ public struct MigrationRunner: Sendable {
             "CREATE INDEX plugin_rollback_operation_idx ON plugin_rollback_state(plugin_identifier, status, updated_at, operation_id)",
           ]
         ),
+        SchemaMigration(
+          version: 22,
+          description:
+            "One active installed control identity per user, team, and signing identifier",
+          implementationRevision: "phase09-installed-identity-rotation-v1",
+          statements: [
+            """
+            CREATE UNIQUE INDEX peer_identities_active_installed_bucket_idx
+            ON peer_identities(user_id, team_identifier, signing_identifier)
+            WHERE validation_mode = 'installedRequirement' AND revoked_at IS NULL
+            """
+          ]
+        ),
     ]
 }

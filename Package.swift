@@ -219,7 +219,9 @@ let package = Package(
         ),
         // Qualification-only continuity tooling is intentionally not exposed as a product.
         .executableTarget(
-            name: "HostwrightPhase09QualificationTool"
+            name: "HostwrightPhase09QualificationTool",
+            dependencies: ["HostwrightCore"],
+            path: "Qualification/HostwrightPhase09QualificationTool"
         ),
         .executableTarget(
             name: "HostwrightStorageProviderHelper",
@@ -437,7 +439,11 @@ let package = Package(
         ),
         .executableTarget(
             name: "HostwrightWASIProviderQualificationTool",
-            dependencies: ["HostwrightControlPlane", "HostwrightWASIProviderRuntime"]
+            dependencies: [
+                "HostwrightControlPlane",
+                "HostwrightCore",
+                "HostwrightWASIProviderRuntime"
+            ]
         ),
         .executableTarget(
             name: "HostwrightWASIReferenceProvider",
@@ -569,6 +575,7 @@ let package = Package(
         .executableTarget(
             name: "HostwrightStreamQualificationTool",
             dependencies: [
+                "HostwrightCommandTransport",
                 "HostwrightControlPlane",
                 "HostwrightControlSecurity",
                 "HostwrightControlTransport",
@@ -590,7 +597,7 @@ let package = Package(
         ),
         .testTarget(
             name: "HostwrightAuditQualificationToolTests",
-            dependencies: ["HostwrightAuditQualificationTool"]
+            dependencies: ["HostwrightAuditQualificationTool", "HostwrightCore"]
         ),
         .testTarget(
             name: "HostwrightControlTests",
@@ -688,7 +695,7 @@ let package = Package(
         ),
         .testTarget(
             name: "HostwrightPhase09QualificationToolTests",
-            dependencies: ["HostwrightPhase09QualificationTool"]
+            dependencies: ["HostwrightCore", "HostwrightPhase09QualificationTool"]
         ),
         .testTarget(
             name: "HostwrightStateTests",

@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import HostwrightControlPlane
+import HostwrightCore
 import HostwrightWASIProviderRuntime
 
 @main
@@ -9,6 +10,10 @@ struct HostwrightWASIProviderQualificationTool {
     var stage = "arguments"
     do {
       let arguments = Array(CommandLine.arguments.dropFirst())
+      if arguments.first == "--process-identity" {
+        try printProcessIdentity(arguments)
+        return
+      }
       guard arguments.count == 4, arguments[0] == "--reference", arguments[2] == "--adversarial" else {
         throw WASIProviderRuntimeError.invalidInvocation
       }
@@ -74,6 +79,31 @@ struct HostwrightWASIProviderQualificationTool {
       FileHandle.standardError.write(Data("Gate 10 WASI live conformance failed: internal.\n".utf8))
       Foundation.exit(1)
     }
+  }
+
+  private static func printProcessIdentity(_ arguments: [String]) throws {
+    guard arguments.count == 4,
+      arguments[0] == "--process-identity",
+      arguments[2] == "--expected-executable",
+      let processID = Int32(arguments[1]),
+      processID > 0
+    else { throw WASIProviderRuntimeError.invalidInvocation }
+    let executable: SecureExecutableIdentity
+    do {
+      executable = try SecureExecutableResolver.verify(path: arguments[3])
+    } catch {
+      throw WASIProviderRuntimeError.invalidInvocation
+    }
+    let identity: HostwrightDarwinProcessIdentity
+    do {
+      identity = try HostwrightDarwinProcessIdentity.lookup(
+        processID: processID,
+        expectedExecutable: executable
+      )
+    } catch {
+      throw WASIProviderRuntimeError.executionFailed
+    }
+    print(identity.ownershipToken)
   }
 
   private static func invocation(

@@ -1,4 +1,6 @@
+import Darwin
 import Foundation
+import HostwrightControlPlane
 
 public enum PluginCLISourceKind: String, Equatable, Sendable {
   case localDirectory, httpsRegistry
@@ -17,9 +19,9 @@ public struct PluginCLISource: Equatable, Sendable {
 public enum PluginCLIAction: Equatable, Sendable {
   case list(identifier: String?)
   case status(identifier: String?, packageDigest: String?)
-  case discover(source: PluginCLISource, signerIdentifier: String, certificatePath: String)
-  case install(source: PluginCLISource, signerIdentifier: String, certificatePath: String)
-  case update(source: PluginCLISource, signerIdentifier: String, certificatePath: String)
+  case discover(source: PluginCLISource, signerIdentifier: String)
+  case install(source: PluginCLISource, signerIdentifier: String)
+  case update(source: PluginCLISource, signerIdentifier: String)
   case activate(packageDigest: String, expectedActivationGeneration: Int?)
   case rollback(identifier: String, expectedActivationGeneration: Int?)
   case revoke(revocationID: String, targetKind: String, targetIdentifier: String, reason: String)
@@ -100,8 +102,18 @@ enum PluginCLIParser {
         else { throw CLIUsageError("extension \(verb) --source is invalid.") }
         return PluginCLISource(kind: .httpsRegistry, locator: locator)
       } else {
-        guard locator.hasPrefix("/"), URL(fileURLWithPath: locator).standardizedFileURL.path == locator else {
+        do {
+          try PluginSource(kind: .localDirectory, locator: locator).validate()
+        } catch {
           throw CLIUsageError("extension \(verb) local --source must be a canonical absolute path.")
+        }
+        guard let resolved = realpath(locator, nil) else {
+          throw CLIUsageError("extension \(verb) local --source must resolve to an existing directory.")
+        }
+        defer { free(resolved) }
+        guard String(cString: resolved) == locator else {
+          throw CLIUsageError(
+            "extension \(verb) local --source must be its exact physical canonical path.")
         }
         return PluginCLISource(kind: .localDirectory, locator: locator)
       }
@@ -113,16 +125,11 @@ enum PluginCLIParser {
       }
       return value
     }
-    func signedSourceAction(
-      _ constructor: (PluginCLISource, String, String) -> PluginCLIAction
+    func trustedSourceAction(
+      _ constructor: (PluginCLISource, String) -> PluginCLIAction
     ) throws -> PluginCLIAction {
-      try exact(["--source", "--signer", "--signer-certificate"])
-      let certificate = try required("--signer-certificate")
-      guard certificate.hasPrefix("/"),
-        URL(fileURLWithPath: certificate).standardizedFileURL.path == certificate
-      else { throw CLIUsageError("extension \(verb) signer certificate path must be canonical and absolute.") }
-      return constructor(
-        try source(), try required("--signer", maximumBytes: 256), certificate)
+      try exact(["--source", "--signer"])
+      return constructor(try source(), try required("--signer", maximumBytes: 256))
     }
 
     let action: PluginCLIAction
@@ -138,9 +145,9 @@ enum PluginCLIParser {
         throw CLIUsageError("extension status requires exactly one of --identifier or --digest.")
       }
       action = .status(identifier: identifier, packageDigest: packageDigest)
-    case "discover": action = try signedSourceAction(PluginCLIAction.discover)
-    case "install": action = try signedSourceAction(PluginCLIAction.install)
-    case "update": action = try signedSourceAction(PluginCLIAction.update)
+    case "discover": action = try trustedSourceAction(PluginCLIAction.discover)
+    case "install": action = try trustedSourceAction(PluginCLIAction.install)
+    case "update": action = try trustedSourceAction(PluginCLIAction.update)
     case "activate":
       try exact(["--digest", "--expected-activation-generation"])
       action = .activate(

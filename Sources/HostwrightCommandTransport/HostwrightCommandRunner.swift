@@ -213,52 +213,12 @@ public enum HostwrightCommandRunner {
                 "locator": .string(value.locator),
             ])
         }
-        func signed(
-            _ value: PluginCLISource, signer: String, certificatePath: String
-        ) throws -> ControlPlaneJSONValue {
-            let descriptor = open(certificatePath, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
-            guard descriptor >= 0 else {
-                throw HostwrightDiagnostic(
-                    code: .extensionInvalid,
-                    message: "The trusted plugin signer certificate cannot be opened safely."
-                )
-            }
-            defer { close(descriptor) }
-            var metadata = stat()
-            guard fstat(descriptor, &metadata) == 0,
-                  metadata.st_mode & S_IFMT == S_IFREG,
-                  metadata.st_uid == geteuid(), metadata.st_nlink == 1,
-                  metadata.st_mode & (S_IWGRP | S_IWOTH | S_ISUID | S_ISGID) == 0,
-                  metadata.st_size > 0, metadata.st_size <= 32 * 1_024 else {
-                throw HostwrightDiagnostic(
-                    code: .extensionInvalid,
-                    message: "The trusted plugin signer certificate identity or mode is unsafe."
-                )
-            }
-            let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: false)
-            guard let certificate = try handle.read(upToCount: 32 * 1_024 + 1),
-                  !certificate.isEmpty, certificate.count <= 32 * 1_024 else {
-                throw HostwrightDiagnostic(
-                    code: .extensionInvalid,
-                    message: "The trusted plugin signer certificate must be bounded DER data."
-                )
-            }
-            var finalMetadata = stat()
-            guard fstat(descriptor, &finalMetadata) == 0,
-                  finalMetadata.st_dev == metadata.st_dev,
-                  finalMetadata.st_ino == metadata.st_ino,
-                  finalMetadata.st_size == metadata.st_size,
-                  finalMetadata.st_mtimespec.tv_sec == metadata.st_mtimespec.tv_sec,
-                  finalMetadata.st_mtimespec.tv_nsec == metadata.st_mtimespec.tv_nsec else {
-                throw HostwrightDiagnostic(
-                    code: .extensionInvalid,
-                    message: "The trusted plugin signer certificate changed while being read."
-                )
-            }
+        func trusted(
+            _ value: PluginCLISource, signer: String
+        ) -> ControlPlaneJSONValue {
             return .object([
                 "source": source(value),
                 "trustedSignerIdentifier": .string(signer),
-                "trustedSignerCertificateDER": .string(certificate.base64EncodedString()),
             ])
         }
         switch options.action {
@@ -267,12 +227,12 @@ public enum HostwrightCommandRunner {
         case .status(let identifier, let packageDigest):
             if let identifier { return .object(["identifier": .string(identifier)]) }
             return .object(["packageDigest": .string(packageDigest!)])
-        case .discover(let value, let signer, let certificate):
-            return try signed(value, signer: signer, certificatePath: certificate)
-        case .install(let value, let signer, let certificate):
-            return try signed(value, signer: signer, certificatePath: certificate)
-        case .update(let value, let signer, let certificate):
-            return try signed(value, signer: signer, certificatePath: certificate)
+        case .discover(let value, let signer):
+            return trusted(value, signer: signer)
+        case .install(let value, let signer):
+            return trusted(value, signer: signer)
+        case .update(let value, let signer):
+            return trusted(value, signer: signer)
         case .activate(let digest, let generation):
             var fields: [String: ControlPlaneJSONValue] = ["packageDigest": .string(digest)]
             if let generation { fields["expectedActivationGeneration"] = .integer(Int64(generation)) }

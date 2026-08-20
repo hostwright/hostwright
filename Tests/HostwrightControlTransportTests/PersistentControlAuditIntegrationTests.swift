@@ -217,7 +217,7 @@ final class PersistentControlAuditIntegrationTests: XCTestCase {
     try completeAuthentication(descriptor: session.client)
     let request = ControlRequestEnvelope(
       requestID: "metrics-observation-one",
-      operation: "metrics.snapshot",
+      operation: "metrics",
       timeoutMilliseconds: 1_000)
     try write(request, descriptor: session.client)
     XCTAssertEqual(try readResponse(descriptor: session.client).status, .completed)

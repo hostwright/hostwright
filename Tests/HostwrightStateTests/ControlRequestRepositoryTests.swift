@@ -110,7 +110,7 @@ final class ControlRequestRepositoryTests: XCTestCase {
     try withStore { store in
       try bootstrapOwner(in: store)
       try store.controlIdentities.declare(
-        identity(subjectID: "other", declaredBy: "owner", hash: "b"))
+        identity(subjectID: "other", declaredBy: "owner", hash: "b", userID: 502))
       let repository = makeRepository(store)
       let owner = ControlRequestSubmission(
         request: request(id: "owner-request", key: "shared"), idempotencyExpiresAt: expiresAt)
@@ -553,11 +553,13 @@ final class ControlRequestRepositoryTests: XCTestCase {
       status: status, operationReference: operationReference, createdAt: createdAt, updatedAt: updatedAt)
   }
 
-  private func identity(subjectID: String, declaredBy: String, hash: Character)
+  private func identity(
+    subjectID: String, declaredBy: String, hash: Character, userID: UInt32 = 501
+  )
     -> ControlPeerIdentityRecord
   {
     ControlPeerIdentityRecord(
-      subjectID: subjectID, userID: 501,
+      subjectID: subjectID, userID: userID,
       codeIdentity: CodeIdentity(
         teamIdentifier: "993YC3JY4Q", signingIdentifier: "hostwright",
         codeDirectoryHash: String(repeating: String(hash), count: 40),

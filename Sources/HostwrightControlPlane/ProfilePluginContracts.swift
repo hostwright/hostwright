@@ -419,7 +419,10 @@ public struct PluginSource: Codable, Equatable, Sendable {
   public func validate() throws {
     switch kind {
     case .localDirectory:
-      guard locator.hasPrefix("/"), !locator.contains("/../"), !locator.hasSuffix("/..") else {
+      let components = locator.split(separator: "/", omittingEmptySubsequences: false)
+      guard components.first?.isEmpty == true, components.count > 1,
+        components.dropFirst().allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." })
+      else {
         throw ContractValidationError.invalid("local plugin source")
       }
     case .httpsRegistry:

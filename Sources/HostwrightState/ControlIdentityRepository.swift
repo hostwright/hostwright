@@ -129,6 +129,154 @@ public struct ControlIdentityRepository: Sendable {
     }
   }
 
+  public func rotateInstalledCodeIdentity(
+    subjectID: String,
+    expectedGeneration: Int,
+    replacement: CodeIdentity,
+    updatedAt: String
+  ) throws -> ControlPeerIdentityRecord {
+    try ControlIdentityValidation.identifier(subjectID, named: "subject ID")
+    guard expectedGeneration >= 1,
+      replacement.validationMode == .installedRequirement,
+      replacement.teamIdentifier != nil
+    else {
+      throw StateStoreError.invalidRecord(
+        "Installed identity rotation requires an installed replacement and positive generation."
+      )
+    }
+    try replacement.validate()
+    try ControlIdentityValidation.codeIdentity(replacement)
+    try ControlIdentityValidation.utcTimestamp(updatedAt, named: "updated at")
+    return try store.withValidatedConnection { connection in
+      try connection.transaction {
+        let activeBucket = try activeInstalledIdentities(
+          userID: nil,
+          teamIdentifier: replacement.teamIdentifier!,
+          signingIdentifier: replacement.signingIdentifier,
+          on: connection
+        ).filter { $0.subjectID == subjectID }
+        guard activeBucket.count == 1, let existing = activeBucket.first,
+          existing.generation == expectedGeneration,
+          existing.codeIdentity.validationMode == .installedRequirement,
+          existing.codeIdentity.teamIdentifier == replacement.teamIdentifier,
+          existing.codeIdentity.signingIdentifier == replacement.signingIdentifier,
+          existing.codeIdentity.codeDirectoryHash != replacement.codeDirectoryHash
+        else {
+          throw StateStoreError.transactionInvariantViolation(
+            message: "Installed identity rotation requires one exact active subject and generation."
+          )
+        }
+        let allBucket = try activeInstalledIdentities(
+          userID: existing.userID,
+          teamIdentifier: replacement.teamIdentifier!,
+          signingIdentifier: replacement.signingIdentifier,
+          on: connection
+        )
+        guard allBucket.count == 1, allBucket[0].subjectID == subjectID else {
+          throw StateStoreError.transactionInvariantViolation(
+            message: "Installed identity rotation refuses an ambiguous active identity bucket."
+          )
+        }
+        let existingHashIsRevoked = try isRevoked(
+          .codeHash,
+          target: existing.codeIdentity.codeDirectoryHash,
+          on: connection
+        )
+        guard !existingHashIsRevoked else {
+          throw StateStoreError.transactionInvariantViolation(
+            message: "An active installed identity cannot use a globally retired code hash."
+          )
+        }
+        let replacementIsRevoked = try isRevoked(
+          .codeHash,
+          target: replacement.codeDirectoryHash,
+          on: connection
+        )
+        guard !replacementIsRevoked else {
+          throw StateStoreError.invalidRecord(
+            "A retired code hash cannot become active through installed identity rotation."
+          )
+        }
+        try connection.run(
+          """
+          UPDATE control_sessions
+          SET revoked_at = COALESCE(revoked_at, ?), updated_at = ?
+          WHERE subject_id = ? AND code_directory_hash = ?
+          """,
+          bindings: [
+            .text(updatedAt), .text(updatedAt), .text(existing.subjectID),
+            .text(existing.codeIdentity.codeDirectoryHash),
+          ]
+        )
+        try connection.run(
+          """
+          UPDATE peer_identities
+          SET signing_identifier = ?, team_identifier = ?, code_directory_hash = ?,
+              validation_mode = ?, generation = generation + 1, updated_at = ?
+          WHERE subject_id = ? AND generation = ? AND revoked_at IS NULL
+            AND code_directory_hash = ?
+          """,
+          bindings: [
+            .text(replacement.signingIdentifier),
+            .text(replacement.teamIdentifier!),
+            .text(replacement.codeDirectoryHash),
+            .text(replacement.validationMode.rawValue),
+            .text(updatedAt),
+            .text(existing.subjectID),
+            .int(expectedGeneration),
+            .text(existing.codeIdentity.codeDirectoryHash),
+          ]
+        )
+        guard let stored = try loadIdentity(existing.subjectID, on: connection),
+          stored.subjectID == existing.subjectID,
+          stored.generation == expectedGeneration + 1,
+          stored.codeIdentity == replacement,
+          stored.revokedAt == nil
+        else {
+          throw StateStoreError.transactionInvariantViolation(
+            message: "Installed identity rotation did not commit the exact replacement."
+          )
+        }
+        let remainingActiveOldHash = try connection.query(
+          """
+          SELECT 1
+          FROM peer_identities
+          WHERE validation_mode = 'installedRequirement'
+            AND revoked_at IS NULL
+            AND code_directory_hash = ?
+          LIMIT 1
+          """,
+          bindings: [.text(existing.codeIdentity.codeDirectoryHash)]
+        )
+        if remainingActiveOldHash.isEmpty {
+          let retirement = ControlIdentityRevocationRecord(
+            revocationID: "installed-rotation-\(existing.codeIdentity.codeDirectoryHash)",
+            targetKind: .codeHash,
+            targetIdentifier: existing.codeIdentity.codeDirectoryHash,
+            reason: "installed code identity rotated",
+            actorSubjectID: existing.subjectID,
+            revokedAt: updatedAt
+          )
+          try retirement.validate()
+          try connection.run(
+            """
+            INSERT INTO identity_revocations (
+                revocation_id, target_kind, target_identifier, reason,
+                actor_subject_id, revoked_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            bindings: [
+              .text(retirement.revocationID), .text(retirement.targetKind.rawValue),
+              .text(retirement.targetIdentifier), .text(retirement.reason),
+              .text(retirement.actorSubjectID), .text(retirement.revokedAt),
+            ]
+          )
+        }
+        return stored
+      }
+    }
+  }
+
   public func loadIdentity(_ subjectID: String) throws -> ControlPeerIdentityRecord? {
     try ControlIdentityValidation.identifier(subjectID, named: "subject ID")
     return try store.withValidatedConnection(readOnly: true) { connection in
@@ -416,6 +564,31 @@ public struct ControlIdentityRepository: Sendable {
       bindings: [.text(subjectID)]
     )
     return try rows.first.map(identity(from:))
+  }
+
+  private func activeInstalledIdentities(
+    userID: UInt32?,
+    teamIdentifier: String,
+    signingIdentifier: String,
+    on connection: SQLiteConnection
+  ) throws -> [ControlPeerIdentityRecord] {
+    var query =
+      """
+      SELECT subject_id, user_id, signing_identifier, team_identifier,
+             code_directory_hash, validation_mode, generation, credential_id,
+             credential_public_key_base64, declared_by_subject_id, declared_at,
+             credential_expires_at, revoked_at, updated_at
+      FROM peer_identities
+      WHERE validation_mode = 'installedRequirement' AND revoked_at IS NULL
+        AND team_identifier = ? AND signing_identifier = ?
+      """
+    var bindings: [SQLiteValue] = [.text(teamIdentifier), .text(signingIdentifier)]
+    if let userID {
+      query += " AND user_id = ?"
+      bindings.append(.int64(Int64(userID)))
+    }
+    query += " ORDER BY subject_id"
+    return try connection.query(query, bindings: bindings).map(identity(from:))
   }
 
   private func loadSession(_ sessionID: String, on connection: SQLiteConnection) throws

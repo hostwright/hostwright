@@ -30,15 +30,17 @@ public struct PluginPackageVerifier: Sendable {
   public static let maximumContentFileBytes = 256 * 1_024 * 1_024
   public static let maximumPackageBytes = 512 * 1_024 * 1_024
 
-  private let trustedSignerCertificates: [String: Data]
+  private let trustedSignerCertificates: [String: [Data]]
   private let hostVersion: String?
 
   public init(
-    trustedSignerCertificates: [String: Data], hostVersion: String? = nil
+    trustedSignerCertificates: [String: [Data]], hostVersion: String? = nil
   ) throws {
     guard !trustedSignerCertificates.isEmpty,
-      trustedSignerCertificates.allSatisfy({ key, value in
-        !key.isEmpty && key.utf8.count <= 256 && !value.isEmpty && value.count <= 32 * 1_024
+      trustedSignerCertificates.allSatisfy({ key, values in
+        !key.isEmpty && key.utf8.count <= 256 && !values.isEmpty && values.count <= 8
+          && values.allSatisfy { !$0.isEmpty && $0.count <= 64 * 1_024 }
+          && Set(values.map(PluginStateDigest.prefixed)).count == values.count
       })
     else { throw Self.blocked("At least one bounded trusted plugin signer is required.") }
     if let hostVersion { _ = try PluginCompatibilityRange.Version(hostVersion) }
@@ -46,15 +48,34 @@ public struct PluginPackageVerifier: Sendable {
     self.hostVersion = hostVersion
   }
 
+  public init(
+    trustedSignerCertificates: [String: Data], hostVersion: String? = nil
+  ) throws {
+    try self.init(
+      trustedSignerCertificates: trustedSignerCertificates.mapValues { [$0] },
+      hostVersion: hostVersion
+    )
+  }
+
   public func verifyMaterializedPackage(
     at directoryURL: URL, expectedSource: PluginSource
   ) throws -> VerifiedPluginPackage {
     try expectedSource.validate()
+    if expectedSource.kind == .localDirectory {
+      guard directoryURL.isFileURL,
+        directoryURL.path == expectedSource.locator
+      else {
+        throw Self.invalid("The local plugin source must use its exact canonical path.")
+      }
+    }
     guard let resolvedRoot = realpath(directoryURL.standardizedFileURL.path, nil) else {
       throw Self.invalid("The plugin package root cannot be resolved.")
     }
     defer { free(resolvedRoot) }
     let root = URL(fileURLWithPath: String(cString: resolvedRoot), isDirectory: true)
+    if expectedSource.kind == .localDirectory, root.path != expectedSource.locator {
+      throw Self.invalid("The local plugin source must not traverse a symbolic-link alias.")
+    }
     try SecurePluginPackageReader.validateRoot(root)
     let manifestData = try SecurePluginPackageReader.read(
       root: root, relativePath: Self.manifestFileName,
@@ -134,28 +155,41 @@ public struct PluginPackageVerifier: Sendable {
       throw Self.blocked("The plugin package checksum does not match its immutable content index.")
     }
     guard manifest.signerIdentifier == manifest.provenance.signerIdentifier,
-      let certificate = trustedSignerCertificates[manifest.signerIdentifier]
+      let certificates = trustedSignerCertificates[manifest.signerIdentifier]
     else { throw Self.blocked("The plugin package signer is not trusted.") }
-    let certificateFingerprint = PluginStateDigest.prefixed(certificate)
-    let verifier = SecurityDetachedCMSVerifier(trustedCertificateDER: [certificate])
     guard let provenanceSignature = Data(base64Encoded: manifest.provenance.signature),
       let manifestSignature = Data(base64Encoded: manifest.cmsSignature),
       !provenanceSignature.isEmpty, !manifestSignature.isEmpty
     else { throw Self.blocked("Plugin package signatures are not valid bounded base64 CMS.") }
-    do {
-      try verifier.verifyDetachedCMS(
-        signature: provenanceSignature, content: Data(packageDigest.utf8),
-        trustedSigner: certificateFingerprint)
-      try verifier.verifyDetachedCMS(
-        signature: manifestSignature,
-        content: try ControlPlaneCanonicalJSON.encode(PluginManifestSigningPayload(manifest)),
-        trustedSigner: certificateFingerprint)
-    } catch {
+    let manifestSigningPayload = try ControlPlaneCanonicalJSON.encode(
+      PluginManifestSigningPayload(manifest)
+    )
+    let verified = certificates.contains { certificate in
+      do {
+        let fingerprint = PluginStateDigest.prefixed(certificate)
+        let verifier = SecurityDetachedCMSVerifier(trustedCertificateDER: [certificate])
+        try verifier.verifyDetachedCMS(
+          signature: provenanceSignature,
+          content: Data(packageDigest.utf8),
+          trustedSigner: fingerprint
+        )
+        try verifier.verifyDetachedCMS(
+          signature: manifestSignature,
+          content: manifestSigningPayload,
+          trustedSigner: fingerprint
+        )
+        return true
+      } catch {
+        return false
+      }
+    }
+    guard verified else {
       throw Self.blocked("Plugin package CMS verification failed.")
     }
     return VerifiedPluginPackage(
       manifest: manifest, manifestData: manifestData, packageDigest: packageDigest,
-      sourceDirectoryURL: directoryURL.standardizedFileURL)
+      sourceDirectoryURL: expectedSource.kind == .localDirectory
+        ? root : directoryURL.standardizedFileURL)
   }
 
   public static func manifestSigningPayload(_ manifest: PluginPackageManifest) throws -> Data {

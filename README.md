@@ -1,6 +1,6 @@
 # Hostwright
 
-Hostwright is a macOS command-line control plane for declaring and managing Apple container workloads on one Apple silicon Mac. It reads strict Manifest v2 YAML, produces plans for review, executes confirmed lifecycle actions through runtime providers, and records local state in SQLite schema v21.
+Hostwright is a macOS command-line control plane for declaring and managing Apple container workloads on one Apple silicon Mac. It reads strict Manifest v2 YAML, produces plans for review, executes confirmed lifecycle actions through runtime providers, and records local state in SQLite schema v22.
 
 Status: `0.0.2-dev`, targeting `v0.0.2`. Hostwright is not production-ready.
 

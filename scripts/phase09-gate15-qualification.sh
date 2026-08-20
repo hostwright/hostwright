@@ -453,7 +453,7 @@ config_digest() {
   for file in \
     Package.swift Package.resolved \
     scripts/phase09-gate15-qualification.sh scripts/phase09-gate15-live.sh \
-    Sources/HostwrightPhase09QualificationTool/main.swift \
+    Qualification/HostwrightPhase09QualificationTool/main.swift \
     Tests/HostwrightStateTests/Phase09Gate15QualificationHarnessTests.swift \
     Tests/HostwrightPhase09QualificationToolTests/HostwrightPhase09QualificationToolTests.swift; do
     [[ -f "$file" && ! -L "$file" ]] || die "Gate 15 configuration file is unavailable: $file" 69
@@ -1194,14 +1194,61 @@ create_run_started() {
   run_started_created=1
 }
 
+live_runner_start_identity() {
+  local marker="$1" pid="$2" identity marker_tool marker_device marker_inode marker_mode marker_digest
+  local expected_tool expected_device expected_inode expected_mode expected_digest current_mode_octal
+  /usr/bin/jq -e --arg schema "$run_started_schema" '
+    .schema == $schema and
+    (.toolPath | type == "string") and
+    (.toolDevice | type == "number" and . >= 0 and floor == .) and
+    (.toolInode | type == "number" and . >= 0 and floor == .) and
+    (.toolMode | type == "number" and . == 493) and
+    (.toolDigest | type == "string")
+  ' "$marker" >/dev/null 2>&1 || return 1
+  marker_tool="$(/usr/bin/jq -r '.toolPath // empty' "$marker" 2>/dev/null)"
+  marker_device="$(/usr/bin/jq -r '.toolDevice // -1' "$marker" 2>/dev/null)"
+  marker_inode="$(/usr/bin/jq -r '.toolInode // -1' "$marker" 2>/dev/null)"
+  marker_mode="$(/usr/bin/jq -r '.toolMode // -1' "$marker" 2>/dev/null)"
+  marker_digest="$(/usr/bin/jq -r '.toolDigest // empty' "$marker" 2>/dev/null)"
+  if testing; then
+    expected_tool="$canonical_tool_path"
+    expected_device=0
+    expected_inode=0
+    expected_mode=493
+    expected_digest='testing-qualification-tool'
+    identity="${HOSTWRIGHT_PHASE09_HARNESS_TEST_PROCESS_IDENTITY:-}"
+  else
+    [[ -f "$canonical_tool_path" && ! -L "$canonical_tool_path" && -x "$canonical_tool_path" \
+      && "$(/bin/realpath "$canonical_tool_path" 2>/dev/null)" == "$canonical_tool_path" \
+      ]] || return 1
+    current_mode_octal="$(/usr/bin/stat -f '%Lp' "$canonical_tool_path" 2>/dev/null)"
+    [[ "$current_mode_octal" == 755 ]] || return 1
+    expected_tool="$canonical_tool_path"
+    expected_device="$(/usr/bin/stat -f '%d' "$canonical_tool_path" 2>/dev/null)"
+    expected_inode="$(/usr/bin/stat -f '%i' "$canonical_tool_path" 2>/dev/null)"
+    expected_mode="$((8#$current_mode_octal))"
+    expected_digest="$(sha_executable "$canonical_tool_path" 2>/dev/null)" || return 1
+    identity="$("$canonical_tool_path" process-identity --pid "$pid" 2>/dev/null)" || return 1
+  fi
+  [[ "$marker_device" =~ ^[0-9]+$ && "$marker_inode" =~ ^[0-9]+$ \
+    && "$marker_mode" =~ ^[0-9]+$ && "$marker_mode" == 493 \
+    && "$marker_tool" == "$expected_tool" && "$marker_device" == "$expected_device" \
+    && "$marker_inode" == "$expected_inode" && "$marker_mode" == "$expected_mode" \
+    && "$marker_digest" == "$expected_digest" ]] || return 1
+  [[ "$identity" =~ ^v1\.[a-f0-9]{64}\.[a-f0-9]{64}\.[0-9]+\.[0-9]+$ ]] || return 1
+  printf '%s\n' "$identity"
+}
+
 valid_existing_runner_marker() {
-  local marker="$root/run-started-v1.json" state marker_pid marker_start state_pid state_start
+  local marker="$root/run-started-v1.json" state marker_pid marker_start state_pid state_start live_start
   [[ -f "$marker" && ! -L "$marker" ]] || return 1
   private_file "$marker" || return 1
   marker_pid="$(/usr/bin/jq -r '.runnerPID // 0' "$marker" 2>/dev/null)"
   marker_start="$(/usr/bin/jq -r '.runnerStartIdentity // empty' "$marker" 2>/dev/null)"
-  [[ "$marker_pid" =~ ^[1-9][0-9]*$ && "$marker_start" =~ ^[0-9]+\.[0-9]+$ ]] || return 1
+  [[ "$marker_pid" =~ ^[1-9][0-9]*$ && "$marker_start" =~ ^v1\.[a-f0-9]{64}\.[a-f0-9]{64}\.[0-9]+\.[0-9]+$ ]] || return 1
   /bin/kill -0 "$marker_pid" >/dev/null 2>&1 || return 1
+  live_start="$(live_runner_start_identity "$marker" "$marker_pid")" || return 1
+  [[ "$live_start" == "$marker_start" ]] || return 1
   state="$root/runner-state-v1.json"
   require_private_file "$state" 'Gate 15 existing runner state' 2>/dev/null || return 1
   state_pid="$(/usr/bin/jq -r '.runnerPID // 0' "$state" 2>/dev/null)"
@@ -1583,7 +1630,7 @@ if marker.get("rootLockPath") != os.path.join(root, "active-run-v1") or marker.g
     fail("run-started marker lock paths are not canonical")
 if marker.get("runnerPID") != state.get("runnerPID") or marker.get("runnerStartIdentity") != state.get("runnerStartIdentity"):
     fail("runner identity changed between marker and state")
-if not isinstance(marker.get("runnerPID"), int) or marker.get("runnerPID") <= 0 or not re.fullmatch(r"[0-9]+\\.[0-9]+", str(marker.get("runnerStartIdentity", ""))):
+if not isinstance(marker.get("runnerPID"), int) or marker.get("runnerPID") <= 0 or not re.fullmatch(r"v1\\.[a-f0-9]{64}\\.[a-f0-9]{64}\\.[0-9]+\\.[0-9]+", str(marker.get("runnerStartIdentity", ""))):
     fail("runner identity is not bound")
 if marker.get("manifestDigest") != state.get("manifestDigest"):
     fail("run-started marker manifest binding changed")

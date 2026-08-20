@@ -200,7 +200,8 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
         maximumResponseBodyBytes: PluginPackageVerifier.maximumContentFileBytes),
       activeProviders: try ActivePluginProviderRuntime(
         repository: store.plugins,
-        wasiOwnershipLedgerURL: providerOwnershipLedgerURL))
+        wasiOwnershipLedgerURL: providerOwnershipLedgerURL),
+      trustedSignerCertificates: try PluginTrustedSignerAuthority.load())
     let interruptedPluginOperations = try pluginRuntime.repository.incompleteRollbackOperations()
     if !interruptedPluginOperations.isEmpty {
       let recoveryTimestamp = ISO8601DateFormatter().string(from: Date())

@@ -7,5 +7,5 @@
   "storageProviderAPI": 1,
   "networkProviderSPI": 1,
   "pluginABI": 1,
-  "stateSchema": 21
+  "stateSchema": 22
 }

@@ -918,10 +918,7 @@ public struct PersistentControlConnectionServer: Sendable {
   }
 
   private static func isObservationOperation(_ operation: String) -> Bool {
-    [
-      "metrics.snapshot", "metrics.export",
-      "traces.inspect", "traces.export"
-    ].contains(operation)
+    ["metrics", "traces"].contains(operation)
   }
 
   private func recordAudit(

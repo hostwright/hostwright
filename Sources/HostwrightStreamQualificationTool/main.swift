@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import Security
+import HostwrightCommandTransport
 import HostwrightControlPlane
 import HostwrightControlSecurity
 import HostwrightControlTransport
@@ -32,6 +33,59 @@ private struct ResumeQualificationResult: Codable {
   let integrityHealth: String
 }
 
+private struct MetricsExportPairQualificationResult: Codable {
+  let schemaVersion: Int
+  let kind: String
+  let snapshot: ControlPlaneJSONValue
+  let exportReceipt: ControlPlaneJSONValue
+}
+
+private struct MetricsSnapshotIdentity: Decodable {
+  let kind: String
+  let snapshotSHA256: String
+}
+
+private struct MetricsExportIdentity: Decodable {
+  let kind: String
+  let snapshotSHA256: String
+  let outputPath: String
+  let outputSHA256: String
+  let outputBytes: UInt64
+  let automaticUpload: Bool
+  let ownership: String
+}
+
+private struct TraceExportIdentity: Decodable {
+  let kind: String
+  let traceSHA256: String
+  let outputPath: String
+  let outputSHA256: String
+  let outputBytes: UInt64
+  let automaticUpload: Bool
+  let ownership: String
+}
+
+private struct TracePayloadIdentity: Decodable {
+  let kind: String
+  let traceSHA256: String
+}
+
+private struct TraceExportVerificationResult: Codable {
+  let schemaVersion: Int
+  let kind: String
+  let traceSHA256: String
+  let outputSHA256: String
+  let outputBytes: UInt64
+}
+
+private struct MetricsExportVerificationResult: Codable {
+  let schemaVersion: Int
+  let kind: String
+  let snapshotSHA256: String
+  let outputSHA256: String
+  let outputBytes: UInt64
+}
+
 @main
 private enum HostwrightStreamQualificationMain {
   static func main() {
@@ -53,26 +107,275 @@ private enum HostwrightStreamQualificationMain {
 
   private static func run() throws {
     let arguments = Array(CommandLine.arguments.dropFirst())
+    if arguments.count == 9,
+      arguments[0] == "--verify-trace-export",
+      arguments[1] == "--root",
+      arguments[3] == "--output",
+      arguments[5] == "--receipt",
+      arguments[7] == "--trace-sha256"
+    {
+      let root = try validatedRoot(arguments[2])
+      try verifyTraceExport(
+        outputPath: try validatedChild(arguments[4], of: root, mustExist: true),
+        receiptPath: try validatedChild(arguments[6], of: root, mustExist: true),
+        traceSHA256: arguments[8]
+      )
+      return
+    }
+    if arguments.count == 9,
+      arguments[0] == "--verify-metrics-export",
+      arguments[1] == "--root",
+      arguments[3] == "--output",
+      arguments[5] == "--receipt",
+      arguments[7] == "--snapshot-sha256"
+    {
+      let root = try validatedRoot(arguments[2])
+      try verifyMetricsExport(
+        outputPath: try validatedChild(arguments[4], of: root, mustExist: true),
+        receiptPath: try validatedChild(arguments[6], of: root, mustExist: true),
+        snapshotSHA256: arguments[8]
+      )
+      return
+    }
     let bootstrapClient = arguments.count == 9 && arguments.first == "--bootstrap"
       && arguments[7] == "--client"
     guard (arguments.count == 7 || bootstrapClient),
-      ["--bootstrap", "--live", "--resume", "--cleanup"].contains(arguments[0]),
+      ["--bootstrap", "--live", "--resume", "--cleanup", "--metrics-export"]
+        .contains(arguments[0]),
       arguments[1] == "--root", arguments[3] == "--state", arguments[5] == "--socket"
     else { throw NSError(domain: "HostwrightStreamQualification", code: 64) }
     let root = try validatedRoot(arguments[2])
     let statePath = try validatedChild(arguments[4], of: root, mustExist: arguments[0] != "--bootstrap")
     let socketPath = try validatedChild(
       arguments[6], of: root,
-      mustExist: arguments[0] == "--live" || arguments[0] == "--resume")
+      mustExist: ["--live", "--resume", "--metrics-export"].contains(arguments[0]))
     let clientPath = bootstrapClient
       ? try validatedChild(arguments[8], of: root, mustExist: true) : nil
     switch arguments[0] {
     case "--bootstrap": try bootstrap(root: root, statePath: statePath, clientPath: clientPath)
     case "--live": try live(root: root, statePath: statePath, socketPath: socketPath)
     case "--resume": try resume(root: root, statePath: statePath, socketPath: socketPath)
+    case "--metrics-export":
+      try metricsExport(root: root, statePath: statePath, socketPath: socketPath)
     case "--cleanup": try removeOwnedKeychainItems(statePath: statePath)
     default: throw NSError(domain: "HostwrightStreamQualification", code: 64)
     }
+  }
+
+  private static func verifyTraceExport(
+    outputPath: String,
+    receiptPath: String,
+    traceSHA256: String
+  ) throws {
+    guard traceSHA256.range(
+      of: "^[a-f0-9]{64}$",
+      options: .regularExpression
+    ) != nil else { throw failure(66) }
+    let verifiedReceipt = try QualificationExportVerifier.readPrivate(
+      path: receiptPath,
+      maximumBytes: 1 * 1_024 * 1_024
+    )
+    let receipt = try JSONDecoder().decode(
+      TraceExportIdentity.self,
+      from: verifiedReceipt.data
+    )
+    guard receipt.kind == "hostwright.trace.export",
+      receipt.traceSHA256 == traceSHA256,
+      receipt.outputPath == outputPath,
+      receipt.outputSHA256.range(
+        of: "^[a-f0-9]{64}$",
+        options: .regularExpression
+      ) != nil,
+      receipt.outputBytes > 0,
+      !receipt.automaticUpload,
+      receipt.ownership == "operator-owned"
+    else { throw failure(66) }
+    let verifiedOutput = try QualificationExportVerifier.verify(
+      path: outputPath,
+      expectedSHA256: receipt.outputSHA256,
+      expectedBytes: receipt.outputBytes
+    )
+    let trace = try JSONDecoder().decode(
+      TracePayloadIdentity.self,
+      from: verifiedOutput.data
+    )
+    guard trace.kind == "hostwright.trace",
+      trace.traceSHA256 == traceSHA256
+    else { throw failure(66) }
+    try emit(TraceExportVerificationResult(
+      schemaVersion: 1,
+      kind: "hostwright.gate09.trace-export-verification",
+      traceSHA256: traceSHA256,
+      outputSHA256: verifiedOutput.sha256,
+      outputBytes: verifiedOutput.bytes
+    ))
+  }
+
+  private static func verifyMetricsExport(
+    outputPath: String,
+    receiptPath: String,
+    snapshotSHA256: String
+  ) throws {
+    guard snapshotSHA256.range(
+      of: "^[a-f0-9]{64}$",
+      options: .regularExpression
+    ) != nil else { throw failure(66) }
+    let verifiedReceipt = try QualificationExportVerifier.readPrivate(
+      path: receiptPath,
+      maximumBytes: 1 * 1_024 * 1_024
+    )
+    let receipt = try JSONDecoder().decode(
+      MetricsExportIdentity.self,
+      from: verifiedReceipt.data
+    )
+    guard receipt.kind == "hostwright.metrics.export",
+      receipt.snapshotSHA256 == snapshotSHA256,
+      receipt.outputPath == outputPath,
+      receipt.outputSHA256.range(
+        of: "^[a-f0-9]{64}$",
+        options: .regularExpression
+      ) != nil,
+      receipt.outputBytes > 0,
+      !receipt.automaticUpload,
+      receipt.ownership == "operator-owned"
+    else { throw failure(66) }
+    let verifiedOutput = try QualificationExportVerifier.verify(
+      path: outputPath,
+      expectedSHA256: receipt.outputSHA256,
+      expectedBytes: receipt.outputBytes
+    )
+    let snapshot = try JSONDecoder().decode(
+      MetricsSnapshotIdentity.self,
+      from: verifiedOutput.data
+    )
+    guard snapshot.kind == "hostwright.metrics.snapshot",
+      snapshot.snapshotSHA256 == snapshotSHA256
+    else { throw failure(66) }
+    try emit(MetricsExportVerificationResult(
+      schemaVersion: 1,
+      kind: "hostwright.gate09.metrics-export-verification",
+      snapshotSHA256: snapshotSHA256,
+      outputSHA256: verifiedOutput.sha256,
+      outputBytes: verifiedOutput.bytes
+    ))
+  }
+
+  private static func metricsExport(root: URL, statePath: String, socketPath: String) throws {
+    let outputPath = try validatedChild(
+      root.appendingPathComponent("metrics.json").path,
+      of: root,
+      mustExist: false
+    )
+    guard !FileManager.default.fileExists(atPath: outputPath) else { throw failure(76) }
+    let session = try PersistentControlClient(socketPath: socketPath).connectSession()
+    defer { session.close() }
+    let authenticationBarrierOutput = try runCLI(
+      session: session,
+      requestID: "gate09-authenticated-session-barrier",
+      arguments: ["capabilities", "--json"]
+    )
+    let authenticationBarrier = try JSONDecoder().decode(
+      ControlPlaneJSONValue.self,
+      from: Data(authenticationBarrierOutput.utf8)
+    )
+    guard case .object(let authenticationFields) = authenticationBarrier,
+      authenticationFields["schemaVersion"] != nil,
+      authenticationFields["capabilities"] != nil
+    else { throw failure(66) }
+    let store = SQLiteStateStore(path: statePath)
+    let result = try store.withReadObservationFence {
+      let snapshotOutput = try runCLI(
+        session: session,
+        requestID: "gate09-metrics-snapshot",
+        arguments: ["metrics", "snapshot", "--state-db", statePath, "--output", "json"]
+      )
+      let snapshotData = Data(snapshotOutput.utf8)
+      let snapshotIdentity = try JSONDecoder().decode(
+        MetricsSnapshotIdentity.self,
+        from: snapshotData
+      )
+      guard snapshotIdentity.kind == "hostwright.metrics.snapshot",
+        snapshotIdentity.snapshotSHA256.range(
+          of: "^[a-f0-9]{64}$",
+          options: .regularExpression
+        ) != nil
+      else { throw failure(66) }
+      let snapshot = try JSONDecoder().decode(ControlPlaneJSONValue.self, from: snapshotData)
+
+      let exportOutput = try runCLI(
+        session: session,
+        requestID: "gate09-metrics-export",
+        arguments: [
+          "metrics", "export",
+          "--state-db", statePath,
+          "--output-path", outputPath,
+          "--confirm-snapshot", snapshotIdentity.snapshotSHA256,
+          "--output", "json",
+        ]
+      )
+      let exportData = Data(exportOutput.utf8)
+      let exportIdentity = try JSONDecoder().decode(MetricsExportIdentity.self, from: exportData)
+      guard exportIdentity.kind == "hostwright.metrics.export",
+        exportIdentity.snapshotSHA256 == snapshotIdentity.snapshotSHA256,
+        exportIdentity.outputPath == outputPath,
+        exportIdentity.outputSHA256.range(
+          of: "^[a-f0-9]{64}$",
+          options: .regularExpression
+        ) != nil,
+        exportIdentity.outputBytes > 0,
+        !exportIdentity.automaticUpload,
+        exportIdentity.ownership == "operator-owned"
+      else { throw failure(66) }
+      let verifiedExport = try QualificationExportVerifier.verify(
+        path: outputPath,
+        expectedSHA256: exportIdentity.outputSHA256,
+        expectedBytes: exportIdentity.outputBytes
+      )
+      let exportedSnapshotIdentity = try JSONDecoder().decode(
+        MetricsSnapshotIdentity.self,
+        from: verifiedExport.data
+      )
+      guard exportedSnapshotIdentity.kind == "hostwright.metrics.snapshot",
+        exportedSnapshotIdentity.snapshotSHA256 == snapshotIdentity.snapshotSHA256
+      else { throw failure(66) }
+      let exportReceipt = try JSONDecoder().decode(ControlPlaneJSONValue.self, from: exportData)
+      return MetricsExportPairQualificationResult(
+        schemaVersion: 1,
+        kind: "hostwright.gate09.metrics-export-pair",
+        snapshot: snapshot,
+        exportReceipt: exportReceipt
+      )
+    }
+    try emit(result)
+  }
+
+  private static func runCLI(
+    session: PersistentControlClientSession,
+    requestID: String,
+    arguments: [String]
+  ) throws -> String {
+    let route = try CLIControlRoute.classify(arguments: arguments)
+    guard route.transport == .persistentControlAPI,
+      route.execution == .unary,
+      !route.mutating
+    else { throw failure(66) }
+    let response = try session.send(ControlRequestEnvelope(
+      requestID: requestID,
+      operation: route.operation,
+      timeoutMilliseconds: ControlPlaneContract.maximumUnaryDeadlineMilliseconds,
+      body: route.requestBody()
+    ))
+    let result = try CLIControlResultContract.result(from: response)
+    if !result.standardOutput.isEmpty, result.exitCode != 0 {
+      FileHandle.standardError.write(Data(result.standardOutput.utf8))
+    }
+    if !result.standardError.isEmpty {
+      FileHandle.standardError.write(Data(result.standardError.utf8))
+    }
+    guard result.exitCode == 0, result.standardError.isEmpty else {
+      throw failure(Int(result.exitCode == 0 ? 66 : result.exitCode))
+    }
+    return result.standardOutput
   }
 
   private static func bootstrap(root: URL, statePath: String, clientPath: String?) throws {

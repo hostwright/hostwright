@@ -14,12 +14,14 @@ struct PluginControlRuntime: @unchecked Sendable {
   let activeHealthCheck: @Sendable (String, Int) throws -> Void
   let revokeProvider: @Sendable (String) -> Void
   let httpsMaterializer: HTTPSPluginPackageSourceMaterializer
+  let trustedSignerCertificates: [String: [Data]]
 
   init(
     repository: PluginLifecycleRepository, immutableStore: PluginImmutableStore,
     healthChecker: PluginProviderHealthChecker,
     registryTransport: any RegistrySynchronousHTTPTransporting,
-    activeProviders: ActivePluginProviderRuntime
+    activeProviders: ActivePluginProviderRuntime,
+    trustedSignerCertificates: [String: [Data]]
   ) {
     self.repository = repository
     self.immutableStore = immutableStore
@@ -32,6 +34,7 @@ struct PluginControlRuntime: @unchecked Sendable {
       activeProviders.revoke(packageDigest: $0)
     }
     httpsMaterializer = HTTPSPluginPackageSourceMaterializer(transport: registryTransport)
+    self.trustedSignerCertificates = trustedSignerCertificates
   }
 
   init(
@@ -39,7 +42,8 @@ struct PluginControlRuntime: @unchecked Sendable {
     healthCheck: @escaping @Sendable (PluginPackageRecord, Int) throws -> Void,
     activeHealthCheck: @escaping @Sendable (String, Int) throws -> Void = { _, _ in },
     revokeProvider: @escaping @Sendable (String) -> Void,
-    httpsMaterializer: HTTPSPluginPackageSourceMaterializer = HTTPSPluginPackageSourceMaterializer()
+    httpsMaterializer: HTTPSPluginPackageSourceMaterializer = HTTPSPluginPackageSourceMaterializer(),
+    trustedSignerCertificates: [String: [Data]] = [:]
   ) {
     self.repository = repository
     self.immutableStore = immutableStore
@@ -47,6 +51,7 @@ struct PluginControlRuntime: @unchecked Sendable {
     self.activeHealthCheck = activeHealthCheck
     self.revokeProvider = revokeProvider
     self.httpsMaterializer = httpsMaterializer
+    self.trustedSignerCertificates = trustedSignerCertificates
   }
 }
 
@@ -93,7 +98,7 @@ enum PluginControlOperations {
       case "plugin.discover":
         try requireExactKeys(
           fields,
-          allowed: ["source", "trustedSignerIdentifier", "trustedSignerCertificateDER"])
+          allowed: ["source", "trustedSignerIdentifier"])
         result = try withVerifiedPackage(fields: fields, runtime: runtime) { verified in
           try value(PluginDiscoveryResult(
             manifest: verified.manifest, packageDigest: verified.packageDigest))
@@ -101,7 +106,7 @@ enum PluginControlOperations {
       case "plugin.install", "plugin.update":
         try requireExactKeys(
           fields,
-          allowed: ["source", "trustedSignerIdentifier", "trustedSignerCertificateDER"])
+          allowed: ["source", "trustedSignerIdentifier"])
         guard let idempotencyKey = request.idempotencyKey, !idempotencyKey.isEmpty else {
           throw PluginControlError.idempotencyRequired
         }
@@ -305,16 +310,13 @@ enum PluginControlOperations {
     }
     try requireExactKeys(sourceFields, allowed: ["kind", "locator"])
     let source: PluginSource = try decodeField("source", from: fields)
-    let certificateText = try requiredString(
-      "trustedSignerCertificateDER", from: fields,
-      maximumBytes: 44 * 1_024)
-    guard let certificate = Data(base64Encoded: certificateText), !certificate.isEmpty else {
-      throw PluginControlError.invalidRequest
-    }
     let signerIdentifier = try requiredString(
       "trustedSignerIdentifier", from: fields, maximumBytes: 256)
+    guard let certificates = runtime.trustedSignerCertificates[signerIdentifier],
+      !certificates.isEmpty
+    else { throw PluginControlError.invalidRequest }
     let verifier = try PluginPackageVerifier(
-      trustedSignerCertificates: [signerIdentifier: certificate],
+      trustedSignerCertificates: [signerIdentifier: certificates],
       hostVersion: String(HostwrightIdentity.releaseTarget.dropFirst()))
     switch source.kind {
     case .localDirectory:

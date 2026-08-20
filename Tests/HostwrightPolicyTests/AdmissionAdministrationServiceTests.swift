@@ -231,7 +231,7 @@ final class AdmissionAdministrationServiceTests: XCTestCase {
     ControlPeerIdentityRecord(
       subjectID: subject, userID: 501,
       codeIdentity: CodeIdentity(
-        teamIdentifier: "993YC3JY4Q", signingIdentifier: "hostwright",
+        teamIdentifier: "993YC3JY4Q", signingIdentifier: "hostwright-\(subject)",
         codeDirectoryHash: String(repeating: String(hash), count: 40), validationMode: .installedRequirement),
       declaredBySubjectID: declaredBy, declaredAt: createdAt, updatedAt: createdAt)
   }

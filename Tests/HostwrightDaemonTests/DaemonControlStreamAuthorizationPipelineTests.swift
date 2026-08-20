@@ -339,7 +339,7 @@ final class DaemonControlStreamAuthorizationPipelineTests: XCTestCase {
       userID: 501,
       codeIdentity: CodeIdentity(
         teamIdentifier: "993YC3JY4Q",
-        signingIdentifier: "hostwright-test",
+        signingIdentifier: "hostwright-test-\(subject)",
         codeDirectoryHash: String(repeating: hash, count: 40),
         validationMode: .installedRequirement
       ),
@@ -352,7 +352,7 @@ final class DaemonControlStreamAuthorizationPipelineTests: XCTestCase {
   private func peer(_ subject: String, hash: String) -> AuthenticatedControlPeer {
     let codeIdentity = CodeIdentity(
       teamIdentifier: "993YC3JY4Q",
-      signingIdentifier: "hostwright-test",
+      signingIdentifier: "hostwright-test-\(subject)",
       codeDirectoryHash: String(repeating: hash, count: 40),
       validationMode: .installedRequirement
     )

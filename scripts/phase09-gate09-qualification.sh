@@ -12,7 +12,7 @@ readonly state_header=$'gate\tcell\tstatus\tsource_digest\tconfig_digest\ttoolch
 readonly ownership_header=$'recorded_at\ttype\tidentifier\tpath\tdevice\tinode\tidentity'
 root='' parent='' source_commit='' source_digest_value='' config_digest_value='' toolchain_digest_value='' live_project=''
 root_lock_created=0 gate_lock_created=0 run_succeeded=0
-lifecycle_fence_pid='' metrics_read_fence_pid=''
+lifecycle_fence_pid=''
 
 die(){ printf '%s\n' "$1" >&2; exit "${2:-70}"; }
 now(){ /bin/date -u +%Y-%m-%dT%H:%M:%SZ; }
@@ -86,14 +86,51 @@ record_keychain_items_for_service(){ local service="$1"; security dump-keychain 
 verify_keychain_absent(){ local identity service account status; while IFS=$'\t' read -r identity; do service="${identity#service=}"; service="${service%%;*}"; account="${identity#*account=}"; account="${account%%;*}"; if security find-generic-password -s "$service" -a "$account" >/dev/null 2>&1; then die 'A ledgered Gate 9 Keychain item remained after cleanup.'; else status=$?; fi; [[ "$status" == 44 ]] || die 'Gate 9 Keychain absence verification failed.'; done < <(/usr/bin/awk -F $'\t' '$2=="keychain-item"{print $7}' "$root/ownership-v1.tsv"); }
 cleanup_keychain_items(){ local state="$1" namespace expected_audit expected_cursor identity service account attributes status; namespace="$(keychain_namespace "$state")"; expected_audit="dev.hostwright.audit.v1.$namespace"; expected_cursor="dev.hostwright.stream-cursor.v1.$namespace"; while IFS=$'\t' read -r identity; do service="${identity#service=}"; service="${service%%;*}"; account="${identity#*account=}"; account="${account%%;*}"; [[ "$service" == "$expected_audit" || "$service" == "$expected_cursor" ]] || die 'Gate 9 Keychain ledger service changed; cleanup is refused.'; [[ "$account" == active-key-id || "$account" == chain-head-v1 || "$account" =~ ^signing-key:p256:[a-f0-9]{64}$ ]] || die 'Gate 9 Keychain ledger account changed; cleanup is refused.'; attributes="$(security find-generic-password -s "$service" -a "$account" 2>&1)" || die 'A ledgered Gate 9 Keychain item disappeared before cleanup.'; printf '%s' "$attributes" | /usr/bin/grep -F '"gena"<blob>="hostwright-audit-owned-v1"' >/dev/null || die 'Gate 9 Keychain ownership marker changed; cleanup is refused.'; security delete-generic-password -s "$service" -a "$account" >/dev/null 2>&1 || die 'Gate 9 Keychain item cleanup failed.'; done < <(/usr/bin/awk -F $'\t' '$2=="keychain-item"{print $7}' "$root/ownership-v1.tsv"); verify_keychain_absent; for service in "$expected_audit" "$expected_cursor"; do if security find-generic-password -s "$service" >/dev/null 2>&1; then die 'An unledgered Gate 9 Keychain item remains; cleanup is frozen.'; else status=$?; fi; [[ "$status" == 44 ]] || die 'Gate 9 Keychain service absence verification failed.'; done; }
 stop_exact_process(){ local path="$1" device="$2" inode="$3" identity="$4" pid command_sha start_sha command start process_state n; pid="${identity#pid=}"; pid="${pid%%;*}"; command_sha="${identity#*command_sha256=}"; command_sha="${command_sha%%;*}"; start_sha="${identity#*start_sha256=}"; start_sha="${start_sha%%;*}"; [[ "$pid" =~ ^[1-9][0-9]*$ && -f "$path" && ! -L "$path" && "$(stat -f '%d' "$path")" == "$device" && "$(stat -f '%i' "$path")" == "$inode" ]] || die 'ledgered process executable identity changed; cleanup is refused.'; kill -0 "$pid" 2>/dev/null || return 0; command="$(ps -p "$pid" -o command=)"; start="$(ps -p "$pid" -o lstart=)"; [[ "${command%% *}" == "$path" && "$(printf '%s' "$command"|stream_sha)" == "$command_sha" && "$(printf '%s' "$start"|stream_sha)" == "$start_sha" ]] || die 'ledgered process identity changed; cleanup is refused.'; kill -TERM "$pid"; for n in {1..600}; do if ! kill -0 "$pid" 2>/dev/null; then return 0; fi; process_state="$(ps -p "$pid" -o state= 2>/dev/null | tr -d '[:space:]')"; [[ "$process_state" == Z* ]] && return 0; /bin/sleep 0.1; done; die 'owned process did not stop; cleanup is frozen.' 124; }
-acquire_lifecycle_mutation_fence(){ local state="$1" lock ready matches; matches="$(/usr/bin/find "$(dirname "$state")" -maxdepth 1 -type f -name '.hostwright-*-access-v1.lock.lifecycle-mutation' -print)"; [[ "$matches" != *$'\n'* && -n "$matches" ]] || die 'Gate 9 lifecycle-mutation fence is missing or ambiguous.'; lock="$matches"; [[ "$(/bin/realpath "$lock")" == "$lock" && ! -L "$lock" && "$(stat -f '%u' "$lock")" == "$(id -u)" && "$(stat -f '%Lp' "$lock")" == 600 && "$(stat -f '%l' "$lock")" == 1 ]] || die 'Gate 9 lifecycle-mutation fence identity changed.'; ready="$(short_live_runtime)/qualification.lifecycle-fence-ready"; /usr/bin/perl -M Fcntl=:flock -e 'umask 077; open my $fh, "+<", $ARGV[0] or die; flock($fh, LOCK_EX) or die; open my $ready, ">", $ARGV[1] or die; close $ready; $SIG{TERM}=sub { exit 0 }; sleep 1 while 1' "$lock" "$ready" & lifecycle_fence_pid=$!; record_process "$lifecycle_fence_pid" /usr/bin/perl; for n in {1..300}; do [[ -e "$ready" ]] && return 0; kill -0 "$lifecycle_fence_pid" 2>/dev/null || die 'Gate 9 lifecycle-mutation fence holder exited.'; /bin/sleep 0.1; done; die 'Gate 9 lifecycle-mutation fence holder did not acquire the lock.' 124; }
-release_lifecycle_mutation_fence(){ if [[ -n "${lifecycle_fence_pid:-}" ]]; then kill -TERM "$lifecycle_fence_pid" 2>/dev/null || true; wait "$lifecycle_fence_pid" 2>/dev/null || true; lifecycle_fence_pid=''; fi; }
-acquire_metrics_read_fence(){ local state="$1" lock ready matches; matches="$(/usr/bin/find "$(dirname "$state")" -maxdepth 1 -type f -name '.hostwright-*-access-v1.lock.writer' -print)"; [[ "$matches" != *$'\n'* && -n "$matches" ]] || die 'Gate 9 metrics writer fence is missing or ambiguous.'; lock="$matches"; [[ "$(/bin/realpath "$lock")" == "$lock" && ! -L "$lock" && "$(stat -f '%u' "$lock")" == "$(id -u)" && "$(stat -f '%Lp' "$lock")" == 600 && "$(stat -f '%l' "$lock")" == 1 ]] || die 'Gate 9 metrics writer fence identity changed.'; ready="$(short_live_runtime)/qualification.metrics-fence-ready"; /usr/bin/perl -MFcntl=:flock -e 'umask 077; open my $fh, "+<", $ARGV[0] or die; flock($fh, LOCK_SH) or die; open my $ready, ">", $ARGV[1] or die; close $ready; $SIG{TERM}=sub { exit 0 }; sleep 1 while 1' "$lock" "$ready" & metrics_read_fence_pid=$!; record_process "$metrics_read_fence_pid" /usr/bin/perl; for n in {1..300}; do [[ -e "$ready" ]] && return 0; kill -0 "$metrics_read_fence_pid" 2>/dev/null || die 'Gate 9 metrics writer fence holder exited.'; /bin/sleep 0.1; done; die 'Gate 9 metrics writer fence holder did not acquire the lock.' 124; }
-release_metrics_read_fence(){ if [[ -n "${metrics_read_fence_pid:-}" ]]; then kill -TERM "$metrics_read_fence_pid" 2>/dev/null || true; wait "$metrics_read_fence_pid" 2>/dev/null || true; metrics_read_fence_pid=''; fi; }
 acquire_lifecycle_mutation_fence(){ local state="$1" lock ready matches; matches="$(/usr/bin/find "$(dirname "$state")" -maxdepth 1 -type f -name '.hostwright-*-access-v1.lock.lifecycle-mutation' -print)"; [[ "$matches" != *$'\n'* && -n "$matches" ]] || die 'Gate 9 lifecycle-mutation fence is missing or ambiguous.'; lock="$matches"; [[ "$(/bin/realpath "$lock")" == "$lock" && ! -L "$lock" && "$(stat -f '%u' "$lock")" == "$(id -u)" && "$(stat -f '%Lp' "$lock")" == 600 && "$(stat -f '%l' "$lock")" == 1 ]] || die 'Gate 9 lifecycle-mutation fence identity changed.'; ready="$(short_live_runtime)/qualification.lifecycle-fence-ready"; /usr/bin/perl -MFcntl=:flock -e 'umask 077; open my $fh, "+<", $ARGV[0] or die; flock($fh, LOCK_EX) or die; open my $ready, ">", $ARGV[1] or die; close $ready; $SIG{TERM}=sub { exit 0 }; sleep 1 while 1' "$lock" "$ready" & lifecycle_fence_pid=$!; record_process "$lifecycle_fence_pid" /usr/bin/perl; for n in {1..300}; do [[ -e "$ready" ]] && return 0; kill -0 "$lifecycle_fence_pid" 2>/dev/null || die 'Gate 9 lifecycle-mutation fence holder exited.'; /bin/sleep 0.1; done; die 'Gate 9 lifecycle-mutation fence holder did not acquire the lock.' 124; }
+release_lifecycle_mutation_fence(){ if [[ -n "${lifecycle_fence_pid:-}" ]]; then kill -TERM "$lifecycle_fence_pid" 2>/dev/null || true; wait "$lifecycle_fence_pid" 2>/dev/null || true; lifecycle_fence_pid=''; fi; }
 remove_owned_socket(){ local runtime="$1" socket="$2"; [[ "$socket" == "$runtime/app-support/run/control-v2.sock" && "$runtime" == /Volumes/T9/hostwright/qualification/.p09g9-* && -d "$(dirname "$socket")" && ! -L "$(dirname "$socket")" ]] || die 'owned Gate 9 socket path changed; cleanup is refused.'; [[ -e "$socket" ]] || return 0; [[ -S "$socket" && ! -L "$socket" ]] || die 'owned Gate 9 control socket identity changed; cleanup is refused.'; /bin/unlink "$socket"; }
 cleanup_files(){ local runtime="$1" path device inode; while IFS=$'\t' read -r path device inode; do [[ "$path" == "$runtime"/* && ! -d "$path" && ! -L "$path" && "$(stat -f '%d' "$path")" == "$device" && "$(stat -f '%i' "$path")" == "$inode" ]] || die 'live artifact identity changed; cleanup is refused'; /bin/unlink "$path"; done < <(/usr/bin/awk -F $'\t' '$2=="temporary-file"{print $4"\t"$5"\t"$6}' "$root/ownership-v1.tsv"); while IFS=$'\t' read -r path device inode; do [[ "$path" == "$runtime"/* && -d "$path" && ! -L "$path" && "$(stat -f '%d' "$path")" == "$device" && "$(stat -f '%i' "$path")" == "$inode" ]] || die 'live artifact identity changed; cleanup is refused'; /bin/rmdir "$path"; done < <(/usr/bin/awk -F $'\t' '$2=="temporary-directory"{print length($4)"\t"$4"\t"$5"\t"$6}' "$root/ownership-v1.tsv" | /usr/bin/sort -rn | /usr/bin/cut -f2-); /bin/rmdir "$runtime"; }
 preserve_live_diagnostics(){ local runtime="$1" diagnostics path copied=0; [[ "$run_succeeded" == 0 && "$runtime" == "$(short_live_runtime)" && -d "$runtime" && ! -L "$runtime" ]] || return 0; diagnostics="$root/live-failure-diagnostics-v1"; while IFS= read -r -d '' path; do [[ -f "$path" && ! -L "$path" && "$(stat -f '%u' "$path")" == "$(id -u)" ]] || die 'live diagnostic identity changed; preservation is refused.'; if [[ "$copied" == 0 ]]; then mkdir "$diagnostics"; chmod 700 "$diagnostics"; copied=1; fi; /bin/cp -p "$path" "$diagnostics/${path##*/}"; chmod 600 "$diagnostics/${path##*/}"; done < <(/usr/bin/find "$runtime" -maxdepth 1 -type f \( -name 'daemon.*.stdout.log' -o -name 'daemon.*.stderr.log' -o -name 'qualification.*.json' -o -name 'qualification.*.stderr.log' \) -print0); }
+copy_live_evidence_artifact(){
+  local runtime="$1" source="$2" destination="$3" device inode digest bytes
+  [[ "$source" == "$runtime"/* && "$destination" == "$root/live-evidence-v1"/* && ! -e "$destination" && ! -L "$source" && -f "$source" && "$(stat -f '%u' "$source")" == "$(id -u)" && "$(stat -f '%Lp' "$source")" == 600 && "$(stat -f '%l' "$source")" == 1 ]] || die 'Gate 9 live evidence source or destination is unsafe.' 66
+  device="$(stat -f '%d' "$source")"; inode="$(stat -f '%i' "$source")"; digest="$(sha "$source")"; bytes="$(stat -f '%z' "$source")"
+  /bin/cp -p "$source" "$destination"; chmod 600 "$destination"
+  [[ -f "$destination" && ! -L "$destination" && "$(stat -f '%u' "$destination")" == "$(id -u)" && "$(stat -f '%Lp' "$destination")" == 600 && "$(stat -f '%l' "$destination")" == 1 && "$(sha "$destination")" == "$digest" && "$(stat -f '%z' "$destination")" == "$bytes" && "$(stat -f '%d' "$source")" == "$device" && "$(stat -f '%i' "$source")" == "$inode" && "$(sha "$source")" == "$digest" ]] || die 'Gate 9 live evidence changed during preservation.' 66
+}
+preserve_live_evidence(){
+  local runtime="$1" evidence="$root/live-evidence-v1" name manifest_rows="$root/.live-evidence-manifest-rows.tmp"
+  [[ "$runtime" == "$(short_live_runtime)" && -d "$runtime" && ! -L "$runtime" && ! -e "$evidence" && ! -e "$manifest_rows" ]] || die 'Gate 9 live evidence destination is unsafe.' 66
+  mkdir "$evidence"; chmod 700 "$evidence"; : > "$manifest_rows"; chmod 600 "$manifest_rows"
+  for name in qualification.capabilities-v1.json qualification.plan-v1.json qualification.status-plan-v1.json stream-live.json trace.json qualification.trace-export-v1.json qualification.trace-export-verification-v1.json qualification.metrics-export-pair-v1.json qualification.metrics-snapshot-v1.json qualification.metrics-export-v1.json qualification.metrics-export-verification-v1.json metrics.json stream-resume.json; do
+    copy_live_evidence_artifact "$runtime" "$runtime/$name" "$evidence/$name"
+    printf '%s\t%s\t%s\n' "$name" "$(sha "$evidence/$name")" "$(stat -f '%z' "$evidence/$name")" >> "$manifest_rows"
+  done
+  /usr/bin/jq -Rn '[inputs | split("\t") | {path:.[0],sha256:.[1],bytes:(.[2]|tonumber)}] | {schemaVersion:1,kind:"hostwright.phase09.gate09.live-evidence",files:.}' < "$manifest_rows" > "$evidence/manifest-v1.json"
+  chmod 600 "$evidence/manifest-v1.json"; /bin/unlink "$manifest_rows"
+}
+validate_live_evidence(){
+  local evidence="$root/live-evidence-v1" path expected bytes
+  [[ -d "$evidence" && ! -L "$evidence" && "$(stat -f '%u' "$evidence")" == "$(id -u)" && "$(stat -f '%Lp' "$evidence")" == 700 && -f "$evidence/manifest-v1.json" && ! -L "$evidence/manifest-v1.json" && "$(stat -f '%u' "$evidence/manifest-v1.json")" == "$(id -u)" && "$(stat -f '%Lp' "$evidence/manifest-v1.json")" == 600 && "$(stat -f '%l' "$evidence/manifest-v1.json")" == 1 ]] || return 1
+  /usr/bin/jq -e '
+    .schemaVersion == 1 and
+    .kind == "hostwright.phase09.gate09.live-evidence" and
+    (.files | type == "array") and
+    ([.files[].path] | length == (unique | length)) and
+    ([.files[].path] | sort) as $paths |
+    (["metrics.json","qualification.capabilities-v1.json","qualification.metrics-export-pair-v1.json","qualification.metrics-export-v1.json","qualification.metrics-export-verification-v1.json","qualification.metrics-snapshot-v1.json","qualification.plan-v1.json","qualification.status-plan-v1.json","qualification.trace-export-v1.json","qualification.trace-export-verification-v1.json","stream-live.json","stream-resume.json","trace.json"] | sort) as $required |
+    ($paths == $required) and
+    all(.files[];
+      (.path | type == "string" and test("^[A-Za-z0-9._-]+$") and . != "manifest-v1.json") and
+      (.sha256 | type == "string" and test("^[a-f0-9]{64}$")) and
+      (.bytes | type == "number" and . > 0 and floor == .)
+    )
+  ' "$evidence/manifest-v1.json" >/dev/null || return 1
+  while IFS=$'\t' read -r path expected bytes; do
+    [[ "$path" =~ ^[A-Za-z0-9._-]+$ && "$path" != manifest-v1.json && -f "$evidence/$path" && ! -L "$evidence/$path" && "$(stat -f '%u' "$evidence/$path")" == "$(id -u)" && "$(stat -f '%Lp' "$evidence/$path")" == 600 && "$(stat -f '%l' "$evidence/$path")" == 1 && "$(sha "$evidence/$path")" == "$expected" && "$(stat -f '%z' "$evidence/$path")" == "$bytes" ]] || return 1
+  done < <(/usr/bin/jq -r '.files[] | [.path,.sha256,(.bytes|tostring)] | @tsv' "$evidence/manifest-v1.json")
+  [[ "$(/usr/bin/find "$evidence" -mindepth 1 -maxdepth 1 -print | /usr/bin/wc -l | tr -d ' ')" == "$(( $(/usr/bin/jq '.files|length' "$evidence/manifest-v1.json") + 1 ))" ]] || return 1
+}
 emergency_live_cleanup(){ [[ -n "$root" && -f "$root/ownership-v1.tsv" ]] || return 0; local runtime path device inode identity resource state; runtime="$(/usr/bin/awk -F $'\t' '$2=="temporary-root"&&$3=="gate09-live-runtime"{print $4}' "$root/ownership-v1.tsv")"; [[ -n "$runtime" && "$runtime" != *$'\n'* && "$runtime" == "$(short_live_runtime)" ]] || return 0; while IFS=$'\t' read -r path device inode identity; do stop_exact_process "$path" "$device" "$inode" "$identity"; done < <(/usr/bin/awk -F $'\t' '$2=="process"{print $4"\t"$5"\t"$6"\t"$7}' "$root/ownership-v1.tsv"); resource="$(/usr/bin/awk -F $'\t' '$2=="container-resource"{print $3}' "$root/ownership-v1.tsv" | /usr/bin/sort -u)"; if [[ -z "$resource" ]] && /usr/bin/awk -F $'\t' '$2=="container-pending"{f=1}END{exit f?0:1}' "$root/ownership-v1.tsv"; then resource="$(resolve_pending_container_claim)"; fi; [[ -z "$resource" ]] || { [[ "$resource" != *$'\n'* ]] || die 'multiple Gate 9 container resources were ledgered; cleanup is frozen.'; delete_exact_container "$resource"; }; [[ -d "$runtime" && ! -L "$runtime" ]] || return 0; preserve_live_diagnostics "$runtime"; state="$runtime/app-support/state/state.sqlite"; if [[ -f "$state" && ! -L "$state" ]]; then record_keychain_items "$state"; cleanup_keychain_items "$state"; fi; while IFS= read -r -d '' path; do record_artifact "$runtime" "$path"; done < <(/usr/bin/find "$runtime" -mindepth 1 -print0); cleanup_files "$runtime"; }
 
 wait_for_authenticated_daemon(){ local runtime="$1" cli="$2" deadline output; deadline=$(( $(/bin/date +%s) + 60 )); while [[ "$(/bin/date +%s)" -lt "$deadline" ]]; do if output="$(HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" HOSTWRIGHT_CACHE_DIR="$runtime/cache" HOSTWRIGHT_LOG_DIR="$runtime/logs" "$cli" capabilities --json 2>/dev/null)" && printf '%s' "$output" | /usr/bin/jq -e . >/dev/null 2>&1; then return 0; fi; /bin/sleep 1; done; die 'owned daemon did not pass authenticated readiness.' 124; }
@@ -130,7 +167,7 @@ live(){
   swift build --jobs 1 --product hostwright-control
   swift build --jobs 1 --product hostwrightd
   swift build --jobs 1 --product hostwright-stream-qualification
-  local bin runtime cli control daemon bootstrap config state socket pid resource output first_process_identity metrics_hash metrics_exported metrics_export_status metrics_snapshot_json metrics_snapshot_status trace_id trace_hash n
+  local bin runtime cli control daemon bootstrap config state socket pid resource output first_process_identity metrics_export_pair_json metrics_export_pair_status metrics_snapshot_hash trace_id trace_hash n
   bin="$(swift build --show-bin-path)"
   runtime="$(short_live_runtime)"
   mkdir "$runtime"
@@ -187,58 +224,45 @@ live(){
   HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" HOSTWRIGHT_CACHE_DIR="$runtime/cache" HOSTWRIGHT_LOG_DIR="$runtime/logs" "$cli" events --state-db "$state" --project "$live_project" --limit 20 --output json | /usr/bin/jq -e . >/dev/null
   HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" HOSTWRIGHT_CACHE_DIR="$runtime/cache" HOSTWRIGHT_LOG_DIR="$runtime/logs" "$bootstrap" --live --root "$runtime" --state "$state" --socket "$socket" > "$runtime/stream-live.json"
   trace_id="$(/usr/bin/sqlite3 "$state" "SELECT json_extract(payload_json_redacted, '\$.traceID') FROM event_ledger WHERE type = 'trace.span.v1' AND source = 'hostwright.trace' ORDER BY rowid DESC LIMIT 1;")"
-  if [[ -n "$trace_id" ]]; then
-    trace_hash="$(HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" traces inspect --state-db "$state" --trace-id "$trace_id" --output json | /usr/bin/jq -er --arg id "$trace_id" '.traces[] | select(.traceID == $id) | .traceSHA256')"
-    HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" traces export --state-db "$state" --trace-id "$trace_id" --output-path "$runtime/trace.json" --confirm-trace "$trace_hash" --output json | /usr/bin/jq -e . >/dev/null
-  fi
+  [[ -n "$trace_id" ]] || die 'Gate 9 did not produce a trace export candidate.' 66
+  trace_hash="$(HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" traces inspect --state-db "$state" --trace-id "$trace_id" --output json | /usr/bin/jq -er --arg id "$trace_id" '.traces[] | select(.traceID == $id) | .traceSHA256')"
+  HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" traces export --state-db "$state" --trace-id "$trace_id" --output-path "$runtime/trace.json" --confirm-trace "$trace_hash" --output json > "$runtime/qualification.trace-export-v1.json"
+  chmod 600 "$runtime/qualification.trace-export-v1.json"
+  "$bootstrap" --verify-trace-export --root "$runtime" --output "$runtime/trace.json" --receipt "$runtime/qualification.trace-export-v1.json" --trace-sha256 "$trace_hash" > "$runtime/qualification.trace-export-verification-v1.json"
+  chmod 600 "$runtime/qualification.trace-export-verification-v1.json"
 
-  # Metrics require the authenticated CLI/daemon path. Observation authorization
-  # is non-persisting, so keep the lifecycle fence across the snapshot and its
-  # confirmed export as one stable read-only observation transaction.
-  metrics_exported=0
-  for n in {1..60}; do
-    acquire_lifecycle_mutation_fence "$state"
-    set +e
-    metrics_snapshot_json="$(HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" metrics snapshot --state-db "$state" --output json 2> "$runtime/qualification.metrics-snapshot-v1.stderr.log")"
-    metrics_snapshot_status=$?
-    set -e
-    printf '%s' "$metrics_snapshot_json" > "$runtime/qualification.metrics-snapshot-v1.json"
-    chmod 600 "$runtime/qualification.metrics-snapshot-v1.json" "$runtime/qualification.metrics-snapshot-v1.stderr.log"
-    if [[ "$metrics_snapshot_status" != 0 ]]; then
-      release_metrics_read_fence
-      release_lifecycle_mutation_fence
-      if ! /usr/bin/grep -qE 'HW-METRIC-003|HW-CLI-005|HW-API-002|authoritative database changed' "$runtime/qualification.metrics-snapshot-v1.json" "$runtime/qualification.metrics-snapshot-v1.stderr.log" 2>/dev/null; then
-        /bin/cat "$runtime/qualification.metrics-snapshot-v1.json" "$runtime/qualification.metrics-snapshot-v1.stderr.log" >&2
-        die 'Gate 9 metrics snapshot failed for a non-retryable reason.' "$metrics_snapshot_status"
-      fi
-      /bin/sleep 1
-      continue
-    fi
-    if ! metrics_hash="$(printf '%s' "$metrics_snapshot_json" | /usr/bin/jq -er '.snapshotSHA256')"; then
-      release_metrics_read_fence
-      release_lifecycle_mutation_fence
-      /bin/cat "$runtime/qualification.metrics-snapshot-v1.json" >&2
-      die 'Gate 9 metrics snapshot returned invalid JSON.' 66
-    fi
-    acquire_metrics_read_fence "$state"
-    if HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" metrics export --state-db "$state" --output-path "$runtime/metrics.json" --confirm-snapshot "$metrics_hash" --output json > "$runtime/qualification.metrics-export-v1.json" 2> "$runtime/qualification.metrics-export-v1.stderr.log"; then
-      /usr/bin/jq -e . "$runtime/qualification.metrics-export-v1.json" >/dev/null || { release_metrics_read_fence; release_lifecycle_mutation_fence; die 'Gate 9 metrics export returned invalid JSON.' 66; }
-      release_metrics_read_fence
-      release_lifecycle_mutation_fence
-      metrics_exported=1
-      break
-    else
-      metrics_export_status=$?
-      release_metrics_read_fence
-      release_lifecycle_mutation_fence
-    fi
-    if ! /usr/bin/grep -qE 'HW-METRIC-003|HW-CLI-005|authoritative database changed' "$runtime/qualification.metrics-export-v1.json" "$runtime/qualification.metrics-export-v1.stderr.log" 2>/dev/null; then
-      /bin/cat "$runtime/qualification.metrics-export-v1.json" "$runtime/qualification.metrics-export-v1.stderr.log" >&2
-      die 'Gate 9 metrics export failed for a non-retryable reason.' "$metrics_export_status"
-    fi
-    /bin/sleep 1
-  done
-  [[ "$metrics_exported" == 1 ]] || die 'Gate 9 metrics snapshot remained unstable across bounded retries.' 124
+  # Metrics require the authenticated CLI/daemon path. One persistent session
+  # performs both commands as one stable read-only observation transaction while
+  # the lifecycle fence prevents reconciliation from changing the source.
+  acquire_lifecycle_mutation_fence "$state"
+  set +e
+  metrics_export_pair_json="$(HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" HOSTWRIGHT_CACHE_DIR="$runtime/cache" HOSTWRIGHT_LOG_DIR="$runtime/logs" "$bootstrap" --metrics-export --root "$runtime" --state "$state" --socket "$socket" 2> "$runtime/qualification.metrics-export-v1.stderr.log")"
+  metrics_export_pair_status=$?
+  set -e
+  printf '%s' "$metrics_export_pair_json" > "$runtime/qualification.metrics-export-pair-v1.json"
+  chmod 600 "$runtime/qualification.metrics-export-pair-v1.json" "$runtime/qualification.metrics-export-v1.stderr.log"
+  release_lifecycle_mutation_fence
+  if [[ "$metrics_export_pair_status" != 0 ]]; then
+    /bin/cat "$runtime/qualification.metrics-export-pair-v1.json" "$runtime/qualification.metrics-export-v1.stderr.log" >&2
+    die 'Gate 9 metrics snapshot/export pair failed.' "$metrics_export_pair_status"
+  fi
+  /usr/bin/jq -e --arg output "$runtime/metrics.json" '
+    .schemaVersion == 1 and
+    .kind == "hostwright.gate09.metrics-export-pair" and
+    .snapshot.kind == "hostwright.metrics.snapshot" and
+    (.snapshot.snapshotSHA256 | test("^[a-f0-9]{64}$")) and
+    .exportReceipt.kind == "hostwright.metrics.export" and
+    .exportReceipt.snapshotSHA256 == .snapshot.snapshotSHA256 and
+    .exportReceipt.outputPath == $output and
+    .exportReceipt.automaticUpload == false and
+    .exportReceipt.ownership == "operator-owned"
+  ' "$runtime/qualification.metrics-export-pair-v1.json" >/dev/null || die 'Gate 9 metrics snapshot/export pair returned invalid JSON.' 66
+  /usr/bin/jq -c '.snapshot' "$runtime/qualification.metrics-export-pair-v1.json" > "$runtime/qualification.metrics-snapshot-v1.json"
+  /usr/bin/jq -c '.exportReceipt' "$runtime/qualification.metrics-export-pair-v1.json" > "$runtime/qualification.metrics-export-v1.json"
+  chmod 600 "$runtime/qualification.metrics-snapshot-v1.json" "$runtime/qualification.metrics-export-v1.json"
+  metrics_snapshot_hash="$(/usr/bin/jq -er '.snapshotSHA256 | select(test("^[a-f0-9]{64}$"))' "$runtime/qualification.metrics-snapshot-v1.json")"
+  "$bootstrap" --verify-metrics-export --root "$runtime" --output "$runtime/metrics.json" --receipt "$runtime/qualification.metrics-export-v1.json" --snapshot-sha256 "$metrics_snapshot_hash" > "$runtime/qualification.metrics-export-verification-v1.json"
+  chmod 600 "$runtime/qualification.metrics-export-verification-v1.json"
 
   first_process_identity="$(/usr/bin/awk -F $'\t' -v p="$pid" '$2=="process"&&$7~("pid="p";"){print $7}' "$root/ownership-v1.tsv")"
   stop_exact_process "$daemon" "$(stat -f '%d' "$daemon")" "$(stat -f '%i' "$daemon")" "$first_process_identity"
@@ -251,6 +275,8 @@ live(){
   pid="$(start_daemon "$runtime" "$daemon" "$config" "$state" restarted "$cli")"
   HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$cli" capabilities --json | /usr/bin/jq -e . >/dev/null
   HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$runtime/app-support" "$bootstrap" --resume --root "$runtime" --state "$state" --socket "$socket" > "$runtime/stream-resume.json"
+  chmod 600 "$runtime/stream-live.json" "$runtime/stream-resume.json"
+  preserve_live_evidence "$runtime"
 
   delete_exact_container "$resource"
   record_keychain_items "$state"
@@ -266,14 +292,15 @@ state(){ printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$gate" "$1" "$2" "$s
 failure(){ [[ -f "$root/failure-v1.tsv" ]] || printf '%s\n' $'recorded_at\tgate\tcell\texit_status\tcommand\tstdout_sha256\tstderr_sha256' > "$root/failure-v1.tsv"; printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$(now)" "$gate" "$1" "$2" "$3" "$4" "$5" >> "$root/failure-v1.tsv"; chmod 600 "$root/failure-v1.tsv"; }
 manifest(){ local tmp="$root/.manifest.tmp"; /usr/bin/jq --arg s "$1" --arg t "$2" '.status=$s|.completedAt=(if $t==""then null else $t end)' "$root/manifest-v1.json" > "$tmp"; chmod 600 "$tmp"; /bin/mv "$tmp" "$root/manifest-v1.json"; }
 reusable(){ local n o e os es; for n in 1 2 3 4 5 6; do /usr/bin/awk -F $'\t' -v g="$gate" -v n="$n" -v s="$source_digest_value" -v c="$config_digest_value" -v t="$toolchain_digest_value" '$1==g&&$2==n&&$3=="pass"&&$4==s&&$5==c&&$6==t{f=1}END{exit f?0:1}' "$root/state-v1.tsv" || return 1; o="$root/cell-$(printf '%02d' "$n").stdout.log"; e="$root/cell-$(printf '%02d' "$n").stderr.log"; [[ -f "$o" && -f "$e" ]] || return 1; os="$(/usr/bin/awk -F $'\t' -v n="$n" '$2==n&&$3=="pass"{x=$9}END{print x}' "$root/state-v1.tsv")"; es="$(/usr/bin/awk -F $'\t' -v n="$n" '$2==n&&$3=="pass"{x=$10}END{print x}' "$root/state-v1.tsv")"; [[ "$(sha "$o")" == "$os" && "$(sha "$e")" == "$es" ]] || return 1; done; }
-verify(){ local tmp status=0; [[ -f "$root/evidence-v1.sha256" && ! -L "$root/evidence-v1.sha256" && -f "$root/evidence-v1.cms" && ! -L "$root/evidence-v1.cms" ]] || return 1; tmp="$(/usr/bin/mktemp /tmp/hostwright-phase09-gate09.XXXXXX)"; security cms -D -u 9 -i "$root/evidence-v1.cms" -o "$tmp" >/dev/null 2>&1 || status=1; /usr/bin/cmp -s "$root/evidence-v1.sha256" "$tmp" || status=1; (cd "$root" && /usr/bin/shasum -a 256 -c evidence-v1.sha256 >/dev/null) || status=1; /bin/unlink "$tmp"; [[ "$status" == 0 ]]; }
+verify(){ local tmp status=0; [[ -f "$root/evidence-v1.sha256" && ! -L "$root/evidence-v1.sha256" && -f "$root/evidence-v1.cms" && ! -L "$root/evidence-v1.cms" ]] || return 1; validate_live_evidence || return 1; tmp="$(/usr/bin/mktemp /tmp/hostwright-phase09-gate09.XXXXXX)"; security cms -D -u 9 -i "$root/evidence-v1.cms" -o "$tmp" >/dev/null 2>&1 || status=1; /usr/bin/cmp -s "$root/evidence-v1.sha256" "$tmp" || status=1; (cd "$root" && /usr/bin/shasum -a 256 -c evidence-v1.sha256 >/dev/null) || status=1; /bin/unlink "$tmp"; [[ "$status" == 0 ]]; }
 release(){ if [[ "$run_succeeded" == 1 && "$root_lock_created" == 1 && "$gate_lock_created" == 1 ]]; then /bin/rmdir "$root/active-run-v1"; /bin/rmdir "$parent/.phase09-gate09-active-v1"; root_lock_created=0; gate_lock_created=0; fi; }
-write_digest(){ (cd "$root"; for f in manifest-v1.json state-v1.tsv ownership-v1.tsv toolchain-v1.txt gate-active-run-v1-info.tsv cell-*.stdout.log cell-*.stderr.log; do [[ -f "$f" ]] && /usr/bin/shasum -a 256 "$f"; done | LC_ALL=C sort) > "$root/evidence-v1.sha256"; chmod 600 "$root/evidence-v1.sha256"; security cms -S -N "$signing_identity" -H SHA256 -u 9 -i "$root/evidence-v1.sha256" -o "$root/evidence-v1.cms"; chmod 600 "$root/evidence-v1.cms"; }
-on_exit(){ local status=$?; trap - EXIT; release_metrics_read_fence || true; release_lifecycle_mutation_fence || true; emergency_live_cleanup || true; release || true; exit "$status"; }
+write_checksum_manifest(){ validate_live_evidence || die 'Gate 9 retained live evidence is incomplete or unsafe.' 73; (cd "$root"; { for f in manifest-v1.json state-v1.tsv ownership-v1.tsv toolchain-v1.txt gate-active-run-v1-info.tsv cell-*.stdout.log cell-*.stderr.log; do [[ -f "$f" ]] && /usr/bin/shasum -a 256 "$f"; done; /usr/bin/find live-evidence-v1 -maxdepth 2 -type f -print | LC_ALL=C sort | while IFS= read -r f; do [[ ! -L "$f" ]] || exit 73; /usr/bin/shasum -a 256 "$f"; done; } | LC_ALL=C sort) > "$root/evidence-v1.sha256"; chmod 600 "$root/evidence-v1.sha256"; }
+write_digest(){ write_checksum_manifest; security cms -S -N "$signing_identity" -H SHA256 -u 9 -i "$root/evidence-v1.sha256" -o "$root/evidence-v1.cms"; chmod 600 "$root/evidence-v1.cms"; }
+on_exit(){ local status=$?; trap - EXIT; release_lifecycle_mutation_fence || true; emergency_live_cleanup || true; release || true; exit "$status"; }
 cell_timeout(){ case "$1" in 3) printf '%s\n' 1800;; 6) printf '%s\n' 2400;; *) printf '%s\n' 1200;; esac; }
 terminate_cell_group(){ local pgid="$1" n; kill -TERM -- "-$pgid" 2>/dev/null || return 0; for n in {1..50}; do kill -0 -- "-$pgid" 2>/dev/null || return 0; /bin/sleep .1; done; kill -KILL -- "-$pgid" 2>/dev/null || true; }
 run(){ prepared; if [[ -e "$root/evidence-v1.sha256" || -e "$root/evidence-v1.cms" ]]; then [[ "$(/usr/bin/jq -r .status "$root/manifest-v1.json")" == passed ]] && reusable && verify || die 'completed evidence is incomplete or changed; preserve this root and do not rerun.' 73; printf '%s\n' 'Gate 9 evidence is valid and reused; no cells were rerun.'; return; fi; local lock="$parent/.phase09-gate09-active-v1" n cmd out err start end status cell_pid watchdog; [[ ! -e "$root/active-run-v1" && ! -e "$lock" ]] || die 'An active Gate 9 qualification already exists; do not duplicate it.' 75; mkdir "$lock"; chmod 700 "$lock"; printf '%s\n' $'root\tpid\tstarted_at\tsource_digest\tconfig_digest\ttoolchain_digest' > "$lock/info-v1.tsv"; printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$root" "$$" "$(now)" "$source_digest_value" "$config_digest_value" "$toolchain_digest_value" >> "$lock/info-v1.tsv"; chmod 600 "$lock/info-v1.tsv"; gate_lock_created=1; mkdir "$root/active-run-v1"; chmod 700 "$root/active-run-v1"; root_lock_created=1; trap on_exit EXIT; for n in 1 2 3 4 5 6; do revalidate_dependencies; cmd="$(cell_command "$n")"; out="$root/cell-$(printf '%02d' "$n").stdout.log"; err="$root/cell-$(printf '%02d' "$n").stderr.log"; [[ ! -e "$out" && ! -e "$err" ]] || die 'Cell logs already exist; preserve this root and do not rerun.' 73; start="$(now)"; set +e; set -m; (set -e; run_cell "$n") > "$out" 2> "$err" & cell_pid=$!; set +m; /usr/bin/perl -e '$p=shift;$s=shift;sleep $s;kill 15,-$p;sleep 5;kill 9,-$p' "$cell_pid" "$(cell_timeout "$n")" & watchdog=$!; wait "$cell_pid"; status=$?; kill "$watchdog" 2>/dev/null; wait "$watchdog" 2>/dev/null; [[ "$status" == 0 ]] || terminate_cell_group "$cell_pid"; set -e; chmod 600 "$out" "$err"; end="$(now)"; if [[ "$status" != 0 ]]; then state "$n" failed "$start" "$end" "$(sha "$out")" "$(sha "$err")"; failure "$n" "$status" "$cmd" "$(sha "$out")" "$(sha "$err")"; manifest failed "$end"; die "Gate 9 cell $n failed; progress is frozen and locks are preserved." "$status"; fi; revalidate_dependencies; state "$n" pass "$start" "$end" "$(sha "$out")" "$(sha "$err")"; done; manifest passed "$(now)"; /bin/cp "$lock/info-v1.tsv" "$root/gate-active-run-v1-info.tsv"; chmod 600 "$root/gate-active-run-v1-info.tsv"; write_digest; /bin/unlink "$lock/info-v1.tsv"; run_succeeded=1; release; printf '%s\n' 'Gate 9 qualification passed.'; }
-main(){ [[ "$#" -ge 1 ]] || die 'usage: phase09-gate09-qualification.sh <contract|prepare|run>.' 64; case "$1" in contract) [[ "$#" == 1 ]] || die 'contract accepts no arguments.' 64; contract;; prepare) [[ "$#" == 2 && "$2" == 9 ]] || die 'Gate 9 harness accepts only prepare 9.' 64; validate_worktree; validate_root; empty_root; collect; prepare; printf '%s\n' 'Gate 9 evidence root prepared.';; run) [[ "$#" == 2 && "$2" == 9 ]] || die 'Gate 9 harness accepts only run 9.' 64; validate_worktree; validate_root; collect; run;; *) die 'unknown qualification command.' 64;; esac; }
+main(){ [[ "$#" -ge 1 ]] || die 'usage: phase09-gate09-qualification.sh <contract|prepare|run>.' 64; case "$1" in contract) [[ "$#" == 1 ]] || die 'contract accepts no arguments.' 64; contract;; prepare) [[ "$#" == 2 && "$2" == 9 ]] || die 'Gate 9 harness accepts only prepare 9.' 64; validate_worktree; validate_root; empty_root; collect; prepare; printf '%s\n' 'Gate 9 evidence root prepared.';; run) [[ "$#" == 2 && "$2" == 9 ]] || die 'Gate 9 harness accepts only run 9.' 64; validate_worktree; validate_root; collect; run;; test-preserve-live-evidence) testing || die 'test-only command is unavailable.' 64; validate_root; preserve_live_evidence "$(short_live_runtime)"; validate_live_evidence || die 'retained live evidence validation failed.' 73;; test-write-checksum-manifest) testing || die 'test-only command is unavailable.' 64; validate_root; write_checksum_manifest;; *) die 'unknown qualification command.' 64;; esac; }
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   main "$@"
 fi

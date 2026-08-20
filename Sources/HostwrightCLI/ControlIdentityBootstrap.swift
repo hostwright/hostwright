@@ -80,42 +80,27 @@ enum HostwrightControlIdentityBootstrap {
             }
             return
         }
-        guard identities.contains(where: {
-            $0.userID == userID && $0.revokedAt == nil && matches($0.codeIdentity, codeIdentity)
-        }) else {
-            throw StateStoreError.invalidRecord(
-                "The installing process is not an active declared control identity."
-            )
-        }
-        if let current = identities.first(where: {
-            $0.userID == userID && $0.revokedAt == nil && matches($0.codeIdentity, codeIdentity)
-        }) {
-            try store.rbac.bootstrapDefaultRolesAndOwner(
-                subjectID: current.subjectID,
+        let current = try resolveOrRotate(
+            store: store,
+            identities: identities,
+            userID: userID,
+            currentIdentity: codeIdentity,
+            declaringSubjectID: nil,
+            timestamp: timestamp
+        )
+        try store.rbac.bootstrapDefaultRolesAndOwner(
+            subjectID: current.subjectID,
+            timestamp: timestamp
+        )
+        if let companionIdentity {
+            _ = try resolveOrRotate(
+                store: store,
+                identities: try store.controlIdentities.listIdentities(),
+                userID: userID,
+                currentIdentity: companionIdentity,
+                declaringSubjectID: current.subjectID,
                 timestamp: timestamp
             )
-            if let companionIdentity,
-               !identities.contains(where: {
-                   $0.userID == userID && $0.revokedAt == nil
-                       && matches($0.codeIdentity, companionIdentity)
-               }) {
-                guard companionIdentity.validationMode == .installedRequirement else {
-                    throw StateStoreError.invalidRecord(
-                        "The ad-hoc bootstrap companion is not an active declared control identity."
-                    )
-                }
-                try store.controlIdentities.declare(
-                    ControlPeerIdentityRecord(
-                        subjectID:
-                            "bootstrap-companion-\(userID)-\(companionIdentity.codeDirectoryHash.prefix(16))",
-                        userID: userID,
-                        codeIdentity: companionIdentity,
-                        declaredBySubjectID: current.subjectID,
-                        declaredAt: timestamp,
-                        updatedAt: timestamp
-                    )
-                )
-            }
         }
     }
 
@@ -166,16 +151,76 @@ enum HostwrightControlIdentityBootstrap {
         ) != nil
     }
 
-    private static func matches(_ declared: CodeIdentity, _ current: CodeIdentity) -> Bool {
-        guard declared.validationMode == current.validationMode else { return false }
-        switch current.validationMode {
-        case .installedRequirement:
-            return declared.teamIdentifier == current.teamIdentifier
-                && declared.signingIdentifier == current.signingIdentifier
-        case .pinnedAdHoc:
-            return declared.teamIdentifier == nil
-                && declared.signingIdentifier == current.signingIdentifier
-                && declared.codeDirectoryHash == current.codeDirectoryHash
+    private static func resolveOrRotate(
+        store: SQLiteStateStore,
+        identities: [ControlPeerIdentityRecord],
+        userID: UInt32,
+        currentIdentity: CodeIdentity,
+        declaringSubjectID: String?,
+        timestamp: String
+    ) throws -> ControlPeerIdentityRecord {
+        let exact = identities.filter {
+            $0.userID == userID && $0.revokedAt == nil
+                && matchesExactly($0.codeIdentity, currentIdentity)
         }
+        guard exact.count <= 1 else {
+            throw StateStoreError.transactionInvariantViolation(
+                message: "The exact active control identity is ambiguous."
+            )
+        }
+        if let exact = exact.first { return exact }
+
+        guard currentIdentity.validationMode == .installedRequirement else {
+            throw StateStoreError.invalidRecord(
+                declaringSubjectID == nil
+                    ? "The installing process is not an active declared control identity."
+                    : "The ad-hoc bootstrap companion is not an active declared control identity."
+            )
+        }
+        let bucket = identities.filter {
+            $0.userID == userID && $0.revokedAt == nil
+                && $0.codeIdentity.validationMode == .installedRequirement
+                && $0.codeIdentity.teamIdentifier == currentIdentity.teamIdentifier
+                && $0.codeIdentity.signingIdentifier == currentIdentity.signingIdentifier
+        }
+        guard bucket.count <= 1 else {
+            throw StateStoreError.transactionInvariantViolation(
+                message: "The installed control identity bucket is ambiguous."
+            )
+        }
+        if let existing = bucket.first {
+            return try store.controlIdentities.rotateInstalledCodeIdentity(
+                subjectID: existing.subjectID,
+                expectedGeneration: existing.generation,
+                replacement: currentIdentity,
+                updatedAt: timestamp
+            )
+        }
+        guard let declaringSubjectID else {
+            throw StateStoreError.invalidRecord(
+                "The installing process is not an active declared control identity."
+            )
+        }
+        let declared = ControlPeerIdentityRecord(
+            subjectID:
+                "bootstrap-companion-\(userID)-\(currentIdentity.codeDirectoryHash.prefix(16))",
+            userID: userID,
+            codeIdentity: currentIdentity,
+            declaredBySubjectID: declaringSubjectID,
+            declaredAt: timestamp,
+            updatedAt: timestamp
+        )
+        try store.controlIdentities.declare(declared)
+        return declared
+    }
+
+    private static func matchesExactly(
+        _ declared: CodeIdentity,
+        _ current: CodeIdentity
+    ) -> Bool {
+        declared.validationMode == current.validationMode
+            && declared.teamIdentifier == current.teamIdentifier
+            && declared.signingIdentifier == current.signingIdentifier
+            && declared.codeDirectoryHash == current.codeDirectoryHash
     }
 }

@@ -20,6 +20,23 @@ final class ControlIdentityBootstrapTests: XCTestCase {
             let records = try store.controlIdentities.listIdentities()
             XCTAssertEqual(records.count, 1)
             XCTAssertEqual(records[0].codeIdentity, initial)
+            try store.controlIdentities.persistSession(ControlSessionRecord(
+                sessionID: "pre-rotation-session",
+                subjectID: records[0].subjectID,
+                daemonGeneration: 1,
+                serverNonceSHA256: String(repeating: "f", count: 64),
+                socketDevice: 1,
+                socketInode: 2,
+                effectiveUID: UInt32(geteuid()),
+                effectiveGID: UInt32(getegid()),
+                pid: getpid(),
+                pidVersion: 1,
+                auditSessionID: 1,
+                codeDirectoryHash: initial.codeDirectoryHash,
+                createdAt: "2026-08-02T20:00:00Z",
+                expiresAt: "2026-08-02T21:00:00Z",
+                updatedAt: "2026-08-02T20:00:00Z"
+            ))
 
             XCTAssertNoThrow(
                 try HostwrightControlIdentityBootstrap.bootstrap(
@@ -29,7 +46,16 @@ final class ControlIdentityBootstrapTests: XCTestCase {
                     timestamp: "2026-08-02T20:01:00Z"
                 )
             )
-            XCTAssertEqual(try store.controlIdentities.listIdentities().count, 1)
+            let rotated = try XCTUnwrap(store.controlIdentities.listIdentities().first)
+            XCTAssertEqual(rotated.subjectID, records[0].subjectID)
+            XCTAssertEqual(rotated.codeIdentity, installedIdentity(hash: "b"))
+            XCTAssertEqual(rotated.generation, 2)
+            XCTAssertNotNil(
+                try store.controlIdentities.loadSession("pre-rotation-session")?.revokedAt
+            )
+            XCTAssertTrue(try store.rbac.listBindings().contains(where: {
+                $0.subjectID == rotated.subjectID && $0.roleID == "owner"
+            }))
         }
     }
 

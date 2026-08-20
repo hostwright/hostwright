@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import HostwrightCore
 import XCTest
 
 @testable import HostwrightPhase09QualificationTool
@@ -37,7 +38,7 @@ final class HostwrightPhase09QualificationToolTests: XCTestCase {
         .deletingLastPathComponent()
         .deletingLastPathComponent()
         .deletingLastPathComponent()
-        .appendingPathComponent("Sources/HostwrightPhase09QualificationTool/main.swift"),
+        .appendingPathComponent("Qualification/HostwrightPhase09QualificationTool/main.swift"),
       encoding: .utf8
     )
     XCTAssertFalse(source.contains("hasPrefix(\"(parent)/\")"))
@@ -75,6 +76,57 @@ final class HostwrightPhase09QualificationToolTests: XCTestCase {
     XCTAssertEqual(canonical, try ledger.samples[0].canonicalJSON())
   }
 
+  func testLedgerRejectsStaleStateSchemaEvidence() throws {
+    let current = observation(at: 0, seconds: 0)
+    let stale = Gate15Observation(
+      observedAtUTC: current.observedAtUTC,
+      continuousTicks: current.continuousTicks,
+      bootSessionID: current.bootSessionID,
+      runner: current.runner,
+      daemon: current.daemon,
+      executable: current.executable,
+      stateDatabase: Gate15StateDatabaseIdentity(
+        identityDigest: current.stateDatabase.identityDigest,
+        sizeBytes: current.stateDatabase.sizeBytes,
+        integrity: current.stateDatabase.integrity,
+        schema: UInt64(HostwrightContractVersions.stateSchema - 1)
+      ),
+      runtime: current.runtime,
+      metrics: current.metrics,
+      fault: current.fault,
+      sleepWakeCoverage: current.sleepWakeCoverage
+    )
+    var ledger = try Gate15ContinuityLedger(contract: contract, ticksPerSecond: 1)
+    XCTAssertThrowsError(try ledger.append(stale)) { error in
+      XCTAssertEqual((error as? Gate15QualificationError)?.code, "invalidRuntimeIdentity")
+    }
+  }
+
+  func testLedgerRejectsWeakDaemonProcessIdentity() throws {
+    let current = observation(at: 0, seconds: 0)
+    let weak = Gate15Observation(
+      observedAtUTC: current.observedAtUTC,
+      continuousTicks: current.continuousTicks,
+      bootSessionID: current.bootSessionID,
+      runner: current.runner,
+      daemon: Gate15DaemonIdentity(
+        pid: current.daemon.pid,
+        generation: current.daemon.generation,
+        startIdentity: "daemon-1"
+      ),
+      executable: current.executable,
+      stateDatabase: current.stateDatabase,
+      runtime: current.runtime,
+      metrics: current.metrics,
+      fault: current.fault,
+      sleepWakeCoverage: current.sleepWakeCoverage
+    )
+    var ledger = try Gate15ContinuityLedger(contract: contract, ticksPerSecond: 1)
+    XCTAssertThrowsError(try ledger.append(weak)) { error in
+      XCTAssertEqual((error as? Gate15QualificationError)?.code, "invalidIdentity")
+    }
+  }
+
   func testReplacementIsRejected() throws {
     var ledger = try Gate15ContinuityLedger(contract: contract, ticksPerSecond: 1)
     _ = try ledger.append(observation(at: 0, seconds: 0))
@@ -83,7 +135,7 @@ final class HostwrightPhase09QualificationToolTests: XCTestCase {
       observedAtUTC: replacement.observedAtUTC,
       continuousTicks: replacement.continuousTicks,
       bootSessionID: replacement.bootSessionID,
-      runner: Gate15ProcessIdentity(pid: 303, startIdentity: "runner-replacement"),
+      runner: Gate15ProcessIdentity(pid: 303, startIdentity: strongIdentity("c", "d", 2, 0)),
       daemon: replacement.daemon,
       executable: replacement.executable,
       stateDatabase: replacement.stateDatabase,
@@ -397,7 +449,8 @@ final class HostwrightPhase09QualificationToolTests: XCTestCase {
     var ledger = try Gate15ContinuityLedger(contract: contract, ticksPerSecond: 1)
     let first = observation(at: 0, seconds: 0)
     _ = try ledger.append(first)
-    let nextDaemon = Gate15DaemonIdentity(pid: 404, generation: 2, startIdentity: "daemon-2")
+    let nextDaemon = Gate15DaemonIdentity(
+      pid: 404, generation: 2, startIdentity: strongIdentity("c", "d", 2, 0))
     let restart = Gate15DaemonRestart(
       previous: first.daemon,
       current: nextDaemon,
@@ -460,6 +513,16 @@ final class HostwrightPhase09QualificationToolTests: XCTestCase {
     XCTAssertEqual(try Gate15ToolCommand.parse(["diagnose"]), .diagnose)
     XCTAssertEqual(try Gate15ToolCommand.parse(["prepare"]), .prepare)
     XCTAssertThrowsError(try Gate15ToolCommand.parse(["resume", "--root", "/var/root"]))
+    XCTAssertEqual(
+      try Gate15ToolCommand.parse(["process-identity", "--pid", String(getpid())]),
+      .processIdentity(pid: getpid())
+    )
+    XCTAssertThrowsError(try Gate15ToolCommand.parse(["process-identity", "--pid", "01"]))
+    let processIdentity = try Gate15QualificationTool.execute(.processIdentity(pid: getpid()))
+    XCTAssertNotNil(String(decoding: processIdentity, as: UTF8.self).range(
+      of: "^v1\\.[a-f0-9]{64}\\.[a-f0-9]{64}\\.[0-9]+\\.[0-9]+$",
+      options: .regularExpression
+    ))
     let diagnostic = try Gate15QualificationTool.execute(.diagnose)
     let json = try XCTUnwrap(JSONSerialization.jsonObject(with: diagnostic) as? [String: Any])
     XCTAssertEqual(json["claim"] as? String, "none")
@@ -526,8 +589,9 @@ final class HostwrightPhase09QualificationToolTests: XCTestCase {
       observedAtUTC: timestampOverride ?? timestamp(seconds),
       continuousTicks: ticks,
       bootSessionID: "boot-session-1",
-      runner: Gate15ProcessIdentity(pid: 101, startIdentity: "runner-1"),
-      daemon: Gate15DaemonIdentity(pid: 202, generation: 1, startIdentity: "daemon-1"),
+      runner: Gate15ProcessIdentity(pid: 101, startIdentity: strongIdentity("a", "b", 1, 0)),
+      daemon: Gate15DaemonIdentity(
+        pid: 202, generation: 1, startIdentity: strongIdentity("c", "d", 1, 0)),
       executable: Gate15SignedExecutableIdentity(
         sha256: "sha256:" + String(repeating: "a", count: 64),
         cdHash: String(repeating: "b", count: 40),
@@ -538,7 +602,7 @@ final class HostwrightPhase09QualificationToolTests: XCTestCase {
         identityDigest: "sha256:" + String(repeating: "c", count: 64),
         sizeBytes: 1024,
         integrity: "verified",
-        schema: 21
+        schema: UInt64(HostwrightContractVersions.stateSchema)
       ),
       runtime: Gate15RuntimeIdentity(
         runtimeUUID: "runtime-uuid-1",
@@ -774,8 +838,16 @@ private struct FakeClock: Gate15Clock {
 }
 
 private struct FakeIdentityProvider: Gate15ProcessIdentityProvider {
-  func current() throws -> Gate15ProcessIdentity { Gate15ProcessIdentity(pid: 1, startIdentity: "test") }
+  func current() throws -> Gate15ProcessIdentity {
+    Gate15ProcessIdentity(pid: 1, startIdentity: strongIdentity("a", "b", 1, 0))
+  }
   func lookup(pid: Int32) throws -> Gate15ProcessIdentity { try current() }
+}
+
+private func strongIdentity(
+  _ path: Character, _ command: Character, _ seconds: UInt64, _ microseconds: UInt64
+) -> String {
+  "v1.\(String(repeating: String(path), count: 64)).\(String(repeating: String(command), count: 64)).\(seconds).\(microseconds)"
 }
 
 private struct FakeObservationProvider: Gate15ObservationProvider {

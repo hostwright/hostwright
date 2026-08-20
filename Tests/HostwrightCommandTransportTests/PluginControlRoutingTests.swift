@@ -10,11 +10,8 @@ final class PluginControlRoutingTests: XCTestCase {
     private let detailDigest = "sha256:" + String(repeating: "b", count: 64)
 
     func testEveryPluginVerbRoutesDirectlyToPersistentControlAPI() throws {
-        let certificate = try temporaryCertificate(contents: Data([0x30, 0x03, 0x02, 0x01, 0x01]))
-        defer { removeTemporaryDirectory(containing: certificate) }
-
         let source = "https://registry.example.com/plugins/weather"
-        let signed = ["--source", source, "--signer", "com.example.weather", "--signer-certificate", certificate.path]
+        let signed = ["--source", source, "--signer", "com.example.weather"]
         let cases: [([String], Bool)] = [
             (["extension", "list"], false),
             (["extension", "status", "--identifier", "weather"], false),
@@ -39,17 +36,13 @@ final class PluginControlRoutingTests: XCTestCase {
     }
 
     func testPluginRequestsUseIdempotencyOnlyForMutationsAndEncodeOperationBodies() throws {
-        let certificateData = Data([0x30, 0x03, 0x02, 0x01, 0x01])
-        let certificate = try temporaryCertificate(contents: certificateData)
-        defer { removeTemporaryDirectory(containing: certificate) }
-
         let source = "https://registry.example.com/plugins/weather"
         let cases: [([String], ControlPlaneJSONValue, Bool)] = [
             (["extension", "list", "--identifier", "weather"], .object(["identifier": .string("weather")]), false),
             (["extension", "status", "--digest", digest], .object(["packageDigest": .string(digest)]), false),
-            (["extension", "discover", "--source", source, "--signer", "com.example.weather", "--signer-certificate", certificate.path], signedBody(source: source, certificateData: certificateData), false),
-            (["extension", "install", "--source", source, "--signer", "com.example.weather", "--signer-certificate", certificate.path], signedBody(source: source, certificateData: certificateData), true),
-            (["extension", "update", "--source", source, "--signer", "com.example.weather", "--signer-certificate", certificate.path], signedBody(source: source, certificateData: certificateData), true),
+            (["extension", "discover", "--source", source, "--signer", "com.example.weather"], signedBody(source: source), false),
+            (["extension", "install", "--source", source, "--signer", "com.example.weather"], signedBody(source: source), true),
+            (["extension", "update", "--source", source, "--signer", "com.example.weather"], signedBody(source: source), true),
             (["extension", "activate", "--digest", digest, "--expected-activation-generation", "5"], .object(["packageDigest": .string(digest), "expectedActivationGeneration": .integer(5)]), true),
             (["extension", "rollback", "--identifier", "weather", "--expected-activation-generation", "6"], .object(["identifier": .string("weather"), "expectedActivationGeneration": .integer(6)]), true),
             (["extension", "revoke", "--revocation-id", "revoke-weather", "--target-kind", "signer", "--target", "com.example.weather", "--reason", "policy"], .object(["revocationID": .string("revoke-weather"), "targetKind": .string("signer"), "targetIdentifier": .string("com.example.weather"), "reason": .string("policy")]), true),
@@ -72,50 +65,26 @@ final class PluginControlRoutingTests: XCTestCase {
         }
     }
 
-    func testCertificateDEREncodingAcceptsBoundedDataAndRejectsEmptyOrOversizedFiles() throws {
-        let exactLimit = Data(repeating: 0xA5, count: 32 * 1_024)
-        let bounded = try temporaryCertificate(contents: exactLimit)
-        defer { removeTemporaryDirectory(containing: bounded) }
-
+    func testLegacyCallerSuppliedSignerCertificateIsRejectedBeforeTransport() {
         let capture = PluginRequestCapture()
-        let success = HostwrightCommandRunner.run(
-            arguments: signedInstall(certificatePath: bounded.path),
+        let result = HostwrightCommandRunner.run(
+            arguments: signedInstall() + ["--signer-certificate", "/tmp/caller.der"],
             environment: environment(capture: capture) { request in
-                completedPluginResponse(requestID: request.requestID, value: .object(["accepted": .bool(true)]))
+                completedPluginResponse(requestID: request.requestID, value: .object([:]))
             }
         )
-        XCTAssertEqual(success.exitCode, 0)
-        guard case .object(let body)? = capture.request?.body else {
-            return XCTFail("Expected a plugin request body.")
-        }
-        XCTAssertEqual(body["trustedSignerCertificateDER"], .string(exactLimit.base64EncodedString()))
-
-        for contents in [Data(), Data(repeating: 0xA5, count: 32 * 1_024 + 1)] {
-            let certificate = try temporaryCertificate(contents: contents)
-            defer { removeTemporaryDirectory(containing: certificate) }
-            let rejectedCapture = PluginRequestCapture()
-            let result = HostwrightCommandRunner.run(
-                arguments: signedInstall(certificatePath: certificate.path),
-                environment: environment(capture: rejectedCapture) { request in
-                    completedPluginResponse(requestID: request.requestID, value: .object([:]))
-                }
-            )
-            XCTAssertNotEqual(result.exitCode, 0)
-            XCTAssertTrue(result.standardError.contains(HostwrightErrorCode.extensionInvalid.rawValue))
-            XCTAssertNil(rejectedCapture.request)
-        }
+        XCTAssertNotEqual(result.exitCode, 0)
+        XCTAssertNil(capture.request)
     }
 
     func testPluginResultsRenderGenericPersistentResponseAndDirectCLIRefusesMutation() throws {
-        let certificate = try temporaryCertificate(contents: Data([0x30, 0x03, 0x02, 0x01, 0x01]))
-        defer { removeTemporaryDirectory(containing: certificate) }
         let value: ControlPlaneJSONValue = .object([
             "generation": .integer(8),
             "plugin": .object(["identifier": .string("weather")]),
         ])
         let capture = PluginRequestCapture()
         let transported = HostwrightCommandRunner.run(
-            arguments: signedInstall(certificatePath: certificate.path),
+            arguments: signedInstall(),
             environment: environment(capture: capture) { request in
                 completedPluginResponse(requestID: request.requestID, value: value)
             }
@@ -128,29 +97,27 @@ final class PluginControlRoutingTests: XCTestCase {
         XCTAssertEqual(transported.standardOutput, expected)
         XCTAssertNotNil(capture.request)
 
-        let direct = HostwrightCLI.run(arguments: signedInstall(certificatePath: certificate.path))
+        let direct = HostwrightCLI.run(arguments: signedInstall())
         XCTAssertNotEqual(direct.exitCode, 0)
         XCTAssertTrue(direct.standardError.contains(HostwrightErrorCode.controlAPIUnavailable.rawValue))
         XCTAssertTrue(direct.standardError.contains("require the authenticated persistent Control API"))
     }
 
-    private func signedInstall(certificatePath: String) -> [String] {
+    private func signedInstall() -> [String] {
         [
             "extension", "install",
             "--source", "https://registry.example.com/plugins/weather",
             "--signer", "com.example.weather",
-            "--signer-certificate", certificatePath,
         ]
     }
 
-    private func signedBody(source: String, certificateData: Data) -> ControlPlaneJSONValue {
+    private func signedBody(source: String) -> ControlPlaneJSONValue {
         .object([
             "source": .object([
                 "kind": .string(PluginCLISourceKind.httpsRegistry.rawValue),
                 "locator": .string(source),
             ]),
             "trustedSignerIdentifier": .string("com.example.weather"),
-            "trustedSignerCertificateDER": .string(certificateData.base64EncodedString()),
         ])
     }
 
@@ -171,20 +138,6 @@ final class PluginControlRoutingTests: XCTestCase {
         )
     }
 
-    private func temporaryCertificate(contents: Data) throws -> URL {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "hostwright-plugin-routing-\(UUID().uuidString)",
-            isDirectory: true
-        )
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
-        let certificate = directory.appendingPathComponent("signer.der")
-        try contents.write(to: certificate, options: .atomic)
-        return certificate
-    }
-
-    private func removeTemporaryDirectory(containing certificate: URL) {
-        try? FileManager.default.removeItem(at: certificate.deletingLastPathComponent())
-    }
 }
 
 private func completedPluginResponse(

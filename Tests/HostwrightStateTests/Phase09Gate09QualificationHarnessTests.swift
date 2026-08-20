@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import XCTest
+@testable import HostwrightState
 
 final class Phase09Gate09QualificationHarnessTests: XCTestCase {
   private var repository: URL {
@@ -10,6 +11,50 @@ final class Phase09Gate09QualificationHarnessTests: XCTestCase {
 
   private var harness: URL {
     repository.appendingPathComponent("Scripts/phase09-gate09-qualification.sh")
+  }
+
+  func testReadObservationFenceAllowsReadersAndExcludesWriters() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+      "hostwright-gate09-observation-fence-\(UUID().uuidString)",
+      isDirectory: true
+    )
+    try FileManager.default.createDirectory(
+      at: directory,
+      withIntermediateDirectories: false,
+      attributes: [.posixPermissions: 0o700]
+    )
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = SQLiteStateStore(
+      path: directory.appendingPathComponent("state.sqlite").path
+    )
+    try store.migrate()
+    let coordinator = StateAccessCoordinator(configuration: store.configuration)
+
+    try store.withReadObservationFence(waitTimeoutNanoseconds: 100_000_000) {
+      XCTAssertNoThrow(
+        try coordinator.withLock(
+          .shared,
+          waitTimeoutNanoseconds: 100_000_000
+        ) {}
+      )
+      XCTAssertThrowsError(
+        try coordinator.withLock(
+          .write,
+          waitTimeoutNanoseconds: 100_000_000
+        ) {}
+      ) { error in
+        guard case .databaseLocked(_, let message) = error as? StateStoreError else {
+          return XCTFail("Expected databaseLocked, got \(error)")
+        }
+        XCTAssertTrue(message.contains("state-writer fence"))
+      }
+    }
+    XCTAssertNoThrow(
+      try coordinator.withLock(
+        .write,
+        waitTimeoutNanoseconds: 100_000_000
+      ) {}
+    )
   }
 
   func testContractFreezesGateNineParityAndAllSixEvidenceCells() throws {
@@ -201,6 +246,112 @@ final class Phase09Gate09QualificationHarnessTests: XCTestCase {
     }
   }
 
+  func testSuccessfulLiveArtifactsSurviveRuntimeCleanupAndAreChecksumSealed() throws {
+    try withRoot { root, environment in
+      let runtime = liveRuntime(for: root)
+      try FileManager.default.createDirectory(
+        at: runtime, withIntermediateDirectories: false,
+        attributes: [.posixPermissions: 0o700])
+      let names = [
+        "qualification.capabilities-v1.json",
+        "qualification.plan-v1.json",
+        "qualification.status-plan-v1.json",
+        "stream-live.json",
+        "trace.json",
+        "qualification.trace-export-v1.json",
+        "qualification.trace-export-verification-v1.json",
+        "qualification.metrics-export-pair-v1.json",
+        "qualification.metrics-snapshot-v1.json",
+        "qualification.metrics-export-v1.json",
+        "qualification.metrics-export-verification-v1.json",
+        "metrics.json",
+        "stream-resume.json",
+      ]
+      for name in names {
+        let artifact = runtime.appendingPathComponent(name)
+        try Data("{\"artifact\":\"\(name)\"}\n".utf8).write(to: artifact)
+        try FileManager.default.setAttributes(
+          [.posixPermissions: 0o600], ofItemAtPath: artifact.path)
+      }
+
+      let retained = try run(["test-preserve-live-evidence"], environment: environment)
+      XCTAssertEqual(retained.status, 0, retained.stderr)
+      try FileManager.default.removeItem(at: runtime)
+      let sealed = try run(["test-write-checksum-manifest"], environment: environment)
+      XCTAssertEqual(sealed.status, 0, sealed.stderr)
+
+      let evidence = root.appendingPathComponent("live-evidence-v1", isDirectory: true)
+      for name in names {
+        XCTAssertTrue(FileManager.default.fileExists(
+          atPath: evidence.appendingPathComponent(name).path))
+      }
+      let checksum = try String(
+        contentsOf: root.appendingPathComponent("evidence-v1.sha256"),
+        encoding: .utf8)
+      XCTAssertTrue(checksum.contains("live-evidence-v1/manifest-v1.json"))
+      for name in names {
+        XCTAssertTrue(checksum.contains("live-evidence-v1/\(name)"))
+      }
+      let verification = try runProcess(
+        executable: "/usr/bin/shasum",
+        arguments: ["-a", "256", "-c", "evidence-v1.sha256"],
+        currentDirectory: root)
+      XCTAssertEqual(verification.status, 0, verification.stderr)
+
+      let extraTarget = root.appendingPathComponent("unexpected-target")
+      try Data("unexpected\n".utf8).write(to: extraTarget)
+      let extraLink = evidence.appendingPathComponent("unexpected-link")
+      XCTAssertEqual(symlink(extraTarget.path, extraLink.path), 0)
+      let symlinkResult = try run(
+        ["test-write-checksum-manifest"], environment: environment)
+      XCTAssertNotEqual(symlinkResult.status, 0)
+      XCTAssertEqual(
+        try String(
+          contentsOf: root.appendingPathComponent("evidence-v1.sha256"),
+          encoding: .utf8),
+        checksum,
+        "failed validation must preserve the last coherent checksum manifest")
+      try FileManager.default.removeItem(at: extraLink)
+
+      let extraDirectory = evidence.appendingPathComponent(
+        "unexpected-directory", isDirectory: true)
+      try FileManager.default.createDirectory(
+        at: extraDirectory, withIntermediateDirectories: false)
+      let directoryResult = try run(
+        ["test-write-checksum-manifest"], environment: environment)
+      XCTAssertNotEqual(directoryResult.status, 0)
+      XCTAssertTrue(FileManager.default.fileExists(atPath: evidence.path))
+      XCTAssertEqual(
+        try String(
+          contentsOf: root.appendingPathComponent("evidence-v1.sha256"),
+          encoding: .utf8),
+        checksum,
+        "failed validation must preserve the retained evidence seal input")
+    }
+  }
+
+  func testLiveEvidenceRetentionRejectsSymlinkedArtifactAndPreservesRoot() throws {
+    try withRoot { root, environment in
+      let runtime = liveRuntime(for: root)
+      try FileManager.default.createDirectory(
+        at: runtime, withIntermediateDirectories: false,
+        attributes: [.posixPermissions: 0o700])
+      let target = root.appendingPathComponent("outside-live-evidence.json")
+      try Data("{}\n".utf8).write(to: target)
+      XCTAssertEqual(symlink(
+        target.path,
+        runtime.appendingPathComponent("qualification.capabilities-v1.json").path), 0)
+
+      let result = try run(["test-preserve-live-evidence"], environment: environment)
+
+      XCTAssertNotEqual(result.status, 0)
+      XCTAssertTrue(FileManager.default.fileExists(atPath: target.path))
+      XCTAssertTrue(FileManager.default.fileExists(atPath: runtime.path))
+      XCTAssertFalse(FileManager.default.fileExists(
+        atPath: root.appendingPathComponent("evidence-v1.sha256").path))
+    }
+  }
+
   func testEvidenceReuseAndDependencyInvalidationAreFrozen() throws {
     let source = try String(contentsOf: harness, encoding: .utf8)
     XCTAssertTrue(source.contains("reusable"))
@@ -232,6 +383,10 @@ final class Phase09Gate09QualificationHarnessTests: XCTestCase {
   func testAutonomousConvergenceUsesPendingClaimAndMetricsExportMutation() throws {
     let source = try String(contentsOf: harness, encoding: .utf8)
     let live = try XCTUnwrap(source.section(named: "live"))
+    let qualificationTool = try String(
+      contentsOf: repository.appendingPathComponent(
+        "Sources/HostwrightStreamQualificationTool/main.swift"),
+      encoding: .utf8)
     let pendingClaim = try XCTUnwrap(live.range(of: "record_pending_container_claim"))
     let initialDaemon = try XCTUnwrap(
       live.range(of: "pid=\"$(start_daemon \"$runtime\" \"$daemon\" \"$config\" \"$state\" initial \"$cli\")\"")
@@ -242,8 +397,18 @@ final class Phase09Gate09QualificationHarnessTests: XCTestCase {
     XCTAssertTrue(live.contains("for n in {1..1200}"))
     XCTAssertTrue(live.contains("resource=\"$(resolve_pending_container_claim)\""))
     XCTAssertTrue(live.contains("owned Gate 9 container was not observed."))
-    XCTAssertTrue(live.contains("\"$cli\" metrics export --state-db \"$state\""))
-    XCTAssertTrue(live.contains("--confirm-snapshot \"$metrics_hash\""))
+    XCTAssertTrue(live.contains(
+      "\"$bootstrap\" --metrics-export --root \"$runtime\" --state \"$state\" --socket \"$socket\""
+    ))
+    XCTAssertTrue(live.contains(
+      "\"$bootstrap\" --verify-trace-export --root \"$runtime\" --output \"$runtime/trace.json\" --receipt \"$runtime/qualification.trace-export-v1.json\" --trace-sha256 \"$trace_hash\""
+    ))
+    XCTAssertTrue(live.contains(
+      "\"$bootstrap\" --verify-metrics-export --root \"$runtime\" --output \"$runtime/metrics.json\" --receipt \"$runtime/qualification.metrics-export-v1.json\" --snapshot-sha256 \"$metrics_snapshot_hash\""
+    ))
+    XCTAssertTrue(live.contains("qualification.metrics-export-verification-v1.json"))
+    XCTAssertFalse(source.contains("verify_receipt_bound_export"))
+    XCTAssertFalse(live.contains("\"$cli\" metrics export --state-db \"$state\""))
     let traceExport = try XCTUnwrap(live.range(of: "traces export --state-db \"$state\""))
     XCTAssertTrue(live.contains("FROM event_ledger"))
     XCTAssertTrue(live.contains("type = 'trace.span.v1'"))
@@ -266,17 +431,38 @@ final class Phase09Gate09QualificationHarnessTests: XCTestCase {
     XCTAssertLessThan(quiesce.lowerBound, socketCleanup.lowerBound)
     XCTAssertLessThan(socketCleanup.lowerBound, restart.lowerBound)
     XCTAssertLessThan(metrics.lowerBound, restart.lowerBound)
-    XCTAssertTrue(live.contains("metrics_exported=0"))
-    XCTAssertTrue(live.contains("for n in {1..60}"))
-    XCTAssertTrue(live.contains("metrics_snapshot_status=$?"))
-    XCTAssertTrue(live.contains("HW-CLI-005"))
+    XCTAssertFalse(source.contains("acquire_metrics_read_fence"))
+    XCTAssertFalse(source.contains("metrics_read_fence_pid"))
+    XCTAssertTrue(qualificationTool.contains("case \"--metrics-export\""))
+    XCTAssertTrue(qualificationTool.contains(
+      "arguments[0] == \"--verify-trace-export\""
+    ))
+    XCTAssertTrue(qualificationTool.contains(
+      "arguments[0] == \"--verify-metrics-export\""
+    ))
+    XCTAssertTrue(qualificationTool.contains(
+      "PersistentControlClient(socketPath: socketPath).connectSession()"
+    ))
+    let authenticatedSession = try XCTUnwrap(
+      qualificationTool.range(of: "PersistentControlClient(socketPath: socketPath).connectSession()")
+    )
+    let authenticationBarrier = try XCTUnwrap(
+      qualificationTool.range(of: "requestID: \"gate09-authenticated-session-barrier\"")
+    )
+    let authenticationBarrierCommand = try XCTUnwrap(
+      qualificationTool.range(of: "arguments: [\"capabilities\", \"--json\"]")
+    )
+    let observationFence = try XCTUnwrap(
+      qualificationTool.range(of: "store.withReadObservationFence")
+    )
+    XCTAssertLessThan(authenticatedSession.lowerBound, authenticationBarrier.lowerBound)
+    XCTAssertLessThan(authenticationBarrier.lowerBound, authenticationBarrierCommand.lowerBound)
+    XCTAssertLessThan(authenticationBarrierCommand.lowerBound, observationFence.lowerBound)
+    XCTAssertTrue(qualificationTool.contains("CLIControlRoute.classify(arguments:"))
     XCTAssertTrue(live.contains("qualification.metrics-snapshot-v1.json"))
     XCTAssertTrue(source.contains("flock($fh, LOCK_EX)"))
     XCTAssertTrue(source.contains("lifecycle-mutation fence identity changed"))
-    XCTAssertTrue(live.contains("HW-METRIC-003"))
-    XCTAssertTrue(live.contains("HW-CLI-005|authoritative database changed"))
-    XCTAssertTrue(live.contains("else\n      metrics_export_status=$?"))
-    XCTAssertTrue(live.contains("metrics snapshot remained unstable across bounded retries"))
+    XCTAssertTrue(live.contains("qualification.metrics-export-pair-v1.json"))
     XCTAssertTrue(source.contains("\"$cli\" status \"$config\" --state-db \"$state\" --output json"))
     XCTAssertTrue(source.contains("qualification.status-plan-v1.json"))
   }
@@ -420,6 +606,13 @@ final class Phase09Gate09QualificationHarnessTests: XCTestCase {
     ])
   }
 
+  private func liveRuntime(for root: URL) -> URL {
+    let suffix = root.lastPathComponent.replacingOccurrences(
+      of: "phase09-gate09-", with: "")
+    return root.deletingLastPathComponent().appendingPathComponent(
+      ".p09g9-\(suffix.prefix(17))", isDirectory: true)
+  }
+
   private func run(
     _ arguments: [String], environment: [String: String] = [:], currentDirectory: URL? = nil
   ) throws -> ShellResult {
@@ -437,6 +630,25 @@ final class Phase09Gate09QualificationHarnessTests: XCTestCase {
       status: process.terminationStatus,
       stdout: String(decoding: stdout.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self),
       stderr: String(decoding: stderr.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self))
+  }
+
+  private func runProcess(
+    executable: String, arguments: [String], currentDirectory: URL
+  ) throws -> ShellResult {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: executable)
+    process.arguments = arguments
+    process.environment = ProcessInfo.processInfo.environment
+    process.currentDirectoryURL = currentDirectory
+    let stdout = Pipe(); let stderr = Pipe()
+    process.standardOutput = stdout; process.standardError = stderr
+    try process.run(); process.waitUntilExit()
+    return ShellResult(
+      status: process.terminationStatus,
+      stdout: String(
+        decoding: stdout.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self),
+      stderr: String(
+        decoding: stderr.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self))
   }
 
   private func canonicalPath(_ url: URL) throws -> String {

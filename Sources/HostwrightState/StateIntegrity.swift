@@ -2204,6 +2204,7 @@ public struct StateIntegrityService: Sendable {
         "restart_attempt_history_operation_idx",
         "peer_identities_code_hash_idx",
         "peer_identities_active_code_idx",
+        "peer_identities_active_installed_bucket_idx",
         "peer_identities_active_credential_idx",
         "control_sessions_subject_idx",
         "control_sessions_code_hash_idx",

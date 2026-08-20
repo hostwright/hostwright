@@ -160,6 +160,120 @@ final class PersistentControlServerTests: XCTestCase {
     }
   }
 
+  func testAuthenticatedUnaryBarrierCannotCompleteBeforeSessionPersistence() throws {
+    let root = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = SQLiteStateStore(path: root.appendingPathComponent("state.sqlite").path)
+    try store.migrate()
+    let identity = fixtureIdentity()
+    try store.controlIdentities.bootstrap(
+      ControlPeerIdentityRecord(
+        subjectID: "control-test-subject",
+        userID: UInt32(geteuid()),
+        codeIdentity: identity,
+        declaredBySubjectID: "control-test-subject",
+        declaredAt: "2026-08-02T20:00:00Z",
+        updatedAt: "2026-08-02T20:00:00Z"
+      )
+    )
+    let adapter = try SQLiteControlIdentitySecurityAdapter(store: store, sessionLifetime: 600)
+    let persistenceGate = PersistenceGateSessionStore(base: adapter)
+    let credentials = RawControlPeerCredentials(
+      peerUID: UInt32(geteuid()), peerGID: UInt32(getegid()), peerPID: getpid(),
+      auditEffectiveUID: UInt32(geteuid()), auditEffectiveGID: UInt32(getegid()),
+      auditPID: getpid(), auditPIDVersion: 1, auditSessionID: 1,
+      auditTokenData: Data(repeating: 7, count: MemoryLayout<audit_token_t>.size)
+    )
+    let authenticator = ControlPeerAuthenticator(
+      policy: try ControlPeerTrustPolicy(
+        expectedUserID: UInt32(geteuid()),
+        pinnedAdHocCodeDirectoryHashes: [identity.codeDirectoryHash]
+      ),
+      credentialReader: FixedCredentialReader(credentials: credentials),
+      codeValidator: FixedCodeValidator(identity: identity),
+      subjectResolver: adapter,
+      sessionStore: persistenceGate
+    )
+    let invocations = InvocationCounter()
+    let server = try PersistentControlConnectionServer(
+      authenticator: authenticator,
+      requestRepository: ControlRequestRepository(store: store),
+      daemonGeneration: 1,
+      socketIdentity: ControlSocketIdentity(device: 31, inode: 37),
+      mutatingOperations: [],
+      auditRecorder: TestControlAuditRecorder(),
+      authorizer: allowingTestControlRequestAuthorizer,
+      admissionEvaluator: allowingTestControlAdmissionEvaluator,
+      handler: { _, request, _ in
+        invocations.increment()
+        return ControlResponseEnvelope(
+          requestID: request.requestID,
+          status: .completed,
+          reasonCode: .completed
+        )
+      }
+    )
+    let pair = try socketPair()
+    let requestWritten = DispatchSemaphore(value: 0)
+    let session = PersistentControlClientSession(
+      descriptor: pair.client,
+      frameWriter: { data, kind, descriptor, deadline in
+        try defaultControlFrameWrite(data, kind, descriptor, deadline)
+        requestWritten.signal()
+      }
+    )
+    defer {
+      session.close()
+      _ = Darwin.close(pair.server)
+    }
+    try ControlFrameCodec.configureNoSigPipe(descriptor: pair.client)
+    let serverResult = ServerResult()
+    let serverFinished = expectation(description: "server finishes after authenticated barrier")
+    DispatchQueue.global().async {
+      defer { serverFinished.fulfill() }
+      do {
+        try server.serve(descriptor: pair.server)
+      } catch {
+        serverResult.error = error
+      }
+    }
+
+    try completeAuthentication(descriptor: pair.client)
+    session.start()
+    let clientResult = ServerResult()
+    let barrierFinished = DispatchSemaphore(value: 0)
+    DispatchQueue.global().async {
+      defer { barrierFinished.signal() }
+      do {
+        let response = try session.send(
+          ControlRequestEnvelope(
+            requestID: "gate09-authenticated-session-barrier",
+            operation: "capabilities",
+            timeoutMilliseconds: 1_000
+          )
+        )
+        guard response.status == .completed else {
+          throw AuthenticationBarrierTestError.unexpectedResponse
+        }
+      } catch {
+        clientResult.error = error
+      }
+    }
+
+    XCTAssertEqual(persistenceGate.persistenceStarted.wait(timeout: .now() + 1), .success)
+    XCTAssertEqual(requestWritten.wait(timeout: .now() + 1), .success)
+    XCTAssertEqual(barrierFinished.wait(timeout: .now() + 0.1), .timedOut)
+    XCTAssertEqual(invocations.value, 0)
+
+    persistenceGate.allowPersistence.signal()
+    XCTAssertEqual(barrierFinished.wait(timeout: .now() + 2), .success)
+    XCTAssertNil(clientResult.error)
+    XCTAssertEqual(invocations.value, 1)
+    session.close()
+    wait(for: [serverFinished], timeout: 2)
+    XCTAssertNil(serverResult.error)
+  }
+
   func testAuthenticatedMutationPersistsBeforeReplyAndIdempotentReplaySkipsHandler() throws {
     let root = try temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: root) }
@@ -1008,6 +1122,34 @@ private final class UnaryCoordinatorEventRecorder: @unchecked Sendable {
 
 private enum UnaryCoordinatorTestError: Error {
   case rejected
+}
+
+private enum AuthenticationBarrierTestError: Error {
+  case persistenceGateTimedOut
+  case unexpectedResponse
+}
+
+private final class PersistenceGateSessionStore: ControlSessionBindingStoring, @unchecked Sendable {
+  let persistenceStarted = DispatchSemaphore(value: 0)
+  let allowPersistence = DispatchSemaphore(value: 0)
+
+  private let base: SQLiteControlIdentitySecurityAdapter
+
+  init(base: SQLiteControlIdentitySecurityAdapter) {
+    self.base = base
+  }
+
+  func persist(_ binding: ControlSessionBinding) throws {
+    persistenceStarted.signal()
+    guard allowPersistence.wait(timeout: .now() + 2) == .success else {
+      throw AuthenticationBarrierTestError.persistenceGateTimedOut
+    }
+    try base.persist(binding)
+  }
+
+  func isActive(sessionID: String, daemonGeneration: UInt64) throws -> Bool {
+    try base.isActive(sessionID: sessionID, daemonGeneration: daemonGeneration)
+  }
 }
 
 private final class ValidationGateSessionStore: ControlSessionBindingStoring, @unchecked Sendable {

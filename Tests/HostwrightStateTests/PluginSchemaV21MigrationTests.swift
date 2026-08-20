@@ -13,9 +13,9 @@ final class PluginSchemaV21MigrationTests: XCTestCase {
             let result = try service.migrateToLatestWithVerifiedBackup()
 
             XCTAssertEqual(result.migration.fromSchemaVersion, 20)
-            XCTAssertEqual(result.migration.toSchemaVersion, 21)
-            XCTAssertEqual(try store.schemaVersion(), 21)
-            XCTAssertEqual(HostwrightContractVersions.stateSchema, 21)
+            XCTAssertEqual(result.migration.toSchemaVersion, 22)
+            XCTAssertEqual(try store.schemaVersion(), 22)
+            XCTAssertEqual(HostwrightContractVersions.stateSchema, 22)
             try store.validateSchema()
 
             let snapshot = try XCTUnwrap(result.rollbackSnapshot)

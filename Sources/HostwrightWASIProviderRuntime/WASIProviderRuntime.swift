@@ -395,13 +395,18 @@ private final class WorkerOwnershipRecorder: @unchecked Sendable {
 
   func record(processID: pid_t, executable: SecureExecutableIdentity) throws {
     try lock.withLock {
-      let command = try processField(processID: processID, field: "command=")
-      let start = try processField(processID: processID, field: "lstart=")
-      let commandDigest = SHA256.hash(data: Data(command.utf8)).hex
-      let startDigest = SHA256.hash(data: Data(start.utf8)).hex
+      let processIdentity: HostwrightDarwinProcessIdentity
+      do {
+        processIdentity = try HostwrightDarwinProcessIdentity.lookup(
+          processID: processID,
+          expectedExecutable: executable
+        )
+      } catch {
+        throw WASIProviderRuntimeError.executionFailed
+      }
       let formatter = ISO8601DateFormatter()
       formatter.formatOptions = [.withInternetDateTime]
-      let line = "\(formatter.string(from: Date()))\tprocess\tprovider-worker\t\(executable.path)\t\(executable.device)\t\(executable.inode)\tpid=\(processID);command_sha256=\(commandDigest);start_sha256=\(startDigest)\n"
+      let line = "\(formatter.string(from: Date()))\tprocess\tprovider-worker\t\(executable.path)\t\(executable.device)\t\(executable.inode)\t\(processIdentity.ownershipToken)\n"
       let descriptor = open(url.path, O_WRONLY | O_APPEND | O_NOFOLLOW)
       guard descriptor >= 0 else { throw WASIProviderRuntimeError.executionFailed }
       defer { close(descriptor) }
@@ -421,20 +426,6 @@ private final class WorkerOwnershipRecorder: @unchecked Sendable {
     }
   }
 
-  private func processField(processID: pid_t, field: String) throws -> String {
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/bin/ps")
-    process.arguments = ["-p", String(processID), "-o", field]
-    let output = Pipe(); let errors = Pipe()
-    process.standardOutput = output; process.standardError = errors
-    try process.run(); process.waitUntilExit()
-    guard process.terminationStatus == 0 else { throw WASIProviderRuntimeError.executionFailed }
-    let value = String(
-      decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-      .trimmingCharacters(in: .newlines)
-    guard !value.isEmpty else { throw WASIProviderRuntimeError.executionFailed }
-    return value
-  }
 }
 
 private extension SHA256.Digest {

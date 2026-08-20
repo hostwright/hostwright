@@ -239,4 +239,210 @@ final class HostwrightImportTests: XCTestCase {
                 $0.message.contains("plaintext sensitive values must use secretEnv")
         })
     }
+
+    func testComposeContractRoundTripsCanonicalSubset() throws {
+        let source = """
+            name: demo
+            services:
+              api:
+                image: ghcr.io/example/api:1
+                command: ["serve", "--port", "8080"]
+                ports:
+                  - "8080:8080"
+                volumes:
+                  - "./data:/data:rw"
+                environment:
+                  APP_ENV: "development"
+                  PUBLIC_URL: "http://localhost:8080"
+                healthcheck:
+                  test: ["CMD", "curl", "http://localhost:8080/health"]
+                  interval: "10s"
+                restart: "unless-stopped"
+
+            """
+
+        let imported = HostwrightCompose.importDocument(source)
+        XCTAssertTrue(imported.succeeded)
+        XCTAssertEqual(imported.schemaVersion, 1)
+        XCTAssertEqual(imported.contractVersion, "v1")
+        XCTAssertTrue(imported.lossReport.losses.isEmpty)
+
+        let manifest = try ManifestValidator.validated(try XCTUnwrap(imported.manifestText))
+        let exported = HostwrightCompose.exportDocument(manifest)
+        XCTAssertTrue(exported.succeeded)
+        XCTAssertEqual(exported.lossReport.losses, [])
+        XCTAssertEqual(
+            exported.composeText,
+            """
+            name: "demo"
+            services:
+              api:
+                image: "ghcr.io/example/api:1"
+                command: ["serve", "--port", "8080"]
+                ports:
+                  - "8080:8080"
+                volumes:
+                  - "./data:/data:rw"
+                environment:
+                  APP_ENV: "development"
+                  PUBLIC_URL: "http://localhost:8080"
+                healthcheck:
+                  test: ["CMD", "curl", "http://localhost:8080/health"]
+                  interval: "10s"
+                restart: "unless-stopped"
+
+            """
+        )
+
+        let roundTripped = HostwrightCompose.importDocument(try XCTUnwrap(exported.composeText))
+        XCTAssertTrue(roundTripped.succeeded)
+        XCTAssertEqual(roundTripped.manifestText, imported.manifestText)
+        XCTAssertEqual(roundTripped.canonicalComposeText, exported.composeText)
+    }
+
+    func testComposeImportReportsStablePathsAndRejectsUnknownSemantics() {
+        let result = HostwrightCompose.importDocument(
+            """
+            name: demo
+            services:
+              api:
+                image: ghcr.io/example/api:1
+                build:
+                  context: .
+                mystery: true
+
+            """
+        )
+
+        XCTAssertFalse(result.succeeded)
+        XCTAssertNil(result.manifestText)
+        XCTAssertNil(result.canonicalComposeText)
+        XCTAssertFalse(result.lossReport.canProceed)
+        XCTAssertEqual(result.lossReport.losses.map(\.code), [.unsupportedInput, .unsupportedInput])
+        XCTAssertEqual(
+            result.lossReport.losses.map(\.path),
+            ["$.services.api.build", "$.services.api.mystery"]
+        )
+        XCTAssertTrue(result.lossReport.losses.allSatisfy { $0.severity == .error })
+    }
+
+    func testComposeMalformedInputUsesInvalidInputContractCode() {
+        let result = HostwrightCompose.importDocument(
+            """
+            name: demo
+            services:
+              api:
+                image: ghcr.io/example/api:1
+                command: ["serve",]
+
+            """
+        )
+
+        XCTAssertFalse(result.succeeded)
+        XCTAssertEqual(result.lossReport.losses.map(\.code), [.invalidInput])
+        XCTAssertEqual(result.lossReport.losses.map(\.path), ["$.services.api.command"])
+    }
+
+    func testComposeExportFailsClosedWithDeterministicLosses() {
+        let manifest = HostwrightManifest(
+            version: HostwrightManifest.currentVersion,
+            project: "demo",
+            imagePolicy: .requireDigest,
+            services: [
+                HostwrightService(
+                    name: "api",
+                    image: "ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    labels: ["team": "platform"]
+                )
+            ]
+        )
+
+        let result = HostwrightCompose.exportDocument(manifest)
+        XCTAssertFalse(result.succeeded)
+        XCTAssertNil(result.composeText)
+        XCTAssertEqual(result.lossReport.losses.map(\.code), [.exportLoss, .exportLoss])
+        XCTAssertEqual(
+            result.lossReport.losses.map(\.path),
+            ["$.imagePolicy", "$.services.api.labels"]
+        )
+        XCTAssertTrue(result.lossReport.losses.allSatisfy { $0.severity == .error })
+    }
+
+    func testComposeUpdatePlanIsDeterministicAndNonMutating() {
+        let current = HostwrightManifest(
+            version: HostwrightManifest.currentVersion,
+            project: "demo",
+            services: [
+                HostwrightService(name: "api", image: "ghcr.io/example/api:1")
+            ]
+        )
+        let desired = HostwrightManifest(
+            version: HostwrightManifest.currentVersion,
+            project: "demo",
+            services: [
+                HostwrightService(
+                    name: "api",
+                    image: "ghcr.io/example/api:2",
+                    env: ["APP_ENV": "production"]
+                ),
+                HostwrightService(name: "worker", image: "ghcr.io/example/worker:1")
+            ]
+        )
+
+        let first = HostwrightCompose.planUpdate(current: current, desired: desired)
+        let second = HostwrightCompose.planUpdate(current: current, desired: desired)
+
+        XCTAssertEqual(first, second)
+        XCTAssertTrue(first.accepted)
+        XCTAssertTrue(first.lossReport.canProceed)
+        XCTAssertFalse(first.mutatesRuntime)
+        XCTAssertEqual(first.changes.map(\.kind), [.updateService, .addService])
+        XCTAssertEqual(first.changes.map(\.serviceName), ["api", "worker"])
+        XCTAssertEqual(first.changes.first?.fields, ["env", "image"])
+        XCTAssertEqual(first.changes.last?.fields, ["service"])
+    }
+
+    func testComposeUpdatePlanRejectsProjectMismatchBeforePlanningChanges() {
+        let current = HostwrightManifest(
+            version: HostwrightManifest.currentVersion,
+            project: "old",
+            services: [HostwrightService(name: "api", image: "ghcr.io/example/api:1")]
+        )
+        let desired = HostwrightManifest(
+            version: HostwrightManifest.currentVersion,
+            project: "new",
+            services: [HostwrightService(name: "api", image: "ghcr.io/example/api:2")]
+        )
+
+        let plan = HostwrightCompose.planUpdate(current: current, desired: desired)
+        XCTAssertFalse(plan.accepted)
+        XCTAssertTrue(plan.changes.isEmpty)
+        XCTAssertEqual(plan.lossReport.losses.map(\.code), [.updateRejected])
+        XCTAssertEqual(plan.lossReport.losses.map(\.path), ["$.project"])
+        XCTAssertFalse(plan.mutatesRuntime)
+    }
+
+    func testComposeContractJSONIsStableAndVersioned() throws {
+        let result = HostwrightCompose.importDocument(
+            """
+            name: demo
+            services:
+              api:
+                image: ghcr.io/example/api:1
+
+            """
+        )
+
+        let first = try ComposeContractJSON.render(result)
+        let second = try ComposeContractJSON.render(result)
+        XCTAssertEqual(first, second)
+
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(first.utf8)) as? [String: Any]
+        )
+        XCTAssertEqual(object["contractVersion"] as? String, "v1")
+        XCTAssertEqual(object["schemaVersion"] as? Int, 1)
+        XCTAssertEqual(object["succeeded"] as? Bool, true)
+        XCTAssertEqual(object["canonicalComposeText"] as? String, result.canonicalComposeText)
+    }
 }

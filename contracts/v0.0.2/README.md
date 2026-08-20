@@ -9,6 +9,7 @@ These files are executable compatibility fixtures for the contracts locked in Ph
 - `runtime-provider-metadata.json`: Runtime Provider API v2 capability metadata.
 - `runtime-provider-capabilities.json`: canonical Runtime Provider API v2 capability-snapshot grammar.
 - `plugin-declaration.json`: plugin ABI v1 reviewed-local declaration supported by the current narrow extension boundary.
+- `phase13-compose-v1.json`: bounded headless Compose import/export/loss/update-plan contract; execution and full Compose parity remain out of scope.
 
 ## Phase 09 Gate 1 freeze
 

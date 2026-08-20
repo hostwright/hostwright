@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "component": "HostwrightCompose",
+  "contractVersion": "v1",
+  "operations": {
+    "import": {
+      "input": "bounded Compose YAML text",
+      "output": "canonical Hostwright manifest text and canonical Compose YAML text",
+      "runtime": "none",
+      "controlAPI": "none"
+    },
+    "export": {
+      "input": "validated Hostwright manifest model",
+      "output": "canonical Compose YAML text",
+      "runtime": "none",
+      "controlAPI": "none"
+    },
+    "updatePlan": {
+      "input": "current and desired validated Hostwright manifest models",
+      "output": "sorted service changes and loss report",
+      "runtime": "none",
+      "controlAPI": "none",
+      "mutatesRuntime": false
+    }
+  },
+  "canonicalComposeSubset": {
+    "topLevel": ["name", "project", "services"],
+    "service": ["image", "command", "environment", "ports", "volumes", "healthcheck", "restart"],
+    "healthcheck": ["test-CMD-array", "interval"],
+    "volumeSource": ["./relative-host-path", "/absolute-host-path"],
+    "ordering": "service and map keys sorted; ports and volumes sorted; command and healthcheck sequences preserve order",
+    "scalarEncoding": "double-quoted with JSON-compatible escapes"
+  },
+  "lossReport": {
+    "shape": {
+      "operation": "import|export|update-plan",
+      "losses": [
+        {
+          "code": "stable HW-COMPOSE code",
+          "severity": "warning|error",
+          "path": "canonical JSON-like path",
+          "message": "stable boundary message",
+          "line": "optional source line",
+          "policyReasonCode": "optional local policy reason"
+        }
+      ]
+    },
+    "proceed": "false when any loss has severity error",
+    "codes": {
+      "HW-COMPOSE-001": "unsupported or unknown Compose input",
+      "HW-COMPOSE-002": "invalid Compose input syntax",
+      "HW-COMPOSE-003": "Hostwright semantics not representable by canonical Compose subset",
+      "HW-COMPOSE-004": "invalid Hostwright manifest",
+      "HW-COMPOSE-005": "update plan rejected before changes are produced"
+    }
+  },
+  "boundaries": {
+    "unknownFields": "reject before producing output",
+    "unsupportedSemantics": "reject with deterministic loss paths; never silently drop",
+    "execution": "not implemented by this source-only contract slice",
+    "DockerComposeParity": "not claimed",
+    "fileWrites": "none"
+  }
+}

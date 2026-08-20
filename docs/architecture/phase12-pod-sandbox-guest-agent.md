@@ -3,7 +3,8 @@
 Status: portable HostwrightPodSandbox boundary implemented; the Phase 11
 credential-free handoff and authenticated local node-agent producer are
 integrated at the guest-agent boundary. Live Apple Container integration
-remains explicitly blocked by the Phase 08 runtime release.
+remains deferred while the Phase 09 single-runtime qualification owns the
+managed Apple Container lane.
 
 This slice owns the pod-sandbox lifecycle model, the guest-agent protocol v1,
 the portable `hostwright-pod-sandbox-guest` executable, and a real subprocess
@@ -115,8 +116,7 @@ handoff injection channel is supplied at its boundary.
 ## Deferred integration boundary
 
 No Apple Container command, VM, Docker process, daemon, or Phase 08 evidence is
-used by this implementation. After Phase 08 records an explicit runtime
-release and the node-agent transport supplies the Phase 11 session binding,
-the next slice is a Linux arm64 build plus one real shared-namespace sandbox
-and exact cleanup proof. CRI, CNI, and CSI adapters remain out of scope for
-this phase.
+used by this implementation. After the Phase 09 runtime lane is released and
+the node-agent transport supplies the Phase 11 session binding, the next slice
+is a Linux arm64 build plus one real shared-namespace sandbox and exact cleanup
+proof. CRI, CNI, and CSI adapters remain out of scope for this phase.

@@ -330,7 +330,7 @@ private struct EventsView: View {
                 .accessibilityIdentifier(DesktopAccessibilityIdentifier.eventsRefresh)
                 if model.isEventStreamRunning {
                     Button("Cancel", systemImage: "xmark") {
-                        model.cancelStreams()
+                        model.cancelEventStream()
                     }
                     .accessibilityIdentifier(DesktopAccessibilityIdentifier.eventsCancel)
                 }
@@ -433,7 +433,7 @@ private struct LogsView: View {
                 }
                 if model.isLogStreamRunning {
                     Button("Cancel", systemImage: "xmark") {
-                        model.cancelStreams()
+                        model.cancelLogStream()
                     }
                     .accessibilityIdentifier(DesktopAccessibilityIdentifier.logsCancel)
                 }

@@ -208,8 +208,13 @@ public final class DesktopOperationsModel: ObservableObject {
     private let api: DesktopControlAPIClient
     private let reconnectDelaysMilliseconds: [UInt64]
     private var reconnectTask: Task<Void, Never>?
+    private var connectionID: UUID?
+    private var refreshTask: Task<Void, Never>?
+    private var refreshID: UUID?
     private var eventTask: Task<Void, Never>?
+    private var eventID: UUID?
     private var logTask: Task<Void, Never>?
+    private var logID: UUID?
 
     public init(
         endpoint: DesktopControlEndpoint? = nil,
@@ -261,17 +266,37 @@ public final class DesktopOperationsModel: ObservableObject {
     }
 
     public func connect() {
+        cancelStatusRefresh()
         reconnectTask?.cancel()
+        let connectionID = UUID()
+        self.connectionID = connectionID
         reconnectTask = Task { [weak self] in
-            await self?.connectOnce()
+            guard let self else { return }
+            defer {
+                if self.connectionID == connectionID {
+                    self.reconnectTask = nil
+                    self.connectionID = nil
+                }
+            }
+            await self.connectOnce(connectionID: connectionID)
         }
     }
 
     public func reconnect() {
+        cancelStatusRefresh()
         reconnectTask?.cancel()
+        let connectionID = UUID()
+        self.connectionID = connectionID
         reconnectTask = Task { [weak self] in
             guard let self else { return }
+            defer {
+                if self.connectionID == connectionID {
+                    self.reconnectTask = nil
+                    self.connectionID = nil
+                }
+            }
             for (index, delay) in reconnectDelaysMilliseconds.enumerated() {
+                guard !Task.isCancelled, self.connectionID == connectionID else { return }
                 if index > 0 {
                     connectionState = .reconnecting(
                         attempt: index + 1,
@@ -283,7 +308,8 @@ public final class DesktopOperationsModel: ObservableObject {
                         return
                     }
                 }
-                await connectOnce()
+                await connectOnce(connectionID: connectionID)
+                guard !Task.isCancelled, self.connectionID == connectionID else { return }
                 if case .connected = connectionState {
                     return
                 }
@@ -293,62 +319,94 @@ public final class DesktopOperationsModel: ObservableObject {
 
     public func disconnect() {
         reconnectTask?.cancel()
-        eventTask?.cancel()
-        logTask?.cancel()
+        connectionID = nil
+        cancelStatusRefresh()
+        cancelEventStream()
+        cancelLogStream()
         reconnectTask = nil
-        eventTask = nil
-        logTask = nil
-        isEventStreamRunning = false
-        isLogStreamRunning = false
         connectionState = .disconnected
     }
 
     public func refreshStatus() {
+        refreshTask?.cancel()
+        let refreshID = UUID()
+        self.refreshID = refreshID
         let api = self.api
-        Task { [weak self] in
+        refreshTask = Task { [weak self] in
+            guard !Task.isCancelled else { return }
+            let request = Task.detached {
+                try Task.checkCancellation()
+                return try api.projectStatus()
+            }
+            defer {
+                request.cancel()
+                if let self, self.refreshID == refreshID {
+                    self.refreshTask = nil
+                    self.refreshID = nil
+                }
+            }
             do {
-                let project = try await Task.detached {
-                    try api.projectStatus()
-                }.value
-                guard !Task.isCancelled else { return }
-                self?.apply(project: project)
+                let project = try await withTaskCancellationHandler(operation: {
+                    try await request.value
+                }, onCancel: {
+                    request.cancel()
+                })
+                guard !Task.isCancelled, let self, self.refreshID == refreshID else { return }
+                self.apply(project: project)
             } catch is CancellationError {
                 return
             } catch {
-                self?.record(error: Self.failure(from: error))
+                guard !Task.isCancelled, let self, self.refreshID == refreshID else { return }
+                self.record(error: Self.failure(from: error))
             }
         }
     }
 
+    var statusRefreshTaskForTesting: Task<Void, Never>? {
+        refreshTask
+    }
+
+    var connectionTaskForTesting: Task<Void, Never>? {
+        reconnectTask
+    }
+
     public func startEventStream(filter: DesktopEventFilter = .init()) {
-        eventTask?.cancel()
+        cancelEventStream()
+        let eventID = UUID()
+        self.eventID = eventID
         isEventStreamRunning = true
         let api = self.api
         eventTask = Task { [weak self] in
             let reader = Task.detached {
                 try Self.readEvents(api: api, filter: filter)
             }
-            defer { reader.cancel() }
+            defer {
+                reader.cancel()
+                if let self, self.eventID == eventID {
+                    self.eventTask = nil
+                    self.eventID = nil
+                    self.isEventStreamRunning = false
+                }
+            }
             do {
                 let values = try await withTaskCancellationHandler(operation: {
                     try await reader.value
                 }, onCancel: {
                     reader.cancel()
                 })
-                guard !Task.isCancelled else { return }
-                self?.events = Array(values.suffix(500))
-                self?.isEventStreamRunning = false
+                guard !Task.isCancelled, let self, self.eventID == eventID else { return }
+                self.events = Array(values.suffix(500))
             } catch is CancellationError {
-                self?.isEventStreamRunning = false
+                return
             } catch {
-                self?.isEventStreamRunning = false
-                self?.record(error: Self.failure(from: error))
+                guard !Task.isCancelled, let self, self.eventID == eventID else { return }
+                self.record(error: Self.failure(from: error))
             }
         }
     }
 
     public func openLogStream(for serviceID: String, tail: Int = 100) {
-        logTask?.cancel()
+        cancelLogStream()
         guard let project = projects.first,
             let service = project.services.first(where: { $0.id == serviceID }),
             let target = service.resourceIdentifier
@@ -366,6 +424,8 @@ public final class DesktopOperationsModel: ObservableObject {
             ))
             return
         }
+        let logID = UUID()
+        self.logID = logID
         isLogStreamRunning = true
         logChunks = []
         let api = self.api
@@ -380,56 +440,94 @@ public final class DesktopOperationsModel: ObservableObject {
                     tail: tail
                 )
             }
-            defer { reader.cancel() }
+            defer {
+                reader.cancel()
+                if let self, self.logID == logID {
+                    self.logTask = nil
+                    self.logID = nil
+                    self.isLogStreamRunning = false
+                }
+            }
             do {
                 let values = try await withTaskCancellationHandler(operation: {
                     try await reader.value
                 }, onCancel: {
                     reader.cancel()
                 })
-                guard !Task.isCancelled else { return }
-                self?.logChunks = values
-                self?.isLogStreamRunning = false
+                guard !Task.isCancelled, let self, self.logID == logID else { return }
+                self.logChunks = values
             } catch is CancellationError {
-                self?.isLogStreamRunning = false
+                return
             } catch {
-                self?.isLogStreamRunning = false
-                self?.record(error: Self.failure(from: error))
+                guard !Task.isCancelled, let self, self.logID == logID else { return }
+                self.record(error: Self.failure(from: error))
             }
         }
     }
 
-    public func cancelStreams() {
+    public func cancelEventStream() {
         eventTask?.cancel()
-        logTask?.cancel()
+        eventTask = nil
+        eventID = nil
         isEventStreamRunning = false
+    }
+
+    public func cancelLogStream() {
+        logTask?.cancel()
+        logTask = nil
+        logID = nil
         isLogStreamRunning = false
     }
 
-    private func connectOnce() async {
+    var eventStreamTaskForTesting: Task<Void, Never>? {
+        eventTask
+    }
+
+    var logStreamTaskForTesting: Task<Void, Never>? {
+        logTask
+    }
+
+    private func connectOnce(connectionID: UUID) async {
+        guard !Task.isCancelled, self.connectionID == connectionID else { return }
         connectionState = .connecting
         let api = self.api
+        let healthRequest = Task.detached {
+            try Task.checkCancellation()
+            return try api.daemonHealth()
+        }
+        defer { healthRequest.cancel() }
         do {
-            let health = try await Task.detached {
-                try api.daemonHealth()
-            }.value
-            guard !Task.isCancelled else { return }
+            let health = try await withTaskCancellationHandler(operation: {
+                try await healthRequest.value
+            }, onCancel: {
+                healthRequest.cancel()
+            })
+            guard !Task.isCancelled, self.connectionID == connectionID else { return }
             daemonHealth = health
             connectionState = .connected
+            let statusRequest = Task.detached {
+                try Task.checkCancellation()
+                return try api.projectStatus()
+            }
+            defer { statusRequest.cancel() }
             do {
-                let project = try await Task.detached {
-                    try api.projectStatus()
-                }.value
-                guard !Task.isCancelled else { return }
+                let project = try await withTaskCancellationHandler(operation: {
+                    try await statusRequest.value
+                }, onCancel: {
+                    statusRequest.cancel()
+                })
+                guard !Task.isCancelled, self.connectionID == connectionID else { return }
                 apply(project: project)
             } catch is CancellationError {
                 return
             } catch {
+                guard !Task.isCancelled, self.connectionID == connectionID else { return }
                 record(error: Self.failure(from: error))
             }
         } catch is CancellationError {
             return
         } catch {
+            guard !Task.isCancelled, self.connectionID == connectionID else { return }
             let failure = Self.failure(from: error)
             connectionState = .unavailable(failure)
             lastFailure = failure
@@ -439,6 +537,12 @@ public final class DesktopOperationsModel: ObservableObject {
     private func apply(project: DesktopProjectStatus) {
         projects = [project]
         lastFailure = nil
+    }
+
+    private func cancelStatusRefresh() {
+        refreshTask?.cancel()
+        refreshTask = nil
+        refreshID = nil
     }
 
     private func record(error: DesktopControlFailure) {

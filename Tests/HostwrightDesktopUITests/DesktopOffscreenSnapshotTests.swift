@@ -67,8 +67,20 @@ final class DesktopOffscreenSnapshotTests: XCTestCase {
             ),
         ]
 
-        let outputDirectory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-            .appendingPathComponent(".codex/phase14-ui-snapshots", isDirectory: true)
+        let outputDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "hostwright-phase14-ui-snapshots-\(UUID().uuidString.lowercased())",
+                isDirectory: true
+            )
+        defer {
+            if FileManager.default.fileExists(atPath: outputDirectory.path) {
+                do {
+                    try FileManager.default.removeItem(at: outputDirectory)
+                } catch {
+                    XCTFail("Could not remove the temporary snapshot directory: \(error)")
+                }
+            }
+        }
         try FileManager.default.createDirectory(
             at: outputDirectory,
             withIntermediateDirectories: true
@@ -124,12 +136,18 @@ final class DesktopOffscreenSnapshotTests: XCTestCase {
             withJSONObject: manifestObject,
             options: [.prettyPrinted, .sortedKeys]
         )
-        try manifestData.write(
-            to: outputDirectory.appendingPathComponent("manifest.json"),
-            options: .atomic
+        let manifestURL = outputDirectory.appendingPathComponent("manifest.json")
+        try manifestData.write(to: manifestURL, options: .atomic)
+        let persistedManifest = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: manifestURL))
+                as? [String: Any]
+        )
+        let persistedSnapshots = try XCTUnwrap(
+            persistedManifest["snapshots"] as? [[String: Any]]
         )
 
         XCTAssertEqual(manifest.count, specifications.count)
+        XCTAssertEqual(persistedSnapshots.count, specifications.count)
         XCTAssertTrue(manifest.allSatisfy { ($0["width"] as? Int ?? 0) > 0 })
         XCTAssertTrue(manifest.allSatisfy { ($0["windowKey"] as? Bool) == false })
         XCTAssertTrue(

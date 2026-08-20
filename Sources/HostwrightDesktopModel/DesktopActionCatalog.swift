@@ -214,6 +214,43 @@ public struct DesktopActionCatalogDocument: Codable, Equatable, Sendable {
     }
 }
 
+public enum DesktopActionCatalogContractError: Error, Equatable, Sendable {
+    case emptyOrOversizedDocument
+    case malformedJSON
+    case duplicateField
+    case unknownField
+    case missingField
+    case schemaDrift
+    case valueDrift
+}
+
+public enum DesktopActionCatalogWireContract {
+    public static let maximumDocumentBytes = 128 * 1_024
+
+    public static func encode(_ document: DesktopActionCatalogDocument) throws -> Data {
+        guard document == DesktopActionCatalog.document else {
+            throw DesktopActionCatalogContractError.valueDrift
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        return try encoder.encode(document)
+    }
+
+    public static func decode(_ data: Data) throws -> DesktopActionCatalogDocument {
+        try DesktopActionCatalogStrictJSON.validate(data)
+        let document: DesktopActionCatalogDocument
+        do {
+            document = try JSONDecoder().decode(DesktopActionCatalogDocument.self, from: data)
+        } catch {
+            throw DesktopActionCatalogContractError.schemaDrift
+        }
+        guard document == DesktopActionCatalog.document else {
+            throw DesktopActionCatalogContractError.valueDrift
+        }
+        return document
+    }
+}
+
 public struct DesktopActionFailure: Codable, Equatable, Sendable {
     public let schemaVersion: Int
     public let actionIdentifier: String
@@ -430,9 +467,7 @@ public enum DesktopActionCatalog {
     }
 
     public static func encodedDocument() throws -> Data {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        return try encoder.encode(document)
+        try DesktopActionCatalogWireContract.encode(document)
     }
 
     public static func cliAction(command: String) -> DesktopCLIActionDescriptor? {
@@ -534,10 +569,12 @@ public enum DesktopActionCatalog {
             return blocked(identifier: command, reason: .phase09PromotionRequired)
         }
         guard let guiAction = guiActions.first(where: { $0.command == command }) else {
-            let reason: DesktopActionAvailabilityReason = action.transport == .localPresentation
-                ? .notExposed
-                : .phase09PromotionRequired
-            return blocked(identifier: command, reason: reason)
+            if guiElements.contains(where: {
+                $0.command == command && $0.role == .status
+            }) {
+                return connectionAvailability(identifier: command, state: model.connectionState)
+            }
+            return blocked(identifier: command, reason: .notExposed)
         }
         return availability(for: guiAction.identifier, model: model, context: context)
     }
@@ -703,5 +740,262 @@ public extension DesktopOperationsModel {
         error: Error
     ) -> DesktopActionFailure {
         DesktopActionFailureContract.redact(actionIdentifier: identifier, error: error)
+    }
+}
+
+private enum DesktopActionCatalogStrictJSON {
+    private indirect enum ValueRule {
+        case object(ObjectRule)
+        case array(ValueRule)
+        case string
+        case integer
+    }
+
+    private struct ObjectRule {
+        let allowedKeys: Set<String>
+        let requiredKeys: Set<String>
+        let valueRules: [String: ValueRule]
+    }
+
+    static func validate(_ data: Data) throws {
+        guard !data.isEmpty,
+            data.count <= DesktopActionCatalogWireContract.maximumDocumentBytes else {
+            throw DesktopActionCatalogContractError.emptyOrOversizedDocument
+        }
+        var parser = Parser(bytes: Array(data))
+        try parser.validateTopLevelObject(using: documentRule())
+    }
+
+    private static func documentRule() -> ObjectRule {
+        let review = ObjectRule(
+            allowedKeys: ["state", "reasonCode", "message"],
+            requiredKeys: ["state", "reasonCode", "message"],
+            valueRules: [
+                "state": .string,
+                "reasonCode": .string,
+                "message": .string,
+            ]
+        )
+        let cliAction = ObjectRule(
+            allowedKeys: [
+                "command", "transport", "mutability", "confirmationReview",
+                "guiElementIdentifiers",
+            ],
+            requiredKeys: [
+                "command", "transport", "mutability", "confirmationReview",
+                "guiElementIdentifiers",
+            ],
+            valueRules: [
+                "command": .string,
+                "transport": .string,
+                "mutability": .string,
+                "confirmationReview": .object(review),
+                "guiElementIdentifiers": .array(.string),
+            ]
+        )
+        let guiElement = ObjectRule(
+            allowedKeys: ["identifier", "role", "command"],
+            requiredKeys: ["identifier", "role"],
+            valueRules: [
+                "identifier": .string,
+                "role": .string,
+                "command": .string,
+            ]
+        )
+        let guiAction = ObjectRule(
+            allowedKeys: ["identifier", "kind", "command", "confirmationReview"],
+            requiredKeys: ["identifier", "kind", "confirmationReview"],
+            valueRules: [
+                "identifier": .string,
+                "kind": .string,
+                "command": .string,
+                "confirmationReview": .object(review),
+            ]
+        )
+        return ObjectRule(
+            allowedKeys: [
+                "contractVersion", "controlProtocolRevision", "sourceCLIInventory",
+                "parityStatus", "cliActions", "guiElements", "guiActions",
+            ],
+            requiredKeys: [
+                "contractVersion", "controlProtocolRevision", "sourceCLIInventory",
+                "parityStatus", "cliActions", "guiElements", "guiActions",
+            ],
+            valueRules: [
+                "contractVersion": .integer,
+                "controlProtocolRevision": .string,
+                "sourceCLIInventory": .string,
+                "parityStatus": .string,
+                "cliActions": .array(.object(cliAction)),
+                "guiElements": .array(.object(guiElement)),
+                "guiActions": .array(.object(guiAction)),
+            ]
+        )
+    }
+
+    private struct Parser {
+        let bytes: [UInt8]
+        var index = 0
+        var depth = 0
+
+        mutating func validateTopLevelObject(using rule: ObjectRule) throws {
+            try skipWhitespace()
+            try parseObject(using: rule)
+            try skipWhitespace()
+            guard index == bytes.count else {
+                throw DesktopActionCatalogContractError.malformedJSON
+            }
+        }
+
+        mutating func parseValue(using rule: ValueRule) throws {
+            switch rule {
+            case .object(let objectRule):
+                try parseObject(using: objectRule)
+            case .array(let elementRule):
+                try parseArray(of: elementRule)
+            case .string:
+                try skipWhitespace()
+                guard peek() == 34 else {
+                    throw DesktopActionCatalogContractError.schemaDrift
+                }
+                _ = try parseString()
+            case .integer:
+                try parseInteger()
+            }
+        }
+
+        mutating func parseObject(using rule: ObjectRule) throws {
+            try skipWhitespace()
+            guard peek() == 123 else {
+                throw DesktopActionCatalogContractError.schemaDrift
+            }
+            try enterContainer()
+            defer { depth -= 1 }
+            index += 1
+            try skipWhitespace()
+            var seen = Set<String>()
+            if peek() == 125 {
+                index += 1
+            } else {
+                while true {
+                    let key = try parseString()
+                    guard seen.insert(key).inserted else {
+                        throw DesktopActionCatalogContractError.duplicateField
+                    }
+                    guard rule.allowedKeys.contains(key),
+                        let valueRule = rule.valueRules[key] else {
+                        throw DesktopActionCatalogContractError.unknownField
+                    }
+                    try skipWhitespace()
+                    try require(58)
+                    try parseValue(using: valueRule)
+                    try skipWhitespace()
+                    if peek() == 44 {
+                        index += 1
+                        try skipWhitespace()
+                        continue
+                    }
+                    try require(125)
+                    break
+                }
+            }
+            guard rule.requiredKeys.isSubset(of: seen) else {
+                throw DesktopActionCatalogContractError.missingField
+            }
+        }
+
+        mutating func parseArray(of elementRule: ValueRule) throws {
+            try skipWhitespace()
+            guard peek() == 91 else {
+                throw DesktopActionCatalogContractError.schemaDrift
+            }
+            try enterContainer()
+            defer { depth -= 1 }
+            index += 1
+            try skipWhitespace()
+            if peek() == 93 {
+                index += 1
+                return
+            }
+            while true {
+                try parseValue(using: elementRule)
+                try skipWhitespace()
+                if peek() == 44 {
+                    index += 1
+                    try skipWhitespace()
+                    continue
+                }
+                try require(93)
+                return
+            }
+        }
+
+        mutating func parseString() throws -> String {
+            try skipWhitespace()
+            try require(34)
+            let start = index - 1
+            var escaped = false
+            while index < bytes.count {
+                let byte = bytes[index]
+                if escaped {
+                    escaped = false
+                } else if byte == 92 {
+                    escaped = true
+                } else if byte == 34 {
+                    let data = Data(bytes[start...index])
+                    index += 1
+                    guard let value = try? JSONDecoder().decode(String.self, from: data) else {
+                        throw DesktopActionCatalogContractError.malformedJSON
+                    }
+                    return value
+                }
+                index += 1
+            }
+            throw DesktopActionCatalogContractError.malformedJSON
+        }
+
+        mutating func parseInteger() throws {
+            try skipWhitespace()
+            if peek() == 45 {
+                index += 1
+            }
+            guard let first = peek() else {
+                throw DesktopActionCatalogContractError.schemaDrift
+            }
+            if first == 48 {
+                index += 1
+            } else if (49...57).contains(first) {
+                index += 1
+                while let byte = peek(), (48...57).contains(byte) {
+                    index += 1
+                }
+            } else {
+                throw DesktopActionCatalogContractError.schemaDrift
+            }
+        }
+
+        mutating func enterContainer() throws {
+            depth += 1
+            guard depth <= 8 else {
+                throw DesktopActionCatalogContractError.schemaDrift
+            }
+        }
+
+        mutating func skipWhitespace() throws {
+            while let byte = peek(), [9, 10, 13, 32].contains(byte) {
+                index += 1
+            }
+        }
+
+        mutating func require(_ expected: UInt8) throws {
+            guard peek() == expected else {
+                throw DesktopActionCatalogContractError.malformedJSON
+            }
+            index += 1
+        }
+
+        func peek() -> UInt8? {
+            index < bytes.count ? bytes[index] : nil
+        }
     }
 }

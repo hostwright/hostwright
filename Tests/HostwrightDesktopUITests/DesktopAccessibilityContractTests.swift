@@ -91,9 +91,12 @@ final class DesktopAccessibilityContractTests: XCTestCase {
             "for: DesktopAccessibilityIdentifier.eventsRefresh",
             ".state != .available",
             "DesktopAccessibilityIdentifier.logsOpen(for: service.id)",
-            "DesktopAccessibilityIdentifier.selectedLogsOpen"
+            "DesktopAccessibilityIdentifier.selectedLogsOpen",
+            "model.cancelEventStream()",
+            "model.cancelLogStream()"
         ] {
             XCTAssertTrue(source.contains(expected), "missing UI contract: \(expected)")
         }
+        XCTAssertFalse(source.contains("model.cancelStreams()"))
     }
 }

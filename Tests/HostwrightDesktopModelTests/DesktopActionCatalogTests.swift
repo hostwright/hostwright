@@ -4,7 +4,7 @@ import XCTest
 
 @MainActor
 final class DesktopActionCatalogTests: XCTestCase {
-    func testCatalogMatchesTheFrozenPhase09InventoryAndHasDeterministicJSON() throws {
+    func testCatalogMatchesTheFrozenPhase09InventoryAndCheckedInContract() throws {
         struct InventoryEntry: Decodable {
             let command: String
             let transport: String
@@ -44,15 +44,66 @@ final class DesktopActionCatalogTests: XCTestCase {
         )
 
         let document = DesktopActionCatalog.document
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        let firstEncoding = try encoder.encode(document)
-        let secondEncoding = try encoder.encode(document)
+        let firstEncoding = try DesktopActionCatalog.encodedDocument()
+        let secondEncoding = try DesktopActionCatalogWireContract.encode(document)
+        let fixture = try Data(contentsOf: contractURL)
         XCTAssertEqual(firstEncoding, secondEncoding)
-        XCTAssertEqual(
-            try JSONDecoder().decode(DesktopActionCatalogDocument.self, from: firstEncoding),
-            document
+        XCTAssertEqual(firstEncoding, fixture)
+
+        let decoded = try DesktopActionCatalogWireContract.decode(fixture)
+        XCTAssertEqual(decoded, document)
+        XCTAssertEqual(try DesktopActionCatalogWireContract.encode(decoded), fixture)
+    }
+
+    func testStrictContractRejectsMalformedAndStructuralDrift() throws {
+        let canonical = try Data(contentsOf: contractURL)
+        let text = String(decoding: canonical, as: UTF8.self)
+        let duplicate = Data(
+            ("{\"\\u0063ontractVersion\":1," + String(text.dropFirst())).utf8
         )
+        assertContractRejected(duplicate, as: .duplicateField)
+
+        var object = try contractJSONObject(canonical)
+        object["unexpected"] = "not-part-of-the-frozen-contract"
+        assertContractRejected(try encodedJSONObject(object), as: .unknownField)
+
+        object.removeValue(forKey: "unexpected")
+        object.removeValue(forKey: "parityStatus")
+        assertContractRejected(try encodedJSONObject(object), as: .missingField)
+
+        object["parityStatus"] = DesktopActionCatalog.parityStatus.rawValue
+        object["contractVersion"] = "1"
+        assertContractRejected(try encodedJSONObject(object), as: .schemaDrift)
+
+        var malformed = canonical
+        malformed.append(contentsOf: Data(" trailing-content".utf8))
+        assertContractRejected(malformed, as: .malformedJSON)
+        assertContractRejected(Data(), as: .emptyOrOversizedDocument)
+    }
+
+    func testContractEncoderAndDecoderRejectSourceValueDrift() throws {
+        let driftedDocument = DesktopActionCatalogDocument(
+            contractVersion: DesktopActionCatalog.contractVersion + 1,
+            controlProtocolRevision: DesktopActionCatalog.controlProtocolRevision,
+            sourceCLIInventory: DesktopActionCatalog.sourceCLIInventory,
+            parityStatus: DesktopActionCatalog.parityStatus,
+            cliActions: DesktopActionCatalog.cliActions,
+            guiElements: DesktopActionCatalog.guiElements,
+            guiActions: DesktopActionCatalog.guiActions
+        )
+        XCTAssertThrowsError(try DesktopActionCatalogWireContract.encode(driftedDocument)) {
+            XCTAssertEqual($0 as? DesktopActionCatalogContractError, .valueDrift)
+        }
+
+        var object = try contractJSONObject(Data(contentsOf: contractURL))
+        object["controlProtocolRevision"] = "not-the-frozen-revision"
+        assertContractRejected(try encodedJSONObject(object), as: .valueDrift)
+
+        var cliActions = try XCTUnwrap(object["cliActions"] as? [[String: Any]])
+        cliActions.append(cliActions[0])
+        object["controlProtocolRevision"] = DesktopActionCatalog.controlProtocolRevision
+        object["cliActions"] = cliActions
+        assertContractRejected(try encodedJSONObject(object), as: .valueDrift)
     }
 
     func testCatalogUsesTheCurrentAccessibilitySurfaceAndMapsOnlyKnownCommands() {
@@ -123,6 +174,23 @@ final class DesktopActionCatalogTests: XCTestCase {
                 }
             }.allSatisfy { $0 }
         )
+        XCTAssertTrue(
+            DesktopActionCatalog.guiElements.compactMap(\.command).allSatisfy {
+                DesktopActionCatalog.cliAction(command: $0) != nil
+            }
+        )
+        for cliAction in DesktopActionCatalog.cliActions {
+            let elementIdentifiers = Set(
+                DesktopActionCatalog.guiElements
+                    .filter { $0.command == cliAction.command }
+                    .map(\.identifier)
+            )
+            XCTAssertEqual(
+                Set(cliAction.guiElementIdentifiers),
+                elementIdentifiers,
+                cliAction.command
+            )
+        }
     }
 
     func testUnexposedAndMutatingInventoryActionsFailClosedWithReviewBoundaries() throws {
@@ -152,6 +220,13 @@ final class DesktopActionCatalogTests: XCTestCase {
         XCTAssertEqual(readOnly.mutability, .readOnly)
         XCTAssertEqual(readOnly.confirmationReview.state, .notRequired)
 
+        let daemonStatus = DesktopActionCatalog.availability(
+            forCommand: "daemon.status",
+            model: model
+        )
+        XCTAssertEqual(daemonStatus.state, .unavailable)
+        XCTAssertEqual(daemonStatus.reason, .disconnected)
+
         let unavailable = DesktopActionCatalog.availability(
             forCommand: "apply",
             model: model
@@ -166,12 +241,35 @@ final class DesktopActionCatalogTests: XCTestCase {
         XCTAssertEqual(localOnly.state, .blocked)
         XCTAssertEqual(localOnly.reason, .notExposed)
 
+        let daemonHealth = DesktopActionCatalog.availability(
+            forCommand: "daemon.status",
+            model: model
+        )
+        XCTAssertEqual(daemonHealth.state, .unavailable)
+        XCTAssertEqual(daemonHealth.reason, .disconnected)
+
+        let hiddenReadOnly = DesktopActionCatalog.availability(
+            forCommand: "daemon.validate",
+            model: model
+        )
+        XCTAssertEqual(hiddenReadOnly.state, .blocked)
+        XCTAssertEqual(hiddenReadOnly.reason, .notExposed)
+
         let unknown = DesktopActionCatalog.availability(
             forCommand: "not-in-the-frozen-inventory",
             model: model
         )
         XCTAssertEqual(unknown.state, .blocked)
         XCTAssertEqual(unknown.reason, .unknownAction)
+
+        for action in DesktopActionCatalog.cliActions where action.mutability == .requiresReview {
+            XCTAssertEqual(action.confirmationReview, .phase09Review, action.command)
+            XCTAssertTrue(action.guiElementIdentifiers.isEmpty, action.command)
+            XCTAssertFalse(
+                DesktopActionCatalog.guiActions.contains { $0.command == action.command },
+                action.command
+            )
+        }
     }
 
     func testAmbiguousInventoryCommandsRequireReviewAndDynamicLogElementsRemainKnown() throws {
@@ -253,5 +351,43 @@ final class DesktopActionCatalogTests: XCTestCase {
             error: DesktopControlFailure(code: "secret123", message: "hidden")
         )
         XCTAssertEqual(arbitraryCode.code, "desktop.action.failed")
+    }
+
+    private var contractURL: URL {
+        URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent(
+                "contracts/v0.0.2/phase14-desktop-action-catalog-v1.json"
+            )
+    }
+
+    private func contractJSONObject(_ data: Data) throws -> [String: Any] {
+        try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    }
+
+    private func encodedJSONObject(_ object: [String: Any]) throws -> Data {
+        try JSONSerialization.data(
+            withJSONObject: object,
+            options: [.sortedKeys, .withoutEscapingSlashes]
+        )
+    }
+
+    private func assertContractRejected(
+        _ data: Data,
+        as expected: DesktopActionCatalogContractError,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertThrowsError(
+            try DesktopActionCatalogWireContract.decode(data),
+            file: file,
+            line: line
+        ) { error in
+            XCTAssertEqual(
+                error as? DesktopActionCatalogContractError,
+                expected,
+                file: file,
+                line: line
+            )
+        }
     }
 }

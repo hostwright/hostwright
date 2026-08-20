@@ -29,6 +29,7 @@ public struct CLIControlRoute: Equatable, Sendable {
     public let arguments: [String]
     public let authorizationScope: CLIControlAuthorizationScope
     public let workingDirectory: String?
+    public let dockerEndpoint: String?
 
     public static func classify(arguments: [String]) throws -> CLIControlRoute {
         try validateArguments(arguments)
@@ -82,7 +83,46 @@ public struct CLIControlRoute: Equatable, Sendable {
                 projectIdentifier: nil,
                 resourceIdentifier: nil
             ),
-            workingDirectory: nil
+            workingDirectory: nil,
+            dockerEndpoint: nil
+        )
+    }
+
+    /// Builds a read-only route for a Docker endpoint while retaining the
+    /// normal CLIControlRoute validation and authorization path.
+    public static func docker(
+        operation: String,
+        endpoint: String,
+        arguments: [String] = []
+    ) throws -> CLIControlRoute {
+        guard operation.range(
+                of: "^[a-z][a-z0-9._-]{0,63}$",
+                options: .regularExpression
+            ) != nil,
+            endpoint.range(
+                of: "^[a-z][a-z0-9._/-]{0,127}$",
+                options: .regularExpression
+            ) != nil else {
+            throw HostwrightDiagnostic(
+                code: .controlAPIInvalid,
+                message: "The Docker control route identifier is invalid."
+            )
+        }
+        try validateArguments(arguments)
+        return CLIControlRoute(
+            transport: .persistentControlAPI,
+            execution: .unary,
+            operation: operation,
+            subcommand: endpoint,
+            mutating: false,
+            output: .json,
+            arguments: arguments,
+            authorizationScope: CLIControlAuthorizationScope(
+                projectIdentifier: nil,
+                resourceIdentifier: nil
+            ),
+            workingDirectory: nil,
+            dockerEndpoint: endpoint
         )
     }
 
@@ -96,7 +136,8 @@ public struct CLIControlRoute: Equatable, Sendable {
             output: output,
             arguments: arguments,
             authorizationScope: scope,
-            workingDirectory: workingDirectory
+            workingDirectory: workingDirectory,
+            dockerEndpoint: dockerEndpoint
         )
     }
 
@@ -117,12 +158,13 @@ public struct CLIControlRoute: Equatable, Sendable {
             output: output,
             arguments: arguments,
             authorizationScope: authorizationScope,
-            workingDirectory: path
+            workingDirectory: path,
+            dockerEndpoint: dockerEndpoint
         )
     }
 
     public func requestBody() -> ControlPlaneJSONValue {
-        .object([
+        var fields: [String: ControlPlaneJSONValue] = [
             "arguments": .array(arguments.map(ControlPlaneJSONValue.string)),
             "authorizationProjectID": authorizationScope.projectIdentifier
                 .map(ControlPlaneJSONValue.string) ?? .null,
@@ -133,7 +175,12 @@ public struct CLIControlRoute: Equatable, Sendable {
             "mutating": .bool(mutating),
             "subcommand": .string(subcommand),
             "workingDirectory": workingDirectory.map(ControlPlaneJSONValue.string) ?? .null,
-        ])
+        ]
+        if let dockerEndpoint {
+            fields["dockerEndpoint"] = .string(dockerEndpoint)
+            fields["dockerSchemaVersion"] = .integer(1)
+        }
+        return .object(fields)
     }
 
     public static func validate(
@@ -143,6 +190,9 @@ public struct CLIControlRoute: Equatable, Sendable {
         guard case .object(let fields)? = request.body,
               fields["commandSchemaVersion"] != nil || fields["commandOperation"] != nil else {
             return nil
+        }
+        if fields["dockerSchemaVersion"] != nil || fields["dockerEndpoint"] != nil {
+            return try validateDocker(request: request, fields: fields)
         }
         guard Set(fields.keys) == [
             "arguments", "authorizationProjectID", "authorizationResourceID",
@@ -181,6 +231,55 @@ public struct CLIControlRoute: Equatable, Sendable {
                 message: "The CLI control request metadata does not match its parsed command."
             )
         }
+        let scoped = route.withAuthorizationScope(declaredScope)
+        return try declaredWorkingDirectory.map(scoped.withWorkingDirectory) ?? scoped
+    }
+
+    private static func validateDocker(
+        request: ControlRequestEnvelope,
+        fields: [String: ControlPlaneJSONValue]
+    ) throws -> CLIControlRoute {
+        let requiredKeys: Set<String> = [
+            "arguments", "authorizationProjectID", "authorizationResourceID",
+            "commandOperation", "commandSchemaVersion", "dockerEndpoint",
+            "dockerSchemaVersion", "mutating", "subcommand", "workingDirectory",
+        ]
+        guard Set(fields.keys) == requiredKeys,
+              case .integer(1)? = fields["commandSchemaVersion"],
+              case .integer(1)? = fields["dockerSchemaVersion"],
+              case .array(let encodedArguments)? = fields["arguments"],
+              case .string(let endpoint)? = fields["dockerEndpoint"],
+              case .string(let declaredOperation)? = fields["commandOperation"],
+              case .string(let declaredSubcommand)? = fields["subcommand"],
+              case .bool(false)? = fields["mutating"] else {
+            throw HostwrightDiagnostic(
+                code: .controlAPIInvalid,
+                message: "The Docker control request body does not match schema v1."
+            )
+        }
+        let arguments = try encodedArguments.map { value -> String in
+            guard case .string(let argument) = value else {
+                throw HostwrightDiagnostic(
+                    code: .controlAPIInvalid,
+                    message: "Docker control route arguments must be strings."
+                )
+            }
+            return argument
+        }
+        let route = try docker(
+            operation: declaredOperation,
+            endpoint: endpoint,
+            arguments: arguments
+        )
+        guard request.operation == declaredOperation,
+              declaredSubcommand == endpoint else {
+            throw HostwrightDiagnostic(
+                code: .controlAPIInvalid,
+                message: "The Docker control route metadata does not match its operation."
+            )
+        }
+        let declaredScope = try authorizationScope(fields)
+        let declaredWorkingDirectory = try workingDirectory(fields)
         let scoped = route.withAuthorizationScope(declaredScope)
         return try declaredWorkingDirectory.map(scoped.withWorkingDirectory) ?? scoped
     }

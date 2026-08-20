@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "component": "HostwrightDockerEngine",
+  "api": {
+    "minimum": "1.52",
+    "maximum": "1.55",
+    "supported": ["1.52", "1.53", "1.54", "1.55"],
+    "outsideRangeStatus": 400,
+    "outsideRangeMessage": "Unsupported Docker API version.",
+    "header": "Docker-API-Version",
+    "pathPrefix": "/v{version}"
+  },
+  "transport": {
+    "protocol": "HTTP/1.1",
+    "socket": "unix-domain",
+    "requestLineBytes": 8192,
+    "headerBytes": 32768,
+    "headerLineBytes": 8192,
+    "headerCount": 100,
+    "bodyBytes": 1048576,
+    "responseBytes": 1048576,
+    "chunkLineBytes": 128,
+    "connection": "one-request-then-close",
+    "upgrade": "rejected"
+  },
+  "endpoints": [
+    { "methods": ["HEAD", "GET"], "path": "/{version}/_ping", "authority": "local", "controlOperation": null },
+    { "methods": ["GET"], "path": "/{version}/version", "authority": "local", "controlOperation": null },
+    { "methods": ["GET"], "path": "/{version}/info", "authority": "control-api", "controlOperation": "status" },
+    { "methods": ["GET"], "path": "/{version}/containers/json", "authority": "control-api", "controlOperation": "status" },
+    { "methods": ["GET"], "path": "/{version}/containers/{id}/json", "authority": "control-api", "controlOperation": "inspect" },
+    { "methods": ["GET"], "path": "/{version}/images/json", "authority": "control-api", "controlOperation": "status" },
+    { "methods": ["GET"], "path": "/{version}/images/{reference}/json", "authority": "control-api", "controlOperation": "image" },
+    { "methods": ["GET"], "path": "/{version}/events", "authority": "control-api", "controlOperation": "events", "delivery": "one-shot-read" }
+  ],
+  "unsupported": {
+    "mutations": "explicit-404-before-control",
+    "streams": "explicit-404-before-control",
+    "upgrades": "explicit-426-before-control",
+    "networksVolumesSwarmBuildExecAttachLogs": "not-advertised"
+  },
+  "errors": {
+    "contentType": "application/json",
+    "shape": { "message": "string" },
+    "controlUnavailableStatus": 503,
+    "redaction": "stable-message-only"
+  },
+  "security": {
+    "socketDirectoryMode": "0700",
+    "socketMode": "0600",
+    "peerPolicy": "same-effective-user",
+    "inodePinning": true,
+    "staleSocketRecovery": "owned-private-refused-connect-only"
+  }
+}

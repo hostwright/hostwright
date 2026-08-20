@@ -83,6 +83,10 @@ let package = Package(
             targets: ["HostwrightStreamQualificationTool"]
         ),
         .executable(name: "hostwrightd", targets: ["HostwrightDaemon"]),
+        .executable(
+            name: "hostwright-docker-proxy",
+            targets: ["HostwrightDockerProxy"]
+        ),
         .executable(name: "hostwright-dist", targets: ["HostwrightDistributionTool"]),
         .executable(
             name: "hostwright-runtime-conformance",
@@ -100,6 +104,7 @@ let package = Package(
             name: "HostwrightControlTransport",
             targets: ["HostwrightControlTransport"]
         ),
+        .library(name: "HostwrightDockerEngine", targets: ["HostwrightDockerEngine"]),
         .library(name: "HostwrightManifest", targets: ["HostwrightManifest"]),
         .library(name: "HostwrightRuntime", targets: ["HostwrightRuntime"]),
         .library(name: "HostwrightState", targets: ["HostwrightState"]),
@@ -308,6 +313,20 @@ let package = Package(
                 "HostwrightCore",
                 "HostwrightState"
             ]
+        ),
+        .target(
+            name: "HostwrightDockerEngine",
+            dependencies: [
+                "HostwrightCommandTransport",
+                "HostwrightControlPlane",
+                "HostwrightControlSecurity",
+                "HostwrightControlTransport",
+                "HostwrightCore"
+            ]
+        ),
+        .executableTarget(
+            name: "HostwrightDockerProxy",
+            dependencies: ["HostwrightDockerEngine"]
         ),
         .target(
             name: "HostwrightDistribution",
@@ -673,6 +692,16 @@ let package = Package(
             dependencies: [
                 "HostwrightControlPlane",
                 "HostwrightControlTransport"
+            ]
+        ),
+        .testTarget(
+            name: "HostwrightDockerEngineTests",
+            dependencies: [
+                "HostwrightCommandTransport",
+                "HostwrightControlPlane",
+                "HostwrightDockerEngine",
+                "HostwrightControlTransport",
+                "HostwrightCore"
             ]
         ),
         .testTarget(

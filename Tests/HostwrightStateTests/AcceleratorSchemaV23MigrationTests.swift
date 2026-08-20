@@ -5,13 +5,13 @@ import XCTest
 
 final class AcceleratorSchemaV23MigrationTests: XCTestCase {
     func testV22ToV23CreatesDedicatedAcceleratorAuthorityTables() throws {
-        try withTemporaryStore(throughVersion: 22) { store, _ in
-            XCTAssertEqual(try store.schemaVersion(), 22)
+        try withTemporaryStore(throughVersion: 23) { store, _ in
+            XCTAssertEqual(try store.schemaVersion(), 23)
 
             try store.migrate()
 
-            XCTAssertEqual(try store.schemaVersion(), 23)
-            XCTAssertEqual(MigrationRunner.latestSchemaVersion, 23)
+            XCTAssertEqual(try store.schemaVersion(), 24)
+            XCTAssertEqual(MigrationRunner.latestSchemaVersion, 24)
             try store.withConnection(createIfNeeded: false, readOnly: true) { connection in
                 let tables = Set(
                     try connection.query(
@@ -50,7 +50,7 @@ final class AcceleratorSchemaV23MigrationTests: XCTestCase {
     }
 
     func testScopeSentinelIsRejectedAndGlobalCurrentIsUnique() throws {
-        try withTemporaryStore(throughVersion: 23) { store, _ in
+        try withTemporaryStore(throughVersion: 24) { store, _ in
             try store.withConnection { connection in
                 XCTAssertThrowsError(
                     try connection.run(
@@ -132,7 +132,7 @@ final class AcceleratorSchemaV23MigrationTests: XCTestCase {
     }
 
     func testV23MigrationRollsBackDedicatedTablesOnConflict() throws {
-        try withTemporaryStore(throughVersion: 22) { store, _ in
+        try withTemporaryStore(throughVersion: 23) { store, _ in
             try store.withConnection { connection in
                 try connection.execute(
                     "CREATE TABLE accelerator_state_journal (unexpected INTEGER)"
@@ -140,7 +140,7 @@ final class AcceleratorSchemaV23MigrationTests: XCTestCase {
             }
 
             XCTAssertThrowsError(try store.migrate())
-            XCTAssertEqual(try store.schemaVersion(), 22)
+            XCTAssertEqual(try store.schemaVersion(), 23)
             try store.withConnection(createIfNeeded: false, readOnly: true) { connection in
                 let currentExists = try connection.query(
                     """
@@ -154,8 +154,8 @@ final class AcceleratorSchemaV23MigrationTests: XCTestCase {
     }
 
     func testPreReplayV23DatabaseUpgradesTransactionallyAndAcceptsReplayRecords() throws {
-        try withTemporaryStore(throughVersion: 22) { store, _ in
-            let legacyStatements = MigrationRunner.legacyV23AcceleratorStatements()
+        try withTemporaryStore(throughVersion: 23) { store, _ in
+            let legacyStatements = MigrationRunner.legacyV24AcceleratorStatements()
             XCTAssertEqual(legacyStatements.count, 6)
             try store.withConnection { connection in
                 for statement in legacyStatements {
@@ -196,11 +196,11 @@ final class AcceleratorSchemaV23MigrationTests: XCTestCase {
                     """
                     INSERT INTO schema_migrations (
                         version, description, checksum, applied_at
-                    ) VALUES (23, ?, ?, ?)
+                    ) VALUES (24, ?, ?, ?)
                     """,
                     bindings: [
                         .text("Dedicated accelerator authority journal and current indexes"),
-                        .text(MigrationRunner.legacyV23AcceleratorChecksum),
+                        .text(MigrationRunner.legacyV24AcceleratorChecksum),
                         .text("2026-08-08T12:00:00Z")
                     ]
                 )
@@ -211,12 +211,12 @@ final class AcceleratorSchemaV23MigrationTests: XCTestCase {
                     error as? StateStoreError else {
                     return XCTFail("expected explicit pre-replay migration refusal, got \(error)")
                 }
-                XCTAssertEqual(latest, 23)
+                XCTAssertEqual(latest, 24)
                 XCTAssertTrue(message.contains("replay table upgrade"))
             }
 
             try store.migrate()
-            XCTAssertEqual(try store.schemaVersion(), 23)
+            XCTAssertEqual(try store.schemaVersion(), 24)
             try store.withConnection(createIfNeeded: false, readOnly: true) { connection in
                 let preserved = try connection.query(
                     """
@@ -271,8 +271,8 @@ final class AcceleratorSchemaV23MigrationTests: XCTestCase {
     }
 
     func testPreReplayV23UpgradeRejectsTamperedLegacyTableAndLeavesLedgerUnchanged() throws {
-        try withTemporaryStore(throughVersion: 22) { store, _ in
-            let legacyStatements = MigrationRunner.legacyV23AcceleratorStatements()
+        try withTemporaryStore(throughVersion: 23) { store, _ in
+            let legacyStatements = MigrationRunner.legacyV24AcceleratorStatements()
             XCTAssertEqual(legacyStatements.count, 6)
             try store.withConnection { connection in
                 for (index, statement) in legacyStatements.enumerated() {
@@ -291,11 +291,11 @@ final class AcceleratorSchemaV23MigrationTests: XCTestCase {
                     """
                     INSERT INTO schema_migrations (
                         version, description, checksum, applied_at
-                    ) VALUES (23, ?, ?, ?)
+                    ) VALUES (24, ?, ?, ?)
                     """,
                     bindings: [
                         .text("Dedicated accelerator authority journal and current indexes"),
-                        .text(MigrationRunner.legacyV23AcceleratorChecksum),
+                        .text(MigrationRunner.legacyV24AcceleratorChecksum),
                         .text("2026-08-08T12:00:00Z")
                     ]
                 )
@@ -304,9 +304,9 @@ final class AcceleratorSchemaV23MigrationTests: XCTestCase {
             XCTAssertThrowsError(try store.migrate())
             try store.withConnection(createIfNeeded: false, readOnly: true) { connection in
                 let checksum = try connection.query(
-                    "SELECT checksum FROM schema_migrations WHERE version = 23"
+                    "SELECT checksum FROM schema_migrations WHERE version = 24"
                 ).first?.first
-                XCTAssertEqual(checksum, MigrationRunner.legacyV23AcceleratorChecksum)
+                XCTAssertEqual(checksum, MigrationRunner.legacyV24AcceleratorChecksum)
                 let currentTable = try connection.query(
                     """
                     SELECT name FROM sqlite_master
@@ -326,7 +326,7 @@ final class AcceleratorSchemaV23MigrationTests: XCTestCase {
     }
 
     func testUnknownSchemaVersionAndTamperedV23ChecksumFailClosed() throws {
-        try withTemporaryStore(throughVersion: 23) { store, _ in
+        try withTemporaryStore(throughVersion: 24) { store, _ in
             try store.withConnection { connection in
                 try connection.run(
                     """
@@ -334,7 +334,7 @@ final class AcceleratorSchemaV23MigrationTests: XCTestCase {
                     VALUES (?, 'future accelerator schema', 'future-checksum', ?)
                     """,
                     bindings: [
-                        .int(24),
+                        .int(25),
                         .text("2026-08-05T12:00:00Z")
                     ]
                 )
@@ -346,15 +346,15 @@ final class AcceleratorSchemaV23MigrationTests: XCTestCase {
                 ) = error as? StateStoreError else {
                     return XCTFail("Expected future-schema refusal, got (error)")
                 }
-                XCTAssertEqual(foundVersion, 24)
-                XCTAssertEqual(latestSupported, 23)
+                XCTAssertEqual(foundVersion, 25)
+                XCTAssertEqual(latestSupported, 24)
             }
         }
 
-        try withTemporaryStore(throughVersion: 23) { store, _ in
+        try withTemporaryStore(throughVersion: 24) { store, _ in
             try store.withConnection { connection in
                 try connection.run(
-                    "UPDATE schema_migrations SET checksum = ? WHERE version = 23",
+                    "UPDATE schema_migrations SET checksum = ? WHERE version = 24",
                     bindings: [.text("tampered")]
                 )
             }

@@ -10,10 +10,10 @@ final class SchedulerSchemaV22MigrationTests: XCTestCase {
             let projectUUID = UUID().uuidString.lowercased()
             try insertProject(id: "phase10-project", resourceUUID: projectUUID, in: store)
 
-            try MigrationRunner().apply(to: store, throughVersion: 22)
+            try MigrationRunner().apply(to: store, throughVersion: 23)
 
-            XCTAssertEqual(try store.schemaVersion(), 22)
-            XCTAssertEqual(MigrationRunner.latestSchemaVersion, 23)
+            XCTAssertEqual(try store.schemaVersion(), 23)
+            XCTAssertEqual(MigrationRunner.latestSchemaVersion, 24)
             XCTAssertEqual(
                 try store.withConnection(createIfNeeded: false, readOnly: true) { connection in
                     try connection.query(
@@ -119,15 +119,15 @@ final class SchedulerSchemaV22MigrationTests: XCTestCase {
                 try connection.execute("DROP TABLE scheduler_decisions")
             }
             try store.migrate()
-            XCTAssertEqual(try store.schemaVersion(), 23)
+            XCTAssertEqual(try store.schemaVersion(), 24)
             let reopened = SQLiteStateStore(path: store.path)
-            XCTAssertEqual(try reopened.schemaVersion(), 23)
+            XCTAssertEqual(try reopened.schemaVersion(), 24)
             try reopened.validateSchema()
         }
     }
 
     func testV22ChecksumTamperingRefusesReopenAndFurtherMigration() throws {
-        try withTemporaryStore(throughVersion: 22) { store, _ in
+        try withTemporaryStore(throughVersion: 23) { store, _ in
             try store.withConnection { connection in
                 try connection.run(
                     "UPDATE schema_migrations SET checksum = 'tampered-v22' WHERE version = 22"
@@ -153,14 +153,14 @@ final class SchedulerSchemaV22MigrationTests: XCTestCase {
     }
 
     func testFutureSchemaVersionRefusalRemainsFailClosedAfterV22() throws {
-        try withTemporaryStore(throughVersion: 22) { store, _ in
+        try withTemporaryStore(throughVersion: 23) { store, _ in
             try store.withConnection { connection in
                 try connection.run(
                     """
                     INSERT INTO schema_migrations (version, description, checksum, applied_at)
                     VALUES (?, 'future scheduler schema', 'future-checksum', ?)
                     """,
-                    bindings: [.int(24), .text("2026-08-05T12:00:00Z")]
+                    bindings: [.int(25), .text("2026-08-05T12:00:00Z")]
                 )
             }
 
@@ -175,15 +175,15 @@ final class SchedulerSchemaV22MigrationTests: XCTestCase {
                     ) = error as? StateStoreError else {
                         return XCTFail("Expected future-schema refusal, got \(error)")
                     }
-                    XCTAssertEqual(foundVersion, 24)
-                    XCTAssertEqual(latestSupported, 23)
+                    XCTAssertEqual(foundVersion, 25)
+                    XCTAssertEqual(latestSupported, 24)
                 }
             }
         }
     }
 
     func testV22FencingSchemaUsesPairedTokensAndRejectsInvalidFenceState() throws {
-        try withTemporaryStore(throughVersion: 22) { store, _ in
+        try withTemporaryStore(throughVersion: 23) { store, _ in
             let stateColumns = try store.withConnection(
                 createIfNeeded: false,
                 readOnly: true

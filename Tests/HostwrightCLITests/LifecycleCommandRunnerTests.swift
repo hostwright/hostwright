@@ -1,11 +1,13 @@
 import CryptoKit
 import Foundation
+import HostwrightControlPlane
 import HostwrightCore
 import HostwrightDaemonCore
 import HostwrightManifest
 import HostwrightReconciler
 import HostwrightRuntime
 import HostwrightSecrets
+import HostwrightScheduler
 import HostwrightState
 import Testing
 @testable import HostwrightCLI
@@ -271,6 +273,129 @@ struct LifecycleCommandRunnerTests {
                 revalidations: 1,
                 executions: 1
             )
+        )
+    }
+
+    @Test
+    func unattendedDaemonAuthorityFailsClosedWithoutValidatorAndOnNodeEpochTOCTOU() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-p10-daemon-authority-toctou-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700]
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let manifest = """
+        version: 3
+        project: demo
+        services:
+          api:
+            image: example.invalid/api@sha256:\(String(repeating: "1", count: 64))
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
+        """
+        let manifestSHA256 = SHA256.hash(data: Data(manifest.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        let databasePath = directory.appendingPathComponent("state.sqlite").path
+        let manifestPath = directory.appendingPathComponent("hostwright.yaml").path
+        let prepared = try preparation(
+            desired: [service()],
+            manifestSHA256: manifestSHA256
+        )
+        let seeded = try seedCommittedDaemonSchedulerAuthority(
+            databasePath: databasePath,
+            manifestPath: manifestPath,
+            manifestText: manifest,
+            manifestSHA256: manifestSHA256,
+            projectResourceUUID: prepared.projectResourceUUID
+        )
+        let request = try makeDaemonReconciliationRequest(
+            manifestPath: manifestPath,
+            manifestSHA256: manifestSHA256,
+            stateDatabasePath: databasePath,
+            projectID: prepared.projectID,
+            maximumParallelism: 4,
+            schedulerAuthorityBinding: seeded.binding
+        )
+        #expect(request.schemaVersion == 1)
+        #expect(request.schedulerAuthorityBinding?.schemaVersion == 1)
+        #expect(
+            try JSONDecoder().decode(
+                DaemonReconciliationRequest.self,
+                from: JSONEncoder().encode(request)
+            ) == request
+        )
+        let driver = ScriptedLifecycleCommandDriver(preparation: prepared)
+        let epochMutation = SchedulerAuthorityEpochMutation(
+            databasePath: databasePath,
+            nodeID: seeded.nodeID
+        )
+        let validatedManifest = try ManifestValidator.validated(manifest)
+
+        let driverWithoutAuthorityFactory = ScriptedLifecycleCommandDriver(
+            preparation: prepared
+        )
+        let reconcilerWithoutAuthorityFactory = UnattendedLifecycleReconciler(
+            readManifest: { _ in manifest },
+            makeDriver: { _ in driverWithoutAuthorityFactory }
+        )
+        var missingFactoryRefused = false
+        do {
+            _ = try await reconcilerWithoutAuthorityFactory.reconcileAuthorized(
+                request: request,
+                schedulerAuthorityBinding: seeded.binding
+            )
+        } catch {
+            missingFactoryRefused = true
+            #expect(
+                String(describing: error).contains(
+                    "no validator-aware lifecycle driver"
+                )
+            )
+        }
+        #expect(missingFactoryRefused)
+        #expect(driverWithoutAuthorityFactory.snapshot().executions == 0)
+
+        let reconciler = UnattendedLifecycleReconciler(
+            readManifest: { _ in manifest },
+            makeDriver: { _ in driver },
+            makeAuthorizedDriver: { _, authorityCheck in
+                SchedulerAuthorityBoundaryDriver(
+                    base: driver,
+                    manifest: validatedManifest,
+                    authorityCheck: authorityCheck,
+                    beforeAuthorityCheck: epochMutation.advance
+                )
+            }
+        )
+
+        var refused = false
+        do {
+            _ = try await reconciler.reconcileAuthorized(
+                request: request,
+                schedulerAuthorityBinding: seeded.binding
+            )
+        } catch {
+            refused = true
+            #expect(
+                String(describing: error).contains(
+                    "scheduler-authority-unavailable"
+                )
+            )
+        }
+
+        #expect(refused)
+        #expect(driver.snapshot().executions == 0)
+        #expect(
+            try SQLiteStateStore(path: databasePath)
+                .schedulerAdmissions.fencingState(nodeID: seeded.nodeID)
+                .nodeEpoch == 2
         )
     }
 
@@ -2040,11 +2165,12 @@ struct LifecycleCommandRunnerTests {
         previous: DesiredRuntimeState? = nil,
         observed: [ObservedRuntimeService] = [],
         bindings: [LifecycleResourceBinding] = [],
-        manifestBaseDirectory: String = "/tmp/hostwright-phase04"
+        manifestBaseDirectory: String = "/tmp/hostwright-phase04",
+        manifestSHA256: String = String(repeating: "a", count: 64)
     ) throws -> LifecycleCommandPreparation {
         let capability = String(repeating: "c", count: 64)
         return LifecycleCommandPreparation(
-            manifestSHA256: String(repeating: "a", count: 64),
+            manifestSHA256: manifestSHA256,
             manifestBaseDirectory: manifestBaseDirectory,
             desiredState: DesiredRuntimeState(
                 projectName: "demo",
@@ -2117,7 +2243,8 @@ private func makeDaemonReconciliationRequest(
     projectID: String,
     maximumParallelism: Int,
     selectedServiceNames: [String]? = nil,
-    maintenanceAdmission: DaemonMaintenanceAdmission? = nil
+    maintenanceAdmission: DaemonMaintenanceAdmission? = nil,
+    schedulerAuthorityBinding: DaemonSchedulerAuthorityBinding? = nil
 ) throws -> DaemonReconciliationRequest {
     let normalizedPath = URL(fileURLWithPath: manifestPath).standardizedFileURL.path
     let target = try DaemonConfigurationTarget(
@@ -2137,7 +2264,170 @@ private func makeDaemonReconciliationRequest(
         projectID: projectID,
         maximumParallelism: maximumParallelism,
         selectedServiceNames: selectedServiceNames,
-        maintenanceAdmission: maintenanceAdmission
+        maintenanceAdmission: maintenanceAdmission,
+        schedulerAuthorityBinding: schedulerAuthorityBinding
+    )
+}
+
+private func seedCommittedDaemonSchedulerAuthority(
+    databasePath: String,
+    manifestPath: String,
+    manifestText: String,
+    manifestSHA256: String,
+    projectResourceUUID: String
+) throws -> (binding: DaemonSchedulerAuthorityBinding, nodeID: UUID) {
+    let store = SQLiteStateStore(path: databasePath)
+    try store.migrate()
+    let manifest = try ManifestValidator.validated(manifestText)
+    let admissions = try ManifestSchedulerAdmissionBridge.admit(
+        manifest: manifest,
+        subjectID: "owner"
+    )
+    let projectID = "project-\(manifest.project!)"
+    try store.desiredStates.saveManifestSnapshot(
+        projectID: projectID,
+        manifestPath: manifestPath,
+        manifestHash: manifestSHA256,
+        desiredGeneration: 1,
+        manifest: manifest,
+        timestamp: "2026-08-13T08:00:00Z",
+        mutationProvider: RuntimeProviderID.appleContainerCLI.rawValue,
+        projectResourceUUID: projectResourceUUID
+    )
+    try store.controlIdentities.bootstrap(
+        ControlPeerIdentityRecord(
+            subjectID: "owner",
+            userID: 501,
+            codeIdentity: CodeIdentity(
+                teamIdentifier: "993YC3JY4Q",
+                signingIdentifier: "hostwright.daemon-authority.tests",
+                codeDirectoryHash: String(repeating: "a", count: 40),
+                validationMode: .installedRequirement
+            ),
+            declaredBySubjectID: "owner",
+            declaredAt: "2026-08-13T08:00:00Z",
+            updatedAt: "2026-08-13T08:00:00Z"
+        )
+    )
+
+    let repository = store.schedulerAdmissions
+    let nodeID = UUID(
+        uuidString: HostwrightResourceUUID.legacy(
+            kind: "daemon-authority-toctou-node",
+            identifier: projectID
+        )
+    )!
+    let capacity = try SchedulerNodeCapacitySnapshot(
+        nodeID: nodeID,
+        capacity: ResourceVector([
+            "cpu": 8,
+            "memory": 8 * 1_024 * 1_024 * 1_024,
+            "disk": 128 * 1_024 * 1_024 * 1_024,
+            "io": 1_024 * 1_024 * 1_024,
+            "network": 1_024 * 1_024 * 1_024,
+            "process": 1_024,
+        ]),
+        generation: 1,
+        observedAt: "2026-08-13T08:00:00Z"
+    )
+    _ = try repository.recordNodeCapacity(snapshot: capacity)
+    let architecture = admissions[0].workload.requirements
+        .requiredArchitectures.first ?? "arm64"
+    let node = try SchedulerNode(
+        snapshot: NodePlacementSnapshot(
+            nodeID: nodeID,
+            capacity: capacity.capacity,
+            allocation: .zero,
+            architecture: architecture,
+            runtime: "linux-vm",
+            provider: "daemon-authority-test"
+        )
+    )
+    let engineDecision = try SchedulerEngine().plan(
+        SchedulerEngineInput(
+            pendingWorkloads: admissions.map(\.workload),
+            nodes: [node]
+        )
+    )
+    let decisionID = UUID(
+        uuidString: HostwrightResourceUUID.legacy(
+            kind: "daemon-authority-toctou-decision",
+            identifier: "\(engineDecision.decisionID.uuidString):\(manifestSHA256)"
+        )
+    )!
+    let decision = try SchedulerDecision(
+        decisionID: decisionID,
+        inputDigest: engineDecision.inputDigest,
+        orderedWorkloadIDs: engineDecision.orderedWorkloadIDs,
+        workloadDecisions: engineDecision.workloadDecisions,
+        snapshotQuality: engineDecision.snapshotQuality
+    )
+    let workloadBindings = try admissions.map { admission in
+        try SchedulerDecisionWorkloadBinding(
+            workloadID: admission.workloadID,
+            nodeID: nodeID,
+            resources: admission.workload.request,
+            capacityDigest: capacity.capacityDigest,
+            capacityGeneration: capacity.generation,
+            ownerSubjectID: admission.workload.subjectID,
+            projectUUID: projectResourceUUID
+        )
+    }
+    let profileDigest = String(repeating: "0", count: 64)
+    _ = try repository.recordDecisionArtifact(
+        decision: decision,
+        workloadBindings: workloadBindings,
+        projectUUID: projectResourceUUID,
+        configDigest: manifestSHA256,
+        profileDigest: profileDigest,
+        lifecyclePlanDigest: manifestSHA256,
+        createdAt: "2026-08-13T08:00:00Z",
+        updatedAt: "2026-08-13T08:00:00Z"
+    )
+    let authority = try SchedulerAdmissionAuthority(
+        nodeCapacityDigest: capacity.capacityDigest,
+        nodeCapacityGeneration: capacity.generation,
+        inputDigest: decision.inputDigest,
+        configDigest: manifestSHA256,
+        profileDigest: profileDigest,
+        lifecyclePlanDigest: manifestSHA256,
+        expectedNodeEpoch: 1
+    )
+    let reservations = try admissions.map { admission in
+        let pending = try repository.reserve(
+            binding: SchedulerAdmissionBinding(
+                decisionID: decisionID,
+                workloadID: admission.workloadID,
+                nodeID: nodeID,
+                resources: admission.workload.request,
+                nodeCapacityDigest: capacity.capacityDigest,
+                nodeCapacityGeneration: capacity.generation,
+                inputDigest: decision.inputDigest,
+                configDigest: manifestSHA256,
+                profileDigest: profileDigest,
+                lifecyclePlanDigest: manifestSHA256,
+                ownerSubjectID: admission.workload.subjectID,
+                projectUUID: projectResourceUUID,
+                createdAt: "2026-08-13T08:00:00Z",
+                expiresAt: "2026-08-13T08:04:00Z"
+            ),
+            authority: authority
+        )
+        return try repository.commit(
+            reservationID: pending.reservationID,
+            expectedToken: pending.fencingToken,
+            updatedAt: "2026-08-13T08:00:01Z"
+        )
+    }.sorted {
+        $0.workloadID.uuidString.lowercased() <
+            $1.workloadID.uuidString.lowercased()
+    }
+    return (
+        try DaemonSchedulerAuthorityBinding(
+            projectResourceUUID: projectResourceUUID,
+            reservations: reservations
+        ),
+        nodeID
     )
 }
 
@@ -2154,6 +2444,92 @@ private final class LockedReadCounter: @unchecked Sendable {
             count += 1
             return count
         }
+    }
+}
+
+private final class SchedulerAuthorityEpochMutation: @unchecked Sendable {
+    private let lock = NSLock()
+    private let databasePath: String
+    private let nodeID: UUID
+    private var advanced = false
+
+    init(databasePath: String, nodeID: UUID) {
+        self.databasePath = databasePath
+        self.nodeID = nodeID
+    }
+
+    func advance() throws {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !advanced else { return }
+        advanced = true
+        _ = try SQLiteStateStore(path: databasePath)
+            .schedulerAdmissions.recoverNode(
+                evidence: SchedulerNodeRecoveryEvidence(
+                    nodeID: nodeID,
+                    expectedNodeEpoch: 1,
+                    newNodeEpoch: 2,
+                    evidenceDigest: String(repeating: "e", count: 64),
+                    verifiedAt: "2026-08-13T08:00:02Z"
+                )
+            )
+    }
+}
+
+private final class SchedulerAuthorityBoundaryDriver:
+    LifecycleCommandDriving,
+    @unchecked Sendable
+{
+    private let base: any LifecycleCommandDriving
+    private let manifest: HostwrightManifest
+    private let authorityCheck: SchedulerLifecycleAuthorityCheck
+    private let beforeAuthorityCheck: @Sendable () throws -> Void
+
+    init(
+        base: any LifecycleCommandDriving,
+        manifest: HostwrightManifest,
+        authorityCheck: @escaping SchedulerLifecycleAuthorityCheck,
+        beforeAuthorityCheck: @escaping @Sendable () throws -> Void
+    ) {
+        self.base = base
+        self.manifest = manifest
+        self.authorityCheck = authorityCheck
+        self.beforeAuthorityCheck = beforeAuthorityCheck
+    }
+
+    func prepare(options: LifecycleCLIOptions) throws -> LifecycleCommandPreparation {
+        try base.prepare(options: options)
+    }
+
+    func localImageEvidence(
+        for requirement: LifecycleLocalImageRequirement,
+        preparation: LifecycleCommandPreparation
+    ) throws -> RuntimeLocalImageEvidence {
+        try base.localImageEvidence(
+            for: requirement,
+            preparation: preparation
+        )
+    }
+
+    func revalidate(
+        compiled: LifecycleCompiledCommand,
+        preparation: LifecycleCommandPreparation
+    ) throws {
+        try base.revalidate(compiled: compiled, preparation: preparation)
+    }
+
+    func execute(
+        compiled: LifecycleCompiledCommand,
+        preparation: LifecycleCommandPreparation,
+        options: LifecycleCLIOptions
+    ) throws -> LifecycleSagaExecutionResult {
+        try beforeAuthorityCheck()
+        try authorityCheck(manifest, compiled, preparation, options)
+        return try base.execute(
+            compiled: compiled,
+            preparation: preparation,
+            options: options
+        )
     }
 }
 

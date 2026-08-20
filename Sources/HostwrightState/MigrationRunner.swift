@@ -74,7 +74,7 @@ public struct MigrationRunner: Sendable {
     public static let latestSchemaVersion =
         HostwrightContractVersions.stateSchema
     static let applicationID = 0x48575254
-    static let legacyV23AcceleratorChecksum = "fnv1a64:147eba7ebe350e07"
+    static let legacyV24AcceleratorChecksum = "fnv1a64:147eba7ebe350e07"
 
     public init() {}
 
@@ -143,14 +143,14 @@ public struct MigrationRunner: Sendable {
                             message: "Recorded checksum \(checksum) does not match expected checksum \(migration.checksum)."
                         )
                     }
-                    if migration.version == 23,
-                       checksum == Self.legacyV23AcceleratorChecksum {
-                        try upgradeLegacyV23AcceleratorTables(
+                    if migration.version == 24,
+                       checksum == Self.legacyV24AcceleratorChecksum {
+                        try upgradeLegacyV24AcceleratorTables(
                             on: connection,
                             migration: migration
                         )
                         try connection.run(
-                            "UPDATE schema_migrations SET checksum = ? WHERE version = 23",
+                            "UPDATE schema_migrations SET checksum = ? WHERE version = 24",
                             bindings: [.text(migration.checksum)]
                         )
                     }
@@ -516,25 +516,25 @@ public struct MigrationRunner: Sendable {
 
         let applied = try appliedMigrations(on: connection)
         try validateCompatibility(applied, requireLatest: true)
-        if applied[23] == Self.legacyV23AcceleratorChecksum {
+        if applied[24] == Self.legacyV24AcceleratorChecksum {
             throw StateStoreError.incompatibleSchema(
-                foundVersion: 23,
+                foundVersion: 24,
                 latestSupported: Self.latestSchemaVersion,
-                message: "Schema v23 predates the durable accelerator replay table upgrade; run the explicit migration path before reading or writing state."
+                message: "Schema v24 predates the durable accelerator replay table upgrade; run the explicit migration path before reading or writing state."
             )
         }
     }
 
-    private func upgradeLegacyV23AcceleratorTables(
+    private func upgradeLegacyV24AcceleratorTables(
         on connection: SQLiteConnection,
         migration: SchemaMigration
     ) throws {
-        let legacyStatements = Self.legacyV23AcceleratorStatements()
+        let legacyStatements = Self.legacyV24AcceleratorStatements()
         guard legacyStatements.count == 6,
               migration.statements.count == 6 else {
             throw StateStoreError.migrationFailed(
-                version: 23,
-                message: "The v23 accelerator migration definition is incomplete."
+                version: 24,
+                message: "The v24 accelerator migration definition is incomplete."
             )
         }
 
@@ -549,8 +549,8 @@ public struct MigrationRunner: Sendable {
             guard let actualSQL = rows.first?.first ?? nil,
                   Self.normalizedSchemaSQL(actualSQL) == Self.normalizedSchemaSQL(expectedSQL) else {
                 throw StateStoreError.migrationFailed(
-                    version: 23,
-                    message: "The recorded v23 accelerator table \(table) is not the recognized pre-replay schema."
+                    version: 24,
+                    message: "The recorded v24 accelerator table \(table) is not the recognized pre-replay schema."
                 )
             }
         }
@@ -565,8 +565,8 @@ public struct MigrationRunner: Sendable {
             try connection.execute("DROP INDEX IF EXISTS \(indexName)")
         }
 
-        let legacyJournal = "accelerator_state_journal_v23_legacy"
-        let legacyCurrent = "accelerator_state_current_v23_legacy"
+        let legacyJournal = "accelerator_state_journal_v24_legacy"
+        let legacyCurrent = "accelerator_state_current_v24_legacy"
         try connection.execute(
             "ALTER TABLE accelerator_state_journal RENAME TO \(legacyJournal)"
         )
@@ -610,8 +610,8 @@ public struct MigrationRunner: Sendable {
               oldCurrentCount >= 0,
               oldCurrentCount == newCurrentCount else {
             throw StateStoreError.migrationFailed(
-                version: 23,
-                message: "The v23 accelerator replay-table upgrade did not preserve row counts."
+                version: 24,
+                message: "The v24 accelerator replay-table upgrade did not preserve row counts."
             )
         }
 
@@ -619,8 +619,8 @@ public struct MigrationRunner: Sendable {
         try connection.execute("DROP TABLE \(legacyCurrent)")
     }
 
-    static func legacyV23AcceleratorStatements() -> [String] {
-        guard let migration = migrations.first(where: { $0.version == 23 }) else {
+    static func legacyV24AcceleratorStatements() -> [String] {
+        guard let migration = migrations.first(where: { $0.version == 24 }) else {
             return []
         }
         return migration.statements.map { statement in
@@ -4387,7 +4387,7 @@ public struct MigrationRunner: Sendable {
         SchemaMigration(
             version: 24,
             description: "Dedicated accelerator authority journal and current indexes",
-            legacyChecksums: [legacyV23AcceleratorChecksum],
+            legacyChecksums: [legacyV24AcceleratorChecksum],
             implementationRevision: "phase10-accelerator-authority-v1",
             statements: [
                 """

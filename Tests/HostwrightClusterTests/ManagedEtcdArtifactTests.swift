@@ -1,4 +1,5 @@
 import CryptoKit
+import Darwin
 import Foundation
 import HostwrightCore
 import XCTest
@@ -14,7 +15,7 @@ final class ManagedEtcdArtifactTests: XCTestCase {
 
         let linux = ManagedEtcdArtifact.linuxArm64
         XCTAssertEqual(linux.archiveKind, .tarGz)
-        XCTAssertEqual(linux.sha256, "d7e25e08f694b6ed7792fc7b7a891fe2c3f3d3dccfe2f3bfdb1545b8200c75b6da")
+        XCTAssertEqual(linux.sha256, "d7e25e08f694b6ed7792fc7b7a891fe2c3f3d3dccfe2f3bfdb1547b0eb75b6da")
         XCTAssertEqual(linux.archiveFileName, "etcd-v3.7.1-linux-arm64.tar.gz")
 
         let clusterID = try ClusterID("11111111-1111-4111-8111-111111111111")
@@ -229,5 +230,325 @@ final class ManagedEtcdArtifactTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: root))
         XCTAssertFalse(FileManager.default.fileExists(atPath: layout.dataDirectory))
         XCTAssertThrowsError(try cleanup.validateCandidate(root))
+    }
+
+    func testLinuxDigestUsesOfficialReleaseChecksum() throws {
+        XCTAssertEqual(
+            ManagedEtcdArtifact.linuxArm64.sha256,
+            "d7e25e08f694b6ed7792fc7b7a891fe2c3f3d3dccfe2f3bfdb1547b0eb75b6da"
+        )
+        XCTAssertEqual(ManagedEtcdArtifact.linuxArm64.sha256.utf8.count, 64)
+    }
+
+    func testInstallerReverifiesArchiveBeforeAtomicPublish() throws {
+        let root = try makeTemporaryRoot("hostwright-etcd-install")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let layout = try makeLayout(root: root.path)
+        let archive = root.appendingPathComponent("untrusted.zip")
+        try Data("not-an-etcd-archive".utf8).write(to: archive)
+        let artifact = ManagedEtcdArtifact.darwinArm64
+        let provenance = ManagedEtcdProvenanceRecord(
+            artifact: artifact,
+            verifierVersion: "test",
+            entryPaths: [artifact.archiveRoot, artifact.executableEntryPath]
+        )
+        let forged = ManagedEtcdVerifiedArchive(
+            artifact: artifact,
+            archivePath: archive.path,
+            archiveSHA256: artifact.sha256,
+            entries: [
+                ManagedEtcdArchiveEntry(path: artifact.archiveRoot, type: .directory),
+                ManagedEtcdArchiveEntry(path: artifact.executableEntryPath, type: .regular)
+            ],
+            provenance: provenance
+        )
+
+        XCTAssertThrowsError(
+            try ManagedEtcdInstaller().install(verifiedArchive: forged, layout: layout)
+        ) { error in
+            guard case .checksumMismatch(let expected, _) = error as? ManagedEtcdError else {
+                return XCTFail("unexpected error: \(error)")
+            }
+            XCTAssertEqual(expected, artifact.sha256)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: layout.executablePath))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: layout.provenancePath))
+    }
+
+    func testInstallerRecoveryRemovesOnlyOwnedStagingDirectories() throws {
+        let root = try makeTemporaryRoot("hostwright-etcd-install-recovery")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let layout = try makeLayout(root: root.path)
+        _ = try layout.prepareDirectories()
+        let stale = URL(fileURLWithPath: layout.runtimeDirectory)
+            .appendingPathComponent("install-stage-stale", isDirectory: true)
+        try FileManager.default.createDirectory(at: stale, withIntermediateDirectories: false)
+        try Data("stale".utf8).write(to: stale.appendingPathComponent("archive"))
+        chmod(stale.path, 0o700)
+
+        let recovered = try ManagedEtcdInstaller().recoverStaging(layout: layout)
+
+        XCTAssertEqual(recovered, [stale.path])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stale.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: layout.rootDirectory))
+    }
+
+    func testInstallerCancellationLeavesNoPublishOrStagingResidue() throws {
+        let root = try makeTemporaryRoot("hostwright-etcd-install-cancel")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let layout = try makeLayout(root: root.path)
+        let artifact = ManagedEtcdArtifact.darwinArm64
+        let provenance = ManagedEtcdProvenanceRecord(
+            artifact: artifact,
+            verifierVersion: "test",
+            entryPaths: [artifact.archiveRoot, artifact.executableEntryPath]
+        )
+        let forged = ManagedEtcdVerifiedArchive(
+            artifact: artifact,
+            archivePath: root.appendingPathComponent("archive.zip").path,
+            archiveSHA256: artifact.sha256,
+            entries: [],
+            provenance: provenance
+        )
+        let cancellation = SecureSubprocessCancellation()
+        cancellation.cancel()
+
+        XCTAssertThrowsError(
+            try ManagedEtcdInstaller().install(
+                verifiedArchive: forged,
+                layout: layout,
+                cancellation: cancellation
+            )
+        ) { error in
+            XCTAssertEqual(error as? ManagedEtcdError, .cancelled)
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: layout.rootDirectory))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: layout.executablePath))
+    }
+
+    func testSnapshotAndRestoreExecutionAreAtomicAndPrivate() throws {
+        let root = try makeTemporaryRoot("hostwright-etcd-snapshot")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let layout = try makeLayout(root: root.path)
+        _ = try layout.prepareDirectories()
+        let dataFile = URL(fileURLWithPath: layout.dataDirectory).appendingPathComponent("member.db")
+        try Data("before".utf8).write(to: dataFile)
+        chmod(dataFile.path, 0o600)
+
+        let planner = ManagedEtcdSnapshotPlanner()
+        let snapshotPlan = try planner.makeSnapshotPlan(layout: layout, snapshotID: "snapshot-1")
+        let executor = ManagedEtcdSnapshotExecutor()
+        let snapshot = try executor.createSnapshot(
+            plan: snapshotPlan,
+            layout: layout,
+            processState: .stopped
+        )
+        XCTAssertEqual(snapshot.destinationDirectory, snapshotPlan.destinationDirectory)
+        XCTAssertEqual(
+            try String(
+                contentsOfFile: snapshotPlan.destinationDirectory + "/member.db",
+                encoding: .utf8
+            ),
+            "before"
+        )
+        XCTAssertEqual(try fileMode(atPath: snapshotPlan.destinationDirectory), 0o700)
+        XCTAssertEqual(try fileMode(atPath: snapshotPlan.destinationDirectory + "/member.db"), 0o600)
+
+        try Data("changed".utf8).write(to: dataFile)
+        chmod(dataFile.path, 0o600)
+        let restorePlan = try planner.makeRestorePlan(
+            layout: layout,
+            snapshotDirectory: snapshotPlan.destinationDirectory
+        )
+        let restored = try executor.restore(
+            plan: restorePlan,
+            layout: layout,
+            processState: .stopped
+        )
+        XCTAssertEqual(restored.backupDirectory, restorePlan.backupDirectory)
+        XCTAssertEqual(try String(contentsOf: dataFile, encoding: .utf8), "before")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: restorePlan.backupDirectory))
+    }
+
+    func testRestoreRefusesRunningMemberAndCancellationDoesNotCreateSnapshot() throws {
+        let root = try makeTemporaryRoot("hostwright-etcd-restore-refusal")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let layout = try makeLayout(root: root.path)
+        _ = try layout.prepareDirectories()
+        let planner = ManagedEtcdSnapshotPlanner()
+        let snapshotPlan = try planner.makeSnapshotPlan(layout: layout, snapshotID: "snapshot-2")
+        let restorePlan = try planner.makeRestorePlan(
+            layout: layout,
+            snapshotDirectory: snapshotPlan.destinationDirectory
+        )
+        let executor = ManagedEtcdSnapshotExecutor()
+
+        XCTAssertThrowsError(
+            try executor.restore(plan: restorePlan, layout: layout, processState: .running)
+        ) { error in
+            guard case .restoreRefused = error as? ManagedEtcdError else {
+                return XCTFail("unexpected error: \(error)")
+            }
+        }
+
+        let unverifiedSnapshot = URL(fileURLWithPath: layout.snapshotsDirectory)
+            .appendingPathComponent("snapshot-unverified", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: unverifiedSnapshot,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700]
+        )
+        let unverifiedRestorePlan = try planner.makeRestorePlan(
+            layout: layout,
+            snapshotDirectory: unverifiedSnapshot.path
+        )
+        XCTAssertThrowsError(
+            try executor.restore(
+                plan: unverifiedRestorePlan,
+                layout: layout,
+                processState: .stopped
+            )
+        ) { error in
+            guard case .restoreRefused = error as? ManagedEtcdError else {
+                return XCTFail("unexpected managed etcd error: \(error)")
+            }
+        }
+
+        let cancellation = SecureSubprocessCancellation()
+        cancellation.cancel()
+        XCTAssertThrowsError(
+            try executor.createSnapshot(
+                plan: snapshotPlan,
+                layout: layout,
+                processState: .stopped,
+                cancellation: cancellation
+            )
+        ) { error in
+            XCTAssertEqual(error as? ManagedEtcdError, .cancelled)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: snapshotPlan.destinationDirectory))
+    }
+
+    func testSupervisorFailedStartHealthFailureAndStopAreExplicit() async throws {
+        let root = try makeTemporaryRoot("hostwright-etcd-supervisor")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let layout = try makeLayout(root: root.path)
+        _ = try layout.prepareDirectories()
+        let configuration = try makeProcessConfiguration(layout: layout)
+        let supervisor = try ManagedEtcdMemberSupervisor(
+            configuration: configuration,
+            healthEndpoint: URL(string: "https://127.0.0.1:1/health")!
+        )
+
+        do {
+            _ = try await supervisor.start()
+            XCTFail("a missing etcd executable must not report a successful start")
+        } catch let error as ManagedEtcdError {
+            guard case .processStartFailed = error else {
+                return XCTFail("unexpected managed etcd error: \(error)")
+            }
+        }
+        let failed = await supervisor.status()
+        XCTAssertEqual(failed.state, .failed)
+        XCTAssertNil(failed.processID)
+
+        do {
+            _ = try await supervisor.checkHealth()
+            XCTFail("health must not be checked for a stopped member")
+        } catch let error as ManagedEtcdError {
+            XCTAssertEqual(error, .processNotRunning)
+        }
+        let stopped = await supervisor.stop()
+        XCTAssertEqual(stopped.state, .stopped)
+    }
+
+    func testSupervisorTracksRunningAndFailedHealthForNonEtcdFixture() async throws {
+        let root = try makeTemporaryRoot("hostwright-etcd-supervisor-health")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let layout = try makeLayout(root: root.path)
+        _ = try layout.prepareDirectories()
+        let source = try XCTUnwrap(
+            Bundle.module.url(
+                forResource: "ManagedEtcdSupervisorFixture",
+                withExtension: "swift"
+            )
+        )
+        let compiler = try SecureExecutableResolver.verify(path: "/usr/bin/swiftc")
+        let result = try SecureSubprocessRunner().run(
+            SecureSubprocessRequest(
+                executablePath: compiler.path,
+                arguments: [source.path, "-o", layout.executablePath],
+                environment: SecureSubprocessEnvironment.minimal,
+                workingDirectory: "/",
+                timeoutMilliseconds: 30_000,
+                terminationGraceMilliseconds: 1_000,
+                maximumStandardOutputBytes: 1 * 1_024 * 1_024,
+                maximumStandardErrorBytes: 1 * 1_024 * 1_024
+            )
+        )
+        XCTAssertEqual(result.exitStatus, 0, String(data: result.standardError, encoding: .utf8) ?? "")
+        XCTAssertEqual(chmod(layout.executablePath, 0o700), 0)
+
+        let configuration = try makeProcessConfiguration(layout: layout)
+        let supervisor = try ManagedEtcdMemberSupervisor(
+            configuration: configuration,
+            healthEndpoint: URL(string: "https://127.0.0.1:1/health")!
+        )
+        let running = try await supervisor.start()
+        XCTAssertEqual(running.state, .running)
+        XCTAssertNotNil(running.processID)
+
+        do {
+            _ = try await supervisor.checkHealth()
+            XCTFail("an unavailable health endpoint must not report a healthy member")
+        } catch let error as ManagedEtcdError {
+            guard case .healthCheckFailed = error else {
+                return XCTFail("unexpected managed etcd error: \(error)")
+            }
+        }
+        let unhealthy = await supervisor.status()
+        XCTAssertEqual(unhealthy.state, .unhealthy)
+        XCTAssertEqual(unhealthy.lastHealthCheckSucceeded, false)
+
+        let stopped = await supervisor.stop()
+        XCTAssertEqual(stopped.state, .stopped)
+        XCTAssertNil(stopped.processID)
+    }
+
+    private func makeLayout(root: String) throws -> ManagedEtcdLayout {
+        try ManagedEtcdLayout(
+            rootDirectory: root,
+            artifact: .darwinArm64,
+            clusterID: try ClusterID("11111111-1111-4111-8111-111111111111"),
+            nodeID: try ClusterNodeID("22222222-2222-4222-8222-222222222222")
+        )
+    }
+
+    private func makeProcessConfiguration(
+        layout: ManagedEtcdLayout
+    ) throws -> ManagedEtcdSupervisedProcessConfiguration {
+        try ManagedEtcdSupervisedProcessConfiguration(
+            layout: layout,
+            nodeID: try XCTUnwrap(layout.nodeID),
+            peerEndpoint: "https://127.0.0.1:2380",
+            clientEndpoint: "https://127.0.0.1:2379",
+            initialCluster: []
+        )
+    }
+
+    private func makeTemporaryRoot(_ name: String) throws -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(name + "-" + UUID().uuidString.lowercased(), isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        chmod(root.path, 0o700)
+        return root
+    }
+
+    private func fileMode(atPath path: String) throws -> Int {
+        var metadata = stat()
+        guard lstat(path, &metadata) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        return Int(metadata.st_mode & 0o7777)
     }
 }

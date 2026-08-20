@@ -28,6 +28,14 @@ public enum ManagedEtcdError: Error, Equatable, CustomStringConvertible, Sendabl
     case unsafePermissions(String)
     case cleanupRefused(String)
     case invalidSnapshotID(String)
+    case installationRefused(String)
+    case installationFailed(String)
+    case processAlreadyRunning
+    case processNotRunning
+    case processStartFailed(String)
+    case healthCheckFailed(String)
+    case snapshotFailed(String)
+    case restoreRefused(String)
 
     public var description: String {
         switch self {
@@ -45,6 +53,14 @@ public enum ManagedEtcdError: Error, Equatable, CustomStringConvertible, Sendabl
         case .unsafePermissions: "Managed etcd path permissions are unsafe."
         case .cleanupRefused: "Managed etcd cleanup was refused."
         case .invalidSnapshotID: "Managed etcd snapshot ID is invalid."
+        case .installationRefused: "Managed etcd installation was refused."
+        case .installationFailed: "Managed etcd installation failed."
+        case .processAlreadyRunning: "Managed etcd process is already running."
+        case .processNotRunning: "Managed etcd process is not running."
+        case .processStartFailed: "Managed etcd process failed to start."
+        case .healthCheckFailed: "Managed etcd health check failed."
+        case .snapshotFailed: "Managed etcd snapshot failed."
+        case .restoreRefused: "Managed etcd restore was refused."
         }
     }
 }
@@ -72,7 +88,7 @@ public struct ManagedEtcdArtifact: Codable, Equatable, Hashable, Sendable {
         archiveKind: .tarGz,
         archiveFileName: "etcd-v3.7.1-linux-arm64.tar.gz",
         downloadURL: "https://github.com/etcd-io/etcd/releases/download/v3.7.1/etcd-v3.7.1-linux-arm64.tar.gz",
-        sha256: "d7e25e08f694b6ed7792fc7b7a891fe2c3f3d3dccfe2f3bfdb1545b8200c75b6da"
+        sha256: "d7e25e08f694b6ed7792fc7b7a891fe2c3f3d3dccfe2f3bfdb1547b0eb75b6da"
     )
 
     public init(
@@ -142,7 +158,7 @@ public struct ManagedEtcdArtifact: Codable, Equatable, Hashable, Sendable {
             expectedFileName = "etcd-v3.7.1-linux-arm64.tar.gz"
             expectedKind = .tarGz
             expectedURL = "https://github.com/etcd-io/etcd/releases/download/v3.7.1/etcd-v3.7.1-linux-arm64.tar.gz"
-            expectedDigest = "d7e25e08f694b6ed7792fc7b7a891fe2c3f3d3dccfe2f3bfdb1545b8200c75b6da"
+            expectedDigest = "d7e25e08f694b6ed7792fc7b7a891fe2c3f3d3dccfe2f3bfdb1547b0eb75b6da"
         }
         guard version == "v3.7.1",
               archiveKind == expectedKind,
@@ -585,7 +601,8 @@ public struct ManagedEtcdSupervisedProcessConfiguration: Codable, Equatable, Sen
         initialClusterState: ManagedEtcdInitialClusterState = .existing,
         terminationGraceMilliseconds: Int = 2_000
     ) throws {
-        guard (10...5_000).contains(terminationGraceMilliseconds),
+        guard layout.nodeID == nodeID,
+              (10...5_000).contains(terminationGraceMilliseconds),
               ManagedEtcdPath.isSafeAbsolutePath(layout.executablePath),
               ManagedEtcdPath.isSafeAbsolutePath(layout.runtimeDirectory) else {
             throw ManagedEtcdError.invalidLayout("supervised process paths or grace period are invalid")
@@ -634,9 +651,59 @@ public struct ManagedEtcdSupervisedProcessConfiguration: Codable, Equatable, Sen
               ManagedEtcdPath.isSafeAbsolutePath(workingDirectory),
               (10...5_000).contains(terminationGraceMilliseconds),
               environment == SecureSubprocessEnvironment.minimal,
-              arguments.allSatisfy({ !$0.contains("\0") }) else {
+              arguments.count == 16,
+              arguments[0] == "--name",
+              (try? ClusterNodeID(arguments[1])) != nil,
+              arguments[2] == "--data-dir",
+              ManagedEtcdPath.isSafeAbsolutePath(arguments[3]),
+              arguments[4] == "--listen-peer-urls",
+              arguments[6] == "--initial-advertise-peer-urls",
+              arguments[5] == arguments[7],
+              Self.isCredentialFreeEndpoint(arguments[5]),
+              arguments[8] == "--listen-client-urls",
+              arguments[10] == "--advertise-client-urls",
+              arguments[9] == arguments[11],
+              Self.isCredentialFreeEndpoint(arguments[9]),
+              arguments[12] == "--initial-cluster",
+              Self.isInitialClusterValue(arguments[13]),
+              arguments[14] == "--initial-cluster-state",
+              arguments[15] == ManagedEtcdInitialClusterState.new.rawValue ||
+                arguments[15] == ManagedEtcdInitialClusterState.existing.rawValue else {
             throw ManagedEtcdError.invalidLayout("supervised process configuration is invalid")
         }
+    }
+
+    private static func isCredentialFreeEndpoint(_ value: String) -> Bool {
+        guard let components = URLComponents(string: value),
+              components.scheme == "https",
+              let host = components.host,
+              !host.isEmpty,
+              components.user == nil,
+              components.password == nil,
+              components.query == nil,
+              components.fragment == nil,
+              components.path.isEmpty || components.path == "/",
+              let port = components.port,
+              (1...65_535).contains(port) else {
+            return false
+        }
+        return true
+    }
+
+    private static func isInitialClusterValue(_ value: String) -> Bool {
+        let entries = value.split(separator: ",", omittingEmptySubsequences: false)
+        guard !entries.isEmpty else { return false }
+        var nodeIDs = Set<ClusterNodeID>()
+        for entry in entries {
+            let parts = entry.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+            guard parts.count == 2,
+                  let nodeID = try? ClusterNodeID(String(parts[0])),
+                  isCredentialFreeEndpoint(String(parts[1])),
+                  nodeIDs.insert(nodeID).inserted else {
+                return false
+            }
+        }
+        return true
     }
 
     private enum CodingKeys: String, CodingKey {

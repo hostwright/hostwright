@@ -891,7 +891,10 @@ let package = Package(
         ),
         .testTarget(
             name: "HostwrightClusterTests",
-            dependencies: ["HostwrightCluster"]
+            dependencies: ["HostwrightCluster"],
+            resources: [
+                .process("Fixtures")
+            ]
         )
     ]
 )

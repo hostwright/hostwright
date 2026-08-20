@@ -36,21 +36,20 @@ old voter remains present until the replacement is a voter.
 
 ## Managed etcd contract
 
-The descriptor is pinned to etcd `v3.7.1` and the exact delegated source
+The descriptor is pinned to etcd `v3.7.1` and the exact official release
 metadata:
 
 | Platform | Archive | SHA-256 pin |
 | --- | --- | --- |
 | Darwin arm64 | `etcd-v3.7.1-darwin-arm64.zip` | `a3e839d9128e170c299b1592bed92d8327f258eb94923aea24a0ccf923cf27e9` |
-| Linux arm64 | `etcd-v3.7.1-linux-arm64.tar.gz` | `d7e25e08f694b6ed7792fc7b7a891fe2c3f3d3dccfe2f3bfdb1545b8200c75b6da` |
+| Linux arm64 | `etcd-v3.7.1-linux-arm64.tar.gz` | `d7e25e08f694b6ed7792fc7b7a891fe2c3f3d3dccfe2f3bfdb1547b0eb75b6da` |
 
-The Linux delegated value is 66 hexadecimal characters, so it cannot be a
-SHA-256 digest. The published etcd release
+The delegated Linux value was 66 hexadecimal characters and therefore could
+not be a SHA-256 digest. The published etcd release
 [`SHA256SUMS`](https://github.com/etcd-io/etcd/releases/download/v3.7.1/SHA256SUMS)
-records a different 64-character Linux arm64 value. This slice preserves the delegated
-literal for contract traceability and therefore does not claim Linux archive
-acceptance until the coordinator resolves the pin. The verifier never treats
-an unmatched digest as accepted.
+records the 64-character value above. The catalog now accepts only that
+authoritative digest; an archive matching the malformed delegated value is
+rejected.
 
 For a valid descriptor, archive acceptance is bounded and ordered:
 
@@ -82,10 +81,30 @@ stopped. Cleanup accepts only the exact install, data, config, snapshot,
 metadata, and runtime directories owned by this layout; the root and shared
 parents are never cleanup targets.
 
+The runtime slice adds bounded execution around those contracts. Installation
+re-copies and re-verifies the accepted archive into an owned `run` staging
+directory, extracts with an exact executable and argument vector, normalizes
+the extracted tree to private modes, and atomically publishes only into an
+empty version directory. Stale `install-stage-*` directories are recovered
+only when they are private and owned by the current user; an existing
+installation or provenance record is never overwritten.
+
+Member supervision preflights the installed executable and working directory,
+launches with the canonical arguments and minimal environment, discards child
+stdio, and exposes explicit `starting`, `running`, `healthy`, `unhealthy`,
+`stopping`, `failed`, and `stopped` transitions. Health is accepted only for a
+credential-free HTTPS endpoint returning HTTP 200 with the exact etcd health
+payload. Snapshot creation and restore copy only private regular-file trees,
+record canonical provenance, require a stopped member, publish through owned
+staging paths, and roll back partial publication on cancellation or failure.
+The focused tests use a non-etcd pause fixture only to exercise process
+supervision failure transitions; they do not qualify a real etcd member.
+
 ## Deliberate boundary
 
 This target does not implement scheduler placement, authoritative replicated
 state, fencing, node agents, remote operations, shared schema migrations, or
 capability promotion. Live etcd qualification and VM fault testing remain
 blocked until the Phase 08 runtime coordinator explicitly releases the
-reserved runtime and the artifact pin discrepancy is resolved.
+reserved runtime. No etcd archive was downloaded or launched while the
+runtime remains reserved.

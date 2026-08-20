@@ -21,6 +21,7 @@ public enum ClusterSessionError: Error, Equatable, CustomStringConvertible, Send
     case credentialProofRejected
     case sessionNotFound
     case sessionBindingMismatch
+    case handoffBindingMismatch
     case sessionNotYetValid
     case sessionExpired
     case sessionClosed
@@ -53,6 +54,7 @@ public enum ClusterSessionError: Error, Equatable, CustomStringConvertible, Send
         case .credentialProofRejected: "Cluster session credential proof was rejected."
         case .sessionNotFound: "Cluster session is unknown to this authority."
         case .sessionBindingMismatch: "Cluster session binding does not match the authority record."
+        case .handoffBindingMismatch: "Cluster session handoff does not match the authority record."
         case .sessionNotYetValid: "Cluster session is not yet valid."
         case .sessionExpired: "Cluster session has expired."
         case .sessionClosed: "Cluster session is closed."
@@ -71,6 +73,7 @@ public enum ClusterSessionError: Error, Equatable, CustomStringConvertible, Send
 public enum ClusterSessionContract {
     public static let apiVersion = 1
     public static let protocolLabel = "hostwright-cluster-session-v1"
+    public static let handoffProtocolLabel = "hostwright-cluster-session-handoff-v1"
     public static let nonceByteCount = 32
     public static let maximumIdentifierBytes = 128
     public static let maximumCredentialCount = 256
@@ -309,6 +312,11 @@ public enum ClusterSessionWireContract {
         "membershipEpoch", "subjectID", "credentialID", "fencingToken",
         "issuedAtMilliseconds", "expiresAtMilliseconds",
     ]
+    public static let handoffAllowedKeys: Set<String> = [
+        "apiVersion", "protocolLabel", "sessionID", "clusterID", "nodeID",
+        "membershipEpoch", "subjectID", "fencingToken", "issuedAtMilliseconds",
+        "expiresAtMilliseconds",
+    ]
 
     public static func decodeChallenge(_ data: Data) throws -> ClusterSessionChallenge {
         let value = try Phase09StrictDecoder.decode(
@@ -338,6 +346,17 @@ public enum ClusterSessionWireContract {
             from: data,
             allowedKeys: sessionAllowedKeys,
             requiredKeys: sessionAllowedKeys
+        )
+        try value.validate()
+        return value
+    }
+
+    public static func decodeHandoff(_ data: Data) throws -> ClusterSessionHandoff {
+        let value = try Phase09StrictDecoder.decode(
+            ClusterSessionHandoff.self,
+            from: data,
+            allowedKeys: handoffAllowedKeys,
+            requiredKeys: handoffAllowedKeys
         )
         try value.validate()
         return value
@@ -447,6 +466,112 @@ public struct ClusterAuthenticatedSession: Codable, Equatable, Sendable {
     }
 }
 
+/// The credential-free session binding a node agent may hand to a local consumer.
+/// It is not independently authoritative: consumers must reauthorize it through
+/// `ClusterSessionHandoffAuthorizing` immediately before protected work.
+public struct ClusterSessionHandoff: Codable, Equatable, Sendable {
+    public let apiVersion: Int
+    public let protocolLabel: String
+    public let sessionID: String
+    public let clusterID: ClusterID
+    public let nodeID: ClusterNodeID
+    public let membershipEpoch: ClusterMembershipEpoch
+    public let subjectID: String
+    public let fencingToken: UInt64
+    public let issuedAtMilliseconds: UInt64
+    public let expiresAtMilliseconds: UInt64
+
+    public init(session: ClusterAuthenticatedSession) throws {
+        try session.validate()
+        try self.init(
+            sessionID: session.sessionID,
+            clusterID: session.clusterID,
+            nodeID: session.nodeID,
+            membershipEpoch: session.membershipEpoch,
+            subjectID: session.subjectID,
+            fencingToken: session.fencingToken,
+            issuedAtMilliseconds: session.issuedAtMilliseconds,
+            expiresAtMilliseconds: session.expiresAtMilliseconds
+        )
+    }
+
+    public init(
+        sessionID: String,
+        clusterID: ClusterID,
+        nodeID: ClusterNodeID,
+        membershipEpoch: ClusterMembershipEpoch,
+        subjectID: String,
+        fencingToken: UInt64,
+        issuedAtMilliseconds: UInt64,
+        expiresAtMilliseconds: UInt64
+    ) throws {
+        self.apiVersion = ClusterSessionContract.apiVersion
+        self.protocolLabel = ClusterSessionContract.handoffProtocolLabel
+        self.sessionID = sessionID
+        self.clusterID = clusterID
+        self.nodeID = nodeID
+        self.membershipEpoch = membershipEpoch
+        self.subjectID = subjectID
+        self.fencingToken = fencingToken
+        self.issuedAtMilliseconds = issuedAtMilliseconds
+        self.expiresAtMilliseconds = expiresAtMilliseconds
+        try validate()
+    }
+
+    public func validate() throws {
+        guard apiVersion == ClusterSessionContract.apiVersion,
+              protocolLabel == ClusterSessionContract.handoffProtocolLabel else {
+            throw ClusterSessionError.invalidChallenge("handoffProtocol")
+        }
+        try ClusterSessionValidation.uuid(sessionID, field: "sessionID")
+        try ClusterSessionValidation.identifier(subjectID, field: "subjectID")
+        guard fencingToken > 0,
+              issuedAtMilliseconds < expiresAtMilliseconds,
+              issuedAtMilliseconds <= UInt64(Int64.max),
+              expiresAtMilliseconds <= UInt64(Int64.max) else {
+            throw ClusterSessionError.invalidChallenge("handoffBinding")
+        }
+    }
+
+    public func canonicalData() throws -> Data {
+        try validate()
+        return try ControlPlaneCanonicalJSON.encode(self)
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let apiVersion = try container.decode(Int.self, forKey: .apiVersion)
+        let protocolLabel = try container.decode(String.self, forKey: .protocolLabel)
+        guard apiVersion == ClusterSessionContract.apiVersion,
+              protocolLabel == ClusterSessionContract.handoffProtocolLabel else {
+            throw ClusterSessionError.invalidChallenge("handoffProtocol")
+        }
+        try self.init(
+            sessionID: container.decode(String.self, forKey: .sessionID),
+            clusterID: container.decode(ClusterID.self, forKey: .clusterID),
+            nodeID: container.decode(ClusterNodeID.self, forKey: .nodeID),
+            membershipEpoch: container.decode(ClusterMembershipEpoch.self, forKey: .membershipEpoch),
+            subjectID: container.decode(String.self, forKey: .subjectID),
+            fencingToken: container.decode(UInt64.self, forKey: .fencingToken),
+            issuedAtMilliseconds: container.decode(UInt64.self, forKey: .issuedAtMilliseconds),
+            expiresAtMilliseconds: container.decode(UInt64.self, forKey: .expiresAtMilliseconds)
+        )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case apiVersion
+        case protocolLabel
+        case sessionID
+        case clusterID
+        case nodeID
+        case membershipEpoch
+        case subjectID
+        case fencingToken
+        case issuedAtMilliseconds
+        case expiresAtMilliseconds
+    }
+}
+
 public struct ClusterSessionTransitionResult: Codable, Equatable, Sendable {
     public let sessionID: String
     public let state: ClusterSessionState
@@ -474,7 +599,16 @@ public protocol ClusterSessionAuthorizing: Sendable {
     ) throws
 }
 
-public final class ClusterSessionAuthority: @unchecked Sendable, ClusterSessionAuthorizing {
+/// Authority seam for consumers that receive only a credential-free handoff.
+public protocol ClusterSessionHandoffAuthorizing: Sendable {
+    func authorize(
+        _ handoff: ClusterSessionHandoff,
+        subjectID: String,
+        nowMilliseconds: UInt64
+    ) throws
+}
+
+public final class ClusterSessionAuthority: @unchecked Sendable, ClusterSessionAuthorizing, ClusterSessionHandoffAuthorizing {
     public let clusterID: ClusterID
     public let nodeID: ClusterNodeID
     public let sessionLifetimeMilliseconds: UInt64
@@ -668,6 +802,62 @@ public final class ClusterSessionAuthority: @unchecked Sendable, ClusterSessionA
         try session.validate()
         lock.lock()
         defer { lock.unlock() }
+        try validateLocked(session, nowMilliseconds: nowMilliseconds)
+    }
+
+    public func authorize(
+        _ session: ClusterAuthenticatedSession,
+        subjectID: String,
+        nowMilliseconds: UInt64
+    ) throws {
+        try ClusterSessionValidation.identifier(subjectID, field: "subjectID")
+        try session.validate()
+        lock.lock()
+        defer { lock.unlock() }
+        try validateLocked(session, nowMilliseconds: nowMilliseconds)
+        guard session.subjectID == subjectID else {
+            throw ClusterSessionError.sessionIdentityMismatch
+        }
+    }
+
+    /// Creates a credential-free bootstrap record only after the source session
+    /// passes the same active, epoch, revocation, expiry, and fence checks used
+    /// for protected operations.
+    public func bootstrapConsumer(
+        from session: ClusterAuthenticatedSession,
+        subjectID: String,
+        nowMilliseconds: UInt64
+    ) throws -> ClusterSessionHandoff {
+        try authorize(session, subjectID: subjectID, nowMilliseconds: nowMilliseconds)
+        return try ClusterSessionHandoff(session: session)
+    }
+
+    public func authorize(
+        _ handoff: ClusterSessionHandoff,
+        subjectID: String,
+        nowMilliseconds: UInt64
+    ) throws {
+        try ClusterSessionValidation.identifier(subjectID, field: "subjectID")
+        try handoff.validate()
+        lock.lock()
+        defer { lock.unlock() }
+        guard let record = sessions[handoff.sessionID] else {
+            throw ClusterSessionError.sessionNotFound
+        }
+        let expected = try ClusterSessionHandoff(session: record.session)
+        guard expected == handoff else {
+            throw ClusterSessionError.handoffBindingMismatch
+        }
+        try validateLocked(record.session, nowMilliseconds: nowMilliseconds)
+        guard record.session.subjectID == subjectID else {
+            throw ClusterSessionError.sessionIdentityMismatch
+        }
+    }
+
+    private func validateLocked(
+        _ session: ClusterAuthenticatedSession,
+        nowMilliseconds: UInt64
+    ) throws {
         guard let record = sessions[session.sessionID] else {
             throw ClusterSessionError.sessionNotFound
         }
@@ -705,18 +895,6 @@ public final class ClusterSessionAuthority: @unchecked Sendable, ClusterSessionA
         guard nowMilliseconds < session.expiresAtMilliseconds else {
             sessions[session.sessionID]?.state = .expired
             throw ClusterSessionError.sessionExpired
-        }
-    }
-
-    public func authorize(
-        _ session: ClusterAuthenticatedSession,
-        subjectID: String,
-        nowMilliseconds: UInt64
-    ) throws {
-        try ClusterSessionValidation.identifier(subjectID, field: "subjectID")
-        try validate(session, nowMilliseconds: nowMilliseconds)
-        guard session.subjectID == subjectID else {
-            throw ClusterSessionError.sessionIdentityMismatch
         }
     }
 

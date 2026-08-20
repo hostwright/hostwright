@@ -1,8 +1,9 @@
 # Phase 11 Cluster Contracts
 
-Status: dependency-safe contract slice for P11-C01 (#220) and the contract
-portion of P11-C03 (#222). This document does not claim live etcd, VM, Apple
-Container, multi-host, or release qualification.
+Status: dependency-safe contract slices for P11-C01 (#220), the contract
+portion of P11-C03 (#222), authenticated node agents P11-C05 (#224), and
+cluster fencing P11-C07 (#226). This document does not claim live etcd, VM,
+Apple Container, multi-host, or release qualification.
 
 The implementation is isolated in the `HostwrightCluster` target:
 
@@ -16,7 +17,8 @@ The implementation is isolated in the `HostwrightCluster` target:
 - [`ClusterSession.swift`](../../Sources/HostwrightCluster/ClusterSession.swift)
   owns the authenticated node-session challenge/proof contract, session
   binding, lifecycle, revocation, membership-epoch fencing, and strict wire
-  decoding helpers that Phase 12 can adapt to its guest-agent boundary.
+  decoding helpers, including the credential-free consumer handoff that Phase
+  12 can adapt to its guest-agent boundary.
 
 ## Membership contract
 
@@ -67,10 +69,22 @@ The lifecycle is explicit and deterministic: `active` sessions validate only
 when their complete binding and current fencing token match; `close` and
 `fence` are idempotent for already terminal records; expiry, closure, fencing,
 stale epochs, replayed challenges, identity mismatch, and proof failures each
-have stable typed errors. `authorize(_:subjectID:nowMilliseconds:)` is the
-intended Phase 12 adapter seam: the guest-agent authentication boundary can
-retain the authenticated binding and validate it before dispatching each
-request, without placing credentials in guest-agent request payloads.
+have stable typed errors.
+
+`ClusterSessionAuthority.bootstrapConsumer(from:subjectID:nowMilliseconds:)`
+creates a canonical `hostwright-cluster-session-handoff-v1`
+`ClusterSessionHandoff` only after that same source session authorizes. The
+handoff contains only its session ID, cluster/node identity, membership epoch,
+subject, fencing token, and issue/expiry timestamps. It deliberately omits the
+credential ID, challenge ID, nonce, public-key material, and proof/signature.
+`ClusterSessionHandoffAuthorizing.authorize(_:subjectID:nowMilliseconds:)`
+is the exact Phase 12 consumption seam: the guest-agent authentication boundary
+retains only the handoff and calls this authority method immediately before
+dispatch. The authority compares the complete handoff to its session record and
+then rechecks active state, expiry, credential revocation, membership epoch,
+and the monotonic fence, so altered, stale, expired, revoked, or malformed
+handoffs fail closed. The handoff is neither a credential nor a transport
+protocol and carries no persistence semantics.
 
 This source-only authority is the admission and fencing contract, not a claim
 of durable replicated session storage, a CA/mTLS transport, or live node-agent

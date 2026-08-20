@@ -57,6 +57,187 @@ final class ClusterSessionTests: XCTestCase {
         )
     }
 
+    func testConsumerHandoffIsStrictCredentialFreeAndReauthorized() throws {
+        let fixture = try makeFixture()
+        let challenge = try fixture.authority.issueChallenge(
+            credentialID: fixture.credential.credentialID,
+            nowMilliseconds: 1_000
+        )
+        let session = try authenticate(fixture, challenge: challenge, nowMilliseconds: 1_001)
+        let handoff = try fixture.authority.bootstrapConsumer(
+            from: session,
+            subjectID: fixture.credential.subjectID,
+            nowMilliseconds: 1_002
+        )
+
+        let encoded = try handoff.canonicalData()
+        XCTAssertEqual(handoff, try JSONDecoder().decode(ClusterSessionHandoff.self, from: encoded))
+        XCTAssertEqual(handoff, try ClusterSessionWireContract.decodeHandoff(encoded))
+        XCTAssertEqual(
+            Set(try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any]).keys),
+            ClusterSessionWireContract.handoffAllowedKeys
+        )
+        XCTAssertNoThrow(
+            try fixture.authority.authorize(
+                handoff,
+                subjectID: fixture.credential.subjectID,
+                nowMilliseconds: 1_003
+            )
+        )
+
+        var unknownField = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        unknownField["credentialID"] = fixture.credential.credentialID
+        XCTAssertThrowsError(
+            try ClusterSessionWireContract.decodeHandoff(
+                JSONSerialization.data(withJSONObject: unknownField)
+            )
+        )
+    }
+
+    func testConsumerHandoffFailsClosedForExpiryRevocationEpochAndFencing() throws {
+        let expiryFixture = try makeFixture(sessionLifetimeMilliseconds: 10)
+        let expiryChallenge = try expiryFixture.authority.issueChallenge(
+            credentialID: expiryFixture.credential.credentialID,
+            nowMilliseconds: 100
+        )
+        let expirySession = try authenticate(expiryFixture, challenge: expiryChallenge, nowMilliseconds: 101)
+        let expiredHandoff = try expiryFixture.authority.bootstrapConsumer(
+            from: expirySession,
+            subjectID: expiryFixture.credential.subjectID,
+            nowMilliseconds: 102
+        )
+        XCTAssertThrowsError(
+            try expiryFixture.authority.authorize(
+                expiredHandoff,
+                subjectID: expiryFixture.credential.subjectID,
+                nowMilliseconds: 111
+            )
+        ) { error in
+            XCTAssertEqual(error as? ClusterSessionError, .sessionExpired)
+        }
+
+        let revocationFixture = try makeFixture()
+        let revocationChallenge = try revocationFixture.authority.issueChallenge(
+            credentialID: revocationFixture.credential.credentialID,
+            nowMilliseconds: 200
+        )
+        let revocationSession = try authenticate(
+            revocationFixture,
+            challenge: revocationChallenge,
+            nowMilliseconds: 201
+        )
+        let revokedHandoff = try revocationFixture.authority.bootstrapConsumer(
+            from: revocationSession,
+            subjectID: revocationFixture.credential.subjectID,
+            nowMilliseconds: 202
+        )
+        try revocationFixture.authority.revokeCredential(revocationFixture.credential.credentialID)
+        XCTAssertThrowsError(
+            try revocationFixture.authority.authorize(
+                revokedHandoff,
+                subjectID: revocationFixture.credential.subjectID,
+                nowMilliseconds: 203
+            )
+        ) { error in
+            XCTAssertEqual(error as? ClusterSessionError, .sessionFenced)
+        }
+
+        let epochFixture = try makeFixture()
+        let epochChallenge = try epochFixture.authority.issueChallenge(
+            credentialID: epochFixture.credential.credentialID,
+            nowMilliseconds: 300
+        )
+        let epochSession = try authenticate(epochFixture, challenge: epochChallenge, nowMilliseconds: 301)
+        let staleEpochHandoff = try epochFixture.authority.bootstrapConsumer(
+            from: epochSession,
+            subjectID: epochFixture.credential.subjectID,
+            nowMilliseconds: 302
+        )
+        try epochFixture.authority.advanceMembershipEpoch(to: ClusterMembershipEpoch(2))
+        XCTAssertThrowsError(
+            try epochFixture.authority.authorize(
+                staleEpochHandoff,
+                subjectID: epochFixture.credential.subjectID,
+                nowMilliseconds: 303
+            )
+        ) { error in
+            XCTAssertEqual(error as? ClusterSessionError, .sessionFenced)
+        }
+
+        let fenceFixture = try makeFixture()
+        let firstChallenge = try fenceFixture.authority.issueChallenge(
+            credentialID: fenceFixture.credential.credentialID,
+            nowMilliseconds: 400
+        )
+        let firstSession = try authenticate(fenceFixture, challenge: firstChallenge, nowMilliseconds: 401)
+        let staleFenceHandoff = try fenceFixture.authority.bootstrapConsumer(
+            from: firstSession,
+            subjectID: fenceFixture.credential.subjectID,
+            nowMilliseconds: 402
+        )
+        let secondChallenge = try fenceFixture.authority.issueChallenge(
+            credentialID: fenceFixture.credential.credentialID,
+            nowMilliseconds: 403
+        )
+        _ = try authenticate(fenceFixture, challenge: secondChallenge, nowMilliseconds: 404)
+        XCTAssertThrowsError(
+            try fenceFixture.authority.authorize(
+                staleFenceHandoff,
+                subjectID: fenceFixture.credential.subjectID,
+                nowMilliseconds: 405
+            )
+        ) { error in
+            XCTAssertEqual(error as? ClusterSessionError, .sessionFenced)
+        }
+    }
+
+    func testConsumerHandoffRejectsMalformedAndAlteredBindings() throws {
+        let fixture = try makeFixture()
+        let challenge = try fixture.authority.issueChallenge(
+            credentialID: fixture.credential.credentialID,
+            nowMilliseconds: 1_000
+        )
+        let session = try authenticate(fixture, challenge: challenge, nowMilliseconds: 1_001)
+        let handoff = try fixture.authority.bootstrapConsumer(
+            from: session,
+            subjectID: fixture.credential.subjectID,
+            nowMilliseconds: 1_002
+        )
+        let altered = try ClusterSessionHandoff(
+            sessionID: handoff.sessionID,
+            clusterID: handoff.clusterID,
+            nodeID: handoff.nodeID,
+            membershipEpoch: handoff.membershipEpoch,
+            subjectID: handoff.subjectID,
+            fencingToken: handoff.fencingToken + 1,
+            issuedAtMilliseconds: handoff.issuedAtMilliseconds,
+            expiresAtMilliseconds: handoff.expiresAtMilliseconds
+        )
+        XCTAssertThrowsError(
+            try fixture.authority.authorize(
+                altered,
+                subjectID: fixture.credential.subjectID,
+                nowMilliseconds: 1_003
+            )
+        ) { error in
+            XCTAssertEqual(error as? ClusterSessionError, .handoffBindingMismatch)
+        }
+
+        var malformed = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: handoff.canonicalData()) as? [String: Any]
+        )
+        malformed["sessionID"] = "not-a-uuid"
+        XCTAssertThrowsError(
+            try ClusterSessionWireContract.decodeHandoff(
+                JSONSerialization.data(withJSONObject: malformed)
+            )
+        ) { error in
+            XCTAssertEqual(error as? ClusterSessionError, .invalidIdentifier("sessionID"))
+        }
+    }
+
     func testInvalidProofIsConsumedAndReplayFailsClosed() throws {
         let fixture = try makeFixture()
         let challenge = try fixture.authority.issueChallenge(

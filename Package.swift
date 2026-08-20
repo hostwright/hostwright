@@ -138,6 +138,14 @@ let package = Package(
         .executable(
             name: "hostwright-pod-sandbox-guest",
             targets: ["HostwrightPodSandboxGuest"]
+        ),
+        .library(
+            name: "HostwrightDesktopModel",
+            targets: ["HostwrightDesktopModel"]
+        ),
+        .executable(
+            name: "hostwright-desktop",
+            targets: ["HostwrightDesktopApp"]
         )
     ],
     dependencies: [
@@ -159,6 +167,23 @@ let package = Package(
         )
     ],
     targets: [
+        .target(
+            name: "HostwrightDesktopModel",
+            dependencies: [
+                "HostwrightCommandTransport",
+                "HostwrightControlPlane",
+                "HostwrightControlTransport",
+                "HostwrightCore",
+                "HostwrightDaemonCore",
+                "HostwrightRuntime"
+            ],
+            path: "Sources/HostwrightDesktopModel"
+        ),
+        .executableTarget(
+            name: "HostwrightDesktopApp",
+            dependencies: ["HostwrightDesktopModel"],
+            path: "Sources/HostwrightDesktopApp"
+        ),
         .target(
             name: "HostwrightCLI",
             dependencies: [
@@ -955,6 +980,16 @@ let package = Package(
                 "HostwrightCluster",
                 "HostwrightPodSandbox"
             ]
+        ),
+        .testTarget(
+            name: "HostwrightDesktopModelTests",
+            dependencies: ["HostwrightControlTransport", "HostwrightDesktopModel"],
+            path: "Tests/HostwrightDesktopModelTests"
+        ),
+        .testTarget(
+            name: "HostwrightDesktopUITests",
+            dependencies: ["HostwrightDesktopModel"],
+            path: "Tests/HostwrightDesktopUITests"
         )
     ]
 )

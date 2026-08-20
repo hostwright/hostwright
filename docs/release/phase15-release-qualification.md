@@ -16,7 +16,7 @@ The committed compatibility truth is intentionally narrow:
 | Containerization framework | `0.35.0` |
 | Other clients and platforms | no supported claims in this slice |
 
-The three committed cells require live-runtime, migration/upgrade, security-assessment, and resilience/chaos evidence. The executable can detect facts and record a blocked result, but it never starts Apple Container, a Hostwright daemon, Docker Desktop, a VM, a signing toolchain, or a public-release action. Phase 08 retains live runtime and evidence authority until its released checkpoint.
+The three committed cells require live-runtime, migration/upgrade, security-assessment, and resilience/chaos evidence. The detector verifies that the source contains the released Phase 08 main checkpoint `00f95eaabd105f17f61727d2a9899db919ad3d9f`; this is an ancestry fact, not runtime evidence. The executable still never starts Apple Container, a Hostwright daemon, Docker Desktop, a VM, a signing toolchain, or a public-release action without a future explicit provider and evidence handoff.
 
 The Swift contracts in `Sources/HostwrightReleaseQualification` are normative. [`schemas/hostwright-release-qualification.schema.json`](../../schemas/hostwright-release-qualification.schema.json) is the machine-readable companion schema; unknown fields, future schema versions, malformed values, unsafe paths, and non-canonical JSON fail closed.
 
@@ -49,6 +49,7 @@ Every evidence record binds:
 
 - the exact source commit and dirty-state digest;
 - detected host, framework, and tool facts;
+- exactly one required evidence class; a single report cannot satisfy every class in a matrix claim;
 - explicit executable, argument, working-directory, timing, exit, truncation, and raw-output hashes for every command;
 - the claim identity, execution mode, authority, simulation class, replay key, blockers, failures, and owned artifact paths;
 - bounded timestamps and duration.
@@ -66,7 +67,7 @@ The default registry is plan-visible and fail-closed:
 | Qualification/evidence JSON boundary | Strict canonical decode with accept/reject seeded corpus identities. | Executable locally. |
 | Dependency lock integrity | Checks exact direct pins, resolved origin hash, unique pins, versions, revisions, and bounds. | Executable locally; it is not provenance or license evidence. |
 | Secret scan | Bounded high-confidence pattern scan with no secret contents in the report. | Executable locally; it reports findings as failures. The base test tree contains intentionally secret-shaped AWS/GitHub fixture strings, so a clean scan result is not assumed. |
-| Phase 08 protocol fuzz | Plan only. | Blocked by the Phase 08 live-runtime boundary and absent provider. |
+| Phase 08 protocol fuzz | Plan only. | Phase 08 authority is released; the lane remains blocked by the absent bounded fuzzing provider and corpus. |
 | ASan/TSan | Plan only. | Blocked; no sanitizer provider is wired. |
 | Semgrep/SAST | Plan only unless a safe provider is explicitly supplied. | Blocked when unavailable; tool presence alone cannot pass the lane. |
 | License metadata | Plan only. | Blocked; no authoritative metadata provider is wired. |

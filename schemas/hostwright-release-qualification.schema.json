@@ -62,6 +62,7 @@
             "missingTool",
             "missingCorpus",
             "corpusMismatch",
+            "phase08ReleaseUnavailable",
             "outputLimitExceeded",
             "unsafePath",
             "missingExplicitAuthority",
@@ -100,6 +101,23 @@
         "commit": { "$ref": "#/$defs/commit" },
         "dirty": { "type": "boolean" },
         "dirtyStateSHA256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "phase08Release": {
+      "type": "object",
+      "required": ["availability", "releaseCommit", "sourceContainsRelease"],
+      "additionalProperties": false,
+      "properties": {
+        "availability": { "$ref": "#/$defs/availability" },
+        "releaseCommit": {
+          "anyOf": [
+            { "$ref": "#/$defs/commit" },
+            { "type": "null" }
+          ]
+        },
+        "sourceContainsRelease": {
+          "type": ["boolean", "null"]
+        }
       }
     },
     "host": {
@@ -210,6 +228,12 @@
       "properties": {
         "schemaVersion": { "$ref": "#/$defs/schemaVersion" },
         "source": { "$ref": "#/$defs/source" },
+        "phase08Release": {
+          "anyOf": [
+            { "$ref": "#/$defs/phase08Release" },
+            { "type": "null" }
+          ]
+        },
         "host": { "$ref": "#/$defs/host" },
         "tools": {
           "type": "array",
@@ -326,12 +350,28 @@
         "unavailable"
       ]
     },
+    "evidenceClass": {
+      "enum": [
+        "unit-contract",
+        "local-integration",
+        "live-runtime",
+        "hardware-benchmark",
+        "distribution-artifact",
+        "migration-upgrade",
+        "security-assessment",
+        "resilience-chaos",
+        "multi-host",
+        "interop-conformance",
+        "ux-accessibility"
+      ]
+    },
     "evidence": {
       "type": "object",
       "required": [
         "schemaVersion",
         "runID",
         "claim",
+        "evidenceClass",
         "status",
         "simulation",
         "source",
@@ -351,6 +391,7 @@
         "schemaVersion": { "$ref": "#/$defs/schemaVersion" },
         "runID": { "type": "string", "minLength": 1, "maxLength": 128 },
         "claim": { "$ref": "#/$defs/claim" },
+        "evidenceClass": { "$ref": "#/$defs/evidenceClass" },
         "status": { "$ref": "#/$defs/outcome" },
         "simulation": { "enum": ["real", "mock", "fixture"] },
         "source": { "$ref": "#/$defs/source" },

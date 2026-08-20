@@ -205,6 +205,11 @@ public struct ReleaseQualificationEnvironmentDetector: Sendable {
             observations: &commandObservations,
             cancellation: cancellation
         )
+        let phase08Release = detectPhase08Release(
+            sourceRoot: sourceRoot,
+            observations: &commandObservations,
+            cancellation: cancellation
+        )
         let host = detectHost(
             observations: &commandObservations,
             cancellation: cancellation
@@ -218,6 +223,7 @@ public struct ReleaseQualificationEnvironmentDetector: Sendable {
 
         let environment = ReleaseQualificationDetectedEnvironment(
             source: source,
+            phase08Release: phase08Release,
             host: host,
             tools: tools,
             commands: commandObservations
@@ -320,6 +326,80 @@ public struct ReleaseQualificationEnvironmentDetector: Sendable {
                 commit: nil,
                 dirty: nil,
                 dirtyStateSHA256: nil
+            )
+        }
+    }
+
+    private func detectPhase08Release(
+        sourceRoot: URL,
+        observations: inout [ReleaseQualificationCommandObservation],
+        cancellation: SecureSubprocessCancellation
+    ) -> ReleaseQualificationPhase08ReleaseFacts {
+        guard let executablePath = executableLocator.path(for: .git) else {
+            return ReleaseQualificationPhase08ReleaseFacts(
+                availability: .init(status: .unavailable, reason: .missingTool),
+                releaseCommit: nil,
+                sourceContainsRelease: nil
+            )
+        }
+        do {
+            let expectedCommit = ReleaseQualificationLimits.phase08ReleaseCommit
+            let releaseObject = try execute(
+                executablePath: executablePath,
+                arguments: [
+                    "-C", sourceRoot.path, "rev-parse", "--verify", "\(expectedCommit)^{commit}"
+                ],
+                purpose: "verify released Phase 08 main commit",
+                workingDirectory: sourceRoot.path,
+                observations: &observations,
+                cancellation: cancellation
+            )
+            guard releaseObject.output == expectedCommit,
+                  let releaseCommit = try? ReleaseQualificationCommit(expectedCommit) else {
+                return ReleaseQualificationPhase08ReleaseFacts(
+                    availability: .init(status: .malformed, reason: .malformedFact),
+                    releaseCommit: nil,
+                    sourceContainsRelease: nil
+                )
+            }
+            let ancestryStatus = try executeStatus(
+                executablePath: executablePath,
+                arguments: [
+                    "-C", sourceRoot.path, "merge-base", "--is-ancestor", expectedCommit, "HEAD"
+                ],
+                purpose: "verify Phase 08 release ancestry",
+                workingDirectory: sourceRoot.path,
+                observations: &observations,
+                cancellation: cancellation
+            )
+            guard ancestryStatus == 0 || ancestryStatus == 1 else {
+                return ReleaseQualificationPhase08ReleaseFacts(
+                    availability: .init(status: .unavailable, reason: .unavailableFact),
+                    releaseCommit: nil,
+                    sourceContainsRelease: nil
+                )
+            }
+            return ReleaseQualificationPhase08ReleaseFacts(
+                availability: .init(status: .available),
+                releaseCommit: releaseCommit,
+                sourceContainsRelease: ancestryStatus == 0
+            )
+        } catch let error as ReleaseQualificationCommandError {
+            return ReleaseQualificationPhase08ReleaseFacts(
+                availability: .init(
+                    status: error == .outputLimitExceeded ? .malformed : .unavailable,
+                    reason: error == .outputLimitExceeded
+                        ? .outputLimitExceeded
+                        : error == .cancelled ? .cancellation : .unavailableFact
+                ),
+                releaseCommit: nil,
+                sourceContainsRelease: nil
+            )
+        } catch {
+            return ReleaseQualificationPhase08ReleaseFacts(
+                availability: .init(status: .malformed, reason: .malformedFact),
+                releaseCommit: nil,
+                sourceContainsRelease: nil
             )
         }
     }
@@ -604,6 +684,49 @@ public struct ReleaseQualificationEnvironmentDetector: Sendable {
         )
     }
 
+    private func executeStatus(
+        executablePath: String,
+        arguments: [String],
+        purpose: String,
+        workingDirectory: String,
+        observations: inout [ReleaseQualificationCommandObservation],
+        cancellation: SecureSubprocessCancellation
+    ) throws -> Int32 {
+        let command = try ReleaseQualificationCommandIdentity(
+            executablePath: executablePath,
+            arguments: arguments,
+            workingDirectory: workingDirectory,
+            purpose: purpose
+        )
+        try checkCancellation(cancellation)
+        let started = ReleaseQualificationTimestamp()
+        let result = try commandRunner.run(
+            command,
+            limits: defaultLimits,
+            cancellation: cancellation
+        )
+        let ended = ReleaseQualificationTimestamp()
+        observations.append(
+            ReleaseQualificationCommandObservation(
+                identity: command,
+                startedAt: started,
+                endedAt: ended,
+                durationMilliseconds: result.durationMilliseconds,
+                exitStatus: result.exitStatus,
+                standardOutputSHA256: ReleaseQualificationHash.sha256(data: result.standardOutput),
+                standardErrorSHA256: ReleaseQualificationHash.sha256(data: result.standardError),
+                standardOutputBytes: result.standardOutput.count,
+                standardErrorBytes: result.standardError.count,
+                standardOutputTruncated: result.standardOutputTruncated,
+                standardErrorTruncated: result.standardErrorTruncated
+            )
+        )
+        guard !result.standardOutputTruncated, !result.standardErrorTruncated else {
+            throw ReleaseQualificationCommandError.outputLimitExceeded
+        }
+        return result.exitStatus
+    }
+
     private func dirtyStateDigest(
         status: Data,
         diff: Data,
@@ -852,6 +975,21 @@ public struct ReleaseQualificationEnvironmentEvaluator: Sendable {
                     detail: "release evidence requires an exact clean source tree"
                 )
             )
+        }
+
+        if cell.authority == .phase08Runtime {
+            let releaseIsAvailable = environment.phase08Release.map {
+                $0.availability.status == .available && $0.sourceContainsRelease == true
+            } == true
+            if !releaseIsAvailable {
+                blockers.append(
+                    ReleaseQualificationBlocker(
+                        reason: .phase08ReleaseUnavailable,
+                        field: "environment.phase08Release",
+                        detail: "the source tree does not contain the released Phase 08 main checkpoint"
+                    )
+                )
+            }
         }
 
         if environment.host.availability.status != .available {

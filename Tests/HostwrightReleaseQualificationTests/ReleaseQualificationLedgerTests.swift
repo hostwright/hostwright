@@ -78,6 +78,7 @@ final class ReleaseQualificationLedgerTests: XCTestCase {
         evidence = ReleaseQualificationEvidence(
             runID: evidence.runID,
             claim: evidence.claim,
+            evidenceClass: evidence.evidenceClass,
             status: evidence.status,
             simulation: evidence.simulation,
             source: evidence.source,

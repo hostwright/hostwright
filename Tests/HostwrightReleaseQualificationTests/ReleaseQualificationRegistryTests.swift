@@ -16,8 +16,11 @@ final class ReleaseQualificationRegistryTests: XCTestCase {
         let protocolPlan = try XCTUnwrap(
             document.lanes.first(where: { $0.laneID == "phase08-protocol-fuzz" })
         )
-        XCTAssertTrue(protocolPlan.blockers.contains {
+        XCTAssertFalse(protocolPlan.blockers.contains {
             $0.reason == .liveRuntimePhase08Boundary
+        })
+        XCTAssertTrue(protocolPlan.blockers.contains {
+            $0.reason == .fuzzingProviderUnavailable
         })
         XCTAssertTrue(document.lanes.contains {
             $0.blockers.contains { $0.reason == .sanitizerUnavailable }

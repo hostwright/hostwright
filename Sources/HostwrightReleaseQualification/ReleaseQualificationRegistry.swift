@@ -241,7 +241,7 @@ public struct ReleaseQualificationDefaultRegistry {
                 budget: boundedPlanBudget,
                 corpus: [],
                 exclusions: [
-                    "Phase 08 owns live runtime and evidence until its sealed checkpoint is released"
+                    "Phase 08 runtime authority is released, but no explicit bounded fuzzing provider is wired"
                 ]
             ),
             ReleaseQualificationLane(
@@ -403,13 +403,6 @@ public struct ReleaseQualificationRegistryPlanner: Sendable {
         case .parserFuzz:
             break
         case .protocolFuzz:
-            blockers.append(
-                ReleaseQualificationBlocker(
-                    reason: .liveRuntimePhase08Boundary,
-                    field: "registry.\(lane.id).authority",
-                    detail: "live protocol qualification remains owned by the Phase 08 runtime boundary"
-                )
-            )
             blockers.append(
                 ReleaseQualificationBlocker(
                     reason: .fuzzingProviderUnavailable,

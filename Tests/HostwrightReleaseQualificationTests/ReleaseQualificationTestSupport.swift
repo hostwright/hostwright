@@ -88,6 +88,7 @@ enum ReleaseQualificationTestSupport {
     static func environment(
         source: ReleaseQualificationSourceFacts? = nil,
         host: ReleaseQualificationHostFacts? = nil,
+        phase08Release: ReleaseQualificationPhase08ReleaseFacts? = nil,
         workingDirectory: String = "/"
     ) -> ReleaseQualificationDetectedEnvironment {
         let command = commandObservation(workingDirectory: workingDirectory)
@@ -111,6 +112,7 @@ enum ReleaseQualificationTestSupport {
         )
         return ReleaseQualificationDetectedEnvironment(
             source: source ?? self.source(),
+            phase08Release: phase08Release,
             host: host ?? self.host(),
             tools: [containerization, appleContainer],
             commands: [command]
@@ -133,6 +135,7 @@ enum ReleaseQualificationTestSupport {
 
     static func evidence(
         environment: ReleaseQualificationDetectedEnvironment? = nil,
+        evidenceClass: HostwrightEvidenceClass? = nil,
         status: ReleaseQualificationOutcomeStatus = .passed,
         blockers: [ReleaseQualificationBlocker] = [],
         failures: [String] = [],
@@ -153,6 +156,7 @@ enum ReleaseQualificationTestSupport {
         return ReleaseQualificationEvidence(
             runID: runID,
             claim: claim,
+            evidenceClass: evidenceClass ?? claim.requiredEvidenceClasses[0],
             status: status,
             simulation: .real,
             source: selectedEnvironment.source,

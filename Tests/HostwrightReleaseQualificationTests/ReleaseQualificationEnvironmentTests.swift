@@ -24,8 +24,14 @@ private struct ReleaseQualificationFixtureRunner:
         }
         let args = command.arguments
         let output: String
-        if args.contains("rev-parse") {
+        if args.contains("rev-parse") && args.contains(
+            "\(ReleaseQualificationLimits.phase08ReleaseCommit)^{commit}"
+        ) {
+            output = "\(ReleaseQualificationLimits.phase08ReleaseCommit)\n"
+        } else if args.contains("rev-parse") {
             output = "1111111111111111111111111111111111111111\n"
+        } else if args.contains("merge-base") {
+            output = ""
         } else if args.contains("status") {
             output = ""
         } else if args.contains("diff") || args.contains("ls-files") {
@@ -77,6 +83,8 @@ final class ReleaseQualificationEnvironmentTests: XCTestCase {
             environment.tool(.containerizationFramework)?.version,
             ReleaseQualificationSemanticVersion(major: 0, minor: 35, patch: 0)
         )
+        XCTAssertEqual(environment.phase08Release?.availability.status, .available)
+        XCTAssertEqual(environment.phase08Release?.sourceContainsRelease, true)
         XCTAssertGreaterThan(environment.commands.count, 0)
     }
 

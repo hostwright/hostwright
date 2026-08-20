@@ -46,6 +46,8 @@ public protocol ReleaseQualificationValidating {
 
 public enum ReleaseQualificationLimits {
     public static let schemaVersion = 1
+    public static let phase08ReleaseCommit =
+        "00f95eaabd105f17f61727d2a9899db919ad3d9f"
     public static let maximumJSONBytes = 8 * 1_024 * 1_024
     public static let maximumCommandCount = 256
     public static let maximumCommandArguments = 64
@@ -321,6 +323,7 @@ public enum ReleaseQualificationUnsupportedReason: String, Codable, CaseIterable
     case missingTool
     case missingCorpus
     case corpusMismatch
+    case phase08ReleaseUnavailable
     case outputLimitExceeded
     case unsafePath
     case missingExplicitAuthority
@@ -545,6 +548,45 @@ public struct ReleaseQualificationSourceFacts:
     }
 }
 
+public struct ReleaseQualificationPhase08ReleaseFacts:
+    Codable, Equatable, Sendable, ReleaseQualificationValidating
+{
+    public let availability: ReleaseQualificationFactAvailability
+    public let releaseCommit: ReleaseQualificationCommit?
+    public let sourceContainsRelease: Bool?
+
+    public init(
+        availability: ReleaseQualificationFactAvailability,
+        releaseCommit: ReleaseQualificationCommit?,
+        sourceContainsRelease: Bool?
+    ) {
+        self.availability = availability
+        self.releaseCommit = releaseCommit
+        self.sourceContainsRelease = sourceContainsRelease
+    }
+
+    public func validate() throws {
+        try availability.validate()
+        switch availability.status {
+        case .available:
+            guard releaseCommit?.value == ReleaseQualificationLimits.phase08ReleaseCommit,
+                  sourceContainsRelease != nil else {
+                throw ReleaseQualificationContractError.invalid(
+                    field: "phase08ReleaseFacts",
+                    reason: "available Phase 08 release facts are incomplete or unexpected"
+                )
+            }
+        case .unavailable, .malformed:
+            guard releaseCommit == nil, sourceContainsRelease == nil else {
+                throw ReleaseQualificationContractError.invalid(
+                    field: "phase08ReleaseFacts",
+                    reason: "unavailable Phase 08 release facts may not carry partial values"
+                )
+            }
+        }
+    }
+}
+
 public struct ReleaseQualificationHostFacts:
     Codable, Equatable, Sendable, ReleaseQualificationValidating
 {
@@ -675,6 +717,7 @@ public struct ReleaseQualificationDetectedEnvironment:
 {
     public let schemaVersion: Int
     public let source: ReleaseQualificationSourceFacts
+    public let phase08Release: ReleaseQualificationPhase08ReleaseFacts?
     public let host: ReleaseQualificationHostFacts
     public let tools: [ReleaseQualificationToolFact]
     public let commands: [ReleaseQualificationCommandObservation]
@@ -682,12 +725,14 @@ public struct ReleaseQualificationDetectedEnvironment:
     public init(
         schemaVersion: Int = ReleaseQualificationLimits.schemaVersion,
         source: ReleaseQualificationSourceFacts,
+        phase08Release: ReleaseQualificationPhase08ReleaseFacts? = nil,
         host: ReleaseQualificationHostFacts,
         tools: [ReleaseQualificationToolFact],
         commands: [ReleaseQualificationCommandObservation]
     ) {
         self.schemaVersion = schemaVersion
         self.source = source
+        self.phase08Release = phase08Release
         self.host = host
         self.tools = tools.sorted { $0.tool.rawValue < $1.tool.rawValue }
         self.commands = commands
@@ -708,6 +753,7 @@ public struct ReleaseQualificationDetectedEnvironment:
             throw ReleaseQualificationContractError.unsupportedSchemaVersion(schemaVersion)
         }
         try source.validate()
+        if let phase08Release { try phase08Release.validate() }
         try host.validate()
         guard tools.count <= ReleaseQualificationLimits.maximumToolFacts,
               tools.map(\.tool).count == Set(tools.map(\.tool)).count,
@@ -1207,6 +1253,7 @@ public struct ReleaseQualificationEvidence:
     public let schemaVersion: Int
     public let runID: String
     public let claim: ReleaseQualificationClaim
+    public let evidenceClass: HostwrightEvidenceClass
     public let status: ReleaseQualificationOutcomeStatus
     public let simulation: ReleaseQualificationEvidenceSimulation
     public let source: ReleaseQualificationSourceFacts
@@ -1225,6 +1272,7 @@ public struct ReleaseQualificationEvidence:
         schemaVersion: Int = ReleaseQualificationLimits.schemaVersion,
         runID: String,
         claim: ReleaseQualificationClaim,
+        evidenceClass: HostwrightEvidenceClass,
         status: ReleaseQualificationOutcomeStatus,
         simulation: ReleaseQualificationEvidenceSimulation,
         source: ReleaseQualificationSourceFacts,
@@ -1242,6 +1290,7 @@ public struct ReleaseQualificationEvidence:
         self.schemaVersion = schemaVersion
         self.runID = runID
         self.claim = claim
+        self.evidenceClass = evidenceClass
         self.status = status
         self.simulation = simulation
         self.source = source
@@ -1260,6 +1309,7 @@ public struct ReleaseQualificationEvidence:
     public var satisfiesRequiredGate: Bool {
         status == .passed &&
             simulation == .real &&
+            claim.requiredEvidenceClasses.contains(evidenceClass) &&
             source.availability.status == .available &&
             source.dirty == false &&
             blockers.isEmpty &&
@@ -1289,6 +1339,12 @@ public struct ReleaseQualificationEvidence:
             )
         }
         try claim.validate()
+        guard claim.requiredEvidenceClasses.contains(evidenceClass) else {
+            throw ReleaseQualificationContractError.invalid(
+                field: "evidence.evidenceClass",
+                reason: "evidence class is not required by the bound claim"
+            )
+        }
         try source.validate()
         try environment.validate()
         try startedAt.validate()

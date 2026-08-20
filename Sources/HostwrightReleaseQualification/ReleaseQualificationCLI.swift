@@ -296,14 +296,9 @@ public struct ReleaseQualificationCLIExecutor: Sendable {
                 evaluation,
                 blockers: [
                     ReleaseQualificationBlocker(
-                        reason: .liveRuntimePhase08Boundary,
-                        field: "claim.authority",
-                        detail: "live/heavy qualification requires an explicit future provider and Phase 08 release"
-                    ),
-                    ReleaseQualificationBlocker(
                         reason: .missingExplicitAuthority,
                         field: "claim.provider",
-                        detail: "this executable never starts a live runtime or provider"
+                        detail: "Phase 08 authority is released, but this executable still requires an explicit live/heavy provider"
                     )
                 ],
                 status: nil,
@@ -332,6 +327,7 @@ public struct ReleaseQualificationCLIExecutor: Sendable {
         let evidence = ReleaseQualificationEvidence(
             runID: runID,
             claim: claim,
+            evidenceClass: cell.requiredEvidenceClasses[0],
             status: safeCheckFailures.isEmpty ? status : .failed,
             simulation: .real,
             source: environment.source,

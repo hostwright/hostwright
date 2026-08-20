@@ -88,6 +88,48 @@ final class ReleaseQualificationContractsTests: XCTestCase {
         XCTAssertTrue(x86.blockers.contains { $0.reason == .unsupportedArchitecture })
     }
 
+    func testLiveCellsRequireReleasedPhase08Ancestry() throws {
+        let releasedCommit = try ReleaseQualificationCommit(
+            ReleaseQualificationLimits.phase08ReleaseCommit
+        )
+        XCTAssertThrowsError(
+            try ReleaseQualificationPhase08ReleaseFacts(
+                availability: .init(status: .available),
+                releaseCommit: ReleaseQualificationTestSupport.commit,
+                sourceContainsRelease: true
+            ).validate()
+        )
+
+        let beforeRelease = ReleaseQualificationPhase08ReleaseFacts(
+            availability: .init(status: .available),
+            releaseCommit: releasedCommit,
+            sourceContainsRelease: false
+        )
+        let beforeEvaluation = ReleaseQualificationEnvironmentEvaluator().evaluate(
+            cell: ReleaseQualificationSupportedMatrix.committed.cells[0],
+            environment: ReleaseQualificationTestSupport.environment(
+                phase08Release: beforeRelease
+            )
+        )
+        XCTAssertEqual(beforeEvaluation.status, .blocked)
+        XCTAssertTrue(beforeEvaluation.blockers.contains {
+            $0.reason == .phase08ReleaseUnavailable
+        })
+
+        let released = ReleaseQualificationPhase08ReleaseFacts(
+            availability: .init(status: .available),
+            releaseCommit: releasedCommit,
+            sourceContainsRelease: true
+        )
+        let releasedEvaluation = ReleaseQualificationEnvironmentEvaluator().evaluate(
+            cell: ReleaseQualificationSupportedMatrix.committed.cells[0],
+            environment: ReleaseQualificationTestSupport.environment(
+                phase08Release: released
+            )
+        )
+        XCTAssertEqual(releasedEvaluation.status, .passed)
+    }
+
     func testUncleanMockAndFixtureEvidenceCannotSatisfyAGate() throws {
         let dirtyEnvironment = ReleaseQualificationTestSupport.environment(
             source: ReleaseQualificationTestSupport.source(dirty: true)
@@ -112,6 +154,13 @@ final class ReleaseQualificationContractsTests: XCTestCase {
         )
         try fixture.validate()
         XCTAssertFalse(fixture.satisfiesRequiredGate)
+
+        let wrongClass = try ReleaseQualificationTestSupport.evidence(
+            evidenceClass: .unitContract,
+            status: .blocked,
+            blockers: [ReleaseQualificationTestSupport.blocker()]
+        )
+        XCTAssertThrowsError(try wrongClass.validate())
     }
 
     func testUnsafeCommandArgumentsAndUnsupportedCellFailClosed() throws {

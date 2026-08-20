@@ -131,7 +131,8 @@ public struct ManagedEtcdInstaller: Sendable {
 
             let installedPaths = try ManagedEtcdRuntimeFileSystem.collectPrivateTree(
                 root: layout.installDirectory,
-                cancellation: cancellation
+                cancellation: cancellation,
+                executablePath: layout.executablePath
             )
             try ManagedEtcdRuntimeFileSystem.removeOwnedDirectory(stageDirectory, fileManager: fileManager)
             return ManagedEtcdInstallReport(
@@ -993,7 +994,13 @@ private enum ManagedEtcdRuntimeFileSystem {
         artifact: ManagedEtcdArtifact,
         cancellation: SecureSubprocessCancellation
     ) throws -> [String] {
-        try requirePrivateDirectory(root)
+        var metadata = stat()
+        guard lstat(root, &metadata) == 0,
+              metadata.st_uid == getuid(),
+              (metadata.st_mode & S_IFMT) == S_IFDIR,
+              metadata.st_mode & (S_IWGRP | S_IWOTH) == 0 else {
+            throw ManagedEtcdError.unsafePermissions(root)
+        }
         var paths: [String] = []
         try collect(
             root: root,
@@ -1010,11 +1017,18 @@ private enum ManagedEtcdRuntimeFileSystem {
 
     static func collectPrivateTree(
         root: String,
-        cancellation: SecureSubprocessCancellation
+        cancellation: SecureSubprocessCancellation,
+        executablePath: String? = nil
     ) throws -> [String] {
         try requirePrivateDirectory(root)
         var paths: [String] = []
-        try collectGeneric(root: root, current: root, cancellation: cancellation, paths: &paths)
+        try collectGeneric(
+            root: root,
+            current: root,
+            cancellation: cancellation,
+            executablePath: executablePath,
+            paths: &paths
+        )
         return paths.sorted()
     }
 
@@ -1064,6 +1078,7 @@ private enum ManagedEtcdRuntimeFileSystem {
         root: String,
         current: String,
         cancellation: SecureSubprocessCancellation,
+        executablePath: String?,
         paths: inout [String]
     ) throws {
         guard !cancellation.isCancelled else { throw ManagedEtcdError.cancelled }
@@ -1085,11 +1100,13 @@ private enum ManagedEtcdRuntimeFileSystem {
                     root: root,
                     current: current + "/" + name,
                     cancellation: cancellation,
+                    executablePath: executablePath,
                     paths: &paths
                 )
             }
         case S_IFREG:
-            guard chmod(current, 0o600) == 0 else { throw ManagedEtcdError.unsafePermissions(current) }
+            let mode: mode_t = current == executablePath ? 0o700 : 0o600
+            guard chmod(current, mode) == 0 else { throw ManagedEtcdError.unsafePermissions(current) }
         default:
             throw ManagedEtcdError.snapshotFailed("tree contains a link or special file")
         }

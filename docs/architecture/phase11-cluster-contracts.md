@@ -2,8 +2,10 @@
 
 Status: dependency-safe contract slices for P11-C01 (#220), the contract
 portion of P11-C03 (#222), authenticated node agents P11-C05 (#224), and
-cluster fencing P11-C07 (#226). This document does not claim live etcd, VM,
-Apple Container, multi-host, or release qualification.
+cluster fencing P11-C07 (#226), plus an opt-in qualification of the pinned
+Darwin artifact's private install and cleanup path. This document does not
+claim live etcd health, quorum/fault, VM, Apple Container, physical
+multi-host, or release qualification.
 
 The implementation is isolated in the `HostwrightCluster` target:
 
@@ -105,8 +107,9 @@ persistence, CA/mTLS, or multi-host behavior in this slice.
 This source-only authority is the admission and fencing contract, not a claim
 of durable replicated session storage, a CA/mTLS transport, or live node-agent
 qualification. Persistent CA/session records and reciprocal network transport
-remain P11-C02/P11-C05 work; Phase 08 still owns the runtime required for
-multi-host evidence.
+remain P11-C02/P11-C05 work. The Phase 08 runtime lock is released, but
+physical multi-host evidence and live authenticated member health remain
+unclaimed.
 
 ## Managed etcd contract
 
@@ -181,7 +184,11 @@ state, consensus-backed cluster fencing, remote operations, shared schema
 migrations, or capability promotion. Its node-agent transport is intentionally
 limited to the authenticated local subprocess/socket producer described above;
 the later consumer, remote transport, and replicated-state work must consume
-the handoff authority seam. Live etcd qualification and VM fault testing remain
-blocked until the Phase 08 runtime coordinator explicitly releases the reserved
-runtime. No etcd archive was downloaded or launched while the runtime remains
-reserved.
+the handoff authority seam. The opt-in
+`ManagedEtcdArtifactTests/testOfficialDarwinArchiveCanBeVerifiedInstalledAndCleanedWhenExplicitlyProvided`
+qualification accepts only the pinned official Darwin archive, executes the
+installed binary's version check, validates canonical provenance, and removes
+only exact owned paths. Live authenticated health, quorum/fault behavior, VM
+qualification, and physical multi-host evidence remain blocked by the missing
+CA/mTLS and lab prerequisites; the Phase 08 runtime release does not claim
+those cells.

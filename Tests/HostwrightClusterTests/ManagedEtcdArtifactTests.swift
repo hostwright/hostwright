@@ -275,6 +275,61 @@ final class ManagedEtcdArtifactTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: layout.provenancePath))
     }
 
+    func testOfficialDarwinArchiveCanBeVerifiedInstalledAndCleanedWhenExplicitlyProvided() throws {
+        guard let archivePath = ProcessInfo.processInfo.environment["HOSTWRIGHT_P11_ETCD_ARCHIVE"],
+              !archivePath.isEmpty else {
+            throw XCTSkip("set HOSTWRIGHT_P11_ETCD_ARCHIVE to run the official-artifact qualification")
+        }
+
+        let archiveURL = URL(fileURLWithPath: archivePath)
+        let verified = try ManagedEtcdArtifactVerifier().accept(
+            artifact: .darwinArm64,
+            archiveURL: archiveURL
+        )
+        XCTAssertEqual(verified.archiveSHA256, ManagedEtcdArtifact.darwinArm64.sha256)
+
+        let root = try makeTemporaryRoot("hostwright-etcd-official-install")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let layout = try makeLayout(root: root.path)
+        let report = try ManagedEtcdInstaller().install(
+            verifiedArchive: verified,
+            layout: layout
+        )
+        XCTAssertEqual(report.executablePath, layout.executablePath)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: report.executablePath))
+
+        let executable = try SecureExecutableResolver.verify(
+            path: report.executablePath,
+            ownershipPolicy: .rootOrCurrentUser
+        )
+        let version = try SecureSubprocessRunner().run(
+            SecureSubprocessRequest(
+                executablePath: executable.path,
+                arguments: ["--version"],
+                environment: SecureSubprocessEnvironment.minimal,
+                workingDirectory: layout.installDirectory,
+                timeoutMilliseconds: 10_000,
+                terminationGraceMilliseconds: 1_000,
+                maximumStandardOutputBytes: 64 * 1_024,
+                maximumStandardErrorBytes: 64 * 1_024
+            )
+        )
+        XCTAssertEqual(version.exitStatus, 0)
+        XCTAssertTrue(
+            (String(data: version.standardOutput, encoding: .utf8) ?? "").contains("etcd Version: 3.7.1")
+        )
+
+        let provenance = try Data(contentsOf: URL(fileURLWithPath: layout.provenancePath))
+        XCTAssertNoThrow(try ManagedEtcdProvenanceRecord.decodeCanonical(provenance))
+
+        let cleanup = try ManagedEtcdCleanupPlan(layout: layout)
+        let cleanupReport = try cleanup.execute()
+        XCTAssertEqual(Set(cleanupReport.removedPaths), Set(layout.ownedCleanupPaths))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: layout.rootDirectory))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: layout.installDirectory))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: layout.provenancePath))
+    }
+
     func testInstallerRecoveryRemovesOnlyOwnedStagingDirectories() throws {
         let root = try makeTemporaryRoot("hostwright-etcd-install-recovery")
         defer { try? FileManager.default.removeItem(at: root) }

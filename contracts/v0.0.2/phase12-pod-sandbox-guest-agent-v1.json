@@ -37,7 +37,8 @@
     "authority": "ClusterSessionHandoffAuthorizing.authorize",
     "producer": "ClusterSessionAuthority.bootstrapConsumer(from:subjectID:nowMilliseconds:)",
     "retainedValue": "ClusterSessionHandoff",
-    "portableExecutableBoundary": "unavailable-fail-closed-until-node-agent-session-handoff",
+    "producerTransport": "GuestAgentNodeAgentTransport -> ClusterNodeAgentLocalTransport.send",
+    "portableExecutableBoundary": "unavailable-fail-closed-until-authority-backed-handoff-injection",
     "unauthenticatedLifecycleMutation": "reject",
     "credentialTransport": "outside-guest-agent-lifecycle-wire"
   },

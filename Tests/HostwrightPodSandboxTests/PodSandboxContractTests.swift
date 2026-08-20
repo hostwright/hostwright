@@ -2,6 +2,7 @@ import Darwin
 import CryptoKit
 import Foundation
 import HostwrightCluster
+import HostwrightCore
 import HostwrightPodSandbox
 import XCTest
 
@@ -731,6 +732,89 @@ final class PodSandboxContractTests: XCTestCase {
         XCTAssertNil(machine.snapshot(for: response.sandboxID))
     }
 
+    func testNodeAgentGuestProducerUsesRealPortableGuestAndFailsClosedWithoutAuthority() async throws {
+        let fixture = try makeClusterSessionFixture()
+        let session = try authenticateClusterSession(
+            fixture,
+            nowMilliseconds: 1_000
+        )
+        let handoff = try fixture.authority.bootstrapConsumer(
+            from: session,
+            subjectID: fixture.credential.subjectID,
+            nowMilliseconds: 1_002
+        )
+        let executable = try guestExecutableURL()
+        let (nodeAgentTransport, root) = try makeNodeAgentTransport(
+            fixture: fixture,
+            guestExecutable: executable
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let producer = try GuestAgentNodeAgentTransport(
+            nodeAgentTransport: nodeAgentTransport,
+            authorizer: fixture.authority,
+            handoff: handoff,
+            nowMilliseconds: { 1_003 }
+        )
+        let create = try request(
+            id: "sandbox-node-agent",
+            operation: .create,
+            requestID: "node-agent-create",
+            spec: true,
+            ownerID: fixture.credential.subjectID
+        )
+
+        let response = try await producer.send(create)
+
+        XCTAssertEqual(response.kind, .response)
+        XCTAssertEqual(response.error, .unauthenticated)
+        XCTAssertNil(response.result)
+        XCTAssertNil(response.state)
+    }
+
+    func testNodeAgentGuestProducerReauthorizesHandoffBeforeLaunch() async throws {
+        let fixture = try makeClusterSessionFixture()
+        let session = try authenticateClusterSession(
+            fixture,
+            nowMilliseconds: 2_000
+        )
+        let handoff = try fixture.authority.bootstrapConsumer(
+            from: session,
+            subjectID: fixture.credential.subjectID,
+            nowMilliseconds: 2_002
+        )
+        let (nodeAgentTransport, root) = try makeNodeAgentTransport(
+            fixture: fixture,
+            guestExecutable: try guestExecutableURL()
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let producer = try GuestAgentNodeAgentTransport(
+            nodeAgentTransport: nodeAgentTransport,
+            authorizer: fixture.authority,
+            handoff: handoff,
+            nowMilliseconds: { 2_003 }
+        )
+        try fixture.authority.revokeCredential(fixture.credential.credentialID)
+        let request = try request(
+            id: "sandbox-node-agent-fenced",
+            operation: .create,
+            requestID: "node-agent-fenced-create",
+            spec: true,
+            ownerID: fixture.credential.subjectID
+        )
+
+        do {
+            _ = try await producer.send(request)
+            XCTFail("revoked handoff must not launch a node-agent subprocess")
+        } catch let error as ClusterNodeAgentTransportError {
+            XCTAssertEqual(error, .authorizationFailed(.sessionFenced))
+        }
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: root.appendingPathComponent("agent.sock").path
+            )
+        )
+    }
+
     func testAuthenticatedGuestServerRunsLifecycleOverRealSocketPairs() throws {
         let hostToGuest = try socketPair()
         let guestToHost = try socketPair()
@@ -1229,6 +1313,118 @@ final class PodSandboxContractTests: XCTestCase {
             userInfo: [NSLocalizedDescriptionKey: "Build hostwright-pod-sandbox-guest before running integration tests."]
         )
     }
+
+    private func makeNodeAgentTransport(
+        fixture: ClusterSessionFixture,
+        guestExecutable: URL
+    ) throws -> (ClusterNodeAgentLocalTransport, URL) {
+        let root = URL(fileURLWithPath: "/tmp", isDirectory: true)
+            .appendingPathComponent("hostwright-p12-node-agent-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: root,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700]
+        )
+        do {
+            let configuration = try ClusterNodeAgentSubprocessConfiguration(
+                executablePath: "/usr/bin/python3",
+                arguments: [
+                    "-c",
+                    Self.guestAgentBridgeProgram,
+                    "--guest-executable",
+                    guestExecutable.path
+                ],
+                environment: SecureSubprocessEnvironment.minimal,
+                workingDirectory: "/",
+                socketPath: root.appendingPathComponent("agent.sock").path
+            )
+            return (
+                try ClusterNodeAgentLocalTransport(
+                    authority: fixture.authority,
+                    configuration: configuration
+                ),
+                root
+            )
+        } catch {
+            try? FileManager.default.removeItem(at: root)
+            throw error
+        }
+    }
+
+    private static let guestAgentBridgeProgram = """
+    import base64
+    import json
+    import os
+    import socket
+    import struct
+    import subprocess
+    import sys
+
+    socket_path = sys.argv[sys.argv.index("--socket-path") + 1]
+    guest_executable = sys.argv[sys.argv.index("--guest-executable") + 1]
+    try:
+        os.unlink(socket_path)
+    except FileNotFoundError:
+        pass
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(socket_path)
+    os.chmod(socket_path, 0o600)
+    server.listen(1)
+    connection, _ = server.accept()
+
+    def read_exact(stream, count):
+        chunks = []
+        remaining = count
+        while remaining:
+            chunk = stream.recv(remaining) if hasattr(stream, "recv") else stream.read(remaining)
+            if not chunk:
+                raise RuntimeError("peer closed")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        return b"".join(chunks)
+
+    node_header = read_exact(connection, 4)
+    node_length = struct.unpack(">I", node_header)[0]
+    node_request = json.loads(read_exact(connection, node_length).decode("utf-8"))
+    assert set(node_request) == {"apiVersion", "protocolLabel", "requestID", "handoff", "operation", "payloadBase64"}
+    assert not {"credentialID", "challengeID", "nonceBase64", "signatureDERBase64", "p256X963PublicKey"}.intersection(node_request["handoff"])
+    guest_payload = base64.b64decode(node_request["payloadBase64"])
+
+    guest = subprocess.Popen(
+        [guest_executable, "--stdio"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        cwd="/",
+        env={"PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C"}
+    )
+    guest.stdin.write(struct.pack(">I", len(guest_payload)) + guest_payload)
+    guest.stdin.flush()
+    guest.stdin.close()
+    guest_header = read_exact(guest.stdout, 4)
+    guest_length = struct.unpack(">I", guest_header)[0]
+    guest_response = read_exact(guest.stdout, guest_length)
+    guest.terminate()
+    try:
+        guest.wait(timeout=1)
+    except subprocess.TimeoutExpired:
+        guest.kill()
+        guest.wait()
+
+    response = {
+        "apiVersion": 1,
+        "protocolLabel": "hostwright-cluster-node-agent-v1",
+        "requestID": node_request["requestID"],
+        "status": "completed",
+        "payloadBase64": base64.b64encode(guest_response).decode("ascii"),
+        "errorCode": ""
+    }
+    encoded = json.dumps(response, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    connection.sendall(struct.pack(">I", len(encoded)) + encoded)
+    connection.close()
+    server.close()
+    os.unlink(socket_path)
+    """
 }
 
 private struct ClusterSessionFixture {

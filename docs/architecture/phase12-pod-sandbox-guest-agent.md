@@ -1,9 +1,9 @@
 # Phase 12 pod-sandbox guest agent
 
 Status: portable HostwrightPodSandbox boundary implemented; the Phase 11
-authenticated-session adapter is integrated at the guest-agent boundary. Live
-Apple Container integration remains explicitly blocked by the Phase 08 runtime
-release.
+credential-free handoff and authenticated local node-agent producer are
+integrated at the guest-agent boundary. Live Apple Container integration
+remains explicitly blocked by the Phase 08 runtime release.
 
 This slice owns the pod-sandbox lifecycle model, the guest-agent protocol v1,
 the portable `hostwright-pod-sandbox-guest` executable, and a real subprocess
@@ -68,8 +68,9 @@ later requests may replenish it, each accepted request consumes one unit, and
 the response reports the remaining window. Teardown clears the window.
 
 Authentication is a required boundary before dispatch. The production
-`ClusterSessionGuestAgentAuthenticationBoundary` retains only a credential-free
-Phase 11 `ClusterSessionHandoff`, produced by
+`ClusterSessionGuestAgentAuthenticationBoundary` and
+`GuestAgentNodeAgentTransport` retain only a credential-free Phase 11
+`ClusterSessionHandoff`, produced by
 `ClusterSessionAuthority.bootstrapConsumer(from:subjectID:nowMilliseconds:)`.
 Immediately before every request it calls
 `ClusterSessionHandoffAuthorizing.authorize(_:subjectID:nowMilliseconds:)`,
@@ -77,18 +78,24 @@ binding `request.ownerID` to the handoff subject. Phase 11 therefore remains
 authoritative for strict challenge/proof validation, expiry, revocation
 fencing, membership epochs, and monotonic session fencing; no credential,
 challenge, proof, or authenticated session is retained by the guest-agent
-boundary or copied into the lifecycle wire. The portable executable remains
-wired to `UnavailableGuestAgentAuthenticationBoundary` because the future
-node-agent transport that supplies a real handoff is not yet present; it
-returns an explicit error before lifecycle state can change and contains no
-credential bypass.
+boundary or copied into the lifecycle wire. The host-side producer encodes the
+validated guest request and delegates to
+`ClusterNodeAgentLocalTransport.send(handoff:subjectID:operation:payload:nowMilliseconds:timeoutMilliseconds:)`;
+that P11 transport reauthorizes the same handoff before launching its local
+endpoint. The portable executable itself remains wired to
+`UnavailableGuestAgentAuthenticationBoundary` because it has no
+authority-backed handoff injection channel; it returns an explicit error
+before lifecycle state can change and contains no credential bypass.
 
 ## Transport and executable
 
 `GuestAgentProcessTransport` launches the portable executable with two Unix
 socket pairs, bounded non-blocking I/O, request/response identity checks, and
-deadline/cancellation handling. `GuestAgentServer` handles the same framed
-protocol on supplied descriptors. The executable supports `--stdio`,
+deadline/cancellation handling. `GuestAgentNodeAgentTransport` is the
+authenticated producer-side bridge: it carries only the handoff and delegates
+the canonical guest-agent request payload to the P11 local node-agent
+transport. `GuestAgentServer` handles the same framed protocol on supplied
+descriptors. The executable supports `--stdio`,
 `--stdio --recovery-file <absolute-path>`, and `--version`; recovery paths are
 validated file boundaries and are never treated as credentials. Protocol
 failures terminate with a generic stderr message and a protocol exit status
@@ -98,11 +105,12 @@ Focused tests cover malformed and oversized frames, unsupported versions,
 canonical/unknown/duplicate fields, unauthenticated dispatch, deadline and
 cancellation behavior, credit exhaustion, request replay, invalid
 transitions, ownership/generation fencing, restart recovery, partial cleanup,
-real fragmented socket-pair dispatch, persistent restart recovery, and the
-real guest subprocess. The authenticated socket-pair tests perform a real
-Phase 11 P-256 challenge/proof exchange, then exercise the production adapter
-through Unix sockets; the shipped executable remains fail-closed until the
-node-agent transport can supply that authenticated session.
+real fragmented socket-pair dispatch, persistent restart recovery, the real
+guest subprocess, and the P12 producer bridge through the P11 local transport.
+The authenticated socket-pair tests perform a real Phase 11 P-256
+challenge/proof exchange, then exercise the production adapter through Unix
+sockets; the shipped executable remains fail-closed until an authority-backed
+handoff injection channel is supplied at its boundary.
 
 ## Deferred integration boundary
 

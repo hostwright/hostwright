@@ -230,6 +230,19 @@ Process and socket I/O run on a utility queue with bounded deadlines and
 cancellation that terminates the owned subprocess. There is no network,
 persistence, CA/mTLS, or multi-host behavior in this slice.
 
+`ClusterNodeAgentLocalTransport` is the bounded P11-C05 producer for a local
+node-agent subprocess. It requires a concrete `ClusterSessionAuthority`,
+creates the handoff through `bootstrapConsumer`, reauthorizes it through
+`ClusterSessionHandoffAuthorizing` immediately before launch, and sends only a
+strict request over a private length-prefixed Unix `SOCK_STREAM`. The launched
+executable is validated with the secure subprocess boundary, receives a
+minimal environment, and gets the socket path only as a launch argument; the
+handoff itself is sent in the socket frame. The socket is checked for current
+user ownership, socket type, and absence of group/world write permission.
+Process and socket I/O run on a utility queue with bounded deadlines and
+cancellation that terminates the owned subprocess. There is no network,
+persistence, CA/mTLS, or multi-host behavior in this slice.
+
 This source-only authority is the admission and fencing contract, not a claim
 of durable replicated session storage, an mTLS network transport, or live
 node-agent qualification. Durable session records and reciprocal network

@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import HostwrightCore
 import XCTest
 @testable import HostwrightCluster
 
@@ -238,6 +239,249 @@ final class ClusterSessionTests: XCTestCase {
         }
     }
 
+    func testAuthenticatedNodeAgentTransportUsesBackgroundSubprocessSocket() async throws {
+        let fixture = try makeFixture()
+        let challenge = try fixture.authority.issueChallenge(
+            credentialID: fixture.credential.credentialID,
+            nowMilliseconds: 1_000
+        )
+        let session = try authenticate(fixture, challenge: challenge, nowMilliseconds: 1_001)
+        let (transport, root) = try makeTransport(fixture: fixture)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let result = try await transport.send(
+            session: session,
+            subjectID: fixture.credential.subjectID,
+            operation: "echo",
+            payload: Data("node-agent-payload".utf8),
+            nowMilliseconds: 1_002
+        )
+        XCTAssertEqual(result, Data("daolyap-tnega-edon".utf8))
+    }
+
+    func testAuthenticatedNodeAgentWireRejectsSensitiveAndVersionMutations() throws {
+        let fixture = try makeFixture()
+        let challenge = try fixture.authority.issueChallenge(
+            credentialID: fixture.credential.credentialID,
+            nowMilliseconds: 6_000
+        )
+        let session = try authenticate(fixture, challenge: challenge, nowMilliseconds: 6_001)
+        let handoff = try fixture.authority.bootstrapConsumer(
+            from: session,
+            subjectID: fixture.credential.subjectID,
+            nowMilliseconds: 6_002
+        )
+        let request = try ClusterNodeAgentRequest(
+            handoff: handoff,
+            operation: "echo",
+            payload: Data("wire".utf8)
+        )
+        let requestData = try request.canonicalData()
+
+        for mutation: (String, Any) in [
+            ("apiVersion", 2),
+            ("protocolLabel", "wrong-protocol"),
+            ("credentialID", fixture.credential.credentialID),
+        ] {
+            var object = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: requestData) as? [String: Any]
+            )
+            object[mutation.0] = mutation.1
+            XCTAssertThrowsError(
+                try ClusterNodeAgentWireContract.decodeRequest(
+                    JSONSerialization.data(withJSONObject: object)
+                ),
+                "mutation of \(mutation.0) must be rejected"
+            )
+        }
+
+        let response = try ClusterNodeAgentResponse(
+            requestID: request.requestID,
+            status: .completed,
+            payload: Data("wire".utf8)
+        )
+        let responseData = try response.canonicalData()
+        var alteredResponse = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: responseData) as? [String: Any]
+        )
+        alteredResponse["apiVersion"] = 2
+        XCTAssertThrowsError(
+            try ClusterNodeAgentWireContract.decodeResponse(
+                JSONSerialization.data(withJSONObject: alteredResponse)
+            )
+        )
+    }
+
+    func testAuthenticatedNodeAgentTransportRevalidatesHandoffBeforeLaunch() async throws {
+        let fixture = try makeFixture(sessionLifetimeMilliseconds: 10)
+        let challenge = try fixture.authority.issueChallenge(
+            credentialID: fixture.credential.credentialID,
+            nowMilliseconds: 1_000
+        )
+        let session = try authenticate(fixture, challenge: challenge, nowMilliseconds: 1_001)
+        let handoff = try fixture.authority.bootstrapConsumer(
+            from: session,
+            subjectID: fixture.credential.subjectID,
+            nowMilliseconds: 1_002
+        )
+        let (transport, root) = try makeTransport(fixture: fixture)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        do {
+            _ = try await transport.send(
+                handoff: handoff,
+                subjectID: fixture.credential.subjectID,
+                operation: "echo",
+                payload: Data(),
+                nowMilliseconds: 1_011
+            )
+            XCTFail("expired handoff must not launch a subprocess")
+        } catch let error as ClusterNodeAgentTransportError {
+            XCTAssertEqual(error, .authorizationFailed(.sessionExpired))
+        }
+
+        let altered = try ClusterSessionHandoff(
+            sessionID: handoff.sessionID,
+            clusterID: handoff.clusterID,
+            nodeID: handoff.nodeID,
+            membershipEpoch: handoff.membershipEpoch,
+            subjectID: handoff.subjectID,
+            fencingToken: handoff.fencingToken + 1,
+            issuedAtMilliseconds: handoff.issuedAtMilliseconds,
+            expiresAtMilliseconds: handoff.expiresAtMilliseconds
+        )
+        do {
+            _ = try await transport.send(
+                handoff: altered,
+                subjectID: fixture.credential.subjectID,
+                operation: "echo",
+                payload: Data(),
+                nowMilliseconds: 1_003
+            )
+            XCTFail("altered fence must not launch a subprocess")
+        } catch let error as ClusterNodeAgentTransportError {
+            XCTAssertEqual(error, .authorizationFailed(.handoffBindingMismatch))
+        }
+
+        let liveFixture = try makeFixture()
+        let liveChallenge = try liveFixture.authority.issueChallenge(
+            credentialID: liveFixture.credential.credentialID,
+            nowMilliseconds: 2_000
+        )
+        let liveSession = try authenticate(liveFixture, challenge: liveChallenge, nowMilliseconds: 2_001)
+        let liveHandoff = try liveFixture.authority.bootstrapConsumer(
+            from: liveSession,
+            subjectID: liveFixture.credential.subjectID,
+            nowMilliseconds: 2_002
+        )
+        let (liveTransport, liveRoot) = try makeTransport(fixture: liveFixture)
+        defer { try? FileManager.default.removeItem(at: liveRoot) }
+        try liveFixture.authority.revokeCredential(liveFixture.credential.credentialID)
+        do {
+            _ = try await liveTransport.send(
+                handoff: liveHandoff,
+                subjectID: liveFixture.credential.subjectID,
+                operation: "echo",
+                payload: Data(),
+                nowMilliseconds: 2_003
+            )
+            XCTFail("revoked handoff must not launch a subprocess")
+        } catch let error as ClusterNodeAgentTransportError {
+            XCTAssertEqual(error, .authorizationFailed(.sessionFenced))
+        }
+
+        let epochFixture = try makeFixture()
+        let epochChallenge = try epochFixture.authority.issueChallenge(
+            credentialID: epochFixture.credential.credentialID,
+            nowMilliseconds: 3_000
+        )
+        let epochSession = try authenticate(epochFixture, challenge: epochChallenge, nowMilliseconds: 3_001)
+        let epochHandoff = try epochFixture.authority.bootstrapConsumer(
+            from: epochSession,
+            subjectID: epochFixture.credential.subjectID,
+            nowMilliseconds: 3_002
+        )
+        let (epochTransport, epochRoot) = try makeTransport(fixture: epochFixture)
+        defer { try? FileManager.default.removeItem(at: epochRoot) }
+        try epochFixture.authority.advanceMembershipEpoch(to: ClusterMembershipEpoch(2))
+        do {
+            _ = try await epochTransport.send(
+                handoff: epochHandoff,
+                subjectID: epochFixture.credential.subjectID,
+                operation: "echo",
+                payload: Data(),
+                nowMilliseconds: 3_003
+            )
+            XCTFail("epoch-stale handoff must not launch a subprocess")
+        } catch let error as ClusterNodeAgentTransportError {
+            XCTAssertEqual(error, .authorizationFailed(.sessionFenced))
+        }
+
+        let fenceFixture = try makeFixture()
+        let firstChallenge = try fenceFixture.authority.issueChallenge(
+            credentialID: fenceFixture.credential.credentialID,
+            nowMilliseconds: 4_000
+        )
+        let firstSession = try authenticate(fenceFixture, challenge: firstChallenge, nowMilliseconds: 4_001)
+        let firstHandoff = try fenceFixture.authority.bootstrapConsumer(
+            from: firstSession,
+            subjectID: fenceFixture.credential.subjectID,
+            nowMilliseconds: 4_002
+        )
+        let secondChallenge = try fenceFixture.authority.issueChallenge(
+            credentialID: fenceFixture.credential.credentialID,
+            nowMilliseconds: 4_003
+        )
+        _ = try authenticate(fenceFixture, challenge: secondChallenge, nowMilliseconds: 4_004)
+        let (fenceTransport, fenceRoot) = try makeTransport(fixture: fenceFixture)
+        defer { try? FileManager.default.removeItem(at: fenceRoot) }
+        do {
+            _ = try await fenceTransport.send(
+                handoff: firstHandoff,
+                subjectID: fenceFixture.credential.subjectID,
+                operation: "echo",
+                payload: Data(),
+                nowMilliseconds: 4_005
+            )
+            XCTFail("monotonic-fence-stale handoff must not launch a subprocess")
+        } catch let error as ClusterNodeAgentTransportError {
+            XCTAssertEqual(error, .authorizationFailed(.sessionFenced))
+        }
+    }
+
+    func testAuthenticatedNodeAgentTransportCancellationStopsBackgroundSubprocess() async throws {
+        let fixture = try makeFixture()
+        let challenge = try fixture.authority.issueChallenge(
+            credentialID: fixture.credential.credentialID,
+            nowMilliseconds: 5_000
+        )
+        let session = try authenticate(fixture, challenge: challenge, nowMilliseconds: 5_001)
+        let (transport, root) = try makeTransport(
+            fixture: fixture,
+            program: Self.blockingAgentProgram
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let request = Task {
+            try await transport.send(
+                session: session,
+                subjectID: fixture.credential.subjectID,
+                operation: "block",
+                payload: Data(),
+                nowMilliseconds: 5_002,
+                timeoutMilliseconds: 30_000
+            )
+        }
+        try await Task.sleep(nanoseconds: 200_000_000)
+        request.cancel()
+        do {
+            _ = try await request.value
+            XCTFail("cancelled transport must not return a response")
+        } catch let error as ClusterNodeAgentTransportError {
+            XCTAssertEqual(error, .cancelled)
+        }
+    }
+
     func testInvalidProofIsConsumedAndReplayFailsClosed() throws {
         let fixture = try makeFixture()
         let challenge = try fixture.authority.issueChallenge(
@@ -445,6 +689,120 @@ final class ClusterSessionTests: XCTestCase {
         let privateKey: P256.Signing.PrivateKey
         let credential: ClusterSessionCredential
     }
+
+    private func makeTransport(
+        fixture: Fixture,
+        program: String = ClusterSessionTests.echoAgentProgram
+    ) throws -> (ClusterNodeAgentLocalTransport, URL) {
+        let root = URL(fileURLWithPath: "/tmp", isDirectory: true)
+            .appendingPathComponent("hostwright-node-agent-" + UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        let socketPath = root.appendingPathComponent("agent.sock").path
+        let configuration = try ClusterNodeAgentSubprocessConfiguration(
+            executablePath: "/usr/bin/python3",
+            arguments: ["-c", program],
+            environment: SecureSubprocessEnvironment.minimal,
+            workingDirectory: "/",
+            socketPath: socketPath
+        )
+        do {
+            return (
+                try ClusterNodeAgentLocalTransport(
+                    authority: fixture.authority,
+                    configuration: configuration
+                ),
+                root
+            )
+        } catch {
+            try? FileManager.default.removeItem(at: root)
+            throw error
+        }
+    }
+
+    private static let echoAgentProgram = """
+    import base64
+    import json
+    import os
+    import socket
+    import struct
+    import sys
+
+    socket_path = sys.argv[sys.argv.index("--socket-path") + 1]
+    try:
+        os.unlink(socket_path)
+    except FileNotFoundError:
+        pass
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(socket_path)
+    os.chmod(socket_path, 0o600)
+    server.listen(1)
+    connection, _ = server.accept()
+    def read_exact(count):
+        chunks = []
+        remaining = count
+        while remaining:
+            chunk = connection.recv(remaining)
+            if not chunk:
+                raise RuntimeError("peer closed")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        return b"".join(chunks)
+    header = read_exact(4)
+    size = struct.unpack(">I", header)[0]
+    request = json.loads(read_exact(size).decode("utf-8"))
+    expected = {"apiVersion", "protocolLabel", "requestID", "handoff", "operation", "payloadBase64"}
+    assert set(request) == expected
+    forbidden = {"credentialID", "challengeID", "nonceBase64", "signatureDERBase64", "p256X963PublicKey"}
+    assert not forbidden.intersection(request["handoff"])
+    payload = base64.b64decode(request["payloadBase64"])
+    response = {
+        "apiVersion": 1,
+        "protocolLabel": "hostwright-cluster-node-agent-v1",
+        "requestID": request["requestID"],
+        "status": "completed",
+        "payloadBase64": base64.b64encode(payload[::-1]).decode("ascii"),
+        "errorCode": "",
+    }
+    encoded = json.dumps(response, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    connection.sendall(struct.pack(">I", len(encoded)) + encoded)
+    connection.close()
+    server.close()
+    os.unlink(socket_path)
+    """
+
+    private static let blockingAgentProgram = """
+    import json
+    import os
+    import socket
+    import struct
+    import sys
+    import time
+
+    socket_path = sys.argv[sys.argv.index("--socket-path") + 1]
+    try:
+        os.unlink(socket_path)
+    except FileNotFoundError:
+        pass
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(socket_path)
+    os.chmod(socket_path, 0o600)
+    server.listen(1)
+    connection, _ = server.accept()
+    def read_exact(count):
+        chunks = []
+        remaining = count
+        while remaining:
+            chunk = connection.recv(remaining)
+            if not chunk:
+                raise RuntimeError("peer closed")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        return b"".join(chunks)
+    header = read_exact(4)
+    size = struct.unpack(">I", header)[0]
+    _ = json.loads(read_exact(size).decode("utf-8"))
+    time.sleep(30)
+    """
 
     private func makeFixture(
         challengeLifetimeMilliseconds: UInt64 = 5_000,

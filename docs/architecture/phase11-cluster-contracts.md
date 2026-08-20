@@ -19,6 +19,9 @@ The implementation is isolated in the `HostwrightCluster` target:
   binding, lifecycle, revocation, membership-epoch fencing, and strict wire
   decoding helpers, including the credential-free consumer handoff that Phase
   12 can adapt to its guest-agent boundary.
+- [`NodeAgentTransport.swift`](../../Sources/HostwrightCluster/NodeAgentTransport.swift)
+  owns the bounded authenticated local subprocess/socket producer, strict
+  request/response framing, and cancellation/peer-identity boundary.
 
 ## Membership contract
 
@@ -85,6 +88,19 @@ then rechecks active state, expiry, credential revocation, membership epoch,
 and the monotonic fence, so altered, stale, expired, revoked, or malformed
 handoffs fail closed. The handoff is neither a credential nor a transport
 protocol and carries no persistence semantics.
+
+`ClusterNodeAgentLocalTransport` is the bounded P11-C05 producer for a local
+node-agent subprocess. It requires a concrete `ClusterSessionAuthority`,
+creates the handoff through `bootstrapConsumer`, reauthorizes it through
+`ClusterSessionHandoffAuthorizing` immediately before launch, and sends only a
+strict request over a private length-prefixed Unix `SOCK_STREAM`. The launched
+executable is validated with the secure subprocess boundary, receives a
+minimal environment, and gets the socket path only as a launch argument; the
+handoff itself is sent in the socket frame. The socket is checked for current
+user ownership, socket type, and absence of group/world write permission.
+Process and socket I/O run on a utility queue with bounded deadlines and
+cancellation that terminates the owned subprocess. There is no network,
+persistence, CA/mTLS, or multi-host behavior in this slice.
 
 This source-only authority is the admission and fencing contract, not a claim
 of durable replicated session storage, a CA/mTLS transport, or live node-agent
@@ -161,10 +177,11 @@ supervision failure transitions; they do not qualify a real etcd member.
 ## Deliberate boundary
 
 This target does not implement scheduler placement, authoritative replicated
-state, consensus-backed cluster fencing, node-agent transport, remote
-operations, shared schema migrations, or capability promotion. The
-authenticated session state machine above is intentionally the source-only
-identity/fencing seam that later node-agent and replicated-state work must
-consume. Live etcd qualification and VM fault testing remain blocked until the
-Phase 08 runtime coordinator explicitly releases the reserved runtime. No
-etcd archive was downloaded or launched while the runtime remains reserved.
+state, consensus-backed cluster fencing, remote operations, shared schema
+migrations, or capability promotion. Its node-agent transport is intentionally
+limited to the authenticated local subprocess/socket producer described above;
+the later consumer, remote transport, and replicated-state work must consume
+the handoff authority seam. Live etcd qualification and VM fault testing remain
+blocked until the Phase 08 runtime coordinator explicitly releases the reserved
+runtime. No etcd archive was downloaded or launched while the runtime remains
+reserved.

@@ -32,8 +32,12 @@
   "authentication": {
     "requiredBeforeDispatch": true,
     "boundary": "GuestAgentAuthenticationBoundary",
-    "portableExecutableBoundary": "unavailable-fail-closed",
-    "unauthenticatedLifecycleMutation": "reject"
+    "phase11Adapter": "ClusterSessionGuestAgentAuthenticationBoundary",
+    "binding": "request.ownerID-must-match-ClusterAuthenticatedSession.subjectID",
+    "authority": "ClusterSessionAuthorizing.authorize",
+    "portableExecutableBoundary": "unavailable-fail-closed-until-node-agent-session-handoff",
+    "unauthenticatedLifecycleMutation": "reject",
+    "credentialTransport": "outside-guest-agent-lifecycle-wire"
   },
   "limits": {
     "deadlineMilliseconds": {
@@ -101,6 +105,16 @@
     "malformed",
     "unsupportedVersion",
     "unauthenticated",
+    "authenticationContextMismatch",
+    "sessionNotFound",
+    "sessionBindingMismatch",
+    "sessionNotYetValid",
+    "sessionExpired",
+    "sessionClosed",
+    "sessionFenced",
+    "membershipEpochMismatch",
+    "fenceMismatch",
+    "sessionIdentityMismatch",
     "invalidTransition",
     "ownershipMismatch",
     "generationMismatch",

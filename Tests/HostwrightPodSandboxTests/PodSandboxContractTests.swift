@@ -1,5 +1,7 @@
 import Darwin
+import CryptoKit
 import Foundation
+import HostwrightCluster
 import HostwrightPodSandbox
 import XCTest
 
@@ -465,7 +467,7 @@ final class PodSandboxContractTests: XCTestCase {
         let machine = PodSandboxLifecycleStateMachine()
         let dispatcher = GuestAgentDispatcher(
             machine: machine,
-            authenticationBoundary: TestAuthenticatedSessionBoundary()
+            authenticationBoundary: try makeEphemeralAuthenticatedBoundary()
         )
         let create = try request(
             id: "sandbox-dispatch",
@@ -493,6 +495,172 @@ final class PodSandboxContractTests: XCTestCase {
         XCTAssertEqual(teardownResponse.state, .absent)
     }
 
+    func testPhase11AuthenticatedSessionAuthorizesRealGuestSocketAndFences() throws {
+        let clock = TestClock()
+        clock.value = 1_000
+        let fixture = try makeClusterSessionFixture()
+        let firstSession = try authenticateClusterSession(
+            fixture,
+            nowMilliseconds: clock.value
+        )
+        clock.value = 1_001
+        let firstBoundary = try ClusterSessionGuestAgentAuthenticationBoundary(
+            authorizer: fixture.authority,
+            session: firstSession,
+            nowMilliseconds: { clock.value }
+        )
+        let machine = PodSandboxLifecycleStateMachine()
+        let firstServer = try GuestServerHarness(
+            machine: machine,
+            authenticationBoundary: firstBoundary
+        )
+        defer { firstServer.close() }
+
+        let create = try request(
+            id: "sandbox-cluster-auth",
+            operation: .create,
+            requestID: "cluster-auth-create",
+            spec: true,
+            ownerID: fixture.credential.subjectID
+        )
+        XCTAssertEqual(try firstServer.send(create).result, .accepted)
+
+        let identityMismatch = try request(
+            id: "sandbox-cluster-auth",
+            operation: .prepare,
+            requestID: "cluster-auth-identity-mismatch",
+            ownerID: "different-subject"
+        )
+        XCTAssertEqual(
+            try firstServer.send(identityMismatch).error,
+            .sessionIdentityMismatch
+        )
+        XCTAssertEqual(machine.snapshot(for: create.sandboxID)?.state, .created)
+
+        clock.value = 1_100
+        let secondSession = try authenticateClusterSession(
+            fixture,
+            nowMilliseconds: clock.value
+        )
+        clock.value = 1_101
+        XCTAssertGreaterThan(secondSession.fencingToken, firstSession.fencingToken)
+        let firstFenced = try firstServer.send(
+            request(
+                id: "sandbox-cluster-auth",
+                operation: .prepare,
+                requestID: "cluster-auth-first-fenced",
+                ownerID: fixture.credential.subjectID
+            )
+        )
+        XCTAssertEqual(firstFenced.error, .sessionFenced)
+        XCTAssertEqual(machine.snapshot(for: create.sandboxID)?.state, .created)
+
+        let secondBoundary = try ClusterSessionGuestAgentAuthenticationBoundary(
+            authorizer: fixture.authority,
+            session: secondSession,
+            nowMilliseconds: { clock.value }
+        )
+        let secondServer = try GuestServerHarness(
+            machine: machine,
+            authenticationBoundary: secondBoundary
+        )
+        defer { secondServer.close() }
+        let prepared = try secondServer.send(
+            request(
+                id: "sandbox-cluster-auth",
+                operation: .prepare,
+                requestID: "cluster-auth-prepare",
+                ownerID: fixture.credential.subjectID
+            )
+        )
+        XCTAssertEqual(prepared.result, .accepted)
+
+        try fixture.authority.advanceMembershipEpoch(to: ClusterMembershipEpoch(1))
+        let epochFenced = try secondServer.send(
+            request(
+                id: "sandbox-cluster-auth",
+                operation: .start,
+                requestID: "cluster-auth-epoch-fenced",
+                ownerID: fixture.credential.subjectID
+            )
+        )
+        XCTAssertEqual(epochFenced.error, .sessionFenced)
+        XCTAssertEqual(machine.snapshot(for: create.sandboxID)?.state, .prepared)
+
+        clock.value = 1_200
+        let thirdSession = try authenticateClusterSession(
+            fixture,
+            nowMilliseconds: clock.value
+        )
+        clock.value = 1_201
+        XCTAssertGreaterThan(thirdSession.fencingToken, secondSession.fencingToken)
+        let thirdBoundary = try ClusterSessionGuestAgentAuthenticationBoundary(
+            authorizer: fixture.authority,
+            session: thirdSession,
+            nowMilliseconds: { clock.value }
+        )
+        let thirdServer = try GuestServerHarness(
+            machine: machine,
+            authenticationBoundary: thirdBoundary
+        )
+        defer { thirdServer.close() }
+        let started = try thirdServer.send(
+            request(
+                id: "sandbox-cluster-auth",
+                operation: .start,
+                requestID: "cluster-auth-start",
+                ownerID: fixture.credential.subjectID
+            )
+        )
+        XCTAssertEqual(started.result, .accepted)
+
+        try fixture.authority.revokeCredential(fixture.credential.credentialID)
+        let revoked = try thirdServer.send(
+            request(
+                id: "sandbox-cluster-auth",
+                operation: .stop,
+                requestID: "cluster-auth-revoked",
+                ownerID: fixture.credential.subjectID
+            )
+        )
+        XCTAssertEqual(revoked.error, .sessionFenced)
+        XCTAssertEqual(machine.snapshot(for: create.sandboxID)?.state, .running)
+    }
+
+    func testPhase11AuthenticatedSessionExpiryFailsClosedBeforeLifecycleMutation() throws {
+        let clock = TestClock()
+        clock.value = 1_000
+        let fixture = try makeClusterSessionFixture(sessionLifetimeMilliseconds: 10)
+        let session = try authenticateClusterSession(
+            fixture,
+            nowMilliseconds: clock.value
+        )
+        let boundary = try ClusterSessionGuestAgentAuthenticationBoundary(
+            authorizer: fixture.authority,
+            session: session,
+            nowMilliseconds: { clock.value }
+        )
+        let machine = PodSandboxLifecycleStateMachine()
+        let server = try GuestServerHarness(
+            machine: machine,
+            authenticationBoundary: boundary
+        )
+        defer { server.close() }
+
+        clock.value = 1_011
+        let response = try server.send(
+            request(
+                id: "sandbox-cluster-expired",
+                operation: .create,
+                requestID: "cluster-expired-create",
+                spec: true,
+                ownerID: fixture.credential.subjectID
+            )
+        )
+        XCTAssertEqual(response.error, .sessionExpired)
+        XCTAssertNil(machine.snapshot(for: response.sandboxID))
+    }
+
     func testAuthenticatedGuestServerRunsLifecycleOverRealSocketPairs() throws {
         let hostToGuest = try socketPair()
         let guestToHost = try socketPair()
@@ -500,7 +668,7 @@ final class PodSandboxContractTests: XCTestCase {
         let server = GuestAgentServer(
             dispatcher: GuestAgentDispatcher(
                 machine: machine,
-                authenticationBoundary: TestAuthenticatedSessionBoundary()
+                authenticationBoundary: try makeEphemeralAuthenticatedBoundary()
             )
         )
         let finished = DispatchSemaphore(value: 0)
@@ -776,7 +944,7 @@ final class PodSandboxContractTests: XCTestCase {
         let machine = PodSandboxLifecycleStateMachine()
         let dispatcher = GuestAgentDispatcher(
             machine: machine,
-            authenticationBoundary: TestAuthenticatedSessionBoundary()
+            authenticationBoundary: try makeEphemeralAuthenticatedBoundary()
         )
         let clock = TestClock()
         let expiredDeadline = try GuestAgentDeadline(
@@ -873,14 +1041,16 @@ final class PodSandboxContractTests: XCTestCase {
         spec: Bool = false,
         credit: Int = 1,
         deadlineMilliseconds: Int = 5_000,
-        cancellationOfRequestID: String? = nil
+        cancellationOfRequestID: String? = nil,
+        ownerID: String = "controller-a",
+        generation: UInt64 = 1
     ) throws -> GuestAgentEnvelope {
         let sandboxID = try PodSandboxID(id)
         let sandboxSpec = spec
             ? try PodSandboxSpec(
                 id: sandboxID,
-                ownerID: "controller-a",
-                generation: 1,
+                ownerID: ownerID,
+                generation: generation,
                 cpuCount: 2,
                 memoryMiB: 512
             )
@@ -889,12 +1059,64 @@ final class PodSandboxContractTests: XCTestCase {
             requestID: requestID,
             operation: operation,
             sandboxID: sandboxID,
-            ownerID: "controller-a",
-            generation: 1,
+            ownerID: ownerID,
+            generation: generation,
             deadlineMilliseconds: deadlineMilliseconds,
             credit: credit,
             cancellationOfRequestID: cancellationOfRequestID,
             spec: sandboxSpec
+        )
+    }
+
+    private func makeClusterSessionFixture(
+        subjectID: String = "controller-a",
+        sessionLifetimeMilliseconds: UInt64 = 300_000
+    ) throws -> ClusterSessionFixture {
+        let privateKey = P256.Signing.PrivateKey()
+        let nodeID = try ClusterNodeID("22222222-2222-4222-8222-222222222222")
+        let credential = try ClusterSessionCredential(
+            credentialID: "credential-1",
+            subjectID: subjectID,
+            nodeID: nodeID,
+            p256X963PublicKey: privateKey.publicKey.x963Representation
+        )
+        let authority = try ClusterSessionAuthority(
+            clusterID: try ClusterID("11111111-1111-4111-8111-111111111111"),
+            nodeID: nodeID,
+            credentials: try ClusterSessionCredentialCatalog([credential]),
+            challengeLifetimeMilliseconds: 5_000,
+            sessionLifetimeMilliseconds: sessionLifetimeMilliseconds
+        )
+        return ClusterSessionFixture(
+            authority: authority,
+            privateKey: privateKey,
+            credential: credential
+        )
+    }
+
+    private func authenticateClusterSession(
+        _ fixture: ClusterSessionFixture,
+        nowMilliseconds: UInt64
+    ) throws -> ClusterAuthenticatedSession {
+        let challenge = try fixture.authority.issueChallenge(
+            credentialID: fixture.credential.credentialID,
+            nowMilliseconds: nowMilliseconds
+        )
+        let wireChallenge = try ClusterSessionWireContract.decodeChallenge(
+            try challenge.canonicalData()
+        )
+        let signature = try fixture.privateKey.signature(for: wireChallenge.canonicalData())
+        let proof = try ClusterSessionProof(
+            credentialID: fixture.credential.credentialID,
+            signatureDERBase64: signature.derRepresentation.base64EncodedString()
+        )
+        let wireProof = try ClusterSessionWireContract.decodeProof(
+            try JSONEncoder().encode(proof)
+        )
+        return try fixture.authority.authenticate(
+            wireChallenge,
+            proof: wireProof,
+            nowMilliseconds: nowMilliseconds + 1
         )
     }
 
@@ -939,8 +1161,53 @@ final class PodSandboxContractTests: XCTestCase {
     }
 }
 
-private struct TestAuthenticatedSessionBoundary: GuestAgentAuthenticationBoundary {
-    func authorize(_ request: GuestAgentEnvelope) throws {}
+private struct ClusterSessionFixture {
+    let authority: ClusterSessionAuthority
+    let privateKey: P256.Signing.PrivateKey
+    let credential: ClusterSessionCredential
+}
+
+private func makeEphemeralAuthenticatedBoundary()
+    throws -> ClusterSessionGuestAgentAuthenticationBoundary
+{
+    let privateKey = P256.Signing.PrivateKey()
+    let nodeID = try ClusterNodeID("22222222-2222-4222-8222-222222222222")
+    let credential = try ClusterSessionCredential(
+        credentialID: "credential-1",
+        subjectID: "controller-a",
+        nodeID: nodeID,
+        p256X963PublicKey: privateKey.publicKey.x963Representation
+    )
+    let authority = try ClusterSessionAuthority(
+        clusterID: try ClusterID("11111111-1111-4111-8111-111111111111"),
+        nodeID: nodeID,
+        credentials: try ClusterSessionCredentialCatalog([credential])
+    )
+    let challenge = try authority.issueChallenge(
+        credentialID: credential.credentialID,
+        nowMilliseconds: 1_000
+    )
+    let wireChallenge = try ClusterSessionWireContract.decodeChallenge(
+        try challenge.canonicalData()
+    )
+    let signature = try privateKey.signature(for: wireChallenge.canonicalData())
+    let proof = try ClusterSessionProof(
+        credentialID: credential.credentialID,
+        signatureDERBase64: signature.derRepresentation.base64EncodedString()
+    )
+    let wireProof = try ClusterSessionWireContract.decodeProof(
+        try JSONEncoder().encode(proof)
+    )
+    let session = try authority.authenticate(
+        wireChallenge,
+        proof: wireProof,
+        nowMilliseconds: 1_001
+    )
+    return try ClusterSessionGuestAgentAuthenticationBoundary(
+        authorizer: authority,
+        session: session,
+        nowMilliseconds: { 1_001 }
+    )
 }
 
 private final class TestClock: @unchecked Sendable {
@@ -974,7 +1241,8 @@ private final class GuestServerHarness: @unchecked Sendable {
 
     init(
         machine: PodSandboxLifecycleStateMachine,
-        readTimeoutMilliseconds: Int = GuestAgentProtocolV1.maximumDeadlineMilliseconds
+        readTimeoutMilliseconds: Int = GuestAgentProtocolV1.maximumDeadlineMilliseconds,
+        authenticationBoundary: (any GuestAgentAuthenticationBoundary)? = nil
     ) throws {
         let inputPair = try makeUnixSocketPair()
         let outputPair = try makeUnixSocketPair()
@@ -984,9 +1252,15 @@ private final class GuestServerHarness: @unchecked Sendable {
         self.hostOutput = outputPair.1
         try GuestAgentFrameCodec.configureConnectedSocket(descriptor: hostOutput)
 
+        let boundary: any GuestAgentAuthenticationBoundary
+        if let authenticationBoundary {
+            boundary = authenticationBoundary
+        } else {
+            boundary = try makeEphemeralAuthenticatedBoundary()
+        }
         let dispatcher = GuestAgentDispatcher(
             machine: machine,
-            authenticationBoundary: TestAuthenticatedSessionBoundary()
+            authenticationBoundary: boundary
         )
         let server: GuestAgentServer
         if readTimeoutMilliseconds == GuestAgentProtocolV1.maximumDeadlineMilliseconds {

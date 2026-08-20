@@ -1,8 +1,9 @@
 # Phase 12 pod-sandbox guest agent
 
-Status: portable HostwrightPodSandbox boundary implemented; live Apple
-Container integration remains explicitly blocked by the Phase 08 runtime
-release and the authenticated-session implementation owned by Phase 11.
+Status: portable HostwrightPodSandbox boundary implemented; the Phase 11
+authenticated-session adapter is integrated at the guest-agent boundary. Live
+Apple Container integration remains explicitly blocked by the Phase 08 runtime
+release.
 
 This slice owns the pod-sandbox lifecycle model, the guest-agent protocol v1,
 the portable `hostwright-pod-sandbox-guest` executable, and a real subprocess
@@ -66,12 +67,18 @@ per-sandbox session grant: the first lifecycle request must grant credit,
 later requests may replenish it, each accepted request consumes one unit, and
 the response reports the remaining window. Teardown clears the window.
 
-Authentication is a required boundary before dispatch. The library accepts a
-`GuestAgentAuthenticationBoundary` supplied by a later authenticated-session
-implementation. The portable executable is wired to
-`UnavailableGuestAgentAuthenticationBoundary`, so unauthenticated requests
-return an explicit error before lifecycle state can change. It contains no
-credential bypass or test credential.
+Authentication is a required boundary before dispatch. The production
+`ClusterSessionGuestAgentAuthenticationBoundary` retains one real Phase 11
+`ClusterAuthenticatedSession` and calls `ClusterSessionAuthorizing` for every
+request, binding `request.ownerID` to the authenticated session subject. Phase
+11 therefore remains authoritative for strict challenge/proof validation,
+expiry, revocation fencing, membership epochs, and monotonic session fencing;
+no credential or handshake message is copied into the guest-agent lifecycle
+wire. The portable executable remains wired to
+`UnavailableGuestAgentAuthenticationBoundary` because the future node-agent
+transport that supplies an authenticated session is not yet present; it
+returns an explicit error before lifecycle state can change and contains no
+credential bypass.
 
 ## Transport and executable
 
@@ -89,14 +96,16 @@ canonical/unknown/duplicate fields, unauthenticated dispatch, deadline and
 cancellation behavior, credit exhaustion, request replay, invalid
 transitions, ownership/generation fencing, restart recovery, partial cleanup,
 real fragmented socket-pair dispatch, persistent restart recovery, and the
-real guest subprocess. The authenticated socket-pair tests inject only an
-explicit test session boundary into the library server; the shipped executable
-remains fail-closed until Phase 11 supplies the production boundary.
+real guest subprocess. The authenticated socket-pair tests perform a real
+Phase 11 P-256 challenge/proof exchange, then exercise the production adapter
+through Unix sockets; the shipped executable remains fail-closed until the
+node-agent transport can supply that authenticated session.
 
 ## Deferred integration boundary
 
 No Apple Container command, VM, Docker process, daemon, or Phase 08 evidence is
 used by this implementation. After Phase 08 records an explicit runtime
-release and Phase 11 supplies authenticated sessions, the next slice is a
-Linux arm64 build plus one real shared-namespace sandbox and exact cleanup
-proof. CRI, CNI, and CSI adapters remain out of scope for this phase.
+release and the node-agent transport supplies the Phase 11 session binding,
+the next slice is a Linux arm64 build plus one real shared-namespace sandbox
+and exact cleanup proof. CRI, CNI, and CSI adapters remain out of scope for
+this phase.

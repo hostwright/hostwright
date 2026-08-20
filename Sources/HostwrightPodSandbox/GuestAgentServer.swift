@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import HostwrightCluster
 
 public final class GuestAgentDispatcher: @unchecked Sendable {
     public static let advertisedCapabilities: [GuestAgentCapability] = [
@@ -37,9 +38,24 @@ public final class GuestAgentDispatcher: @unchecked Sendable {
             return response(for: request, error: .malformed)
         }
 
+        if let deadline {
+            do {
+                try deadline.assertActive()
+            } catch GuestAgentProtocolError.deadlineExceeded {
+                return response(for: request, error: .deadlineExceeded)
+            } catch {
+                return response(for: request, error: .internalFailure)
+            }
+        }
+        if cancellation?.isCancelled == true {
+            return response(for: request, error: .cancelled)
+        }
+
         do {
             try authenticationBoundary.authorize(request)
         } catch let error as GuestAgentProtocolError {
+            return response(for: request, error: errorCode(for: error))
+        } catch let error as ClusterSessionError {
             return response(for: request, error: errorCode(for: error))
         } catch {
             return response(for: request, error: .unauthenticated)
@@ -192,6 +208,35 @@ public final class GuestAgentDispatcher: @unchecked Sendable {
         case .cancelled: .cancelled
         case .creditExhausted: .creditExhausted
         default: .malformed
+        }
+    }
+
+    private func errorCode(for error: ClusterSessionError) -> GuestAgentErrorCode {
+        switch error {
+        case .challengeContextMismatch:
+            .authenticationContextMismatch
+        case .sessionNotFound:
+            .sessionNotFound
+        case .sessionBindingMismatch:
+            .sessionBindingMismatch
+        case .sessionNotYetValid:
+            .sessionNotYetValid
+        case .sessionExpired:
+            .sessionExpired
+        case .sessionClosed:
+            .sessionClosed
+        case .sessionFenced:
+            .sessionFenced
+        case .membershipEpochMismatch:
+            .membershipEpochMismatch
+        case .fenceMismatch:
+            .fenceMismatch
+        case .sessionIdentityMismatch:
+            .sessionIdentityMismatch
+        case .credentialRevoked:
+            .sessionFenced
+        default:
+            .unauthenticated
         }
     }
 

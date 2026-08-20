@@ -578,7 +578,10 @@ let package = Package(
                 .linkedFramework("Security")
             ]
         ),
-        .target(name: "HostwrightPodSandbox"),
+        .target(
+            name: "HostwrightPodSandbox",
+            dependencies: ["HostwrightCluster"]
+        ),
         .executableTarget(
             name: "HostwrightPodSandboxGuest",
             dependencies: ["HostwrightPodSandbox"]
@@ -949,6 +952,7 @@ let package = Package(
         .testTarget(
             name: "HostwrightPodSandboxTests",
             dependencies: [
+                "HostwrightCluster",
                 "HostwrightPodSandbox"
             ]
         )

@@ -122,6 +122,21 @@ public final class DockerUnixSocketListener: @unchecked Sendable {
 
     public func accept(timeoutMilliseconds: Int) throws -> Int32 {
         guard timeoutMilliseconds > 0 else { throw DockerSocketError.acceptFailed }
+        let accepted = try acceptDescriptor(timeoutMilliseconds: timeoutMilliseconds)
+        do {
+            try validatePeer(accepted)
+            try configureConnectedSocket(accepted)
+            return accepted
+        } catch {
+            _ = Darwin.close(accepted)
+            throw error
+        }
+    }
+
+    private func acceptDescriptor(timeoutMilliseconds: Int) throws -> Int32 {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !closed else { throw DockerSocketError.cancelled }
         try validatePathIdentity()
         var entry = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
         let result = Darwin.poll(
@@ -135,14 +150,7 @@ public final class DockerUnixSocketListener: @unchecked Sendable {
         }
         let accepted = Darwin.accept(descriptor, nil, nil)
         guard accepted >= 0 else { throw DockerSocketError.acceptFailed }
-        do {
-            try validatePeer(accepted)
-            try configureConnectedSocket(accepted)
-            return accepted
-        } catch {
-            _ = Darwin.close(accepted)
-            throw error
-        }
+        return accepted
     }
 
     public func closeAndRemoveOwnedSocket() {

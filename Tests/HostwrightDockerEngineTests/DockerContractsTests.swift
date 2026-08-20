@@ -44,6 +44,16 @@ final class DockerContractsTests: XCTestCase {
         XCTAssertFalse(request.keepAlive)
     }
 
+    func testHTTPValueNormalizesCaseInsensitiveHeadersDeterministically() throws {
+        let request = DockerHTTPRequest(
+            method: .get,
+            target: "/v1.52/_ping",
+            headers: ["Host": "first", "host": "last"]
+        )
+
+        XCTAssertEqual(request.header("HOST"), "last")
+    }
+
     func testChunkedBodyIsDecodedAndConflictingFramingIsRejected() throws {
         let chunked = Data(
             "POST /v1.52/test HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nbody\r\n0\r\n\r\n".utf8

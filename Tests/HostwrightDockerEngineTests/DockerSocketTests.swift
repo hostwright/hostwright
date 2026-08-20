@@ -74,6 +74,20 @@ final class DockerSocketTests: XCTestCase {
         _ = close(accepted)
     }
 
+    func testAcceptAfterListenerCloseReportsCancellation() throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let listener = try DockerUnixSocketListener(
+            socketPath: root.appendingPathComponent("docker.sock").path,
+            recoverStaleSocket: true
+        )
+        listener.closeAndRemoveOwnedSocket()
+
+        XCTAssertThrowsError(try listener.accept(timeoutMilliseconds: 1_000)) { error in
+            XCTAssertEqual(error as? DockerSocketError, .cancelled)
+        }
+    }
+
     func testPeerMismatchIsRejectedBeforeHTTPParsing() throws {
         let root = try makeRoot()
         defer { try? FileManager.default.removeItem(at: root) }

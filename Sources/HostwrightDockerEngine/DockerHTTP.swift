@@ -186,7 +186,16 @@ public struct DockerHTTPRequest: Equatable, Sendable {
     }
 
     private static func normalized(_ headers: [String: String]) -> [String: String] {
-        Dictionary(uniqueKeysWithValues: headers.map { ($0.key.lowercased(), $0.value) })
+        headers
+            .sorted { left, right in
+                let leftName = left.key.lowercased()
+                let rightName = right.key.lowercased()
+                if leftName != rightName { return leftName < rightName }
+                return left.key < right.key
+            }
+            .reduce(into: [:]) { result, header in
+                result[header.key.lowercased()] = header.value
+            }
     }
 
     private static func defaultKeepAlive(version: String, headers: [String: String]) -> Bool {

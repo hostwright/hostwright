@@ -89,10 +89,18 @@ let package = Package(
         ),
         .executable(name: "hostwright-dist", targets: ["HostwrightDistributionTool"]),
         .executable(
+            name: "hostwright-release-qualify",
+            targets: ["HostwrightReleaseQualificationTool"]
+        ),
+        .executable(
             name: "hostwright-runtime-conformance",
             targets: ["HostwrightRuntimeConformanceTool"]
         ),
         .library(name: "HostwrightCore", targets: ["HostwrightCore"]),
+        .library(
+            name: "HostwrightReleaseQualification",
+            targets: ["HostwrightReleaseQualification"]
+        ),
         .library(name: "HostwrightControlPlane", targets: ["HostwrightControlPlane"]),
         .library(name: "HostwrightControlSecurity", targets: ["HostwrightControlSecurity"]),
         .library(name: "HostwrightControl", targets: ["HostwrightControl"]),
@@ -264,6 +272,10 @@ let package = Package(
             dependencies: ["HostwrightDistribution"]
         ),
         .executableTarget(
+            name: "HostwrightReleaseQualificationTool",
+            dependencies: ["HostwrightReleaseQualification"]
+        ),
+        .executableTarget(
             name: "HostwrightRuntimeConformanceTool",
             dependencies: [
                 "HostwrightCLI",
@@ -307,6 +319,10 @@ let package = Package(
             ]
         ),
         .target(name: "HostwrightCore"),
+        .target(
+            name: "HostwrightReleaseQualification",
+            dependencies: ["HostwrightCore"]
+        ),
         .target(
             name: "HostwrightControlPlane",
             dependencies: ["HostwrightCore"]
@@ -754,6 +770,13 @@ let package = Package(
         .testTarget(
             name: "HostwrightCoreTests",
             dependencies: ["HostwrightCore"],
+            resources: [
+                .process("Fixtures")
+            ]
+        ),
+        .testTarget(
+            name: "HostwrightReleaseQualificationTests",
+            dependencies: ["HostwrightReleaseQualification"],
             resources: [
                 .process("Fixtures")
             ]

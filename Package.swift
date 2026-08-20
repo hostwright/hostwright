@@ -133,6 +133,11 @@ let package = Package(
         .library(
             name: "HostwrightStorageHelper",
             targets: ["HostwrightStorageHelper"]
+        ),
+        .library(name: "HostwrightPodSandbox", targets: ["HostwrightPodSandbox"]),
+        .executable(
+            name: "hostwright-pod-sandbox-guest",
+            targets: ["HostwrightPodSandboxGuest"]
         )
     ],
     dependencies: [
@@ -573,6 +578,11 @@ let package = Package(
                 .linkedFramework("Security")
             ]
         ),
+        .target(name: "HostwrightPodSandbox"),
+        .executableTarget(
+            name: "HostwrightPodSandboxGuest",
+            dependencies: ["HostwrightPodSandbox"]
+        ),
         .target(
             name: "HostwrightTestSupport",
             dependencies: [
@@ -934,6 +944,12 @@ let package = Package(
             ],
             resources: [
                 .process("Fixtures")
+            ]
+        ),
+        .testTarget(
+            name: "HostwrightPodSandboxTests",
+            dependencies: [
+                "HostwrightPodSandbox"
             ]
         )
     ]

@@ -1,0 +1,178 @@
+{
+  "contract": "hostwright-pod-sandbox-guest-agent",
+  "protocolVersion": 1,
+  "status": "portable-boundary-implemented",
+  "framing": {
+    "transport": "connected-byte-stream",
+    "lengthPrefixBytes": 4,
+    "lengthEncoding": "unsigned-big-endian",
+    "zeroLength": "reject",
+    "requestPayloadBytes": {
+      "maximum": 65536
+    },
+    "responseOrFramePayloadBytes": {
+      "maximum": 1048576
+    }
+  },
+  "encoding": {
+    "mediaType": "application/json",
+    "canonical": {
+      "sortedKeys": true,
+      "withoutEscapingSlashes": true
+    },
+    "reject": [
+      "malformed-json",
+      "duplicate-field",
+      "unknown-field",
+      "missing-field",
+      "non-canonical-json",
+      "unsupported-version"
+    ]
+  },
+  "authentication": {
+    "requiredBeforeDispatch": true,
+    "boundary": "GuestAgentAuthenticationBoundary",
+    "portableExecutableBoundary": "unavailable-fail-closed",
+    "unauthenticatedLifecycleMutation": "reject"
+  },
+  "limits": {
+    "deadlineMilliseconds": {
+      "minimum": 1,
+      "maximum": 30000
+    },
+    "requestIDBytes": 128,
+    "ownerIDBytes": 128,
+    "credit": 64,
+    "capabilities": 16,
+    "errorBytes": 512
+  },
+  "envelope": {
+    "required": [
+      "apiVersion",
+      "kind",
+      "requestID",
+      "operation",
+      "sandboxID",
+      "ownerID",
+      "generation",
+      "deadlineMilliseconds",
+      "credit",
+      "capabilities"
+    ],
+    "optional": [
+      "cancellationOfRequestID",
+      "cpuCount",
+      "memoryMiB",
+      "state",
+      "result",
+      "error"
+    ],
+    "requestCreateFields": [
+      "cpuCount",
+      "memoryMiB"
+    ],
+    "responseResultFields": [
+      "state",
+      "result"
+    ],
+    "responseErrorField": "error"
+  },
+  "capabilities": [
+    "pod-sandbox-lifecycle",
+    "restart-recovery",
+    "cancellation",
+    "stream-credit",
+    "strict-framing"
+  ],
+  "states": [
+    "absent",
+    "created",
+    "prepared",
+    "running",
+    "stopped",
+    "recovering",
+    "cancelling",
+    "tearingDown"
+  ],
+  "transitions": {
+    "create": {
+      "from": [
+        "absent"
+      ],
+      "to": "created",
+      "generationFence": "strictly-newer-than-tombstone"
+    },
+    "prepare": {
+      "from": [
+        "created",
+        "stopped",
+        "prepared"
+      ],
+      "to": "prepared"
+    },
+    "start": {
+      "from": [
+        "prepared",
+        "stopped",
+        "running"
+      ],
+      "to": "running"
+    },
+    "stop": {
+      "from": [
+        "running",
+        "stopped"
+      ],
+      "to": "stopped"
+    },
+    "restart": {
+      "from": [
+        "prepared",
+        "stopped",
+        "running"
+      ],
+      "to": "running"
+    },
+    "recover": {
+      "from": [
+        "recovering",
+        "created",
+        "prepared",
+        "running",
+        "stopped"
+      ],
+      "to": "known-state-or-absent-after-cleanup"
+    },
+    "cancel": {
+      "from": [
+        "created",
+        "prepared",
+        "running",
+        "stopped",
+        "recovering",
+        "cancelling"
+      ],
+      "to": "absent",
+      "cleanup": "exact-owned-resources"
+    },
+    "teardown": {
+      "from": [
+        "created",
+        "prepared",
+        "running",
+        "stopped",
+        "recovering",
+        "cancelling",
+        "tearingDown"
+      ],
+      "to": "absent",
+      "cleanup": "exact-owned-resources"
+    }
+  },
+  "deferred": [
+    "apple-container-vm-runtime",
+    "cri-adapter",
+    "cni-adapter",
+    "csi-adapter"
+  ]
+}

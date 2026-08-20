@@ -1,0 +1,89 @@
+# Phase 12 pod-sandbox guest agent
+
+Status: portable HostwrightPodSandbox boundary implemented; live Apple
+Container integration remains explicitly blocked by the Phase 08 runtime
+release and the authenticated-session implementation owned by Phase 11.
+
+This slice owns the pod-sandbox lifecycle model, the guest-agent protocol v1,
+the portable `hostwright-pod-sandbox-guest` executable, and a real subprocess
+transport. It does not claim a VM, a Linux namespace, or a CRI/CNI/CSI
+adapter.
+
+## Public library boundary
+
+`HostwrightPodSandbox` exposes bounded `PodSandboxID` and `PodSandboxSpec`
+values, the `PodSandboxState` and `PodSandboxTransition` vocabularies, and
+recovery/snapshot/result values. Identifiers and owners are non-empty,
+lowercase bounded names; generations start at one; CPU and memory limits are
+bounded before a lifecycle operation is accepted.
+
+`PodSandboxLifecycleStateMachine` is an explicitly owner- and generation-
+fenced state machine. A request ID is bound to its transition inputs and an
+exact replay returns the prior result without repeating cleanup. A teardown or
+cancel creates a tombstone, removes the live record, and permits only bounded
+idempotent cleanup replays. A newer generation may create the same sandbox ID;
+stale owners and generations cannot act on the tombstone.
+
+The modeled resource accounting is deliberately exact: create owns one
+resource, prepare adds one, and running adds one. Recovery accepts only
+consistent partial evidence, restores the known state, or removes the
+remaining owned resources. This is lifecycle accounting, not an Apple
+Container VM claim.
+
+## Guest protocol v1
+
+The executable protocol is a connected byte stream with an unsigned,
+four-byte big-endian payload length. A zero length is invalid. The canonical
+JSON payload is sorted-key JSON with unescaped slashes.
+
+| Boundary | Limit |
+| --- | ---: |
+| Request payload | 64 KiB |
+| Response or other frame payload | 1 MiB |
+| Deadline | 1–30,000 ms |
+| Request/owner/cancellation IDs | 1–128 UTF-8 bytes |
+| Stream credit | 0–64 units |
+| Capabilities | 0–16 unique values |
+| Error text | 512 UTF-8 bytes |
+
+The codec rejects malformed JSON, duplicate or unknown top-level fields,
+missing required fields, unsupported versions, non-canonical JSON, invalid
+envelope combinations, and over-limit lengths before allocating a payload.
+Requests and responses carry the protocol version, kind, request ID,
+operation, sandbox ID, owner, generation, bounded deadline, credit, and
+capability/error/result fields appropriate to their kind. Cancellation names a
+different request ID. The dispatcher consumes one unit of request credit and
+returns the remaining credit.
+
+Authentication is a required boundary before dispatch. The library accepts a
+`GuestAgentAuthenticationBoundary` supplied by a later authenticated-session
+implementation. The portable executable is wired to
+`UnavailableGuestAgentAuthenticationBoundary`, so unauthenticated requests
+return an explicit error before lifecycle state can change. It contains no
+credential bypass or test credential.
+
+## Transport and executable
+
+`GuestAgentProcessTransport` launches the portable executable with two Unix
+socket pairs, bounded non-blocking I/O, request/response identity checks, and
+deadline/cancellation handling. `GuestAgentServer` handles the same framed
+protocol on supplied descriptors. The executable supports `--stdio` and
+`--version`; protocol failures terminate with a generic stderr message and a
+protocol exit status without copying request data or credentials into logs.
+
+Focused tests cover malformed and oversized frames, unsupported versions,
+canonical/unknown/duplicate fields, unauthenticated dispatch, deadline and
+cancellation behavior, credit exhaustion, request replay, invalid
+transitions, ownership/generation fencing, restart recovery, partial cleanup,
+real socket-pair dispatch, and the real guest subprocess. The authenticated
+socket-pair test injects only an explicit test session boundary into the
+library server; the shipped executable remains fail-closed until Phase 11
+supplies the production boundary.
+
+## Deferred integration boundary
+
+No Apple Container command, VM, Docker process, daemon, or Phase 08 evidence is
+used by this implementation. After Phase 08 records an explicit runtime
+release and Phase 11 supplies authenticated sessions, the next slice is a
+Linux arm64 build plus one real shared-namespace sandbox and exact cleanup
+proof. CRI, CNI, and CSI adapters remain out of scope for this phase.

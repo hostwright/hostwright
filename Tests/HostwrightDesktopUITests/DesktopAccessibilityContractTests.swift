@@ -30,4 +30,41 @@ final class DesktopAccessibilityContractTests: XCTestCase {
             XCTAssertFalse(availability.systemImage.isEmpty)
         }
     }
+
+    func testEmptyCollectionsUseAnExplicitEmptyStateContract() {
+        XCTAssertEqual(DesktopCollectionState(count: 0), .empty)
+        XCTAssertEqual(DesktopCollectionState(count: 1), .populated)
+        XCTAssertEqual(DesktopCollectionState(count: 500), .populated)
+    }
+
+    func testSceneRestorationKeysAndOfflineControlsRemainStable() {
+        XCTAssertEqual(DesktopSceneStorageKey.selection, "desktop.console.selection")
+        XCTAssertEqual(
+            DesktopSceneStorageKey.selectedProject,
+            "desktop.console.selectedProject"
+        )
+        XCTAssertEqual(
+            DesktopSceneStorageKey.selectedService,
+            "desktop.console.selectedService"
+        )
+
+        let identifiers = [
+            DesktopAccessibilityIdentifier.connectionState,
+            DesktopAccessibilityIdentifier.reconnect,
+            DesktopAccessibilityIdentifier.disconnect,
+            DesktopAccessibilityIdentifier.statusRefresh,
+            DesktopAccessibilityIdentifier.overview,
+            DesktopAccessibilityIdentifier.events,
+            DesktopAccessibilityIdentifier.eventsRefresh,
+            DesktopAccessibilityIdentifier.eventsCancel,
+            DesktopAccessibilityIdentifier.logs,
+            DesktopAccessibilityIdentifier.selectedLogsOpen,
+            DesktopAccessibilityIdentifier.logsCancel,
+            DesktopAccessibilityIdentifier.menuConnectionState,
+            DesktopAccessibilityIdentifier.menuReconnect,
+            DesktopAccessibilityIdentifier.menuOpenWindow,
+        ]
+        XCTAssertEqual(identifiers.count, Set(identifiers).count)
+        XCTAssertTrue(identifiers.allSatisfy { $0.hasPrefix("desktop.") })
+    }
 }

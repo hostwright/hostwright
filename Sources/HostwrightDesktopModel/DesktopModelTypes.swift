@@ -1,5 +1,37 @@
 import Foundation
 
+public enum DesktopCollectionState: Equatable, Sendable {
+    case empty
+    case populated
+
+    public init(count: Int) {
+        self = count == 0 ? .empty : .populated
+    }
+}
+
+public enum DesktopAccessibilityIdentifier {
+    public static let connectionState = "desktop.connection.state"
+    public static let reconnect = "desktop.connection.reconnect"
+    public static let disconnect = "desktop.connection.disconnect"
+    public static let statusRefresh = "desktop.status.refresh"
+    public static let overview = "desktop.console.overview"
+    public static let events = "desktop.console.events"
+    public static let eventsRefresh = "desktop.events.refresh"
+    public static let eventsCancel = "desktop.events.cancel"
+    public static let logs = "desktop.console.logs"
+    public static let selectedLogsOpen = "desktop.logs.open.selected"
+    public static let logsCancel = "desktop.logs.cancel"
+    public static let menuConnectionState = "desktop.menu.connection.state"
+    public static let menuReconnect = "desktop.menu.reconnect"
+    public static let menuOpenWindow = "desktop.menu.openWindow"
+}
+
+public enum DesktopSceneStorageKey {
+    public static let selection = "desktop.console.selection"
+    public static let selectedProject = "desktop.console.selectedProject"
+    public static let selectedService = "desktop.console.selectedService"
+}
+
 public struct DesktopControlFailure: Error, Equatable, LocalizedError, Sendable {
     public let code: String
     public let message: String

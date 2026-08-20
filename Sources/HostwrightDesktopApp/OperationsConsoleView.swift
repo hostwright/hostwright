@@ -7,6 +7,7 @@ struct MenuBarLabel: View {
     var body: some View {
         Label(model.connectionState.label, systemImage: connectionImage)
             .foregroundStyle(connectionColor)
+            .accessibilityLabel("Hostwright connection: \(model.connectionState.label)")
     }
 
     private var connectionImage: String {
@@ -31,9 +32,9 @@ struct MenuBarLabel: View {
 struct OperationsConsoleView: View {
     @EnvironmentObject private var model: DesktopOperationsModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @SceneStorage("desktop.console.selection") private var storedSelection = "overview"
-    @State private var selectedProjectID: String?
-    @State private var selectedServiceID: String?
+    @SceneStorage(DesktopSceneStorageKey.selection) private var storedSelection = "overview"
+    @SceneStorage(DesktopSceneStorageKey.selectedProject) private var storedProjectID = ""
+    @SceneStorage(DesktopSceneStorageKey.selectedService) private var storedServiceID = ""
 
     var body: some View {
         NavigationSplitView {
@@ -50,7 +51,8 @@ struct OperationsConsoleView: View {
                 Section("Connection") {
                     Label(model.connectionState.label, systemImage: connectionImage)
                         .foregroundStyle(connectionColor)
-                        .accessibilityIdentifier("desktop.connection.state")
+                        .accessibilityLabel("Connection: \(model.connectionState.label)")
+                        .accessibilityIdentifier(DesktopAccessibilityIdentifier.connectionState)
                 }
             }
             .listStyle(.sidebar)
@@ -59,10 +61,10 @@ struct OperationsConsoleView: View {
             Group {
                 switch storedSelection {
                 case "events": EventsView()
-                case "logs": LogsView(selectedServiceID: $selectedServiceID)
+                case "logs": LogsView(selectedServiceID: selectedServiceBinding)
                 default: OverviewView(
-                    selectedProjectID: $selectedProjectID,
-                    selectedServiceID: $selectedServiceID
+                    selectedProjectID: selectedProjectBinding,
+                    selectedServiceID: selectedServiceBinding
                 )
                 }
             }
@@ -73,7 +75,7 @@ struct OperationsConsoleView: View {
                     } label: {
                         Label("Reconnect", systemImage: "arrow.clockwise")
                     }
-                    .accessibilityIdentifier("desktop.connection.reconnect")
+                    .accessibilityIdentifier(DesktopAccessibilityIdentifier.reconnect)
 
                     Button {
                         model.disconnect()
@@ -81,15 +83,58 @@ struct OperationsConsoleView: View {
                         Label("Disconnect", systemImage: "xmark.circle")
                     }
                     .disabled(model.connectionState == .disconnected)
-                    .accessibilityIdentifier("desktop.connection.disconnect")
+                    .accessibilityIdentifier(DesktopAccessibilityIdentifier.disconnect)
                 }
             }
         }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: storedSelection)
         .task {
+            updateSelectionValidity(for: model.projects)
             if case .disconnected = model.connectionState {
                 model.connect()
             }
+        }
+        .onChange(of: model.projects) { _, projects in
+            updateSelectionValidity(for: projects)
+        }
+        .onChange(of: model.connectionState) { _, _ in
+            updateSelectionValidity(for: model.projects)
+        }
+    }
+
+    private var selectedProjectBinding: Binding<String?> {
+        Binding(
+            get: { storedProjectID.isEmpty ? nil : storedProjectID },
+            set: { storedProjectID = $0 ?? "" }
+        )
+    }
+
+    private var selectedServiceBinding: Binding<String?> {
+        Binding(
+            get: { storedServiceID.isEmpty ? nil : storedServiceID },
+            set: { storedServiceID = $0 ?? "" }
+        )
+    }
+
+    private func updateSelectionValidity(for projects: [DesktopProjectStatus]) {
+        if projects.isEmpty {
+            if case .unavailable = model.connectionState {
+                storedProjectID = ""
+                storedServiceID = ""
+            }
+            return
+        }
+
+        if !storedProjectID.isEmpty, !projects.contains(where: { $0.id == storedProjectID }) {
+            storedProjectID = ""
+        }
+
+        guard let project = projects.first else {
+            storedServiceID = ""
+            return
+        }
+        if !storedServiceID.isEmpty, !project.services.contains(where: { $0.id == storedServiceID }) {
+            storedServiceID = ""
         }
     }
 
@@ -130,7 +175,7 @@ private struct OverviewView: View {
                 Button("Refresh status", systemImage: "arrow.clockwise") {
                     model.refreshStatus()
                 }
-                .accessibilityIdentifier("desktop.status.refresh")
+                .accessibilityIdentifier(DesktopAccessibilityIdentifier.statusRefresh)
             }
             .padding(.horizontal)
 
@@ -138,29 +183,31 @@ private struct OverviewView: View {
                 FailureBanner(failure: failure)
             }
 
-            Table(model.projects, selection: $selectedProjectID) {
-                TableColumn("Project") { project in
-                    Label(project.name, systemImage: project.availability.systemImage)
-                        .foregroundStyle(projectColor(project.availability))
-                        .accessibilityLabel("Project \(project.name), \(project.availability.label)")
+            if DesktopCollectionState(count: model.projects.count) == .populated {
+                Table(model.projects, selection: $selectedProjectID) {
+                    TableColumn("Project") { project in
+                        Label(project.name, systemImage: project.availability.systemImage)
+                            .foregroundStyle(projectColor(project.availability))
+                            .accessibilityLabel("Project \(project.name), \(project.availability.label)")
+                    }
+                    TableColumn("Manifest") { project in
+                        Text(project.manifestPath)
+                            .font(.system(.body, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    TableColumn("Services") { project in
+                        Text("\(project.services.count)")
+                            .monospacedDigit()
+                    }
+                    TableColumn("Status") { project in
+                        Text(project.availability.label)
+                            .foregroundStyle(projectColor(project.availability))
+                    }
                 }
-                TableColumn("Manifest") { project in
-                    Text(project.manifestPath)
-                        .font(.system(.body, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                TableColumn("Services") { project in
-                    Text("\(project.services.count)")
-                        .monospacedDigit()
-                }
-                TableColumn("Status") { project in
-                    Text(project.availability.label)
-                        .foregroundStyle(projectColor(project.availability))
-                }
+                .tableStyle(.inset(alternatesRowBackgrounds: true))
+                .frame(minHeight: 120)
             }
-            .tableStyle(.inset(alternatesRowBackgrounds: true))
-            .frame(minHeight: 120)
 
             if let project = model.projects.first {
                 ServiceTable(project: project, selectedServiceID: $selectedServiceID)
@@ -173,6 +220,7 @@ private struct OverviewView: View {
         }
         .padding(.vertical)
         .navigationTitle("Overview")
+        .accessibilityIdentifier(DesktopAccessibilityIdentifier.overview)
     }
 }
 
@@ -186,33 +234,41 @@ private struct ServiceTable: View {
             Text("Services")
                 .font(.headline)
                 .padding(.horizontal)
-            Table(project.services, selection: $selectedServiceID) {
-                TableColumn("Service") { service in
-                    Label(service.id, systemImage: service.availability.systemImage)
-                        .foregroundStyle(projectColor(service.availability))
-                        .accessibilityLabel("Service \(service.id), \(service.detailLabel)")
-                }
-                TableColumn("Lifecycle") { service in
-                    Text(service.detailLabel)
-                        .foregroundStyle(.secondary)
-                }
-                TableColumn("Resource") { service in
-                    Text(service.resourceIdentifier ?? "Not observed")
-                        .font(.system(.body, design: .monospaced))
-                        .lineLimit(1)
-                }
-                TableColumn("Logs") { service in
-                    Button("Open", systemImage: "text.alignleft") {
-                        selectedServiceID = service.id
-                        model.openLogStream(for: service.id)
+            if DesktopCollectionState(count: project.services.count) == .populated {
+                Table(project.services, selection: $selectedServiceID) {
+                    TableColumn("Service") { service in
+                        Label(service.id, systemImage: service.availability.systemImage)
+                            .foregroundStyle(projectColor(service.availability))
+                            .accessibilityLabel("Service \(service.id), \(service.detailLabel)")
                     }
-                    .labelStyle(.iconOnly)
-                    .help("Open finite logs for \(service.id)")
-                    .accessibilityLabel("Open logs for \(service.id)")
-                    .accessibilityIdentifier("desktop.logs.open.\(service.id)")
+                    TableColumn("Lifecycle") { service in
+                        Text(service.detailLabel)
+                            .foregroundStyle(.secondary)
+                    }
+                    TableColumn("Resource") { service in
+                        Text(service.resourceIdentifier ?? "Not observed")
+                            .font(.system(.body, design: .monospaced))
+                            .lineLimit(1)
+                    }
+                    TableColumn("Logs") { service in
+                        Button("Open", systemImage: "text.alignleft") {
+                            selectedServiceID = service.id
+                            model.openLogStream(for: service.id)
+                        }
+                        .labelStyle(.iconOnly)
+                        .help("Open finite logs for \(service.id)")
+                        .accessibilityLabel("Open logs for \(service.id)")
+                        .accessibilityIdentifier("desktop.logs.open.\(service.id)")
+                    }
                 }
+                .tableStyle(.inset(alternatesRowBackgrounds: true))
+                .frame(minHeight: 120)
+            } else {
+                EmptyStateView(
+                    title: "No service status yet",
+                    message: "The daemon has not reported any configured services."
+                )
             }
-            .tableStyle(.inset(alternatesRowBackgrounds: true))
         }
     }
 }
@@ -229,12 +285,12 @@ private struct EventsView: View {
                 Button("Refresh", systemImage: "arrow.clockwise") {
                     model.startEventStream()
                 }
-                .accessibilityIdentifier("desktop.events.refresh")
+                .accessibilityIdentifier(DesktopAccessibilityIdentifier.eventsRefresh)
                 if model.isEventStreamRunning {
                     Button("Cancel", systemImage: "xmark") {
                         model.cancelStreams()
                     }
-                    .accessibilityIdentifier("desktop.events.cancel")
+                    .accessibilityIdentifier(DesktopAccessibilityIdentifier.eventsCancel)
                 }
             }
             .padding()
@@ -256,6 +312,7 @@ private struct EventsView: View {
             }
         }
         .navigationTitle("Events")
+        .accessibilityIdentifier(DesktopAccessibilityIdentifier.events)
     }
 }
 
@@ -321,13 +378,13 @@ private struct LogsView: View {
                     Button("Open", systemImage: "text.alignleft") {
                         model.openLogStream(for: selectedServiceID)
                     }
-                    .accessibilityIdentifier("desktop.logs.open.selected")
+                    .accessibilityIdentifier(DesktopAccessibilityIdentifier.selectedLogsOpen)
                 }
                 if model.isLogStreamRunning {
                     Button("Cancel", systemImage: "xmark") {
                         model.cancelStreams()
                     }
-                    .accessibilityIdentifier("desktop.logs.cancel")
+                    .accessibilityIdentifier(DesktopAccessibilityIdentifier.logsCancel)
                 }
             }
             .padding()
@@ -359,6 +416,7 @@ private struct LogsView: View {
             }
         }
         .navigationTitle("Logs")
+        .accessibilityIdentifier(DesktopAccessibilityIdentifier.logs)
     }
 }
 
@@ -369,7 +427,8 @@ struct MenuBarHealthView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Label(model.connectionState.label, systemImage: connectionImage)
-                .accessibilityIdentifier("desktop.menu.connection.state")
+                .accessibilityLabel("Hostwright connection: \(model.connectionState.label)")
+                .accessibilityIdentifier(DesktopAccessibilityIdentifier.menuConnectionState)
             if let health = model.daemonHealth {
                 Text("Daemon: \(health.statusLabel)")
                     .font(.caption)
@@ -378,12 +437,12 @@ struct MenuBarHealthView: View {
             Button("Reconnect", systemImage: "arrow.clockwise") {
                 model.reconnect()
             }
-            .accessibilityIdentifier("desktop.menu.reconnect")
+            .accessibilityIdentifier(DesktopAccessibilityIdentifier.menuReconnect)
             Button("Open Hostwright", systemImage: "macwindow") {
                 openWindow(id: "operations")
                 NSApp.activate(ignoringOtherApps: true)
             }
-            .accessibilityIdentifier("desktop.menu.openWindow")
+            .accessibilityIdentifier(DesktopAccessibilityIdentifier.menuOpenWindow)
             Button("Quit Hostwright", systemImage: "power") {
                 NSApplication.shared.terminate(nil)
             }
@@ -441,6 +500,8 @@ private struct EmptyStateView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(32)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title): \(message)")
     }
 }
 

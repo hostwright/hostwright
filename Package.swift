@@ -537,7 +537,10 @@ let package = Package(
         ),
         .target(
             name: "HostwrightCluster",
-            dependencies: ["HostwrightCore"]
+            dependencies: [
+                "HostwrightCore",
+                "HostwrightControlPlane"
+            ]
         ),
         .target(
             name: "HostwrightStorageHelper",

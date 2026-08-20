@@ -13,6 +13,10 @@ The implementation is isolated in the `HostwrightCluster` target:
   owns the pinned artifact descriptor, archive acceptance boundary, private
   layout, process configuration, snapshot/restore plans, and exact cleanup
   ownership.
+- [`ClusterSession.swift`](../../Sources/HostwrightCluster/ClusterSession.swift)
+  owns the authenticated node-session challenge/proof contract, session
+  binding, lifecycle, revocation, membership-epoch fencing, and strict wire
+  decoding helpers that Phase 12 can adapt to its guest-agent boundary.
 
 ## Membership contract
 
@@ -33,6 +37,46 @@ Voter removal preserves the current quorum and refuses a change that would
 leave no voter or fewer surviving voters than the current quorum. Replacement
 is planned as learner join, learner promotion, then old-voter removal so the
 old voter remains present until the replacement is a voter.
+
+## Authenticated cluster-session contract
+
+`ClusterSessionCredential` binds one bounded credential identifier and subject
+identifier to one `ClusterNodeID` and an exact P-256 X9.63 public key.
+`ClusterSessionCredentialCatalog` is the non-secret credential authority input;
+duplicate credential identities and invalid public-key material fail before a
+session authority is created. Private keys are never accepted by the contract.
+
+`ClusterSessionAuthority` issues a canonical, sorted-key
+`hostwright-cluster-session-v1` challenge. The challenge binds the cluster ID,
+node ID, current membership epoch, subject, credential ID, a 32-byte random
+nonce, and bounded issue/expiry timestamps. The client returns a canonical DER
+P-256 signature over the complete challenge. `ClusterSessionWireContract`
+reuses the Phase 09 strict decoder boundary so unknown, missing, noncanonical,
+or malformed handshake fields fail before authentication state changes.
+
+Authentication accepts only a challenge issued by the same authority, in the
+current membership epoch and validity window, with the catalog's exact public
+key. A challenge is consumed before signature verification, so a rejected
+proof cannot be retried. Successful authentication creates a binding carrying
+the cluster/node identity, subject, credential, membership epoch, session
+expiry, and a monotonic fencing token. Only one active session per subject is
+allowed: a new authentication fences the prior session. Credential revocation
+and membership-epoch advancement fence every affected session immediately.
+
+The lifecycle is explicit and deterministic: `active` sessions validate only
+when their complete binding and current fencing token match; `close` and
+`fence` are idempotent for already terminal records; expiry, closure, fencing,
+stale epochs, replayed challenges, identity mismatch, and proof failures each
+have stable typed errors. `authorize(_:subjectID:nowMilliseconds:)` is the
+intended Phase 12 adapter seam: the guest-agent authentication boundary can
+retain the authenticated binding and validate it before dispatching each
+request, without placing credentials in guest-agent request payloads.
+
+This source-only authority is the admission and fencing contract, not a claim
+of durable replicated session storage, a CA/mTLS transport, or live node-agent
+qualification. Persistent CA/session records and reciprocal network transport
+remain P11-C02/P11-C05 work; Phase 08 still owns the runtime required for
+multi-host evidence.
 
 ## Managed etcd contract
 
@@ -103,8 +147,10 @@ supervision failure transitions; they do not qualify a real etcd member.
 ## Deliberate boundary
 
 This target does not implement scheduler placement, authoritative replicated
-state, fencing, node agents, remote operations, shared schema migrations, or
-capability promotion. Live etcd qualification and VM fault testing remain
-blocked until the Phase 08 runtime coordinator explicitly releases the
-reserved runtime. No etcd archive was downloaded or launched while the
-runtime remains reserved.
+state, consensus-backed cluster fencing, node-agent transport, remote
+operations, shared schema migrations, or capability promotion. The
+authenticated session state machine above is intentionally the source-only
+identity/fencing seam that later node-agent and replicated-state work must
+consume. Live etcd qualification and VM fault testing remain blocked until the
+Phase 08 runtime coordinator explicitly releases the reserved runtime. No
+etcd archive was downloaded or launched while the runtime remains reserved.

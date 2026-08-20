@@ -27,11 +27,16 @@ public enum DesktopAccessibilityIdentifier {
     public static let logs = "desktop.console.logs"
     public static let emptyLogs = "desktop.console.empty.logs"
     public static let selectedLogsOpen = "desktop.logs.open.selected"
+    public static let logsOpenPrefix = "desktop.logs.open."
     public static let logsCancel = "desktop.logs.cancel"
     public static let menuConnectionState = "desktop.menu.connection.state"
     public static let menuReconnect = "desktop.menu.reconnect"
     public static let menuOpenWindow = "desktop.menu.openWindow"
     public static let menuQuit = "desktop.menu.quit"
+
+    public static func logsOpen(for serviceID: String) -> String {
+        "\(logsOpenPrefix)\(serviceID)"
+    }
 }
 
 public enum DesktopSceneStorageKey {

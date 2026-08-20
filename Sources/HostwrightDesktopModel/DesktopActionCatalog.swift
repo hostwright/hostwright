@@ -440,11 +440,33 @@ public enum DesktopActionCatalog {
     }
 
     public static func guiElement(identifier: String) -> DesktopGUIElementDescriptor? {
-        guiElements.first { $0.identifier == identifier }
+        if let element = guiElements.first(where: { $0.identifier == identifier }) {
+            return element
+        }
+        guard identifier.hasPrefix(DesktopAccessibilityIdentifier.logsOpenPrefix),
+            identifier.count > DesktopAccessibilityIdentifier.logsOpenPrefix.count else {
+            return nil
+        }
+        return element(
+            identifier,
+            .action,
+            command: "logs"
+        )
     }
 
     public static func guiAction(identifier: String) -> DesktopGUIActionDescriptor? {
-        guiActions.first { $0.identifier == identifier }
+        if let action = guiActions.first(where: { $0.identifier == identifier }) {
+            return action
+        }
+        guard identifier.hasPrefix(DesktopAccessibilityIdentifier.logsOpenPrefix),
+            identifier.count > DesktopAccessibilityIdentifier.logsOpenPrefix.count else {
+            return nil
+        }
+        return gui(
+            identifier,
+            .logStream,
+            command: "logs"
+        )
     }
 
     @MainActor

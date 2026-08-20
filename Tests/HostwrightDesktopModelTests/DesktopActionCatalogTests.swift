@@ -174,6 +174,53 @@ final class DesktopActionCatalogTests: XCTestCase {
         XCTAssertEqual(unknown.reason, .unknownAction)
     }
 
+    func testAmbiguousInventoryCommandsRequireReviewAndDynamicLogElementsRemainKnown() throws {
+        let model = DesktopOperationsModel.live(
+            homeDirectory: "/Users/tester",
+            environment: ["HOSTWRIGHT_APPLICATION_SUPPORT_DIR": "relative"]
+        )
+
+        for command in ["metrics", "traces"] {
+            let action = try XCTUnwrap(DesktopActionCatalog.cliAction(command: command))
+            XCTAssertEqual(action.mutability, .requiresReview, command)
+            XCTAssertEqual(
+                action.confirmationReview.state,
+                .required,
+                command
+            )
+            XCTAssertEqual(
+                DesktopActionCatalog.availability(forCommand: command, model: model).reason,
+                .phase09PromotionRequired,
+                command
+            )
+        }
+
+        let dynamicIdentifier = DesktopAccessibilityIdentifier.logsOpen(for: "web")
+        let element = try XCTUnwrap(
+            DesktopActionCatalog.guiElement(identifier: dynamicIdentifier)
+        )
+        XCTAssertEqual(element.role, .action)
+        XCTAssertEqual(element.command, "logs")
+        let action = try XCTUnwrap(
+            DesktopActionCatalog.guiAction(identifier: dynamicIdentifier)
+        )
+        XCTAssertEqual(action.kind, .logStream)
+        XCTAssertEqual(
+            DesktopActionCatalog.confirmationReview(for: dynamicIdentifier).state,
+            .notRequired
+        )
+
+        let failure = DesktopActionFailureContract.redact(
+            actionIdentifier: dynamicIdentifier,
+            error: DesktopControlFailure(
+                code: "logs.unavailable",
+                message: "secret-value"
+            )
+        )
+        XCTAssertEqual(failure.actionIdentifier, dynamicIdentifier)
+        XCTAssertEqual(failure.message, "The log stream is unavailable.")
+    }
+
     func testFailureContractRedactsMessagesCodesAndUnknownActionIdentifiers() {
         let failure = DesktopActionFailureContract.redact(
             actionIdentifier: DesktopAccessibilityIdentifier.statusRefresh,

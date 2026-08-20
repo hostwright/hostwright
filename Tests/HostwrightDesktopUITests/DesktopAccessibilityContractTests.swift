@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 @testable import HostwrightDesktopModel
 
@@ -74,5 +75,25 @@ final class DesktopAccessibilityContractTests: XCTestCase {
         ]
         XCTAssertEqual(identifiers.count, Set(identifiers).count)
         XCTAssertTrue(identifiers.allSatisfy { $0.hasPrefix("desktop.") })
+    }
+
+    func testDynamicServiceLogIdentifiersAndCatalogBackedControlGatesRemainStable() throws {
+        XCTAssertEqual(
+            DesktopAccessibilityIdentifier.logsOpen(for: "web"),
+            "desktop.logs.open.web"
+        )
+
+        let sourceURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent("Sources/HostwrightDesktopApp/OperationsConsoleView.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        for expected in [
+            "for: DesktopAccessibilityIdentifier.statusRefresh",
+            "for: DesktopAccessibilityIdentifier.eventsRefresh",
+            ".state != .available",
+            "DesktopAccessibilityIdentifier.logsOpen(for: service.id)",
+            "DesktopAccessibilityIdentifier.selectedLogsOpen"
+        ] {
+            XCTAssertTrue(source.contains(expected), "missing UI contract: \(expected)")
+        }
     }
 }

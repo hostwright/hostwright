@@ -97,7 +97,11 @@ public struct OperationsConsoleView: View {
                     } label: {
                         Label("Disconnect", systemImage: "xmark.circle")
                     }
-                    .disabled(model.connectionState == .disconnected)
+                    .disabled(
+                        model.actionAvailability(
+                            for: DesktopAccessibilityIdentifier.disconnect
+                        ).state != .available
+                    )
                     .accessibilityIdentifier(DesktopAccessibilityIdentifier.disconnect)
                 }
             }
@@ -190,6 +194,11 @@ private struct OverviewView: View {
                 Button("Refresh status", systemImage: "arrow.clockwise") {
                     model.refreshStatus()
                 }
+                .disabled(
+                    model.actionAvailability(
+                        for: DesktopAccessibilityIdentifier.statusRefresh
+                    ).state != .available
+                )
                 .accessibilityIdentifier(DesktopAccessibilityIdentifier.statusRefresh)
             }
             .padding(.horizontal)
@@ -274,7 +283,18 @@ private struct ServiceTable: View {
                         .labelStyle(.iconOnly)
                         .help("Open finite logs for \(service.id)")
                         .accessibilityLabel("Open logs for \(service.id)")
-                        .accessibilityIdentifier("desktop.logs.open.\(service.id)")
+                        .disabled(
+                            model.actionAvailability(
+                                for: DesktopAccessibilityIdentifier.selectedLogsOpen,
+                                context: DesktopActionAvailabilityContext(
+                                    projectID: project.id,
+                                    serviceID: service.id
+                                )
+                            ).state != .available
+                        )
+                        .accessibilityIdentifier(
+                            DesktopAccessibilityIdentifier.logsOpen(for: service.id)
+                        )
                     }
                 }
                 .tableStyle(.inset(alternatesRowBackgrounds: true))
@@ -302,6 +322,11 @@ private struct EventsView: View {
                 Button("Refresh", systemImage: "arrow.clockwise") {
                     model.startEventStream()
                 }
+                .disabled(
+                    model.actionAvailability(
+                        for: DesktopAccessibilityIdentifier.eventsRefresh
+                    ).state != .available
+                )
                 .accessibilityIdentifier(DesktopAccessibilityIdentifier.eventsRefresh)
                 if model.isEventStreamRunning {
                     Button("Cancel", systemImage: "xmark") {
@@ -396,6 +421,14 @@ private struct LogsView: View {
                     Button("Open", systemImage: "text.alignleft") {
                         model.openLogStream(for: selectedServiceID)
                     }
+                    .disabled(
+                        model.actionAvailability(
+                            for: DesktopAccessibilityIdentifier.selectedLogsOpen,
+                            context: DesktopActionAvailabilityContext(
+                                serviceID: selectedServiceID
+                            )
+                        ).state != .available
+                    )
                     .accessibilityIdentifier(DesktopAccessibilityIdentifier.selectedLogsOpen)
                 }
                 if model.isLogStreamRunning {

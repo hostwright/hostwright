@@ -33,10 +33,24 @@ public final class PodSandboxLifecycleStateMachine: @unchecked Sendable {
     }
 
     private let lock = NSLock()
+    private let recoveryStore: (any PodSandboxRecoveryStore)?
     private var records: [PodSandboxID: Record] = [:]
     private var tombstones: [PodSandboxID: Tombstone] = [:]
 
-    public init() {}
+    public init() {
+        self.recoveryStore = nil
+    }
+
+    public init(recoveryStore: any PodSandboxRecoveryStore) throws {
+        self.recoveryStore = recoveryStore
+        guard let data = try recoveryStore.load() else {
+            return
+        }
+        let journal = try decodePodSandboxRecoveryJournal(data)
+        let restored = try Self.restore(journal)
+        self.records = restored.records
+        self.tombstones = restored.tombstones
+    }
 
     public func snapshot(for id: PodSandboxID) -> PodSandboxSnapshot? {
         lock.withLock {
@@ -65,7 +79,14 @@ public final class PodSandboxLifecycleStateMachine: @unchecked Sendable {
     public func markRecoveryRequired(
         _ evidence: PodSandboxRecoveryEvidence
     ) throws -> PodSandboxSnapshot {
-        try lock.withLock {
+        try transact {
+            try markRecoveryRequiredLocked(evidence)
+        }
+    }
+
+    private func markRecoveryRequiredLocked(
+        _ evidence: PodSandboxRecoveryEvidence
+    ) throws -> PodSandboxSnapshot {
             if let tombstone = tombstones[evidence.id] {
                 try validateTombstone(
                     tombstone,
@@ -132,7 +153,6 @@ public final class PodSandboxLifecycleStateMachine: @unchecked Sendable {
             )
             records[evidence.id] = record
             return snapshot(from: record)
-        }
     }
 
     public func apply(
@@ -152,7 +172,7 @@ public final class PodSandboxLifecycleStateMachine: @unchecked Sendable {
             }
         }
 
-        return try lock.withLock {
+        return try transact {
             if transition == .create {
                 return try create(
                     id: id,
@@ -288,6 +308,22 @@ public final class PodSandboxLifecycleStateMachine: @unchecked Sendable {
             try validateOwnership(record.spec, ownerID: ownerID, generation: generation)
             guard record.spec == spec else {
                 throw PodSandboxLifecycleError.generationConflict
+            }
+            let signature = ReplaySignature(
+                transition: .create,
+                ownerID: ownerID,
+                generation: generation,
+                spec: spec
+            )
+            if let replay = record.replays[requestID] {
+                guard replay.signature == signature else {
+                    throw PodSandboxLifecycleError.replayMismatch
+                }
+                return result(
+                    replay.result,
+                    replayed: true,
+                    cleanupPerformed: false
+                )
             }
             let snapshot = snapshot(from: record)
             let lifecycleResult = PodSandboxLifecycleResult(
@@ -590,5 +626,224 @@ public final class PodSandboxLifecycleStateMachine: @unchecked Sendable {
             replayed: replayed,
             cleanupPerformed: cleanupPerformed
         )
+    }
+
+    private func transact<T>(_ body: () throws -> T) throws -> T {
+        try lock.withLock {
+            let priorRecords = records
+            let priorTombstones = tombstones
+            do {
+                let value = try body()
+                try persistLocked()
+                return value
+            } catch {
+                records = priorRecords
+                tombstones = priorTombstones
+                throw error
+            }
+        }
+    }
+
+    private func persistLocked() throws {
+        guard let recoveryStore else { return }
+        let journal = PodSandboxRecoveryJournal(
+            schemaVersion: podSandboxRecoverySchemaVersion,
+            records: records.keys.sorted { $0.rawValue < $1.rawValue }.compactMap { id in
+                guard let record = records[id] else { return nil }
+                return PodSandboxRecoveryRecord(
+                    spec: record.spec,
+                    state: record.state,
+                    resourcePresent: record.resourcePresent,
+                    prepared: record.prepared,
+                    running: record.running,
+                    cleanupComplete: record.cleanupComplete,
+                    cleanupResourceCount: record.cleanupResourceCount,
+                    lastTransition: record.lastTransition,
+                    replays: record.replays.keys.sorted().compactMap { requestID in
+                        guard let replay = record.replays[requestID] else { return nil }
+                        return PodSandboxRecoveryReplay(
+                            requestID: requestID,
+                            transition: replay.signature.transition,
+                            ownerID: replay.signature.ownerID,
+                            generation: replay.signature.generation,
+                            spec: replay.signature.spec,
+                            result: replay.result
+                        )
+                    }
+                )
+            },
+            tombstones: tombstones.keys.sorted { $0.rawValue < $1.rawValue }.compactMap { id in
+                guard let tombstone = tombstones[id] else { return nil }
+                return PodSandboxRecoveryTombstone(
+                    id: id,
+                    ownerID: tombstone.ownerID,
+                    generation: tombstone.generation,
+                    lastTransition: tombstone.lastTransition,
+                    replays: tombstone.replays.keys.sorted().compactMap { requestID in
+                        guard let replay = tombstone.replays[requestID] else { return nil }
+                        return PodSandboxRecoveryReplay(
+                            requestID: requestID,
+                            transition: replay.signature.transition,
+                            ownerID: replay.signature.ownerID,
+                            generation: replay.signature.generation,
+                            spec: replay.signature.spec,
+                            result: replay.result
+                        )
+                    }
+                )
+            }
+        )
+        do {
+            try recoveryStore.save(try encodePodSandboxRecoveryJournal(journal))
+        } catch let error as PodSandboxLifecycleError {
+            throw error
+        } catch {
+            throw PodSandboxLifecycleError.recoveryPersistenceFailed
+        }
+    }
+
+    private static func restore(
+        _ journal: PodSandboxRecoveryJournal
+    ) throws -> (records: [PodSandboxID: Record], tombstones: [PodSandboxID: Tombstone]) {
+        guard journal.records.count <= 1_024,
+              journal.tombstones.count <= 1_024 else {
+            throw PodSandboxRecoveryStoreError.fileTooLarge
+        }
+
+        var records: [PodSandboxID: Record] = [:]
+        for persisted in journal.records {
+            let id = persisted.spec.id
+            guard records[id] == nil else {
+                throw PodSandboxRecoveryStoreError.duplicateField("records.id")
+            }
+            try validatePersistedRecord(persisted)
+            records[id] = Record(
+                spec: persisted.spec,
+                state: persisted.state,
+                resourcePresent: persisted.resourcePresent,
+                prepared: persisted.prepared,
+                running: persisted.running,
+                cleanupComplete: persisted.cleanupComplete,
+                cleanupResourceCount: persisted.cleanupResourceCount,
+                lastTransition: persisted.lastTransition,
+                replays: try replayEntries(
+                    persisted.replays,
+                    id: id,
+                    ownerID: persisted.spec.ownerID,
+                    generation: persisted.spec.generation
+                )
+            )
+        }
+
+        var tombstones: [PodSandboxID: Tombstone] = [:]
+        for persisted in journal.tombstones {
+            let id = persisted.id
+            guard tombstones[id] == nil, records[id] == nil else {
+                throw PodSandboxRecoveryStoreError.malformed
+            }
+            try PodSandboxValidation.safeIdentifier(
+                persisted.ownerID,
+                maximumLength: 128,
+                field: "ownerID"
+            )
+            try PodSandboxValidation.generation(persisted.generation)
+            guard [.cancel, .teardown, .recover].contains(persisted.lastTransition) else {
+                throw PodSandboxRecoveryStoreError.malformed
+            }
+            tombstones[id] = Tombstone(
+                ownerID: persisted.ownerID,
+                generation: persisted.generation,
+                lastTransition: persisted.lastTransition,
+                replays: try replayEntries(
+                    persisted.replays,
+                    id: id,
+                    ownerID: persisted.ownerID,
+                    generation: persisted.generation
+                )
+            )
+        }
+        return (records, tombstones)
+    }
+
+    private static func validatePersistedRecord(
+        _ record: PodSandboxRecoveryRecord
+    ) throws {
+        guard record.state != .absent,
+              record.state != .cancelling,
+              record.state != .tearingDown,
+              !record.cleanupComplete,
+              record.resourcePresent || (!record.prepared && !record.running),
+              !record.running || record.prepared else {
+            throw PodSandboxRecoveryStoreError.malformed
+        }
+        let expectedResourceCount = record.resourcePresent
+            ? 1 + (record.prepared ? 1 : 0) + (record.running ? 1 : 0)
+            : 0
+        guard record.cleanupResourceCount == expectedResourceCount else {
+            throw PodSandboxRecoveryStoreError.malformed
+        }
+        switch record.state {
+        case .created:
+            guard record.resourcePresent, !record.prepared, !record.running else {
+                throw PodSandboxRecoveryStoreError.malformed
+            }
+        case .prepared, .stopped:
+            guard record.resourcePresent, record.prepared, !record.running else {
+                throw PodSandboxRecoveryStoreError.malformed
+            }
+        case .running:
+            guard record.resourcePresent, record.prepared, record.running else {
+                throw PodSandboxRecoveryStoreError.malformed
+            }
+        case .recovering:
+            break
+        case .absent, .cancelling, .tearingDown:
+            throw PodSandboxRecoveryStoreError.malformed
+        }
+    }
+
+    private static func replayEntries(
+        _ entries: [PodSandboxRecoveryReplay],
+        id: PodSandboxID,
+        ownerID: String,
+        generation: UInt64
+    ) throws -> [String: ReplayEntry] {
+        guard entries.count <= 4_096 else {
+            throw PodSandboxRecoveryStoreError.fileTooLarge
+        }
+        var result: [String: ReplayEntry] = [:]
+        for entry in entries {
+            guard result[entry.requestID] == nil else {
+                throw PodSandboxRecoveryStoreError.duplicateField("replays.requestID")
+            }
+            try PodSandboxValidation.safeIdentifier(
+                entry.requestID,
+                maximumLength: 128,
+                field: "requestID"
+            )
+            guard entry.ownerID == ownerID,
+                  entry.generation == generation,
+                  entry.result.transition == entry.transition,
+                  entry.result.snapshot.id == id,
+                  entry.result.snapshot.ownerID == ownerID,
+                  entry.result.snapshot.generation == generation else {
+                throw PodSandboxRecoveryStoreError.malformed
+            }
+            if let spec = entry.spec {
+                guard spec.id == id, spec.ownerID == ownerID, spec.generation == generation else {
+                    throw PodSandboxRecoveryStoreError.malformed
+                }
+            }
+            result[entry.requestID] = ReplayEntry(
+                signature: ReplaySignature(
+                    transition: entry.transition,
+                    ownerID: entry.ownerID,
+                    generation: entry.generation,
+                    spec: entry.spec
+                ),
+                result: entry.result
+            )
+        }
+        return result
     }
 }

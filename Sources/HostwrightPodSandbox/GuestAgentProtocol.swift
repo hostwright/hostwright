@@ -85,6 +85,7 @@ public enum GuestAgentErrorCode: String, Codable, CaseIterable, Sendable {
     case cancelled
     case creditExhausted
     case sandboxNotFound
+    case recoveryPersistenceFailed
     case cleanupIncomplete
     case internalFailure
 }
@@ -203,6 +204,10 @@ public struct GuestAgentEnvelope: Codable, Equatable, Sendable {
         )
     }
 
+    static func internalFailure(for request: GuestAgentEnvelope) -> GuestAgentEnvelope {
+        GuestAgentEnvelope(uncheckedInternalFailureFor: request)
+    }
+
     public func validate() throws {
         guard apiVersion == GuestAgentProtocolV1.version else {
             throw GuestAgentProtocolError.unsupportedVersion(apiVersion)
@@ -259,11 +264,10 @@ public struct GuestAgentEnvelope: Codable, Equatable, Sendable {
                 }
             }
             if operation == .cancel {
-                guard let cancellationOfRequestID else {
-                    throw GuestAgentProtocolError.missingField("cancellationOfRequestID")
-                }
-                guard cancellationOfRequestID != requestID else {
-                    throw GuestAgentProtocolError.invalidEnvelope("self-cancellation")
+                if let cancellationOfRequestID {
+                    guard cancellationOfRequestID != requestID else {
+                        throw GuestAgentProtocolError.invalidEnvelope("self-cancellation")
+                    }
                 }
             } else {
                 guard cancellationOfRequestID == nil else {
@@ -304,6 +308,25 @@ public struct GuestAgentEnvelope: Codable, Equatable, Sendable {
         case result
         case error
         case capabilities
+    }
+
+    private init(uncheckedInternalFailureFor request: GuestAgentEnvelope) {
+        self.apiVersion = GuestAgentProtocolV1.version
+        self.kind = .response
+        self.requestID = request.requestID
+        self.operation = request.operation
+        self.sandboxID = request.sandboxID
+        self.ownerID = request.ownerID
+        self.generation = request.generation
+        self.deadlineMilliseconds = request.deadlineMilliseconds
+        self.credit = 0
+        self.cancellationOfRequestID = nil
+        self.cpuCount = nil
+        self.memoryMiB = nil
+        self.state = nil
+        self.result = nil
+        self.error = .internalFailure
+        self.capabilities = []
     }
 
     public init(from decoder: Decoder) throws {

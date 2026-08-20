@@ -46,6 +46,15 @@
     "capabilities": 16,
     "errorBytes": 512
   },
+  "creditSemantics": {
+    "scope": "sandbox-session",
+    "firstLifecycleRequest": "must-grant-positive-credit",
+    "replenishment": "request-credit-is-an-additional-grant",
+    "acceptedRequestCost": 1,
+    "response": "remaining-credit",
+    "teardown": "clear-window",
+    "cancelControl": "does-not-consume-credit"
+  },
   "envelope": {
     "required": [
       "apiVersion",
@@ -75,7 +84,11 @@
       "state",
       "result"
     ],
-    "responseErrorField": "error"
+    "responseErrorField": "error",
+    "cancelSemantics": {
+      "withCancellationOfRequestID": "cancel-control",
+      "withoutCancellationOfRequestID": "lifecycle-cancel"
+    }
   },
   "capabilities": [
     "pod-sandbox-lifecycle",
@@ -83,6 +96,23 @@
     "cancellation",
     "stream-credit",
     "strict-framing"
+  ],
+  "errors": [
+    "malformed",
+    "unsupportedVersion",
+    "unauthenticated",
+    "invalidTransition",
+    "ownershipMismatch",
+    "generationMismatch",
+    "generationConflict",
+    "replayMismatch",
+    "deadlineExceeded",
+    "cancelled",
+    "creditExhausted",
+    "sandboxNotFound",
+    "recoveryPersistenceFailed",
+    "cleanupIncomplete",
+    "internalFailure"
   ],
   "states": [
     "absent",
@@ -168,6 +198,27 @@
       "to": "absent",
       "cleanup": "exact-owned-resources"
     }
+  },
+  "recoveryJournal": {
+    "schemaVersion": 1,
+    "storage": "caller-supplied-PodSandboxRecoveryStore",
+    "fileStoreMaximumBytes": 1048576,
+    "recordsMaximum": 1024,
+    "tombstonesMaximum": 1024,
+    "replaysPerRecordMaximum": 4096,
+    "fields": [
+      "schemaVersion",
+      "records",
+      "tombstones"
+    ],
+    "persistence": "atomic-canonical-write-before-success",
+    "failure": "rollback-transition-and-report-persistence-error"
+  },
+  "executable": {
+    "stdio": "--stdio",
+    "stdioWithRecovery": "--stdio --recovery-file <absolute-path>",
+    "version": "--version",
+    "invalidArguments": "reject-before-dispatch"
   },
   "deferred": [
     "apple-container-vm-runtime",

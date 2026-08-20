@@ -30,6 +30,14 @@ consistent partial evidence, restores the known state, or removes the
 remaining owned resources. This is lifecycle accounting, not an Apple
 Container VM claim.
 
+`FilePodSandboxRecoveryStore` durably writes a bounded canonical journal with
+live records, tombstones, generation fences, and request replay results. Each
+lifecycle mutation persists atomically; a persistence failure rolls the
+in-memory transition back and returns an explicit persistence error. A fresh
+state machine can therefore replay a request, recover a partial record, reject
+an old generation, and repeat teardown without reconstructing success from
+missing state.
+
 ## Guest protocol v1
 
 The executable protocol is a connected byte stream with an unsigned,
@@ -52,8 +60,11 @@ envelope combinations, and over-limit lengths before allocating a payload.
 Requests and responses carry the protocol version, kind, request ID,
 operation, sandbox ID, owner, generation, bounded deadline, credit, and
 capability/error/result fields appropriate to their kind. Cancellation names a
-different request ID. The dispatcher consumes one unit of request credit and
-returns the remaining credit.
+different request ID when it is a cancellation control request. A cancel
+request without a target is the lifecycle cancel transition. Credit is a
+per-sandbox session grant: the first lifecycle request must grant credit,
+later requests may replenish it, each accepted request consumes one unit, and
+the response reports the remaining window. Teardown clears the window.
 
 Authentication is a required boundary before dispatch. The library accepts a
 `GuestAgentAuthenticationBoundary` supplied by a later authenticated-session
@@ -67,18 +78,20 @@ credential bypass or test credential.
 `GuestAgentProcessTransport` launches the portable executable with two Unix
 socket pairs, bounded non-blocking I/O, request/response identity checks, and
 deadline/cancellation handling. `GuestAgentServer` handles the same framed
-protocol on supplied descriptors. The executable supports `--stdio` and
-`--version`; protocol failures terminate with a generic stderr message and a
-protocol exit status without copying request data or credentials into logs.
+protocol on supplied descriptors. The executable supports `--stdio`,
+`--stdio --recovery-file <absolute-path>`, and `--version`; recovery paths are
+validated file boundaries and are never treated as credentials. Protocol
+failures terminate with a generic stderr message and a protocol exit status
+without copying request data or credentials into logs.
 
 Focused tests cover malformed and oversized frames, unsupported versions,
 canonical/unknown/duplicate fields, unauthenticated dispatch, deadline and
 cancellation behavior, credit exhaustion, request replay, invalid
 transitions, ownership/generation fencing, restart recovery, partial cleanup,
-real socket-pair dispatch, and the real guest subprocess. The authenticated
-socket-pair test injects only an explicit test session boundary into the
-library server; the shipped executable remains fail-closed until Phase 11
-supplies the production boundary.
+real fragmented socket-pair dispatch, persistent restart recovery, and the
+real guest subprocess. The authenticated socket-pair tests inject only an
+explicit test session boundary into the library server; the shipped executable
+remains fail-closed until Phase 11 supplies the production boundary.
 
 ## Deferred integration boundary
 

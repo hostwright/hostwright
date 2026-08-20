@@ -25,6 +25,7 @@ public enum PodSandboxLifecycleError: Error, Equatable, Sendable, CustomStringCo
     case replayMismatch
     case sandboxNotFound
     case recoveryEvidenceInvalid
+    case recoveryPersistenceFailed
     case cleanupIncomplete
 
     public var description: String {
@@ -38,6 +39,7 @@ public enum PodSandboxLifecycleError: Error, Equatable, Sendable, CustomStringCo
         case .replayMismatch: "The replayed request ID has different operation inputs."
         case .sandboxNotFound: "The pod sandbox does not exist."
         case .recoveryEvidenceInvalid: "Recovery evidence does not describe a valid partial sandbox."
+        case .recoveryPersistenceFailed: "The pod-sandbox recovery record could not be persisted."
         case .cleanupIncomplete: "Exact pod-sandbox cleanup did not remove every owned resource."
         }
     }
@@ -242,7 +244,7 @@ public struct PodSandboxSnapshot: Codable, Equatable, Sendable {
     }
 }
 
-public struct PodSandboxLifecycleResult: Equatable, Sendable {
+public struct PodSandboxLifecycleResult: Codable, Equatable, Sendable {
     public let transition: PodSandboxTransition
     public let snapshot: PodSandboxSnapshot
     public let replayed: Bool

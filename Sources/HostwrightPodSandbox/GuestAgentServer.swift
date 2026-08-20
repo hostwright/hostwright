@@ -13,6 +13,7 @@ public final class GuestAgentDispatcher: @unchecked Sendable {
     private let machine: PodSandboxLifecycleStateMachine
     private let authenticationBoundary: any GuestAgentAuthenticationBoundary
     private let lock = NSLock()
+    private let creditLedger = GuestAgentCreditLedger()
     private var cancelledRequestIDs: Set<String> = []
 
     public init(
@@ -23,7 +24,11 @@ public final class GuestAgentDispatcher: @unchecked Sendable {
         self.authenticationBoundary = authenticationBoundary
     }
 
-    public func dispatch(_ request: GuestAgentEnvelope) -> GuestAgentEnvelope {
+    public func dispatch(
+        _ request: GuestAgentEnvelope,
+        deadline: GuestAgentDeadline? = nil,
+        cancellation: GuestAgentCancellation? = nil
+    ) -> GuestAgentEnvelope {
         do {
             try request.validate()
         } catch let error as GuestAgentProtocolError {
@@ -40,29 +45,67 @@ public final class GuestAgentDispatcher: @unchecked Sendable {
             return response(for: request, error: .unauthenticated)
         }
 
-        if request.credit == 0 {
-            return response(for: request, error: .creditExhausted)
+        if let deadline {
+            do {
+                try deadline.assertActive()
+            } catch GuestAgentProtocolError.deadlineExceeded {
+                return response(for: request, error: .deadlineExceeded)
+            } catch {
+                return response(for: request, error: .internalFailure)
+            }
+        }
+        if cancellation?.isCancelled == true {
+            return response(for: request, error: .cancelled)
         }
 
         return lock.withLock {
-            if request.operation == .cancel {
-                if let target = request.cancellationOfRequestID {
-                    cancelledRequestIDs.insert(target)
+            if let deadline {
+                do {
+                    try deadline.assertActive()
+                } catch GuestAgentProtocolError.deadlineExceeded {
+                    return response(for: request, error: .deadlineExceeded)
+                } catch {
+                    return response(for: request, error: .internalFailure)
                 }
+            }
+            if request.operation == .cancel,
+               let target = request.cancellationOfRequestID {
+                cancelledRequestIDs.insert(target)
                 let state = machine.snapshot(for: request.sandboxID)?.state ?? .absent
                 return response(
                     for: request,
                     state: state,
                     result: .cancelled,
-                    credit: request.credit - 1
+                    credit: 0
                 )
+            }
+
+            let cleanupReplay = request.operation == .teardown &&
+                machine.snapshot(for: request.sandboxID)?.state == .absent
+            let responseCredit: Int
+            if cleanupReplay {
+                responseCredit = 0
+            } else {
+                do {
+                    _ = try creditLedger.grant(
+                        streamID: request.sandboxID.rawValue,
+                        credit: request.credit
+                    )
+                    responseCredit = try creditLedger.consume(
+                        streamID: request.sandboxID.rawValue
+                    )
+                } catch GuestAgentProtocolError.creditExhausted {
+                    return response(for: request, error: .creditExhausted, credit: 0)
+                } catch {
+                    return response(for: request, error: .malformed, credit: 0)
+                }
             }
 
             if cancelledRequestIDs.contains(request.requestID) {
                 return response(
                     for: request,
                     error: .cancelled,
-                    credit: request.credit - 1
+                    credit: responseCredit
                 )
             }
 
@@ -88,7 +131,9 @@ public final class GuestAgentDispatcher: @unchecked Sendable {
                     spec: spec
                 )
                 let result: GuestAgentResult
-                if outcome.cleanupPerformed {
+                if request.operation == .cancel {
+                    result = .cancelled
+                } else if outcome.cleanupPerformed {
                     result = .teardownComplete
                 } else if outcome.replayed {
                     result = .replayed
@@ -97,23 +142,26 @@ public final class GuestAgentDispatcher: @unchecked Sendable {
                 } else {
                     result = .accepted
                 }
+                if outcome.snapshot.state == .absent {
+                    try? creditLedger.clear(streamID: request.sandboxID.rawValue)
+                }
                 return response(
                     for: request,
                     state: outcome.snapshot.state,
                     result: result,
-                    credit: request.credit - 1
+                    credit: outcome.snapshot.state == .absent ? 0 : responseCredit
                 )
             } catch let error as PodSandboxLifecycleError {
                 return response(
                     for: request,
                     error: errorCode(for: error),
-                    credit: request.credit - 1
+                    credit: responseCredit
                 )
             } catch {
                 return response(
                     for: request,
                     error: .internalFailure,
-                    credit: request.credit - 1
+                    credit: responseCredit
                 )
             }
         }
@@ -133,19 +181,7 @@ public final class GuestAgentDispatcher: @unchecked Sendable {
             error: error,
             credit: max(0, credit),
             capabilities: error == nil ? Self.advertisedCapabilities : []
-        )) ?? (try! GuestAgentEnvelope(
-            kind: .response,
-            requestID: request.requestID,
-            operation: request.operation,
-            sandboxID: request.sandboxID,
-            ownerID: request.ownerID,
-            generation: request.generation,
-            deadlineMilliseconds: request.deadlineMilliseconds,
-            credit: 0,
-            state: nil,
-            result: nil,
-            error: .internalFailure
-        ))
+        )) ?? GuestAgentEnvelope.internalFailure(for: request)
     }
 
     private func errorCode(for error: GuestAgentProtocolError) -> GuestAgentErrorCode {
@@ -167,6 +203,7 @@ public final class GuestAgentDispatcher: @unchecked Sendable {
         case .generationConflict: .generationConflict
         case .replayMismatch, .requestIDConflict: .replayMismatch
         case .sandboxNotFound: .sandboxNotFound
+        case .recoveryPersistenceFailed: .recoveryPersistenceFailed
         case .recoveryEvidenceInvalid: .internalFailure
         case .cleanupIncomplete: .cleanupIncomplete
         }
@@ -175,9 +212,22 @@ public final class GuestAgentDispatcher: @unchecked Sendable {
 
 public final class GuestAgentServer: @unchecked Sendable {
     private let dispatcher: GuestAgentDispatcher
+    private let readTimeoutMilliseconds: Int
 
     public init(dispatcher: GuestAgentDispatcher) {
         self.dispatcher = dispatcher
+        self.readTimeoutMilliseconds = GuestAgentProtocolV1.maximumDeadlineMilliseconds
+    }
+
+    public init(
+        dispatcher: GuestAgentDispatcher,
+        readTimeoutMilliseconds: Int
+    ) throws {
+        guard (1...GuestAgentProtocolV1.maximumDeadlineMilliseconds).contains(readTimeoutMilliseconds) else {
+            throw GuestAgentProtocolError.invalidDeadline
+        }
+        self.dispatcher = dispatcher
+        self.readTimeoutMilliseconds = readTimeoutMilliseconds
     }
 
     public func run(
@@ -188,7 +238,7 @@ public final class GuestAgentServer: @unchecked Sendable {
         try configureDescriptor(outputDescriptor)
         while true {
             let deadline = try GuestAgentDeadline(
-                timeoutMilliseconds: GuestAgentProtocolV1.maximumDeadlineMilliseconds
+                timeoutMilliseconds: readTimeoutMilliseconds
             )
             let payload: Data
             do {
@@ -204,16 +254,16 @@ public final class GuestAgentServer: @unchecked Sendable {
             guard request.kind == .request else {
                 throw GuestAgentProtocolError.invalidEnvelope("request kind")
             }
-            let response = dispatcher.dispatch(request)
-            let responsePayload = try GuestAgentEnvelopeCodec.encode(response)
-            let responseDeadline = try GuestAgentDeadline(
+            let requestDeadline = try GuestAgentDeadline(
                 timeoutMilliseconds: request.deadlineMilliseconds
             )
+            let response = dispatcher.dispatch(request, deadline: requestDeadline)
+            let responsePayload = try GuestAgentEnvelopeCodec.encode(response)
             try GuestAgentFrameCodec.write(
                 responsePayload,
                 kind: .response,
                 descriptor: outputDescriptor,
-                deadline: responseDeadline
+                deadline: requestDeadline
             )
         }
     }

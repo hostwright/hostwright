@@ -89,6 +89,60 @@ public struct GuestAgentCreditWindow: Equatable, Sendable {
     }
 }
 
+public final class GuestAgentCreditLedger: @unchecked Sendable {
+    private let lock = NSLock()
+    private var windows: [String: GuestAgentCreditWindow] = [:]
+
+    public init() {}
+
+    @discardableResult
+    public func grant(streamID: String, credit: Int) throws -> Int {
+        try validateStreamID(streamID)
+        return try lock.withLock {
+            var window: GuestAgentCreditWindow
+            if let existing = windows[streamID] {
+                window = existing
+            } else {
+                window = try GuestAgentCreditWindow()
+            }
+            try window.grant(credit)
+            windows[streamID] = window
+            return window.available
+        }
+    }
+
+    @discardableResult
+    public func consume(streamID: String) throws -> Int {
+        try validateStreamID(streamID)
+        return try lock.withLock {
+            guard var window = windows[streamID] else {
+                throw GuestAgentProtocolError.creditExhausted
+            }
+            try window.consume()
+            windows[streamID] = window
+            return window.available
+        }
+    }
+
+    public func available(streamID: String) throws -> Int {
+        try validateStreamID(streamID)
+        return lock.withLock { windows[streamID]?.available ?? 0 }
+    }
+
+    public func clear(streamID: String) throws {
+        try validateStreamID(streamID)
+        _ = lock.withLock { windows.removeValue(forKey: streamID) }
+    }
+
+    private func validateStreamID(_ streamID: String) throws {
+        try PodSandboxValidation.safeIdentifier(
+            streamID,
+            maximumLength: GuestAgentProtocolV1.maximumRequestIDBytes,
+            field: "streamID"
+        )
+    }
+}
+
 public enum GuestAgentFrameCodec {
     public static let prefixBytes = GuestAgentProtocolV1.lengthPrefixBytes
     public static let maximumRequestBytes = GuestAgentProtocolV1.maximumRequestBytes

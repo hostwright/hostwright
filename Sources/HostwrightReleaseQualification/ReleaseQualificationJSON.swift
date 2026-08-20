@@ -71,35 +71,140 @@ public enum ReleaseQualificationHash {
     }
 
     public static func sha256(fileURL: URL) throws -> ReleaseQualificationSHA256 {
-        guard try ReleaseQualificationFile.isRegularNonSymlink(fileURL) else {
-            throw ReleaseQualificationContractError.unsafePath
-        }
-        let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
-        guard let size = (attributes[.size] as? NSNumber)?.intValue,
-              size >= 0,
-              size <= ReleaseQualificationLimits.maximumSourceFileBytes else {
-            throw ReleaseQualificationContractError.oversizedInput
-        }
-        let handle = try FileHandle(forReadingFrom: fileURL)
-        defer { try? handle.close() }
-        var hasher = SHA256()
-        var total = 0
-        while true {
-            let chunk = try handle.read(upToCount: 1 * 1_024 * 1_024) ?? Data()
-            guard !chunk.isEmpty else { break }
-            total += chunk.count
-            guard total <= ReleaseQualificationLimits.maximumSourceFileBytes else {
-                throw ReleaseQualificationContractError.oversizedInput
-            }
-            hasher.update(data: chunk)
-        }
-        return ReleaseQualificationSHA256(
-            validatedValue: hasher.finalize().map { String(format: "%02x", $0) }.joined()
-        )
+        sha256(data: try ReleaseQualificationFile.readBoundedRegularFile(fileURL))
     }
 }
 
 public enum ReleaseQualificationFile {
+    public static func readBoundedRegularFile(
+        _ url: URL,
+        maximumBytes: Int = ReleaseQualificationLimits.maximumSourceFileBytes
+    ) throws -> Data {
+        guard ReleaseQualificationPath.isNormalizedAbsolute(url.path),
+              (0...ReleaseQualificationLimits.maximumSourceFileBytes).contains(maximumBytes) else {
+            throw ReleaseQualificationContractError.unsafePath
+        }
+        let descriptor = Darwin.open(url.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+        guard descriptor >= 0 else {
+            throw ReleaseQualificationContractError.unsafePath
+        }
+        defer { Darwin.close(descriptor) }
+
+        return try readBoundedRegularFile(
+            descriptor: descriptor,
+            maximumBytes: maximumBytes
+        ) { named in
+            Darwin.lstat(url.path, &named)
+        }
+    }
+
+    public static func readBoundedRegularFile(
+        relativePath: String,
+        under rootURL: URL,
+        maximumBytes: Int = ReleaseQualificationLimits.maximumSourceFileBytes
+    ) throws -> Data {
+        guard ReleaseQualificationPath.isNormalizedAbsolute(rootURL.path),
+              ReleaseQualificationPath.isSafeRelative(relativePath),
+              (0...ReleaseQualificationLimits.maximumSourceFileBytes).contains(maximumBytes) else {
+            throw ReleaseQualificationContractError.unsafePath
+        }
+        let components = relativePath.split(separator: "/").map(String.init)
+        guard let finalName = components.last else {
+            throw ReleaseQualificationContractError.unsafePath
+        }
+        var directory = Darwin.open(
+            rootURL.path,
+            O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
+        )
+        guard directory >= 0 else {
+            throw ReleaseQualificationContractError.unsafePath
+        }
+        defer { Darwin.close(directory) }
+
+        for component in components.dropLast() {
+            let child = component.withCString {
+                Darwin.openat(
+                    directory,
+                    $0,
+                    O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
+                )
+            }
+            guard child >= 0 else {
+                throw ReleaseQualificationContractError.unsafePath
+            }
+            var metadata = stat()
+            guard Darwin.fstat(child, &metadata) == 0,
+                  metadata.st_mode & S_IFMT == S_IFDIR else {
+                Darwin.close(child)
+                throw ReleaseQualificationContractError.unsafePath
+            }
+            Darwin.close(directory)
+            directory = child
+        }
+
+        let descriptor = finalName.withCString {
+            Darwin.openat(directory, $0, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+        }
+        guard descriptor >= 0 else {
+            throw ReleaseQualificationContractError.unsafePath
+        }
+        defer { Darwin.close(descriptor) }
+        return try readBoundedRegularFile(
+            descriptor: descriptor,
+            maximumBytes: maximumBytes
+        ) { named in
+            finalName.withCString {
+                Darwin.fstatat(directory, $0, &named, AT_SYMLINK_NOFOLLOW)
+            }
+        }
+    }
+
+    private static func readBoundedRegularFile(
+        descriptor: Int32,
+        maximumBytes: Int,
+        namedMetadata: (inout stat) -> Int32
+    ) throws -> Data {
+
+        var before = stat()
+        guard Darwin.fstat(descriptor, &before) == 0,
+              before.st_mode & S_IFMT == S_IFREG else {
+            throw ReleaseQualificationContractError.unsafePath
+        }
+        guard before.st_size >= 0,
+              before.st_size <= Int64(maximumBytes) else {
+            throw ReleaseQualificationContractError.oversizedInput
+        }
+
+        var data = Data()
+        data.reserveCapacity(Int(before.st_size))
+        var buffer = [UInt8](repeating: 0, count: 64 * 1_024)
+        while true {
+            let count = buffer.withUnsafeMutableBytes {
+                Darwin.read(descriptor, $0.baseAddress, $0.count)
+            }
+            if count == 0 { break }
+            if count < 0 {
+                if errno == EINTR { continue }
+                throw ReleaseQualificationContractError.unsafePath
+            }
+            guard data.count + count <= maximumBytes else {
+                throw ReleaseQualificationContractError.oversizedInput
+            }
+            data.append(buffer, count: count)
+        }
+
+        var after = stat()
+        var named = stat()
+        guard Darwin.fstat(descriptor, &after) == 0,
+              namedMetadata(&named) == 0,
+              sameIdentity(before, after),
+              sameIdentity(after, named),
+              Int64(data.count) == after.st_size else {
+            throw ReleaseQualificationContractError.tamperedEvidence
+        }
+        return data
+    }
+
     public static func isRegularNonSymlink(_ url: URL) throws -> Bool {
         var metadata = stat()
         guard lstat(url.path, &metadata) == 0 else {
@@ -126,6 +231,20 @@ public enum ReleaseQualificationFile {
             )
         }
         return metadata.st_mode & S_IFMT == S_IFDIR
+    }
+
+    private static func sameIdentity(_ lhs: stat, _ rhs: stat) -> Bool {
+        lhs.st_mode & S_IFMT == S_IFREG &&
+            rhs.st_mode & S_IFMT == S_IFREG &&
+            lhs.st_dev == rhs.st_dev &&
+            lhs.st_ino == rhs.st_ino &&
+            lhs.st_uid == rhs.st_uid &&
+            lhs.st_nlink == rhs.st_nlink &&
+            lhs.st_size == rhs.st_size &&
+            lhs.st_mtimespec.tv_sec == rhs.st_mtimespec.tv_sec &&
+            lhs.st_mtimespec.tv_nsec == rhs.st_mtimespec.tv_nsec &&
+            lhs.st_ctimespec.tv_sec == rhs.st_ctimespec.tv_sec &&
+            lhs.st_ctimespec.tv_nsec == rhs.st_ctimespec.tv_nsec
     }
 
     public static func validatePrivateDirectory(_ url: URL) throws {

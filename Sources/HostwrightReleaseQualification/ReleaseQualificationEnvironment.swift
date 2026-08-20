@@ -69,7 +69,36 @@ public protocol ReleaseQualificationCommandRunning: Sendable {
     ) throws -> ReleaseQualificationCommandResult
 }
 
-public struct ReleaseQualificationSubprocessRunner: ReleaseQualificationCommandRunning, Sendable {
+public protocol ReleaseQualificationStandardInputCommandRunning:
+    ReleaseQualificationCommandRunning
+{
+    func run(
+        _ command: ReleaseQualificationCommandIdentity,
+        standardInput: Data?,
+        limits: ReleaseQualificationCommandLimits,
+        cancellation: SecureSubprocessCancellation
+    ) throws -> ReleaseQualificationCommandResult
+}
+
+public extension ReleaseQualificationStandardInputCommandRunning {
+    func run(
+        _ command: ReleaseQualificationCommandIdentity,
+        limits: ReleaseQualificationCommandLimits,
+        cancellation: SecureSubprocessCancellation
+    ) throws -> ReleaseQualificationCommandResult {
+        try run(
+            command,
+            standardInput: nil,
+            limits: limits,
+            cancellation: cancellation
+        )
+    }
+}
+
+public struct ReleaseQualificationSubprocessRunner:
+    ReleaseQualificationStandardInputCommandRunning,
+    Sendable
+{
     public init() {}
 
     public func run(
@@ -77,15 +106,35 @@ public struct ReleaseQualificationSubprocessRunner: ReleaseQualificationCommandR
         limits: ReleaseQualificationCommandLimits,
         cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation()
     ) throws -> ReleaseQualificationCommandResult {
+        try run(
+            command,
+            standardInput: nil,
+            limits: limits,
+            cancellation: cancellation
+        )
+    }
+
+    public func run(
+        _ command: ReleaseQualificationCommandIdentity,
+        standardInput: Data?,
+        limits: ReleaseQualificationCommandLimits,
+        cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation()
+    ) throws -> ReleaseQualificationCommandResult {
         try command.validate()
+        guard (standardInput?.count ?? 0) <= ReleaseQualificationLimits.maximumSourceFileBytes else {
+            throw ReleaseQualificationCommandError.outputLimitExceeded
+        }
         let request = SecureSubprocessRequest(
             executablePath: command.executablePath,
             arguments: command.arguments,
-            environment: SecureSubprocessEnvironment.minimal,
+            environment: Self.fixedEnvironment,
             workingDirectory: command.workingDirectory,
+            standardInput: standardInput,
             timeoutMilliseconds: limits.timeoutMilliseconds,
             maximumStandardOutputBytes: limits.maximumStandardOutputBytes,
-            maximumStandardErrorBytes: limits.maximumStandardErrorBytes
+            maximumStandardErrorBytes: limits.maximumStandardErrorBytes,
+            maximumStandardInputBytes: standardInput.map { max(1, $0.count) }
+                ?? SecureSubprocessRequest.defaultMaximumInputBytes
         )
         do {
             let result = try SecureSubprocessRunner().run(
@@ -124,6 +173,12 @@ public struct ReleaseQualificationSubprocessRunner: ReleaseQualificationCommandR
             }
         }
     }
+
+    static let fixedEnvironment: [String: String] = {
+        var environment = SecureSubprocessEnvironment.minimal
+        environment["GIT_NO_LAZY_FETCH"] = "1"
+        return environment
+    }()
 }
 
 public protocol ReleaseQualificationExecutableLocating: Sendable {
@@ -232,6 +287,25 @@ public struct ReleaseQualificationEnvironmentDetector: Sendable {
         return environment
     }
 
+    func detectSourceState(
+        sourceRoot: URL,
+        cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation()
+    ) throws -> (
+        source: ReleaseQualificationSourceFacts,
+        commands: [ReleaseQualificationCommandObservation]
+    ) {
+        try validateSourceRoot(sourceRoot)
+        try checkCancellation(cancellation)
+        var observations: [ReleaseQualificationCommandObservation] = []
+        let source = detectSource(
+            sourceRoot: sourceRoot,
+            observations: &observations,
+            cancellation: cancellation
+        )
+        try source.validate()
+        return (source, observations)
+    }
+
     private func detectSource(
         sourceRoot: URL,
         observations: inout [ReleaseQualificationCommandObservation],
@@ -305,7 +379,9 @@ public struct ReleaseQualificationEnvironmentDetector: Sendable {
             return ReleaseQualificationSourceFacts(
                 availability: .init(status: .available),
                 commit: commit,
-                dirty: !status.rawOutput.isEmpty,
+                dirty: !status.rawOutput.isEmpty ||
+                    !diff.rawOutput.isEmpty ||
+                    !untracked.rawOutput.isEmpty,
                 dirtyStateSHA256: digest
             )
         } catch let error as ReleaseQualificationCommandError {

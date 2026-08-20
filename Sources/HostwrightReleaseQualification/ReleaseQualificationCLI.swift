@@ -41,8 +41,8 @@ public struct ReleaseQualificationCLIInvocation: Equatable, Sendable {
     public let rootPath: String?
     public let ledgerRootPath: String?
     public let cellID: String?
+    public let laneID: String?
     public let runID: String?
-    public let executeSafeChecks: Bool
 
     public init(arguments: [String]) throws {
         guard !arguments.isEmpty, arguments.count <= 32 else {
@@ -63,19 +63,13 @@ public struct ReleaseQualificationCLIInvocation: Equatable, Sendable {
         var rootPath: String?
         var ledgerRootPath: String?
         var cellID: String?
+        var laneID: String?
         var runID: String?
-        var executeSafeChecks = false
         var index = 1
         while index < arguments.count {
             let argument = arguments[index]
             switch argument {
-            case "--execute-safe-checks":
-                guard !executeSafeChecks else {
-                    throw ReleaseQualificationCLIError.usage("duplicate --execute-safe-checks")
-                }
-                executeSafeChecks = true
-                index += 1
-            case "--root", "--ledger-root", "--cell", "--run-id":
+            case "--root", "--ledger-root", "--cell", "--lane", "--run-id":
                 guard index + 1 < arguments.count else {
                     throw ReleaseQualificationCLIError.usage("missing value for \(argument)")
                 }
@@ -99,6 +93,11 @@ public struct ReleaseQualificationCLIInvocation: Equatable, Sendable {
                         throw ReleaseQualificationCLIError.usage("duplicate --cell")
                     }
                     cellID = value
+                case "--lane":
+                    guard laneID == nil else {
+                        throw ReleaseQualificationCLIError.usage("duplicate --lane")
+                    }
+                    laneID = value
                 case "--run-id":
                     guard runID == nil else {
                         throw ReleaseQualificationCLIError.usage("duplicate --run-id")
@@ -120,34 +119,46 @@ public struct ReleaseQualificationCLIInvocation: Equatable, Sendable {
         self.rootPath = rootPath
         self.ledgerRootPath = ledgerRootPath
         self.cellID = cellID
+        self.laneID = laneID
         self.runID = runID
-        self.executeSafeChecks = executeSafeChecks
         try validateCombination()
     }
 
     public static let usage =
         "hostwright-release-qualify <plan|detect|verify|status|resume|version|help> " +
-        "[--root PATH] [--ledger-root PATH] [--cell ID] [--run-id ID] [--execute-safe-checks]"
+        "[--root PATH] [--ledger-root PATH] [--cell ID|--lane ID] [--run-id ID]"
 
     private func validateCombination() throws {
         switch command {
         case .plan:
-            guard cellID == nil, runID == nil, ledgerRootPath == nil, !executeSafeChecks else {
+            guard cellID == nil, laneID == nil, runID == nil, ledgerRootPath == nil else {
                 throw ReleaseQualificationCLIError.usage("plan accepts only --root")
             }
         case .detect:
-            guard cellID == nil, runID == nil, ledgerRootPath == nil, !executeSafeChecks else {
+            guard cellID == nil, laneID == nil, runID == nil, ledgerRootPath == nil else {
                 throw ReleaseQualificationCLIError.usage("detect accepts only --root")
             }
         case .verify:
-            guard cellID != nil else {
-                throw ReleaseQualificationCLIError.usage("verify requires --cell ID")
-            }
-            guard let cellID,
-                  ReleaseQualificationSupportedMatrix.committed.cell(id: cellID) != nil else {
+            guard (cellID == nil) != (laneID == nil) else {
                 throw ReleaseQualificationCLIError.usage(
-                    "verify cell is not present in the committed compatibility matrix"
+                    "verify requires exactly one of --cell ID or --lane ID"
                 )
+            }
+            if let cellID {
+                guard ReleaseQualificationSupportedMatrix.committed.cell(id: cellID) != nil else {
+                    throw ReleaseQualificationCLIError.usage(
+                        "verify cell is not present in the committed compatibility matrix"
+                    )
+                }
+            }
+            if let laneID {
+                guard ReleaseQualificationDefaultRegistry.registry.lanes.contains(
+                    where: { $0.id == laneID }
+                ) else {
+                    throw ReleaseQualificationCLIError.usage(
+                        "verify lane is not present in the committed qualification registry"
+                    )
+                }
             }
             if ledgerRootPath != nil {
                 guard runID != nil else {
@@ -163,21 +174,21 @@ public struct ReleaseQualificationCLIInvocation: Equatable, Sendable {
                 }
             }
         case .status:
-            guard ledgerRootPath != nil, rootPath == nil, cellID == nil, !executeSafeChecks else {
+            guard ledgerRootPath != nil, rootPath == nil, cellID == nil, laneID == nil else {
                 throw ReleaseQualificationCLIError.usage(
                     "status requires --ledger-root and accepts only optional --run-id"
                 )
             }
         case .resume:
-            guard ledgerRootPath != nil, rootPath == nil, cellID == nil, runID == nil,
-                  !executeSafeChecks else {
+            guard ledgerRootPath != nil, rootPath == nil, cellID == nil, laneID == nil,
+                  runID == nil else {
                 throw ReleaseQualificationCLIError.usage(
                     "resume requires --ledger-root and accepts no other option"
                 )
             }
         case .version, .help:
-            guard rootPath == nil, ledgerRootPath == nil, cellID == nil,
-                  runID == nil, !executeSafeChecks else {
+            guard rootPath == nil, ledgerRootPath == nil, cellID == nil, laneID == nil,
+                  runID == nil else {
                 throw ReleaseQualificationCLIError.usage(
                     "\(command.rawValue) does not accept options"
                 )
@@ -208,11 +219,65 @@ public struct ReleaseQualificationCLIVersion: Codable, Equatable, Sendable {
     }
 }
 
+enum ReleaseQualificationLaneEvidenceStatus {
+    static func resolve(
+        executionStatus: ReleaseQualificationOutcomeStatus,
+        sourceAvailability: ReleaseQualificationFactStatus,
+        sourceDirty: Bool?,
+        sourceChangedDuringExecution: Bool = false
+    ) -> ReleaseQualificationOutcomeStatus {
+        if sourceAvailability != .available {
+            return executionStatus == .passed || executionStatus == .dirty
+                ? .unavailable
+                : executionStatus
+        }
+        if sourceChangedDuringExecution,
+           executionStatus == .passed || executionStatus == .dirty {
+            return .stale
+        }
+        if sourceDirty == true, executionStatus == .passed {
+            return .dirty
+        }
+        return executionStatus
+    }
+}
+
+enum ReleaseQualificationLocalLaneEvidenceClass {
+    static func resolve(for lane: ReleaseQualificationLane) throws -> HostwrightEvidenceClass {
+        let expected: HostwrightEvidenceClass
+        switch lane.id {
+        case "dependency-lock-integrity",
+             "documentation-source-contracts",
+             "license-policy":
+            expected = .localIntegration
+        case "secret-scan":
+            expected = .securityAssessment
+        default:
+            throw ReleaseQualificationContractError.invalid(
+                field: "lane.id",
+                reason: "no local evidence producer is bound to this lane"
+            )
+        }
+        guard lane.requiredEvidenceClasses.contains(expected) else {
+            throw ReleaseQualificationContractError.invalid(
+                field: "lane.requiredEvidenceClasses",
+                reason: "local lane producer evidence class is not declared"
+            )
+        }
+        return expected
+    }
+}
+
 public struct ReleaseQualificationCLIExecutor: Sendable {
     private let detector: ReleaseQualificationEnvironmentDetector
+    private let localLaneRunner: ReleaseQualificationLocalLaneRunner
 
-    public init(detector: ReleaseQualificationEnvironmentDetector = .init()) {
+    public init(
+        detector: ReleaseQualificationEnvironmentDetector = .init(),
+        localLaneRunner: ReleaseQualificationLocalLaneRunner = .init()
+    ) {
         self.detector = detector
+        self.localLaneRunner = localLaneRunner
     }
 
     public func execute(
@@ -226,8 +291,12 @@ public struct ReleaseQualificationCLIExecutor: Sendable {
             return try ReleaseQualificationJSON.encode(ReleaseQualificationCLIVersion())
         case .plan:
             let root = try resolveSourceRoot(invocation.rootPath, currentDirectory: currentDirectory)
+            let environment = try detect(root: root)
             return try ReleaseQualificationJSON.encode(
-                ReleaseQualificationRegistryPlanner().plan(sourceRoot: root)
+                ReleaseQualificationRegistryPlanner().plan(
+                    sourceRoot: root,
+                    environment: environment
+                )
             )
         case .detect:
             let root = try resolveSourceRoot(invocation.rootPath, currentDirectory: currentDirectory)
@@ -257,6 +326,9 @@ public struct ReleaseQualificationCLIExecutor: Sendable {
         _ invocation: ReleaseQualificationCLIInvocation,
         currentDirectory: URL
     ) throws -> Data {
+        if invocation.laneID != nil {
+            return try executeLaneVerify(invocation, currentDirectory: currentDirectory)
+        }
         let root = try resolveSourceRoot(invocation.rootPath, currentDirectory: currentDirectory)
         let environment = try detect(root: root)
         guard let cellID = invocation.cellID,
@@ -269,28 +341,6 @@ public struct ReleaseQualificationCLIExecutor: Sendable {
             cell: cell,
             environment: environment
         )
-        var safeCheckFailures: [String] = []
-        if invocation.executeSafeChecks {
-            let safeChecks = try ReleaseQualificationSafeCheckRunner().run(sourceRoot: root)
-            for result in safeChecks {
-                if result.status == .failed {
-                    safeCheckFailures.append(contentsOf: result.failures)
-                    evaluation = withAdditional(
-                        evaluation,
-                        blockers: result.blockers,
-                        status: nil,
-                        failures: []
-                    )
-                } else if result.status == .blocked || result.status == .unavailable {
-                    evaluation = withAdditional(
-                        evaluation,
-                        blockers: result.blockers,
-                        status: nil,
-                        failures: []
-                    )
-                }
-            }
-        }
         if cell.executionMode != .safeLocal || cell.authority != .local {
             evaluation = withAdditional(
                 evaluation,
@@ -328,7 +378,7 @@ public struct ReleaseQualificationCLIExecutor: Sendable {
             runID: runID,
             claim: claim,
             evidenceClass: cell.requiredEvidenceClasses[0],
-            status: safeCheckFailures.isEmpty ? status : .failed,
+            status: status,
             simulation: .real,
             source: environment.source,
             environment: environment,
@@ -339,7 +389,7 @@ public struct ReleaseQualificationCLIExecutor: Sendable {
             rawOutputSHA256: commandHashes,
             artifacts: [],
             blockers: evaluation.blockers,
-            failures: safeCheckFailures.sorted(),
+            failures: [],
             replayKey: replayKey
         )
         try evidence.validate()
@@ -353,6 +403,129 @@ public struct ReleaseQualificationCLIExecutor: Sendable {
                 replayKey: replayKey
             )
             _ = try ledger.complete(runID: runID, evidence: evidence)
+        }
+        return try ReleaseQualificationJSON.encode(evidence)
+    }
+
+    private func executeLaneVerify(
+        _ invocation: ReleaseQualificationCLIInvocation,
+        currentDirectory: URL
+    ) throws -> Data {
+        let root = try resolveSourceRoot(invocation.rootPath, currentDirectory: currentDirectory)
+        let environment = try detect(root: root)
+        guard let laneID = invocation.laneID,
+              let lane = ReleaseQualificationDefaultRegistry.registry.lanes.first(
+                  where: { $0.id == laneID }
+              ) else {
+            throw ReleaseQualificationCLIError.usage(
+                "verify lane is not present in the committed qualification registry"
+            )
+        }
+        guard let sourceCommit = environment.source.commit else {
+            throw ReleaseQualificationCLIError.blocked(
+                "local qualification requires an exact source commit"
+            )
+        }
+        let evidenceClass = try ReleaseQualificationLocalLaneEvidenceClass.resolve(for: lane)
+        let execution = try localLaneRunner.run(
+            lane: lane,
+            sourceRoot: root,
+            sourceCommit: sourceCommit
+        )
+        let postExecutionSource = try detector.detectSourceState(sourceRoot: root)
+        let sourceAvailableThroughout =
+            environment.source.availability.status == .available &&
+            postExecutionSource.source.availability.status == .available
+        let sourceChangedDuringExecution =
+            sourceAvailableThroughout && postExecutionSource.source != environment.source
+        var blockers = execution.blockers
+        let status = ReleaseQualificationLaneEvidenceStatus.resolve(
+            executionStatus: execution.status,
+            sourceAvailability: sourceAvailableThroughout ? .available : .unavailable,
+            sourceDirty: environment.source.dirty,
+            sourceChangedDuringExecution: sourceChangedDuringExecution
+        )
+        if !sourceAvailableThroughout {
+            blockers.append(
+                ReleaseQualificationBlocker(
+                    reason: .sourceCommitUnavailable,
+                    field: "environment.source",
+                    detail: "source identity was unavailable before or after lane execution"
+                )
+            )
+        } else if environment.source.dirty == true {
+            blockers.append(
+                ReleaseQualificationBlocker(
+                    reason: .dirtySource,
+                    field: "environment.source",
+                    detail: "dirty source cannot satisfy a release qualification lane"
+                )
+            )
+        }
+        if sourceChangedDuringExecution {
+            blockers.append(
+                ReleaseQualificationBlocker(
+                    reason: .staleEvidence,
+                    field: "environment.source",
+                    detail: "source identity changed while the qualification lane was executing"
+                )
+            )
+        }
+        blockers = Array(Set(blockers)).sorted {
+            ($0.field, $0.reason.rawValue, $0.detail) <
+                ($1.field, $1.reason.rawValue, $1.detail)
+        }
+        let claim = ReleaseQualificationClaim(
+            id: "lane.\(lane.id)",
+            title: lane.target,
+            matrixCellID: nil,
+            executionMode: lane.executionMode,
+            authority: lane.authority,
+            requiredEvidenceClasses: lane.requiredEvidenceClasses
+        )
+        let commands = environment.commands + execution.commands + postExecutionSource.commands
+        let replayKey = try ReleaseQualificationLedgerStore.replayKey(
+            claim: claim,
+            environment: environment,
+            commands: commands
+        )
+        let timestamp = ReleaseQualificationTimestamp()
+        let evidence = ReleaseQualificationEvidence(
+            runID: invocation.runID ?? "nonledger-lane-\(lane.id)",
+            claim: claim,
+            evidenceClass: evidenceClass,
+            status: status,
+            simulation: .real,
+            source: environment.source,
+            environment: environment,
+            startedAt: commands.first?.startedAt ?? timestamp,
+            endedAt: commands.last?.endedAt ?? timestamp,
+            durationMilliseconds: commands.reduce(0) { partial, command in
+                partial + command.durationMilliseconds
+            },
+            commands: commands,
+            rawOutputSHA256: commands.flatMap {
+                [$0.standardOutputSHA256, $0.standardErrorSHA256]
+            },
+            artifacts: [],
+            blockers: blockers,
+            failures: execution.failures,
+            replayKey: replayKey
+        )
+        try evidence.validate()
+        if let ledgerRootPath = invocation.ledgerRootPath {
+            let ledger = try ReleaseQualificationLedgerStore(
+                root: try resolveLedgerRoot(
+                    ledgerRootPath,
+                    currentDirectory: currentDirectory
+                )
+            )
+            _ = try ledger.begin(
+                runID: evidence.runID,
+                claim: claim,
+                replayKey: replayKey
+            )
+            _ = try ledger.complete(runID: evidence.runID, evidence: evidence)
         }
         return try ReleaseQualificationJSON.encode(evidence)
     }
@@ -472,7 +645,7 @@ public struct ReleaseQualificationCLIExecutor: Sendable {
         "hostwright-release-qualify plan|detect|verify|status|resume|version|help\n" +
         "  plan    print the committed matrix and bounded gate plan\n" +
         "  detect  detect local facts and evaluate committed matrix cells\n" +
-        "  verify  produce bound evidence; live/heavy cells remain blocked\n" +
+        "  verify  produce cell evidence or run one bounded local lane\n" +
         "  status  read a private ledger journal or summary\n" +
         "  resume  recover interrupted private ledger journals\n"
 }

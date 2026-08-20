@@ -10,7 +10,11 @@ import sys
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[1]
+PINNED_FILES = globals().get("HOSTWRIGHT_QUALIFICATION_FILES")
+PINNED_ENTRIES = globals().get("HOSTWRIGHT_QUALIFICATION_ENTRIES")
+if (PINNED_FILES is None) != (PINNED_ENTRIES is None):
+    raise RuntimeError("incomplete qualification source snapshot")
+ROOT = Path(".") if PINNED_FILES is not None else Path(__file__).resolve().parents[1]
 EVIDENCE_CLASSES = [
     "unit-contract",
     "local-integration",
@@ -30,8 +34,17 @@ PHASE_SCHEDULE = [
 ]
 
 
+def read_bytes(path: str) -> bytes:
+    if PINNED_FILES is not None:
+        try:
+            return PINNED_FILES[path]
+        except KeyError as error:
+            raise RuntimeError(f"qualification source snapshot lacks {path}") from error
+    return (ROOT / path).read_bytes()
+
+
 def read(path: str) -> str:
-    return (ROOT / path).read_text(encoding="utf-8")
+    return read_bytes(path).decode("utf-8")
 
 
 def require(condition: bool, message: str, errors: list[str]) -> None:
@@ -185,17 +198,26 @@ def main() -> int:
         errors,
     )
 
-    example_paths = sorted((ROOT / "examples").glob("*/hostwright.yaml"))
+    if PINNED_FILES is None:
+        example_paths = [
+            path.relative_to(ROOT).as_posix()
+            for path in sorted((ROOT / "examples").glob("*/hostwright.yaml"))
+        ]
+    else:
+        example_paths = sorted(
+            path
+            for path in PINNED_FILES
+            if re.fullmatch(r"examples/[^/]+/hostwright\.yaml", path)
+        )
     require(bool(example_paths), "no executable manifest examples found", errors)
     for path in example_paths:
-        content = path.read_text(encoding="utf-8")
-        require(re.search(r"(?m)^version:\s*3\s*$", content) is not None, f"{path.relative_to(ROOT)} is not Manifest v3", errors)
+        content = read(path)
+        require(re.search(r"(?m)^version:\s*3\s*$", content) is not None, f"{path} is not Manifest v3", errors)
 
     immutable = json.loads(read("docs/release/IMMUTABLE_RELEASES.json"))
     require(immutable.get("schemaVersion") == 1, "immutable release manifest schema is invalid", errors)
     for record in immutable.get("files", []):
-        path = ROOT / record["path"]
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        digest = hashlib.sha256(read_bytes(record["path"])).hexdigest()
         require(digest == record["sha256"], f"immutable historical release changed: {record['path']}", errors)
 
     if errors:

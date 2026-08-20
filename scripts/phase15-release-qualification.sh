@@ -34,5 +34,27 @@ if document.get("schemaVersion") != 1:
     raise SystemExit("release qualification plan schema version is invalid")
 '
 
+swift run --jobs 1 hostwright-release-qualify verify \
+    --lane documentation-source-contracts \
+    --root "$repository_root" \
+    | python3 -c '
+import json
+import sys
+
+evidence = json.load(sys.stdin)
+if evidence.get("evidenceClass") != "local-integration":
+    raise SystemExit("documentation lane evidence class is invalid")
+if evidence.get("status") != "passed":
+    raise SystemExit("documentation lane is not promotable")
+commands = [
+    command for command in evidence.get("commands", [])
+    if command.get("identity", {}).get("purpose", "").startswith("validate ")
+]
+if len(commands) != 2 or any(command.get("exitStatus") != 0 for command in commands):
+    raise SystemExit("documentation lane command evidence is incomplete")
+if evidence.get("blockers") or evidence.get("failures"):
+    raise SystemExit("documentation lane has release blockers or failures")
+'
+
 git diff --check
 printf '%s\n' "phase15 release qualification focused checks passed"

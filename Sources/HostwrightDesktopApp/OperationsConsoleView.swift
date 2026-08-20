@@ -1,10 +1,12 @@
 import SwiftUI
 import HostwrightDesktopModel
 
-struct MenuBarLabel: View {
+public struct MenuBarLabel: View {
     @EnvironmentObject private var model: DesktopOperationsModel
 
-    var body: some View {
+    public init() {}
+
+    public var body: some View {
         Label(model.connectionState.label, systemImage: connectionImage)
             .foregroundStyle(connectionColor)
             .accessibilityLabel("Hostwright connection: \(model.connectionState.label)")
@@ -29,22 +31,35 @@ struct MenuBarLabel: View {
     }
 }
 
-struct OperationsConsoleView: View {
+public struct OperationsConsoleView: View {
     @EnvironmentObject private var model: DesktopOperationsModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @SceneStorage(DesktopSceneStorageKey.selection) private var storedSelection = "overview"
     @SceneStorage(DesktopSceneStorageKey.selectedProject) private var storedProjectID = ""
     @SceneStorage(DesktopSceneStorageKey.selectedService) private var storedServiceID = ""
 
-    var body: some View {
+    public init(initialSelection: String? = nil) {
+        _storedSelection = SceneStorage(
+            wrappedValue: initialSelection ?? "overview",
+            DesktopSceneStorageKey.selection
+        )
+    }
+
+    public var body: some View {
         NavigationSplitView {
             List(selection: $storedSelection) {
                 Section("Workspace") {
                     Label("Overview", systemImage: "rectangle.3.group")
+                        .accessibilityLabel("Workspace: Overview")
+                        .accessibilityIdentifier(DesktopAccessibilityIdentifier.workspaceOverview)
                         .tag("overview")
                     Label("Events", systemImage: "list.bullet.rectangle")
+                        .accessibilityLabel("Workspace: Events")
+                        .accessibilityIdentifier(DesktopAccessibilityIdentifier.workspaceEvents)
                         .tag("events")
                     Label("Logs", systemImage: "text.alignleft")
+                        .accessibilityLabel("Workspace: Logs")
+                        .accessibilityIdentifier(DesktopAccessibilityIdentifier.workspaceLogs)
                         .tag("logs")
                 }
 
@@ -214,7 +229,8 @@ private struct OverviewView: View {
             } else {
                 EmptyStateView(
                     title: "No project status yet",
-                    message: "Connect to the local daemon to observe its configured project."
+                    message: "Connect to the local daemon to observe its configured project.",
+                    accessibilityIdentifier: DesktopAccessibilityIdentifier.emptyOverview
                 )
             }
         }
@@ -266,7 +282,8 @@ private struct ServiceTable: View {
             } else {
                 EmptyStateView(
                     title: "No service status yet",
-                    message: "The daemon has not reported any configured services."
+                    message: "The daemon has not reported any configured services.",
+                    accessibilityIdentifier: DesktopAccessibilityIdentifier.emptyServices
                 )
             }
         }
@@ -302,7 +319,8 @@ private struct EventsView: View {
             if model.events.isEmpty {
                 EmptyStateView(
                     title: "No events loaded",
-                    message: "Refresh to read the daemon's bounded local event snapshot."
+                    message: "Refresh to read the daemon's bounded local event snapshot.",
+                    accessibilityIdentifier: DesktopAccessibilityIdentifier.emptyEvents
                 )
             } else {
                 List(model.events) { event in
@@ -396,7 +414,8 @@ private struct LogsView: View {
             if model.logChunks.isEmpty {
                 EmptyStateView(
                     title: "No logs loaded",
-                    message: "Select a service with an observed resource to read its bounded logs."
+                    message: "Select a service with an observed resource to read its bounded logs.",
+                    accessibilityIdentifier: DesktopAccessibilityIdentifier.emptyLogs
                 )
             } else {
                 ScrollView {
@@ -420,11 +439,13 @@ private struct LogsView: View {
     }
 }
 
-struct MenuBarHealthView: View {
+public struct MenuBarHealthView: View {
     @EnvironmentObject private var model: DesktopOperationsModel
     @Environment(\.openWindow) private var openWindow
 
-    var body: some View {
+    public init() {}
+
+    public var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Label(model.connectionState.label, systemImage: connectionImage)
                 .accessibilityLabel("Hostwright connection: \(model.connectionState.label)")
@@ -446,6 +467,7 @@ struct MenuBarHealthView: View {
             Button("Quit Hostwright", systemImage: "power") {
                 NSApplication.shared.terminate(nil)
             }
+            .accessibilityIdentifier(DesktopAccessibilityIdentifier.menuQuit)
         }
         .padding(8)
     }
@@ -485,6 +507,7 @@ private struct FailureBanner: View {
 private struct EmptyStateView: View {
     let title: String
     let message: String
+    let accessibilityIdentifier: String
 
     var body: some View {
         VStack(spacing: 8) {
@@ -502,6 +525,7 @@ private struct EmptyStateView: View {
         .padding(32)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(title): \(message)")
+        .accessibilityIdentifier(accessibilityIdentifier)
     }
 }
 

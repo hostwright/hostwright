@@ -143,6 +143,10 @@ let package = Package(
             name: "HostwrightDesktopModel",
             targets: ["HostwrightDesktopModel"]
         ),
+        .library(
+            name: "HostwrightDesktopUI",
+            targets: ["HostwrightDesktopUI"]
+        ),
         .executable(
             name: "hostwright-desktop",
             targets: ["HostwrightDesktopApp"]
@@ -181,6 +185,11 @@ let package = Package(
         ),
         .executableTarget(
             name: "HostwrightDesktopApp",
+            dependencies: ["HostwrightDesktopModel", "HostwrightDesktopUI"],
+            path: "Sources/HostwrightDesktopEntry"
+        ),
+        .target(
+            name: "HostwrightDesktopUI",
             dependencies: ["HostwrightDesktopModel"],
             path: "Sources/HostwrightDesktopApp"
         ),
@@ -988,7 +997,7 @@ let package = Package(
         ),
         .testTarget(
             name: "HostwrightDesktopUITests",
-            dependencies: ["HostwrightDesktopModel"],
+            dependencies: ["HostwrightDesktopModel", "HostwrightDesktopUI"],
             path: "Tests/HostwrightDesktopUITests"
         )
     ]

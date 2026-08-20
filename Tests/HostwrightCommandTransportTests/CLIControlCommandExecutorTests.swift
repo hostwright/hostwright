@@ -165,7 +165,7 @@ final class CLIControlCommandExecutorTests: XCTestCase {
         XCTAssertFalse(result.standardOutput.contains("swapped-after-authorization"))
     }
 
-    func testImportStackSnapshotsComposeInputWithoutTreatingItAsAHostwrightManifest() throws {
+    func testImportStackUnaryControlReturnsVersionedComposeEnvelopeWithoutWritesOrRuntime() throws {
         let compose = """
         name: gate09-import
         services:
@@ -194,7 +194,18 @@ final class CLIControlCommandExecutorTests: XCTestCase {
         XCTAssertEqual(response.status, .completed)
         XCTAssertEqual(result.exitCode, 0)
         XCTAssertEqual(reads.value, 1)
-        XCTAssertTrue(result.standardOutput.contains("\"manifest\""))
+        XCTAssertEqual(result.standardError, "")
+        let output = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: Data(result.standardOutput.utf8)) as? [String: Any]
+        )
+        XCTAssertEqual(output["kind"] as? String, "composeImport")
+        XCTAssertEqual(output["schemaVersion"] as? Int, 1)
+        XCTAssertEqual(output["contractVersion"] as? String, "v1")
+        XCTAssertEqual(output["succeeded"] as? Bool, true)
+        XCTAssertTrue((output["manifestText"] as? String)?.contains("project: gate09-import") == true)
+        let lossReport = try XCTUnwrap(output["lossReport"] as? [String: Any])
+        XCTAssertEqual(lossReport["operation"] as? String, "import")
+        XCTAssertTrue((lossReport["losses"] as? [[String: Any]])?.isEmpty == true)
     }
 
     func testStreamRouteIsRejectedForUnaryExecutor() throws {

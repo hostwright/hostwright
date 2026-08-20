@@ -865,6 +865,30 @@ public enum HostwrightCLI {
         environment: CLIEnvironment
     ) throws -> CLIRunResult {
         let text = try hostwrightReadLocalText(path: path, role: "stack file", environment: environment)
+
+        if output == .json {
+            let result = HostwrightCompose.importDocument(text)
+            let exitCode: CLIExitCode = result.succeeded ? .success : .validation
+            let validatedManifest: TeamValidatedManifest?
+            if result.succeeded, let manifestText = result.manifestText {
+                validatedManifest = try hostwrightValidatedManifest(
+                    text: manifestText,
+                    teamProfilePath: teamProfilePath,
+                    environment: environment
+                )
+            } else {
+                validatedManifest = nil
+            }
+            let envelope = CLIJSON.composeImport(
+                path: path,
+                result: result,
+                validatedManifest: validatedManifest
+            )
+            return result.succeeded
+                ? CLIRunResult(standardOutput: envelope, exitCode: exitCode.rawValue)
+                : CLIRunResult(standardError: envelope, exitCode: exitCode.rawValue)
+        }
+
         let result = StackFileImporter.convert(text)
         let exitCode: CLIExitCode = result.succeeded ? .success : .validation
         var validatedManifest: TeamValidatedManifest?
@@ -874,16 +898,6 @@ public enum HostwrightCLI {
                 teamProfilePath: teamProfilePath,
                 environment: environment
             )
-        }
-
-        if output == .json {
-            if result.succeeded {
-                return CLIRunResult(
-                    standardOutput: CLIJSON.stackImport(path: path, result: result, validatedManifest: validatedManifest),
-                    exitCode: exitCode.rawValue
-                )
-            }
-            return CLIRunResult(standardError: CLIJSON.stackImportError(path: path, result: result, exitCode: exitCode), exitCode: exitCode.rawValue)
         }
 
         if result.succeeded, let manifestText = result.manifestText {

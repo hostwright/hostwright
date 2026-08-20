@@ -18,6 +18,15 @@ Both operations return a versioned result with `schemaVersion: 1`,
 `ComposeContractJSON.render(_:)` for stable sorted-key JSON output. An error
 loss makes the result unsuccessful and its output text is `nil`.
 
+`hostwright import-stack <path> --output json` and the unary control route
+return that same import result as a sorted-key `composeImport` envelope. Its
+top-level fields are `kind`, `sourcePath`, `schemaVersion`, `contractVersion`,
+`succeeded`, `manifestText`, `canonicalComposeText`, and `lossReport`; a
+success is written to standard output and an unsuccessful import is written to
+standard error with the normal validation exit code. An explicit team profile
+adds its existing `teamPolicy` binding. Plain-text `import-stack` output
+remains the legacy converted-manifest form.
+
 The canonical subset is intentionally narrow:
 
 - top-level `name` or `project` and `services`;

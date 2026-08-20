@@ -728,7 +728,7 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertNoThrow(try ManifestValidator.validated(result.standardOutput))
     }
 
-    func testImportStackJSONOutputIncludesManifestAndWarnings() throws {
+    func testImportStackJSONOutputUsesVersionedComposeEnvelopeWithoutWritingFiles() throws {
         let stack = """
         version: "3.9"
         name: demo
@@ -740,20 +740,30 @@ final class HostwrightCLITests: XCTestCase {
         let files = FileBox(files: ["compose.yaml": stack])
 
         let result = HostwrightCLI.run(arguments: ["import-stack", "compose.yaml", "--output", "json"], environment: environment(files: files))
+        let repeated = HostwrightCLI.run(arguments: ["import-stack", "compose.yaml", "--output", "json"], environment: environment(files: files))
 
         XCTAssertEqual(result.exitCode, 0)
         XCTAssertEqual(result.standardError, "")
+        XCTAssertEqual(repeated, result)
+        XCTAssertEqual(files.files, ["compose.yaml": stack])
         let object = try jsonObject(result.standardOutput)
-        XCTAssertEqual(object["kind"] as? String, "stackImport")
+        XCTAssertEqual(object["kind"] as? String, "composeImport")
         XCTAssertEqual(object["sourcePath"] as? String, "compose.yaml")
+        XCTAssertEqual(object["schemaVersion"] as? Int, 1)
+        XCTAssertEqual(object["contractVersion"] as? String, "v1")
         XCTAssertEqual(object["succeeded"] as? Bool, true)
-        XCTAssertTrue((object["manifest"] as? String)?.contains("project: demo") == true)
-        let warnings = try XCTUnwrap(object["warnings"] as? [[String: Any]])
-        XCTAssertEqual(warnings.count, 1)
-        XCTAssertEqual(warnings.first?["severity"] as? String, "warning")
+        XCTAssertTrue((object["manifestText"] as? String)?.contains("project: demo") == true)
+        XCTAssertTrue((object["canonicalComposeText"] as? String)?.contains("name: \"demo\"") == true)
+        let lossReport = try XCTUnwrap(object["lossReport"] as? [String: Any])
+        XCTAssertEqual(lossReport["operation"] as? String, "import")
+        let losses = try XCTUnwrap(lossReport["losses"] as? [[String: Any]])
+        XCTAssertEqual(losses.count, 1)
+        XCTAssertEqual(losses.first?["severity"] as? String, "warning")
+        XCTAssertFalse(result.standardOutput.contains("\"warnings\""))
+        XCTAssertFalse(result.standardOutput.contains("\"manifest\""))
     }
 
-    func testImportStackJSONErrorsFailClosedForUnsupportedFields() throws {
+    func testImportStackJSONErrorsUseVersionedComposeLossEnvelopeAndFailClosed() throws {
         let stack = """
         name: demo
         services:
@@ -768,12 +778,21 @@ final class HostwrightCLITests: XCTestCase {
 
         XCTAssertEqual(result.exitCode, CLIExitCode.validation.rawValue)
         XCTAssertEqual(result.standardOutput, "")
+        XCTAssertEqual(files.files, ["compose.yaml": stack])
         let object = try jsonObject(result.standardError)
-        XCTAssertEqual(object["kind"] as? String, "error")
-        XCTAssertEqual(object["exitCode"] as? Int, Int(CLIExitCode.validation.rawValue))
-        let issues = try XCTUnwrap(object["issues"] as? [[String: Any]])
-        XCTAssertEqual(issues.first?["policyReasonCode"] as? String, "secureExposureUnsupported")
-        XCTAssertTrue((issues.first?["message"] as? String)?.contains("network_mode") == true)
+        XCTAssertEqual(object["kind"] as? String, "composeImport")
+        XCTAssertEqual(object["schemaVersion"] as? Int, 1)
+        XCTAssertEqual(object["contractVersion"] as? String, "v1")
+        XCTAssertEqual(object["succeeded"] as? Bool, false)
+        XCTAssertTrue(object["manifestText"] is NSNull)
+        XCTAssertTrue(object["canonicalComposeText"] is NSNull)
+        let lossReport = try XCTUnwrap(object["lossReport"] as? [String: Any])
+        XCTAssertEqual(lossReport["operation"] as? String, "import")
+        let losses = try XCTUnwrap(lossReport["losses"] as? [[String: Any]])
+        XCTAssertEqual(losses.first?["code"] as? String, "HW-COMPOSE-001")
+        XCTAssertEqual(losses.first?["path"] as? String, "$.services.api.network_mode")
+        XCTAssertEqual(losses.first?["policyReasonCode"] as? String, "secureExposureUnsupported")
+        XCTAssertTrue((losses.first?["message"] as? String)?.contains("network_mode") == true)
     }
 
     func testValidateAndPlanRemainNonMutatingWhileStatusUsesSecureDefaultState() throws {

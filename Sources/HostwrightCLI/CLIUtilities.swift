@@ -529,40 +529,31 @@ enum CLIJSON {
         ])
     }
 
-    static func stackImport(
+    static func composeImport(
         path: String,
-        result: StackImportResult,
+        result: ComposeImportResult,
         validatedManifest: TeamValidatedManifest? = nil
     ) -> String {
-        var object: [String: Any] = [
-            "kind": "stackImport",
-            "sourcePath": path,
-            "succeeded": result.succeeded,
-            "manifest": result.manifestText as Any,
-            "warnings": result.warnings.map(stackImportDiagnostic)
-        ]
-        if let validatedManifest,
-           let profileIdentifier = validatedManifest.profileIdentifier,
-           let profileHash = validatedManifest.profileHash,
-           let manifestHash = validatedManifest.manifestHash {
-            object["teamPolicy"] = teamPolicy(
+        let teamPolicy = validatedManifest.flatMap { validatedManifest -> ComposeImportTeamPolicy? in
+            guard let profileIdentifier = validatedManifest.profileIdentifier,
+                  let profileHash = validatedManifest.profileHash,
+                  let manifestHash = validatedManifest.manifestHash else {
+                return nil
+            }
+            return ComposeImportTeamPolicy(
                 profileIdentifier: profileIdentifier,
                 profileHash: profileHash,
                 manifestHash: manifestHash,
-                planHash: nil
+                approvalRequiredForMutation: true
             )
         }
-        return render(object)
-    }
-
-    static func stackImportError(path: String, result: StackImportResult, exitCode: CLIExitCode) -> String {
-        render([
-            "kind": "error",
-            "code": (result.errors.first?.code ?? .manifestUnsupportedFeature).rawValue,
-            "exitCode": Int(exitCode.rawValue),
-            "sourcePath": path,
-            "issues": result.errors.map(stackImportDiagnostic)
-        ])
+        return codable(
+            ComposeImportEnvelope(
+                sourcePath: path,
+                result: result,
+                teamPolicy: teamPolicy
+            )
+        )
     }
 
     static func plan(_ plan: ReconciliationPlan, teamBinding: TeamWorkflowBinding? = nil) -> String {
@@ -623,16 +614,6 @@ enum CLIJSON {
             "manifestHash": manifestHash,
             "planHash": planHash as Any,
             "approvalRequiredForMutation": true
-        ].compactNilValues()
-    }
-
-    private static func stackImportDiagnostic(_ diagnostic: StackImportDiagnostic) -> [String: Any] {
-        [
-            "code": diagnostic.code.rawValue,
-            "severity": diagnostic.severity.rawValue,
-            "message": RuntimeRedactionPolicy.default.redact(diagnostic.message),
-            "line": diagnostic.line as Any,
-            "policyReasonCode": diagnostic.policyReasonCode as Any
         ].compactNilValues()
     }
 
@@ -1171,6 +1152,45 @@ enum CLIJSON {
             }
         ].compactNilValues()
     }
+}
+
+private struct ComposeImportEnvelope: Encodable {
+    let kind = "composeImport"
+    let sourcePath: String
+    let result: ComposeImportResult
+    let teamPolicy: ComposeImportTeamPolicy?
+
+    private enum CodingKeys: String, CodingKey {
+        case kind
+        case sourcePath
+        case schemaVersion
+        case contractVersion
+        case succeeded
+        case manifestText
+        case canonicalComposeText
+        case lossReport
+        case teamPolicy
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(sourcePath, forKey: .sourcePath)
+        try container.encode(result.schemaVersion, forKey: .schemaVersion)
+        try container.encode(result.contractVersion, forKey: .contractVersion)
+        try container.encode(result.succeeded, forKey: .succeeded)
+        try container.encode(result.manifestText, forKey: .manifestText)
+        try container.encode(result.canonicalComposeText, forKey: .canonicalComposeText)
+        try container.encode(result.lossReport, forKey: .lossReport)
+        try container.encodeIfPresent(teamPolicy, forKey: .teamPolicy)
+    }
+}
+
+private struct ComposeImportTeamPolicy: Encodable {
+    let profileIdentifier: String
+    let profileHash: String
+    let manifestHash: String
+    let approvalRequiredForMutation: Bool
 }
 
 private extension Dictionary where Key == String, Value == Any {

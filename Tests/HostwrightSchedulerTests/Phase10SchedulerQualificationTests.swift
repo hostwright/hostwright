@@ -878,7 +878,8 @@ final class Phase10SchedulerQualificationTests: XCTestCase {
 
     func testPhase10SchedulerQualificationAllowsOwnedDurableClosureRoot() throws {
         let configuration = try Phase10SchedulerQualification.Configuration(
-            explicitOutputRoot: Phase10SchedulerQualification.Configuration.ownedDurableOutputRoot
+            explicitOutputRoot: try Phase10SchedulerQualification.Configuration
+                .ensureOwnedDurableOutputRootForTest()
         )
         XCTAssertEqual(
             configuration.outputRootIdentity,
@@ -1127,7 +1128,8 @@ final class Phase10SchedulerQualificationTests: XCTestCase {
         let configuration = try Phase10SchedulerQualification.Configuration(
             generatedCount: 1,
             exactCount: 1,
-            explicitOutputRoot: Phase10SchedulerQualification.Configuration.ownedDurableOutputRoot
+            explicitOutputRoot: try Phase10SchedulerQualification.Configuration
+                .ensureOwnedDurableOutputRootForTest()
         )
         let fingerprint = String(repeating: "c", count: 64)
         let record = Phase10SchedulerQualificationRunReceipt(
@@ -1184,7 +1186,8 @@ final class Phase10SchedulerQualificationTests: XCTestCase {
         let configuration = try Phase10SchedulerQualification.Configuration(
             generatedCount: 1,
             exactCount: 1,
-            explicitOutputRoot: Phase10SchedulerQualification.Configuration.ownedDurableOutputRoot
+            explicitOutputRoot: try Phase10SchedulerQualification.Configuration
+                .ensureOwnedDurableOutputRootForTest()
         )
         let fingerprint = String(repeating: "f", count: 64)
         func entry(_ name: String) -> Phase10SchedulerQualificationReplayEntry {
@@ -1240,7 +1243,8 @@ final class Phase10SchedulerQualificationTests: XCTestCase {
         let configuration = try Phase10SchedulerQualification.Configuration(
             generatedCount: 1,
             exactCount: 1,
-            explicitOutputRoot: Phase10SchedulerQualification.Configuration.ownedDurableOutputRoot
+            explicitOutputRoot: try Phase10SchedulerQualification.Configuration
+                .ensureOwnedDurableOutputRootForTest()
         )
         let fingerprint = String(repeating: "d", count: 64)
         let fixture = Phase10SchedulerQualificationReplayEntry(

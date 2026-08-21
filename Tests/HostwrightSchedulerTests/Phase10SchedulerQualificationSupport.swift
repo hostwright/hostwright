@@ -304,6 +304,18 @@ enum Phase10SchedulerQualification {
                 )
         }
 
+        static func ensureOwnedDurableOutputRootForTest() throws -> URL {
+            let root = ownedDurableOutputRoot
+            if !FileManager.default.fileExists(atPath: root.path) {
+                try FileManager.default.createDirectory(
+                    at: root,
+                    withIntermediateDirectories: true,
+                    attributes: [.posixPermissions: 0o700]
+                )
+            }
+            return root
+        }
+
         var outputRootIdentity: String {
             explicitOutputRoot?.standardizedFileURL.path ?? "temporary-phase10-owned"
         }

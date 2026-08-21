@@ -247,11 +247,11 @@ final class ClusterRemoteOperationAdmissionTests: XCTestCase {
         let desired = try makeDesired()
         return Fixture(
             intent: intent,
-            handoff: makeHandoff(),
+            handoff: try makeHandoff(),
             desired: desired,
-            proof: ClusterMutationProof(
+            proof: try ClusterMutationProof(
                 mutationID: intent.operationID,
-                mutationSHA256: intent.canonicalSHA256(),
+                mutationSHA256: try intent.canonicalSHA256(),
                 replicatedDesiredState: desired
             )
         )

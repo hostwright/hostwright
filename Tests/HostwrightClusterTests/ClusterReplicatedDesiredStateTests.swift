@@ -61,7 +61,7 @@ final class ClusterReplicatedDesiredStateTests: XCTestCase {
         let forgedReplay = try ClusterReplicatedDesiredStateProposal(
             expectation: .record(
                 revision: first.revision,
-                recordSHA256: digest("z")
+                recordSHA256: digest("e")
             ),
             next: second
         )

@@ -962,7 +962,20 @@ final class HostwrightCLITests: XCTestCase {
 
     func testComposeBoundedReaderAcceptsExactLimitAndRejectsOversizedAndInvalidUTF8() throws {
         try withTemporaryDirectory { directory in
-            let validSuffix = "\nproject: boundary\nservices: {}\n"
+            let validSuffix = "\n" + """
+            version: 3
+            project: boundary
+            services:
+              api:
+                image: ghcr.io/example/api:1
+                resources:
+                  requests:
+                    cpus: 1
+                    memory: 512MiB
+                  limits:
+                    cpus: 1
+                    memory: 512MiB
+            """
             let exactText = String(
                 repeating: "#",
                 count: ManifestParser.maximumUTF8Bytes - validSuffix.utf8.count

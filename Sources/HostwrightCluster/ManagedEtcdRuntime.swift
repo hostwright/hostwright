@@ -538,7 +538,7 @@ public struct ManagedEtcdMemberStatus: Codable, Equatable, Sendable {
 public actor ManagedEtcdMemberSupervisor {
     private let configuration: ManagedEtcdSupervisedProcessConfiguration
     private let healthEndpoint: URL
-    private var process: Process?
+    private var process: SecureDetachedProcess?
     private var processID: Int32?
     private var state: ManagedEtcdMemberState = .stopped
     private var lastHealthCheckSucceeded: Bool?
@@ -579,38 +579,20 @@ public actor ManagedEtcdMemberSupervisor {
         try configuration.validate()
         state = .starting
         lastHealthCheckSucceeded = nil
-        let executable: SecureExecutableIdentity
         do {
-            executable = try SecureExecutableResolver.verify(
-                path: configuration.executablePath,
-                ownershipPolicy: .rootOrCurrentUser
+            process = try SecureSubprocessRunner().launchDetached(
+                configuration.secureSubprocessRequest()
             )
-            _ = try SecureExecutableResolver.verifyWorkingDirectory(path: configuration.workingDirectory)
-        } catch {
-            state = .failed
-            throw ManagedEtcdError.processStartFailed("secure executable validation failed")
-        }
-        let child = Process()
-        child.executableURL = URL(fileURLWithPath: executable.path)
-        child.arguments = configuration.arguments
-        child.environment = configuration.environment
-        child.currentDirectoryURL = URL(fileURLWithPath: configuration.workingDirectory, isDirectory: true)
-        child.standardInput = FileHandle.nullDevice
-        child.standardOutput = FileHandle.nullDevice
-        child.standardError = FileHandle.nullDevice
-        do {
-            try child.run()
         } catch {
             state = .failed
             throw ManagedEtcdError.processStartFailed("secure subprocess launch failed")
         }
-        guard child.isRunning else {
+        guard let process, process.isRunning else {
             state = .failed
-            child.waitUntilExit()
+            self.process = nil
             throw ManagedEtcdError.processStartFailed("process exited before supervision began")
         }
-        process = child
-        processID = child.processIdentifier
+        processID = process.processID
         state = .running
         return status()
     }
@@ -618,12 +600,9 @@ public actor ManagedEtcdMemberSupervisor {
     public func checkHealth() async throws -> ManagedEtcdMemberStatus {
         guard let process, process.isRunning,
               state == .running || state == .healthy || state == .unhealthy else {
-            if let exitedProcess = self.process {
-                exitedProcess.waitUntilExit()
-                self.process = nil
-                state = .failed
-                processID = nil
-            }
+            self.process = nil
+            state = .failed
+            processID = nil
             throw ManagedEtcdError.processNotRunning
         }
         var request = URLRequest(url: healthEndpoint)
@@ -661,18 +640,7 @@ public actor ManagedEtcdMemberSupervisor {
             return status()
         }
         state = .stopping
-        if process.isRunning {
-            process.terminate()
-            let deadline = DispatchTime.now().uptimeNanoseconds +
-                UInt64(configuration.terminationGraceMilliseconds) * 1_000_000
-            while process.isRunning && DispatchTime.now().uptimeNanoseconds < deadline {
-                usleep(20_000)
-            }
-            if process.isRunning {
-                kill(process.processIdentifier, SIGKILL)
-            }
-            process.waitUntilExit()
-        }
+        process.terminate(graceMilliseconds: configuration.terminationGraceMilliseconds)
         self.process = nil
         processID = nil
         state = .stopped

@@ -138,22 +138,24 @@ discard Kubernetes semantics.
 ## Deterministic translation preview
 
 `RenderedKubernetesTranslationPreview` is the first source-only P12-C08 slice.
-It accepts only a successful immutable scanner result and can emit a canonical,
-strictly re-validated Hostwright manifest for one-container Pods and
-Deployments. Deployment replicas carry through only when they fit Hostwright's
-`1...256` bound; zero is never silently changed to one. Default-namespace
-workload names are preserved, while other namespaces map to
-`<namespace>-<name>`. Any invalid or colliding Hostwright service identity
-fails the whole preview. Object order does not affect emitted service order,
-diagnostic order, untranslated-field reporting, or canonical output.
+It accepts only a successful immutable scanner result and validates the
+one-container Pod/Deployment identity projection. The scanner summary does not
+retain Kubernetes resource requests or limits, while Hostwright Manifest v3
+requires explicit, validated CPU and memory requests and limits for every
+executable service. Therefore the current preview fails closed with
+`resourceAdmissionUnavailable` and emits neither a Hostwright manifest nor
+manifest text; it never invents capacity. A future resource-aware preview must
+carry the existing validated resource-admission contract explicitly before it
+can emit a manifest. Deployment replica, identity, selector, and service
+diagnostics remain bounded and deterministic while this boundary is closed.
 
-The preview deliberately translates only workload identity, image, and
-replicas. Container names and Kubernetes label/selector semantics remain
-explicitly reported as untranslated rather than being silently discarded;
-Deployment template labels beyond `matchLabels` cannot be recovered from the
-immutable scanner summary. The summary does not retain whether a workload
-declared `restartPolicy`, so the preview makes no presence or translation claim
-about that field. Every error returns neither a manifest nor manifest text.
+The preview deliberately inspects workload identity, image, and replicas only.
+Container names and Kubernetes label/selector semantics remain explicitly
+reported as untranslated rather than being silently discarded; Deployment
+template labels beyond `matchLabels` cannot be recovered from the immutable
+scanner summary. The summary does not retain whether a workload declared
+`restartPolicy`, so the preview makes no presence or translation claim about
+that field. Every error returns neither a manifest nor manifest text.
 Fixed object, summary-byte, and output-byte limits also apply when callers
 construct public summary values directly instead of obtaining them from the
 scanner.

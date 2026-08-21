@@ -346,24 +346,23 @@ final class DesktopOperationsModelTests: XCTestCase {
             return XCTFail("The model did not retain the superseded connection task.")
         }
         await fulfillment(of: [healthGate.started], timeout: 1)
+        healthGate.release()
+        await fulfillment(of: [statusGate.started], timeout: 1)
 
         model.connect()
         guard let replacementTask = model.connectionTaskForTesting else {
             return XCTFail("The model did not retain the replacement connection task.")
         }
-        await fulfillment(of: [statusGate.started], timeout: 1)
-
-        healthGate.release()
-        await supersededTask.value
-
-        XCTAssertNotNil(model.connectionTaskForTesting)
-        XCTAssertEqual(model.connectionState, .connected)
-        XCTAssertTrue(model.projects.isEmpty)
-
-        statusGate.release()
         await replacementTask.value
 
         XCTAssertNil(model.connectionTaskForTesting)
+        XCTAssertEqual(model.projects.first?.name, "demo")
+        XCTAssertNil(model.lastFailure)
+
+        statusGate.release()
+        await supersededTask.value
+
+        XCTAssertEqual(model.connectionState, .connected)
         XCTAssertEqual(model.projects.first?.name, "demo")
         XCTAssertNil(model.lastFailure)
     }

@@ -4,6 +4,7 @@ import XCTest
 import HostwrightCLI
 import HostwrightControlPlane
 import HostwrightCore
+import HostwrightManifest
 import HostwrightObservability
 import HostwrightRuntime
 
@@ -643,7 +644,20 @@ final class CLIControlCommandExecutorTests: XCTestCase {
     }
 
     func testComposeControlUsesBoundedSnapshotReaderAndRetainsExactBoundaryAndFailures() throws {
-        let suffix = "\nproject: bounded-control\nservices: {}\n"
+        let suffix = "\n" + """
+        version: 3
+        project: bounded-control
+        services:
+          api:
+            image: ghcr.io/example/api:1
+            resources:
+              requests:
+                cpus: 1
+                memory: 512MiB
+              limits:
+                cpus: 1
+                memory: 512MiB
+        """
         let documents: [String: Result<String, ManifestParseError>] = [
             "/exact.yaml": .success(
                 String(

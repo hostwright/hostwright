@@ -46,7 +46,7 @@ final class DesktopActionCatalogTests: XCTestCase {
         let document = DesktopActionCatalog.document
         let firstEncoding = try DesktopActionCatalog.encodedDocument()
         let secondEncoding = try DesktopActionCatalogWireContract.encode(document)
-        let fixture = try Data(contentsOf: contractURL)
+        let fixture = try contractData()
         XCTAssertEqual(firstEncoding, secondEncoding)
         XCTAssertEqual(firstEncoding, fixture)
 
@@ -56,7 +56,7 @@ final class DesktopActionCatalogTests: XCTestCase {
     }
 
     func testStrictContractRejectsMalformedAndStructuralDrift() throws {
-        let canonical = try Data(contentsOf: contractURL)
+        let canonical = try contractData()
         let text = String(decoding: canonical, as: UTF8.self)
         let duplicate = Data(
             ("{\"\\u0063ontractVersion\":1," + String(text.dropFirst())).utf8
@@ -95,7 +95,7 @@ final class DesktopActionCatalogTests: XCTestCase {
             XCTAssertEqual($0 as? DesktopActionCatalogContractError, .valueDrift)
         }
 
-        var object = try contractJSONObject(Data(contentsOf: contractURL))
+        var object = try contractJSONObject(try contractData())
         object["controlProtocolRevision"] = "not-the-frozen-revision"
         assertContractRejected(try encodedJSONObject(object), as: .valueDrift)
 
@@ -358,6 +358,14 @@ final class DesktopActionCatalogTests: XCTestCase {
             .appendingPathComponent(
                 "contracts/v0.0.2/phase14-desktop-action-catalog-v1.json"
             )
+    }
+
+    private func contractData() throws -> Data {
+        var data = try Data(contentsOf: contractURL)
+        if data.last == 0x0A {
+            data.removeLast()
+        }
+        return data
     }
 
     private func contractJSONObject(_ data: Data) throws -> [String: Any] {

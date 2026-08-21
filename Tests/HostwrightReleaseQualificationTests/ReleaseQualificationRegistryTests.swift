@@ -166,6 +166,7 @@ func makeDocumentationSnapshotRepository() throws -> URL {
         "SECURITY.md",
         "scripts/check-doc-links.py",
         "scripts/check-current-truth.py",
+        "scripts/phase09-gate16-qualification.sh",
     ] {
         let destination = root.appendingPathComponent(path)
         let parent = destination.deletingLastPathComponent()
@@ -242,7 +243,8 @@ func makeSafeCheckSnapshotRepository(
         [
             "-c", "user.name=Hostwright Tests",
             "-c", "user.email=tests@hostwright.invalid",
-            "commit", "--quiet", "--no-gpg-sign", "-m", "safe-check fixture",
+            "commit", "--quiet", "--no-gpg-sign", "--allow-empty",
+            "-m", "safe-check fixture",
         ],
         in: root
     )
@@ -1624,7 +1626,7 @@ final class ReleaseQualificationRegistryTests: XCTestCase {
             $0 == "feec8f5d501dcce89dcc6ee2b5b155dfd9b1dbb4408efb02399f9b2adfebf588"
         })
         XCTAssertTrue(validators[1].identity.arguments.contains {
-            $0 == "daca74e386c58412b704b13f67ff836907968866639baabd094f01ba4e7463fe"
+            $0 == "211b1e1716334b11aeac5d399ec99d68834ece7151f9dc0da05cb76f358dcfd4"
         })
         XCTAssertEqual(validators[0].durationMilliseconds, 42)
         XCTAssertEqual(validators[0].standardOutputBytes, 22)

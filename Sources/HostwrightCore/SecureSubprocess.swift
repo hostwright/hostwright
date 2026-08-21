@@ -201,7 +201,7 @@ public struct SecureSubprocessRunner: Sendable {
         suspendedProcessValidator: SuspendedProcessValidator?,
         onLaunch: (@Sendable (pid_t) -> Void)?
     ) throws -> SecureSubprocessResult {
-        try validate(request)
+        try Self.validate(request)
         if cancellation.isCancelled {
             throw SecureSubprocessError.cancelled(preLaunchCancellationResult())
         }
@@ -571,7 +571,7 @@ public struct SecureSubprocessRunner: Sendable {
         }
     }
 
-    private func validate(_ request: SecureSubprocessRequest) throws {
+    static func validate(_ request: SecureSubprocessRequest) throws {
         guard (1...86_400_000).contains(request.timeoutMilliseconds) else {
             throw SecureSubprocessError.invalidRequest(.invalidTimeout)
         }
@@ -612,7 +612,7 @@ public struct SecureSubprocessRunner: Sendable {
         ]
         var environmentBytes = 0
         for (name, value) in request.environment {
-            guard isValidEnvironmentName(name), !value.contains("\0") else {
+            guard Self.isValidEnvironmentName(name), !value.contains("\0") else {
                 throw SecureSubprocessError.invalidRequest(.invalidEnvironment)
             }
             let uppercased = name.uppercased()
@@ -631,17 +631,17 @@ public struct SecureSubprocessRunner: Sendable {
         }
     }
 
-    private func isValidEnvironmentName(_ name: String) -> Bool {
+    private static func isValidEnvironmentName(_ name: String) -> Bool {
         guard let first = name.utf8.first,
-              first == 95 || isASCIIAlpha(first) else {
+              first == 95 || Self.isASCIIAlpha(first) else {
             return false
         }
         return name.utf8.dropFirst().allSatisfy { byte in
-            byte == 95 || isASCIIAlpha(byte) || (48...57).contains(byte)
+            byte == 95 || Self.isASCIIAlpha(byte) || (48...57).contains(byte)
         }
     }
 
-    private func isASCIIAlpha(_ byte: UInt8) -> Bool {
+    private static func isASCIIAlpha(_ byte: UInt8) -> Bool {
         (65...90).contains(byte) || (97...122).contains(byte)
     }
 

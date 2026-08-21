@@ -1040,13 +1040,13 @@ private enum DesktopTopologyBoundary {
 }
 
 private enum DesktopTopologyStrictJSON {
-    private struct ObjectRule {
+    private struct ObjectRule: Sendable {
         let allowedKeys: Set<String>
         let requiredKeys: Set<String>
         let nestedRules: [String: ValueRule]
     }
 
-    private indirect enum ValueRule {
+    private indirect enum ValueRule: Sendable {
         case object(ObjectRule)
         case array(ValueRule)
         case any

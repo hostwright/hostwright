@@ -1,9 +1,8 @@
 import HostwrightImport
-import HostwrightManifest
 import XCTest
 
 final class RenderedKubernetesTranslationPreviewTests: XCTestCase {
-    func testTranslatesSingleContainerWorkloadsAndCarriesDeploymentReplicas() throws {
+    func testResourceLessWorkloadsFailClosedBeforeManifestEmission() {
         let result = RenderedKubernetesTranslationPreview.translate(
             successful([
                 pod(
@@ -23,18 +22,12 @@ final class RenderedKubernetesTranslationPreviewTests: XCTestCase {
             ])
         )
 
-        XCTAssertTrue(result.succeeded)
-        XCTAssertTrue(result.errors.isEmpty)
+        XCTAssertFalse(result.succeeded)
+        XCTAssertEqual(result.errors.map(\.code), [.resourceAdmissionUnavailable])
         XCTAssertEqual(result.warnings.count, 2)
-        XCTAssertEqual(result.manifest?.services.map(\.name), ["api", "production-worker"])
-        XCTAssertEqual(result.manifest?.services.map(\.replicas), [1, 3])
-        XCTAssertTrue(result.manifest?.services.allSatisfy { $0.publishedPorts.isEmpty } == true)
-
-        let text = try XCTUnwrap(result.manifestText)
-        let parsed = try ManifestValidator.validated(text)
-        XCTAssertEqual(try ManifestCanonicalEncoder.encode(parsed), text)
-        XCTAssertEqual(parsed, try XCTUnwrap(result.manifest))
-        XCTAssertTrue(text.contains("replicas: 3"))
+        XCTAssertNil(result.manifest)
+        XCTAssertNil(result.manifestText)
+        XCTAssertTrue(result.errors[0].message.contains("validated compute-resource admission"))
         XCTAssertEqual(
             result.untranslated.map(\.path),
             [
@@ -161,7 +154,7 @@ final class RenderedKubernetesTranslationPreviewTests: XCTestCase {
         XCTAssertNil(result.manifestText)
     }
 
-    func testCanonicalOutputAndReportingAreIndependentOfInputOrdering() throws {
+    func testResourceAdmissionFailureIsIndependentOfInputOrdering() {
         let api = pod(documentIndex: 2, name: "zeta", image: "example.invalid/zeta:v1")
         let worker = deployment(
             documentIndex: 1,
@@ -175,12 +168,9 @@ final class RenderedKubernetesTranslationPreviewTests: XCTestCase {
         let second = RenderedKubernetesTranslationPreview.translate(successful([worker, api]))
 
         XCTAssertEqual(first, second)
-        XCTAssertEqual(first.manifest?.services.map(\.name), ["alpha", "zeta"])
-        let text = try XCTUnwrap(first.manifestText)
-        XCTAssertEqual(
-            try ManifestCanonicalEncoder.encode(ManifestValidator.validated(text)),
-            text
-        )
+        XCTAssertEqual(first.errors.map(\.code), [.resourceAdmissionUnavailable])
+        XCTAssertNil(first.manifest)
+        XCTAssertNil(first.manifestText)
     }
 
     func testRejectsMappedNamespaceNameCollision() {

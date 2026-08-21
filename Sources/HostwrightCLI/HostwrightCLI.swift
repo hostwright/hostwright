@@ -1098,11 +1098,15 @@ public enum HostwrightCLI {
             losses: issues.map { issue in
                 let path: String
                 if let prefix {
-                    path = issue.path == "$"
-                        ? "$.\(prefix)"
-                        : "$.\(prefix)" + String(issue.path.dropFirst())
+                    if let issuePath = issue.path {
+                        path = issuePath == "$"
+                            ? "$.\(prefix)"
+                            : "$.\(prefix)" + String(issuePath.dropFirst())
+                    } else {
+                        path = "$.\(prefix)"
+                    }
                 } else {
-                    path = issue.path
+                    path = issue.path ?? "$.document"
                 }
                 return ComposeLoss(
                     code: .invalidManifest,

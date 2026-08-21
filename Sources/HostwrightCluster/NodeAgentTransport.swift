@@ -435,23 +435,26 @@ public final class ClusterNodeAgentLocalTransport: @unchecked Sendable {
             throw ClusterNodeAgentTransportError.requestTooLarge
         }
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: configuration.executablePath)
-        process.arguments = configuration.launchArguments
-        process.environment = configuration.environment
-        process.currentDirectoryURL = URL(fileURLWithPath: configuration.workingDirectory, isDirectory: true)
-        process.standardInput = FileHandle.nullDevice
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-
+        let process: SecureDetachedProcess
         do {
-            try process.run()
+            process = try SecureSubprocessRunner().launchDetached(
+                SecureSubprocessRequest(
+                    executablePath: configuration.executablePath,
+                    arguments: configuration.launchArguments,
+                    environment: configuration.environment,
+                    workingDirectory: configuration.workingDirectory,
+                    timeoutMilliseconds: 1,
+                    terminationGraceMilliseconds: 250,
+                    maximumStandardOutputBytes: 1,
+                    maximumStandardErrorBytes: 1
+                )
+            )
         } catch {
             throw ClusterNodeAgentTransportError.processLaunchFailed
         }
         defer { terminate(process) }
         guard process.isRunning else {
-            throw ClusterNodeAgentTransportError.processExited(process.terminationStatus)
+            throw ClusterNodeAgentTransportError.processExited(-1)
         }
 
         let deadline = SocketDeadline(timeoutMilliseconds: timeoutMilliseconds)
@@ -495,7 +498,7 @@ public final class ClusterNodeAgentLocalTransport: @unchecked Sendable {
     }
 
     private func connect(
-        process: Process,
+        process: SecureDetachedProcess,
         deadline: SocketDeadline,
         cancellation: SecureSubprocessCancellation
     ) throws -> Int32 {
@@ -503,7 +506,7 @@ public final class ClusterNodeAgentLocalTransport: @unchecked Sendable {
         while !deadline.expired {
             guard !cancellation.isCancelled else { throw ClusterNodeAgentTransportError.cancelled }
             guard process.isRunning else {
-                throw ClusterNodeAgentTransportError.processExited(process.terminationStatus)
+                throw ClusterNodeAgentTransportError.processExited(-1)
             }
             let descriptor = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
             guard descriptor >= 0 else {
@@ -708,17 +711,8 @@ public final class ClusterNodeAgentLocalTransport: @unchecked Sendable {
         return value
     }
 
-    private func terminate(_ process: Process) {
-        guard process.isRunning else { return }
-        process.terminate()
-        let deadline = DispatchTime.now().uptimeNanoseconds + 250_000_000
-        while process.isRunning && DispatchTime.now().uptimeNanoseconds < deadline {
-            usleep(5_000)
-        }
-        if process.isRunning {
-            _ = kill(process.processIdentifier, SIGKILL)
-        }
-        process.waitUntilExit()
+    private func terminate(_ process: SecureDetachedProcess) {
+        process.terminate(graceMilliseconds: 250)
     }
 }
 

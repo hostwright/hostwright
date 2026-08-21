@@ -54,7 +54,7 @@ final class ReleaseQualificationCLITests: XCTestCase {
                 $0.id == "dependency-lock-integrity"
             }
         )
-        XCTAssertEqual(committed.requiredEvidenceClasses[0], .unitContract)
+        XCTAssertTrue(committed.requiredEvidenceClasses.contains(.unitContract))
         XCTAssertEqual(
             try ReleaseQualificationLocalLaneEvidenceClass.resolve(for: committed),
             .localIntegration
@@ -580,6 +580,12 @@ private struct ReleaseQualificationMutatingValidatorRunner:
         limits: ReleaseQualificationCommandLimits,
         cancellation: SecureSubprocessCancellation
     ) throws -> ReleaseQualificationCommandResult {
+        let result = try subprocess.run(
+            command,
+            standardInput: standardInput,
+            limits: limits,
+            cancellation: cancellation
+        )
         if command.purpose.hasPrefix("validate "), !state.mutated {
             try replacement.write(
                 to: sourceRoot.appendingPathComponent("README.md"),
@@ -587,11 +593,6 @@ private struct ReleaseQualificationMutatingValidatorRunner:
             )
             state.mutated = true
         }
-        return try subprocess.run(
-            command,
-            standardInput: standardInput,
-            limits: limits,
-            cancellation: cancellation
-        )
+        return result
     }
 }

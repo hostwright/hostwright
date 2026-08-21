@@ -630,7 +630,7 @@ let package = Package(
         ),
         .target(
             name: "HostwrightPodSandbox",
-            dependencies: ["HostwrightCluster"]
+            dependencies: ["HostwrightCluster", "HostwrightCore"]
         ),
         .executableTarget(
             name: "HostwrightPodSandboxGuest",
@@ -746,6 +746,7 @@ let package = Package(
                 "HostwrightControlTransport",
                 "HostwrightCore",
                 "HostwrightDaemonCore",
+                "HostwrightManifest",
                 "HostwrightObservability",
                 "HostwrightRuntime"
             ]

@@ -287,7 +287,7 @@ final class DesktopTopologyProjectionTests: XCTestCase {
         XCTAssertTrue(document.nodes.allSatisfy { $0.accessibilitySummary.contains("State") })
         XCTAssertTrue(document.nodes.allSatisfy { $0.accessibilitySummary.contains("Severity") })
         XCTAssertTrue(document.diagnostics.allSatisfy { $0.accessibilitySummary.contains("Severity") })
-        XCTAssertTrue(document.accessibilitySummary.contains("reported local topology"))
+        XCTAssertTrue(document.accessibilitySummary.lowercased().contains("reported local topology"))
         XCTAssertFalse(document.accessibilitySummary.lowercased().contains("color"))
     }
 

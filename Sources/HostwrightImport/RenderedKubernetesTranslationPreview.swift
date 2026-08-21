@@ -21,6 +21,7 @@ public enum RenderedKubernetesTranslationDiagnosticCode: String, Equatable, Send
     case selectorResolutionIndeterminate
     case unsupportedServiceProtocol
     case clusterIPServiceUnsupported
+    case resourceAdmissionUnavailable
     case untranslatedWorkloadFields
     case manifestValidationFailed
     case canonicalEncodingFailed
@@ -308,82 +309,18 @@ public enum RenderedKubernetesTranslationPreview {
             return failed(diagnostics, untranslated: untranslated)
         }
 
-        let translatedServices = workloads
-            .sorted { $0.serviceName < $1.serviceName }
-            .map { workload in
-                HostwrightService(
-                    name: workload.serviceName,
-                    image: workload.object.containers[0].image,
-                    replicas: workload.replicas
-                )
-            }
-        let manifest = HostwrightManifest(
-            version: HostwrightManifest.currentVersion,
-            project: project,
-            services: translatedServices
+        // The immutable scanner summary intentionally does not retain Kubernetes
+        // resource requests or limits. Manifest v3 requires an explicit,
+        // validated CPU and memory request/limit pair, so a preview cannot
+        // safely invent capacity or claim that a resource-less workload is
+        // executable.
+        diagnostics.append(
+            diagnostic(
+                .resourceAdmissionUnavailable,
+                message: "The scanner summary contains no validated compute-resource admission. Manifest v3 requires explicit CPU and memory requests and limits, so translation emits no Hostwright manifest."
+            )
         )
-
-        let validationIssues = ManifestValidator.validate(manifest)
-            .sorted { lhs, rhs in lhs.rendered < rhs.rendered }
-        if !validationIssues.isEmpty {
-            diagnostics.append(contentsOf: validationIssues.map { issue in
-                diagnostic(
-                    .manifestValidationFailed,
-                    message: issue.rendered
-                )
-            })
-            return failed(diagnostics, untranslated: untranslated)
-        }
-
-        let manifestText: String
-        do {
-            manifestText = try ManifestCanonicalEncoder.encode(manifest)
-        } catch {
-            diagnostics.append(
-                diagnostic(
-                    .canonicalEncodingFailed,
-                    message: "Validated translation could not be encoded by the canonical Hostwright manifest encoder."
-                )
-            )
-            return failed(diagnostics, untranslated: untranslated)
-        }
-        guard manifestText.utf8.count <= maximumOutputBytes else {
-            diagnostics.append(
-                diagnostic(
-                    .outputSizeExceeded,
-                    message: "Canonical Hostwright output exceeds the \(maximumOutputBytes)-byte preview bound."
-                )
-            )
-            return failed(diagnostics, untranslated: untranslated)
-        }
-
-        do {
-            let validated = try ManifestValidator.validated(manifestText)
-            let rerendered = try ManifestCanonicalEncoder.encode(validated)
-            guard rerendered == manifestText else {
-                diagnostics.append(
-                    diagnostic(
-                        .canonicalRoundTripFailed,
-                        message: "Canonical Hostwright output did not re-render byte-for-byte."
-                    )
-                )
-                return failed(diagnostics, untranslated: untranslated)
-            }
-            return RenderedKubernetesTranslationPreviewResult(
-                manifest: validated,
-                manifestText: manifestText,
-                diagnostics: diagnostics.sorted(by: diagnosticOrder),
-                untranslated: untranslated.sorted(by: untranslatedOrder)
-            )
-        } catch {
-            diagnostics.append(
-                diagnostic(
-                    .canonicalRoundTripFailed,
-                    message: "Canonical Hostwright output failed strict parse and validation."
-                )
-            )
-            return failed(diagnostics, untranslated: untranslated)
-        }
+        return failed(diagnostics, untranslated: untranslated)
     }
 
     private static func evaluate(

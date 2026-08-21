@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import HostwrightCluster
+import HostwrightCore
 
 public final class GuestAgentDispatcher: @unchecked Sendable {
     public static let advertisedCapabilities: [GuestAgentCapability] = [
@@ -331,7 +332,7 @@ public final class GuestAgentProcessTransport: @unchecked Sendable {
     private let executableURL: URL
     private let arguments: [String]
     private let lock = NSLock()
-    private var process: Process?
+    private var process: SecureDetachedProcess?
     private var inputDescriptor: Int32 = -1
     private var outputDescriptor: Int32 = -1
     private var closed = false
@@ -399,19 +400,7 @@ public final class GuestAgentProcessTransport: @unchecked Sendable {
                 _ = Darwin.close(outputDescriptor)
                 outputDescriptor = -1
             }
-            if let process {
-                if process.isRunning {
-                    process.terminate()
-                    for _ in 0..<50 {
-                        if !process.isRunning { break }
-                        usleep(10_000)
-                    }
-                    if process.isRunning {
-                        _ = kill(process.processIdentifier, SIGKILL)
-                    }
-                    process.waitUntilExit()
-                }
-            }
+            process?.terminate(graceMilliseconds: 500)
             process = nil
             closed = true
         }
@@ -437,25 +426,22 @@ public final class GuestAgentProcessTransport: @unchecked Sendable {
             throw GuestAgentProtocolError.transportFailure
         }
 
-        var childProcess: Process?
+        var childProcess: SecureDetachedProcess?
         do {
-            let childInput = FileHandle(fileDescriptor: inputPair[1], closeOnDealloc: false)
-            let childOutput = FileHandle(fileDescriptor: outputPair[1], closeOnDealloc: false)
-            let childError = try FileHandle(forWritingTo: URL(fileURLWithPath: "/dev/null"))
-            let child = Process()
-            child.executableURL = executableURL
-            child.arguments = ["--stdio"] + arguments
-            child.environment = [
-                "PATH": "/usr/bin:/bin",
-                "LANG": "C",
-                "LC_ALL": "C"
-            ]
-            child.currentDirectoryURL = URL(fileURLWithPath: "/", isDirectory: true)
-            child.standardInput = childInput
-            child.standardOutput = childOutput
-            child.standardError = childError
-            try child.run()
-            childProcess = child
+            childProcess = try SecureSubprocessRunner().launchDetached(
+                SecureSubprocessRequest(
+                    executablePath: executableURL.path,
+                    arguments: ["--stdio"] + arguments,
+                    environment: SecureSubprocessEnvironment.minimal,
+                    workingDirectory: "/",
+                    timeoutMilliseconds: 1,
+                    terminationGraceMilliseconds: 500,
+                    maximumStandardOutputBytes: 1,
+                    maximumStandardErrorBytes: 1
+                ),
+                standardInput: inputPair[1],
+                standardOutput: outputPair[1]
+            )
             _ = Darwin.close(inputPair[1])
             inputPair[1] = -1
             _ = Darwin.close(outputPair[1])
@@ -466,12 +452,9 @@ public final class GuestAgentProcessTransport: @unchecked Sendable {
             outputDescriptor = outputPair[0]
             inputPair[0] = -1
             outputPair[0] = -1
-            process = child
+            process = childProcess
         } catch {
-            if let childProcess, childProcess.isRunning {
-                childProcess.terminate()
-                childProcess.waitUntilExit()
-            }
+            childProcess?.terminate(graceMilliseconds: 500)
             for descriptor in inputPair + outputPair where descriptor >= 0 {
                 _ = Darwin.close(descriptor)
             }

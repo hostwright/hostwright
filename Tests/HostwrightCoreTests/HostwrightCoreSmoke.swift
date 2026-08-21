@@ -22,7 +22,7 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertEqual(violations, [], "Test-double types must remain outside production Sources.")
     }
 
-    func testSecureProcessExecutionTruthAllowsOnlyBoundedWASIProcessUse() throws {
+    func testSecureProcessExecutionTruthUsesOnlyTheSecureBoundary() throws {
         let root = try packageRoot()
         let processReference = try read("docs/reference/process-execution.md", root: root)
         let securityReference = try read("docs/reference/security-safety.md", root: root)
@@ -66,7 +66,7 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertTrue(shippedBoundary.contains("shipped product closure contains Process callsite"))
         XCTAssertEqual(
             Set(processCallSites),
-            ["Sources/HostwrightWASIProviderRuntime/WASIProviderRuntime.swift"]
+            []
         )
         XCTAssertFalse(
             FileManager.default.fileExists(

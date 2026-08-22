@@ -1,11 +1,16 @@
 import Darwin
 import Foundation
 import Security
+import Crypto
 import HostwrightCommandTransport
 import HostwrightControlPlane
 import HostwrightControlSecurity
 import HostwrightControlTransport
 import HostwrightCore
+import HostwrightManifest
+import HostwrightReconciler
+import HostwrightRuntime
+import HostwrightScheduler
 import HostwrightState
 
 private struct LiveQualificationResult: Codable {
@@ -137,8 +142,8 @@ private enum HostwrightStreamQualificationMain {
       )
       return
     }
-    let bootstrapClient = arguments.count == 9 && arguments.first == "--bootstrap"
-      && arguments[7] == "--client"
+    let bootstrapClient = arguments.count >= 9 && arguments.first == "--bootstrap"
+      && (arguments[7] == "--client" || arguments[7] == "--config")
     guard (arguments.count == 7 || bootstrapClient),
       ["--bootstrap", "--live", "--resume", "--cleanup", "--metrics-export"]
         .contains(arguments[0]),
@@ -149,10 +154,23 @@ private enum HostwrightStreamQualificationMain {
     let socketPath = try validatedChild(
       arguments[6], of: root,
       mustExist: ["--live", "--resume", "--metrics-export"].contains(arguments[0]))
-    let clientPath = bootstrapClient
-      ? try validatedChild(arguments[8], of: root, mustExist: true) : nil
+    var clientPath: String?
+    var configPath: String?
+    if bootstrapClient {
+      if arguments[7] == "--client" {
+        clientPath = try validatedChild(arguments[8], of: root, mustExist: true)
+        if arguments.count == 11 {
+          guard arguments[9] == "--config" else { throw NSError(domain: "HostwrightStreamQualification", code: 64) }
+          configPath = try validatedChild(arguments[10], of: root, mustExist: true)
+        }
+      } else {
+        guard arguments.count == 9 else { throw NSError(domain: "HostwrightStreamQualification", code: 64) }
+        configPath = try validatedChild(arguments[8], of: root, mustExist: true)
+      }
+    }
     switch arguments[0] {
-    case "--bootstrap": try bootstrap(root: root, statePath: statePath, clientPath: clientPath)
+    case "--bootstrap":
+      try bootstrap(root: root, statePath: statePath, clientPath: clientPath, configPath: configPath)
     case "--live": try live(root: root, statePath: statePath, socketPath: socketPath)
     case "--resume": try resume(root: root, statePath: statePath, socketPath: socketPath)
     case "--metrics-export":
@@ -378,7 +396,12 @@ private enum HostwrightStreamQualificationMain {
     return result.standardOutput
   }
 
-  private static func bootstrap(root: URL, statePath: String, clientPath: String?) throws {
+  private static func bootstrap(
+    root: URL,
+    statePath: String,
+    clientPath: String?,
+    configPath: String? = nil
+  ) throws {
     let stateParent = URL(fileURLWithPath: statePath).deletingLastPathComponent()
     guard stateParent.path.hasPrefix(root.path + "/") else { throw failure(75) }
     try FileManager.default.createDirectory(
@@ -440,6 +463,157 @@ private enum HostwrightStreamQualificationMain {
       ))
     }
     try Data(ownerSubjectID.utf8).write(to: root.appendingPathComponent("subject-id.txt"))
+    if let configPath {
+      let manifestText = try String(contentsOf: URL(fileURLWithPath: configPath), encoding: .utf8)
+      try seedSchedulerAuthority(
+        statePath: statePath,
+        configPath: configPath,
+        manifestText: manifestText
+      )
+    }
+  }
+
+  private static func seedSchedulerAuthority(
+    statePath: String,
+    configPath: String,
+    manifestText: String
+  ) throws {
+    let store = SQLiteStateStore(path: statePath)
+    let manifest = try ManifestValidator.validated(manifestText)
+    guard let project = manifest.project else {
+      throw failure(65)
+    }
+    let admissions = try ManifestSchedulerAdmissionBridge.admit(
+      manifest: manifest,
+      subjectID: "owner"
+    )
+    let manifestData = try Data(contentsOf: URL(fileURLWithPath: configPath))
+    let manifestSHA256 = SHA256.hash(data: manifestData)
+      .map { String(format: "%02x", $0) }.joined()
+    let projectID = "project-\(project)"
+    let projectResourceUUID = UUID().uuidString.lowercased()
+    let timestamp = ISO8601DateFormatter().string(from: Date())
+    try store.desiredStates.saveManifestSnapshot(
+      projectID: projectID,
+      manifestPath: configPath,
+      manifestHash: manifestSHA256,
+      desiredGeneration: 1,
+      manifest: manifest,
+      timestamp: timestamp,
+      mutationProvider: RuntimeProviderID.appleContainerCLI.rawValue,
+      projectResourceUUID: projectResourceUUID
+    )
+    let repository = store.schedulerAdmissions
+    let nodeID = UUID(
+      uuidString: HostwrightResourceUUID.legacy(
+        kind: "phase09-gate-live-node",
+        identifier: projectID
+      )
+    )!
+    let capacity = try SchedulerNodeCapacitySnapshot(
+      nodeID: nodeID,
+      capacity: ResourceVector([
+        "cpu": 8,
+        "memory": 8 * 1_024 * 1_024 * 1_024,
+        "disk": 128 * 1_024 * 1_024 * 1_024,
+        "io": 1_024 * 1_024 * 1_024,
+        "network": 1_024 * 1_024 * 1_024,
+        "process": 1_024,
+      ]),
+      generation: 1,
+      observedAt: timestamp
+    )
+    _ = try repository.recordNodeCapacity(snapshot: capacity)
+    let architecture = admissions[0].workload.requirements
+      .requiredArchitectures.first ?? "arm64"
+    let node = try SchedulerNode(
+      snapshot: NodePlacementSnapshot(
+        nodeID: nodeID,
+        capacity: capacity.capacity,
+        allocation: .zero,
+        architecture: architecture,
+        runtime: "linux-vm",
+        provider: "apple-container-cli"
+      )
+    )
+    let engineDecision = try SchedulerEngine().plan(
+      SchedulerEngineInput(
+        pendingWorkloads: admissions.map(\.workload),
+        nodes: [node]
+      )
+    )
+    let decisionID = UUID(
+      uuidString: HostwrightResourceUUID.legacy(
+        kind: "phase09-gate-live-decision",
+        identifier: "\(engineDecision.decisionID.uuidString):\(manifestSHA256)"
+      )
+    )!
+    let decision = try SchedulerDecision(
+      decisionID: decisionID,
+      inputDigest: engineDecision.inputDigest,
+      orderedWorkloadIDs: engineDecision.orderedWorkloadIDs,
+      workloadDecisions: engineDecision.workloadDecisions,
+      snapshotQuality: engineDecision.snapshotQuality
+    )
+    let workloadBindings = try admissions.map { admission in
+      try SchedulerDecisionWorkloadBinding(
+        workloadID: admission.workloadID,
+        nodeID: nodeID,
+        resources: admission.workload.request,
+        capacityDigest: capacity.capacityDigest,
+        capacityGeneration: capacity.generation,
+        ownerSubjectID: admission.workload.subjectID,
+        projectUUID: projectResourceUUID
+      )
+    }
+    let profileDigest = String(repeating: "0", count: 64)
+    _ = try repository.recordDecisionArtifact(
+      decision: decision,
+      workloadBindings: workloadBindings,
+      projectUUID: projectResourceUUID,
+      configDigest: manifestSHA256,
+      profileDigest: profileDigest,
+      lifecyclePlanDigest: manifestSHA256,
+      createdAt: timestamp,
+      updatedAt: timestamp
+    )
+    let expiresAt = ISO8601DateFormatter().string(
+      from: Date().addingTimeInterval(3_600)
+    )
+    for admission in admissions {
+      let pending = try repository.reserve(
+        binding: SchedulerAdmissionBinding(
+          decisionID: decisionID,
+          workloadID: admission.workloadID,
+          nodeID: nodeID,
+          resources: admission.workload.request,
+          nodeCapacityDigest: capacity.capacityDigest,
+          nodeCapacityGeneration: capacity.generation,
+          inputDigest: decision.inputDigest,
+          configDigest: manifestSHA256,
+          profileDigest: profileDigest,
+          lifecyclePlanDigest: manifestSHA256,
+          ownerSubjectID: admission.workload.subjectID,
+          projectUUID: projectResourceUUID,
+          createdAt: timestamp,
+          expiresAt: expiresAt
+        ),
+        authority: try SchedulerAdmissionAuthority(
+          nodeCapacityDigest: capacity.capacityDigest,
+          nodeCapacityGeneration: capacity.generation,
+          inputDigest: decision.inputDigest,
+          configDigest: manifestSHA256,
+          profileDigest: profileDigest,
+          lifecyclePlanDigest: manifestSHA256,
+          expectedNodeEpoch: 1
+        )
+      )
+      _ = try repository.commit(
+        reservationID: pending.reservationID,
+        expectedToken: pending.fencingToken,
+        updatedAt: timestamp
+      )
+    }
   }
 
   private static func live(root: URL, statePath: String, socketPath: String) throws {

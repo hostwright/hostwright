@@ -197,7 +197,7 @@ live(){
   state="$runtime/app-support/state/state.sqlite"
   socket="$runtime/app-support/run/control-v2.sock"
   (( ${#socket} < 104 )) || die 'the Gate 9 control socket exceeds the macOS Unix-domain path limit.' 66
-  "$bootstrap" --bootstrap --root "$runtime" --state "$state" --socket "$socket" --client "$cli"
+  "$bootstrap" --bootstrap --root "$runtime" --state "$state" --socket "$socket" --client "$cli" --config "$config"
 
   record_pending_container_claim
   pid="$(start_daemon "$runtime" "$daemon" "$config" "$state" initial "$cli")"

@@ -707,6 +707,10 @@ let package = Package(
                 "HostwrightControlSecurity",
                 "HostwrightControlTransport",
                 "HostwrightCore",
+                "HostwrightManifest",
+                "HostwrightReconciler",
+                "HostwrightRuntime",
+                "HostwrightScheduler",
                 "HostwrightState"
             ]
         ),

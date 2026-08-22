@@ -265,6 +265,9 @@ final class DaemonControlStreamAuthorizationPipelineTests: XCTestCase {
       services:
         probe:
           image: ghcr.io/example/probe:latest
+          resources:
+            requests: {cpus: 1, memory: 512MiB}
+            limits: {cpus: 1, memory: 512MiB}
       """
     )
     try store.desiredStates.saveManifestSnapshot(

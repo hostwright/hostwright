@@ -513,7 +513,7 @@ public struct DesiredStateRepository: Sendable {
                 name = excluded.name,
                 manifest_path = excluded.manifest_path,
                 manifest_hash = excluded.manifest_hash,
-                resource_uuid = excluded.resource_uuid,
+                resource_uuid = COALESCE(projects.resource_uuid, excluded.resource_uuid),
                 manifest_version = excluded.manifest_version,
                 mutation_provider = COALESCE(projects.mutation_provider, excluded.mutation_provider),
                 provider_generation = MAX(projects.provider_generation, excluded.provider_generation),

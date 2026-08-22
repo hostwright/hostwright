@@ -468,7 +468,8 @@ private enum HostwrightStreamQualificationMain {
       try seedSchedulerAuthority(
         statePath: statePath,
         configPath: configPath,
-        manifestText: manifestText
+        manifestText: manifestText,
+        ownerSubjectID: ownerSubjectID
       )
     }
   }
@@ -476,7 +477,8 @@ private enum HostwrightStreamQualificationMain {
   private static func seedSchedulerAuthority(
     statePath: String,
     configPath: String,
-    manifestText: String
+    manifestText: String,
+    ownerSubjectID: String
   ) throws {
     let store = SQLiteStateStore(path: statePath)
     let manifest = try ManifestValidator.validated(manifestText)
@@ -562,7 +564,7 @@ private enum HostwrightStreamQualificationMain {
         resources: admission.workload.request,
         capacityDigest: capacity.capacityDigest,
         capacityGeneration: capacity.generation,
-        ownerSubjectID: admission.workload.subjectID,
+        ownerSubjectID: ownerSubjectID,
         projectUUID: projectResourceUUID
       )
     }
@@ -578,7 +580,7 @@ private enum HostwrightStreamQualificationMain {
       updatedAt: timestamp
     )
     let expiresAt = ISO8601DateFormatter().string(
-      from: Date().addingTimeInterval(3_600)
+      from: Date().addingTimeInterval(240)
     )
     for admission in admissions {
       let pending = try repository.reserve(
@@ -593,7 +595,7 @@ private enum HostwrightStreamQualificationMain {
           configDigest: manifestSHA256,
           profileDigest: profileDigest,
           lifecyclePlanDigest: manifestSHA256,
-          ownerSubjectID: admission.workload.subjectID,
+          ownerSubjectID: ownerSubjectID,
           projectUUID: projectResourceUUID,
           createdAt: timestamp,
           expiresAt: expiresAt

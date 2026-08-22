@@ -291,6 +291,41 @@ final class SchemaV7ContractTests: XCTestCase {
         }
     }
 
+    func testManifestSnapshotResavePreservesProjectResourceIdentity() throws {
+        try withTemporaryStore { store, _ in
+            try store.migrate()
+            let manifest = HostwrightManifest(
+                version: 2,
+                project: "demo",
+                services: [HostwrightService(name: "api", image: "local/demo:latest")]
+            )
+            let boundResourceUUID = HostwrightResourceUUID.generate()
+            try store.desiredStates.saveManifestSnapshot(
+                projectID: "project-demo",
+                manifestPath: "/tmp/hostwright.yaml",
+                manifestHash: "hash-1",
+                desiredGeneration: 1,
+                manifest: manifest,
+                timestamp: "2026-07-13T00:00:00Z",
+                mutationProvider: "apple-container-cli",
+                projectResourceUUID: boundResourceUUID
+            )
+            try store.desiredStates.saveManifestSnapshot(
+                projectID: "project-demo",
+                manifestPath: "/tmp/hostwright.yaml",
+                manifestHash: "hash-2",
+                desiredGeneration: 2,
+                manifest: manifest,
+                timestamp: "2026-07-13T00:01:00Z",
+                mutationProvider: "apple-container-cli"
+            )
+            XCTAssertEqual(
+                try store.desiredStates.loadProject(id: "project-demo").resourceUUID,
+                boundResourceUUID
+            )
+        }
+    }
+
     func testOwnershipUpsertRequiresExactIdentityFenceAndMonotonicGeneration() throws {
         try withTemporaryStore { store, _ in
             try store.migrate()

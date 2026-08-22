@@ -192,7 +192,7 @@ live(){
     [[ "$(codesign -d --verbose=4 "$output" 2>&1 | /usr/bin/awk -F= '$1=="TeamIdentifier"{print $2}')" == 993YC3JY4Q ]] || die 'a Gate 9 live artifact has the wrong signing team.'
   done
   config="$runtime/hostwright.yaml"
-  printf '%s\n' 'version: 2' "project: $live_project" 'imagePolicy: require-digest' 'services:' '  probe:' "    image: $pinned_image" '    command: ["python3", "-c", "import time; print(\"gate09-log\", flush=True); time.sleep(600)"]' '    probes:' '      liveness:' '        exec: ["true"]' '        interval: 60s' '        timeout: 1s' > "$config"
+  printf '%s\n' 'version: 3' "project: $live_project" 'imagePolicy: require-digest' 'services:' '  probe:' "    image: $pinned_image" '    resources:' '      requests: {cpus: 1, memory: 512MiB}' '      limits: {cpus: 1, memory: 512MiB}' '    command: ["python3", "-c", "import time; print(\"gate09-log\", flush=True); time.sleep(600)"]' '    probes:' '      liveness:' '        exec: ["true"]' '        interval: 60s' '        timeout: 1s' > "$config"
   chmod 600 "$config"
   state="$runtime/app-support/state/state.sqlite"
   socket="$runtime/app-support/run/control-v2.sock"

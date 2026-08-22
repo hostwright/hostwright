@@ -24,10 +24,10 @@ enum HostwrightRBACQualificationTool {
     try store.migrate()
     let now = Date()
     let timestamp = ISO8601DateFormatter().string(from: now)
-    try store.controlIdentities.bootstrap(identity("owner", hash: "a", declaredBy: "owner", at: timestamp))
+    try store.controlIdentities.bootstrap(identity("owner", hash: "a", declaredBy: "owner", bucket: "owner", at: timestamp))
     try store.rbac.bootstrapDefaultRolesAndOwner(subjectID: "owner", timestamp: timestamp)
-    try store.controlIdentities.declare(identity("member", hash: "b", declaredBy: "owner", at: timestamp))
-    try store.controlIdentities.declare(identity("delegate", hash: "c", declaredBy: "owner", at: timestamp))
+    try store.controlIdentities.declare(identity("member", hash: "b", declaredBy: "owner", bucket: "member", at: timestamp))
+    try store.controlIdentities.declare(identity("delegate", hash: "c", declaredBy: "owner", bucket: "delegate", at: timestamp))
     let repository = store.rbac
     let engine = RBACAuthorizationEngine(repository: repository)
     let member = subject("member", hash: "b")
@@ -108,12 +108,14 @@ enum HostwrightRBACQualificationTool {
     _ identifier: String,
     hash: Character,
     declaredBy: String,
+    bucket: String,
     at timestamp: String
   ) -> ControlPeerIdentityRecord {
     ControlPeerIdentityRecord(
       subjectID: identifier, userID: UInt32(geteuid()),
       codeIdentity: CodeIdentity(
-        teamIdentifier: "993YC3JY4Q", signingIdentifier: "dev.hostwright.rbac-qualification",
+        teamIdentifier: "993YC3JY4Q",
+        signingIdentifier: "dev.hostwright.rbac-qualification.\(bucket)",
         codeDirectoryHash: String(repeating: String(hash), count: 40),
         validationMode: .installedRequirement),
       declaredBySubjectID: declaredBy, declaredAt: timestamp, updatedAt: timestamp)

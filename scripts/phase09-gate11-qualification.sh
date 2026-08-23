@@ -158,7 +158,11 @@ revalidate_dependencies() {
 
 record_root() {
   local path="$1" identifier="${2:-gate11-xpc-live}"
-  [[ -d "$path" && ! -L "$path" && "$path" == "$root"/* ]] || die 'temporary XPC root is unsafe.'
+  [[ -d "$path" && ! -L "$path" && "$(/bin/realpath "$path")" == "$path" ]] \
+    || die 'temporary XPC root is unsafe.'
+  if [[ "$identifier" != gate11-xpc-staging ]]; then
+    [[ "$path" == "$root"/* ]] || die 'temporary XPC root is unsafe.'
+  fi
   printf '%s\ttemporary-root\t%s\t%s\t%s\t%s\t%s\n' "$(now)" "$identifier" "$path" "$(stat -f '%d' "$path")" "$(stat -f '%i' "$path")" 'owned=gate11' >> "$root/ownership-v1.tsv"
 }
 
@@ -185,12 +189,26 @@ live() {
   : "${HOSTWRIGHT_NOTARY_PROFILE:?HOSTWRIGHT_NOTARY_PROFILE is required for Gate 11 notarization}"
   swift build --jobs 1 --product hostwright-xpc-provider-service
   swift build --jobs 1 --product hostwright-xpc-provider-qualification
-  local host_bin live_root
+  local host_bin live_root staging_parent staging_root suffix
   host_bin="$(swift build --show-bin-path)"
   live_root="$root/live-xpc-v1"; mkdir "$live_root"; chmod 700 "$live_root"; record_root "$live_root"
+  suffix="${root##*/phase09-gate11-}"
+  [[ "$suffix" =~ ^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$ ]] \
+    || die 'Gate 11 evidence root name is not a lowercase UUID.' 66
+  staging_parent="$HOME/Library/Application Support/Hostwright/qualification"
+  /bin/mkdir -p "$staging_parent"; /bin/chmod 700 "$staging_parent"
+  staging_root="$staging_parent/phase09-gate11-$suffix"
+  [[ ! -L "$staging_root" && ! -e "$staging_root" ]] || die 'The Gate 11 staging root already exists; preserve or remove it explicitly.' 73
+  /bin/mkdir "$staging_root"; /bin/chmod 700 "$staging_root"
+  [[ "$(/bin/realpath "$staging_root")" == "$staging_root" && "$(stat -f '%u' "$staging_root")" == "$(id -u)" \
+    && "$(stat -f '%Lp' "$staging_root")" == 700 ]] || die 'The Gate 11 staging root is unsafe.' 66
+  record_root "$staging_root" gate11-xpc-staging
   HOSTWRIGHT_XPC_REQUIRE_NOTARY=1 \
     HOSTWRIGHT_NOTARY_PROFILE="$HOSTWRIGHT_NOTARY_PROFILE" \
     HOSTWRIGHT_XPC_LIVE_ROOT="$live_root" \
+    HOSTWRIGHT_XPC_STAGING_ROOT="$staging_root" \
+    HOSTWRIGHT_XPC_SOURCE_COMMIT="$(git rev-parse HEAD)" \
+    HOSTWRIGHT_XPC_CONFIG_DIGEST="$config_digest_value" \
     HOSTWRIGHT_XPC_OWNERSHIP_LEDGER="$root/ownership-v1.tsv" \
     HOSTWRIGHT_XPC_HOST_BIN="$host_bin" \
     scripts/phase09-gate11-live.sh

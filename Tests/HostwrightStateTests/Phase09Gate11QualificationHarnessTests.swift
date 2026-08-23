@@ -122,4 +122,112 @@ final class Phase09Gate11QualificationHarnessTests: XCTestCase {
       XCTAssertFalse(combined.contains(forbidden), "Gate 11 must not inspect or mutate Phase 08: \(forbidden)")
     }
   }
+
+  func testLiveHarnessStagesLaunchdJobsUnderOwnedInternalRoot() throws {
+    let source = try String(contentsOf: liveHarness, encoding: .utf8)
+    XCTAssertTrue(source.contains("HOSTWRIGHT_XPC_STAGING_ROOT is required"))
+    XCTAssertTrue(source.contains("The XPC staging root is unsafe."))
+    XCTAssertTrue(source.contains("The XPC staging root must be empty."))
+    XCTAssertTrue(source.contains("record_staged"))
+    XCTAssertTrue(source.contains("$staging_root/$name"))
+    XCTAssertTrue(source.contains("Add :ProgramArguments:0 string $staged_service"))
+    XCTAssertTrue(source.contains("codesign --verify --strict \"$staged_service\""))
+    XCTAssertFalse(source.contains("Add :ProgramArguments:0 string $service\""))
+  }
+
+  func testStagedLaunchdMaterialIsDigestAndIdentityBoundToTheLedger() throws {
+    let source = try String(contentsOf: liveHarness, encoding: .utf8)
+    for required in [
+      "sha256=$(sha \"$plist\")",
+      "source_commit=$source_commit",
+      "config_digest=$config_digest",
+      "sha256=$(sha \"$staged_service\")",
+      "HOSTWRIGHT_XPC_SOURCE_COMMIT is required",
+      "HOSTWRIGHT_XPC_CONFIG_DIGEST is required",
+      "The XPC source commit binding is invalid.",
+      "The XPC configuration digest binding is invalid.",
+    ] {
+      XCTAssertTrue(source.contains(required), "missing staged-artifact ledger binding: \(required)")
+    }
+  }
+
+  func testCleanupDetectsPlistTamperReapsProcessesAndProvesAbsence() throws {
+    let source = try String(contentsOf: liveHarness, encoding: .utf8)
+    for required in [
+      "An owned XPC launchd plist digest changed; cleanup is frozen.",
+      "kill -TERM \"$pid\"",
+      "kill -KILL \"$pid\"",
+      "did not terminate; cleanup is frozen.",
+      "survived unlink; cleanup is frozen.",
+      "A Gate 11 XPC launchd label remained loaded after cleanup.",
+      "was not fully cleaned by ledgered removal.",
+      "== 600 ]]",
+      "|| die 'An owned XPC launchd plist changed; cleanup is frozen.'",
+    ] {
+      XCTAssertTrue(source.contains(required), "missing hardened cleanup invariant: \(required)")
+    }
+    let qualification = try String(contentsOf: qualificationHarness, encoding: .utf8)
+    XCTAssertTrue(qualification.contains("gate11-xpc-staging"))
+    XCTAssertTrue(qualification.contains("HOSTWRIGHT_XPC_STAGING_ROOT=\"$staging_root\""))
+  }
+
+  func testStagingRootValidationRejectsSymlinkPathRacesAndNoOwnerVolumes() throws {
+    let source = try String(contentsOf: liveHarness, encoding: .utf8)
+    for required in [
+      "/bin/realpath \"$staging_root\")\" == \"$staging_root\"",
+      "! -L \"$staging_root\"",
+      "noowners",
+      "launchd jobs cannot be staged there",
+      "$staging_root\" != \"$live_root\"",
+    ] {
+      XCTAssertTrue(source.contains(required), "missing staging path-race/volume guard: \(required)")
+    }
+  }
+
+  func testInvalidStagingRootsAreRejectedBeforeAnyLaunchdAction() throws {
+    let parent = URL(fileURLWithPath: "/private/tmp")
+      .appendingPathComponent("hw-g11-staging-\(UUID().uuidString.lowercased())")
+    try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: false)
+    defer { try? FileManager.default.removeItem(at: parent) }
+    let liveDir = parent.appendingPathComponent("live")
+    try FileManager.default.createDirectory(at: liveDir, withIntermediateDirectories: false)
+    try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: liveDir.path)
+    let livePath = liveDir.path
+
+    func assertRejected(staging: String, expectedMessage: String) throws {
+      let process = Process()
+      process.executableURL = URL(fileURLWithPath: "/bin/bash")
+      process.arguments = [liveHarness.path]
+      var env = ProcessInfo.processInfo.environment
+      env["HOSTWRIGHT_XPC_LIVE_ROOT"] = livePath
+      env["HOSTWRIGHT_XPC_STAGING_ROOT"] = staging
+      env["HOSTWRIGHT_XPC_OWNERSHIP_LEDGER"] = parent.appendingPathComponent("ledger.tsv").path
+      env["HOSTWRIGHT_XPC_HOST_BIN"] = "/nonexistent-host-bin"
+      env["HOSTWRIGHT_XPC_SOURCE_COMMIT"] = String(repeating: "a", count: 40)
+      env["HOSTWRIGHT_XPC_CONFIG_DIGEST"] = String(repeating: "b", count: 64)
+      process.environment = env
+      let errorPipe = Pipe()
+      process.standardError = errorPipe
+      process.standardOutput = Pipe()
+      try process.run()
+      process.waitUntilExit()
+      XCTAssertEqual(process.terminationStatus, 66, staging)
+      let stderr = String(data: errorPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+      XCTAssertTrue(stderr.contains(expectedMessage), "\(staging): \(stderr)")
+    }
+
+    let missing = parent.appendingPathComponent("missing").path
+    try assertRejected(staging: missing, expectedMessage: "The XPC staging root is unsafe.")
+
+    let target = parent.appendingPathComponent("real-dir")
+    try FileManager.default.createDirectory(at: target, withIntermediateDirectories: false)
+    let link = parent.appendingPathComponent("link")
+    try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: target.path)
+    try assertRejected(staging: link.path, expectedMessage: "The XPC staging root is unsafe.")
+
+    let loose = parent.appendingPathComponent("loose")
+    try FileManager.default.createDirectory(at: loose, withIntermediateDirectories: false)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: loose.path)
+    try assertRejected(staging: parent.appendingPathComponent("loose").resolvingSymlinksInPath().path, expectedMessage: "The XPC staging root is unsafe.")
+  }
 }

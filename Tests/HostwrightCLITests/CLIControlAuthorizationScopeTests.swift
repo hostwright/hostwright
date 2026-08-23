@@ -390,8 +390,14 @@ final class CLIControlAuthorizationScopeTests: XCTestCase {
         services:
           api:
             image: ghcr.io/example/api:latest
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
           worker:
             image: ghcr.io/example/worker:latest
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
         """
         try manifestText.write(toFile: manifestPath, atomically: true, encoding: .utf8)
 

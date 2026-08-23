@@ -242,8 +242,17 @@ create_job() {
   record_staged temporary-directory "$name" "$staged_job"
   staged_service="$staged_job/hostwright-xpc-provider-service"
   /bin/cp "$service" "$staged_service"; /bin/chmod 500 "$staged_service"
+  if [[ "$service_signing" == adhoc ]]; then
+    /usr/bin/codesign --force --options runtime --sign - --identifier "$service_id" "$staged_service"
+  elif [[ "$entitlements" == sandbox || "$entitlements" == over-entitled ]]; then
+    /usr/bin/codesign --force --options runtime --timestamp --sign "$signing_identity" \
+      --identifier "$service_id" --entitlements "$signing_entitlements" "$staged_service"
+  else
+    /usr/bin/codesign --force --options runtime --timestamp --sign "$signing_identity" \
+      --identifier "$service_id" "$staged_service"
+  fi
   /usr/bin/codesign --verify --strict "$staged_service" \
-    || die "The staged $name XPC service copy failed strict signature verification." 69
+    || die "The staged $name XPC service failed strict signature verification." 69
   [[ "$(/usr/bin/codesign -d --verbose=4 "$staged_service" 2>&1 | /usr/bin/awk -F= '$1=="Identifier"{print $2}')" == "$service_id" ]] \
     || die "The staged $name XPC service code identity changed during staging." 69
   record_staged temporary-file "$name" "$staged_service" \

@@ -410,6 +410,9 @@ final class LocalControlAPIIntegrationTests: XCTestCase {
         services:
           api:
             image: local/demo:latest
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
             command: ["serve"]
 
         """

@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import HostwrightCore
 import HostwrightExtensions
@@ -144,6 +145,12 @@ func hostwrightStableHash(_ value: String) -> String {
         hash &*= 0x100000001b3
     }
     return String(format: "%016llx", hash)
+}
+
+func hostwrightContentSHA256(_ value: String) -> String {
+    SHA256.hash(data: Data(value.utf8))
+        .map { String(format: "%02x", $0) }
+        .joined()
 }
 
 func hostwrightTimestamp() -> String {

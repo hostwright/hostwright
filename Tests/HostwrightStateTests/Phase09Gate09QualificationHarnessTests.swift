@@ -98,6 +98,34 @@ final class Phase09Gate09QualificationHarnessTests: XCTestCase {
     XCTAssertFalse(qualificationTool.contains("roleID: DefaultRole.owner.rawValue"))
   }
 
+  func testCLIProjectManifestWritersPersistSHA256Digests() throws {
+    let writers = [
+      "Sources/HostwrightCLI/ApplyCommandPersistence.swift",
+      "Sources/HostwrightCLI/LogsCommand.swift",
+      "Sources/HostwrightCLI/StatusCommand.swift",
+    ]
+    for path in writers {
+      let source = try String(
+        contentsOf: repository.appendingPathComponent(path),
+        encoding: .utf8
+      )
+      XCTAssertTrue(
+        source.contains("manifestHash: hostwrightContentSHA256(manifestText)"),
+        "\(path) must persist the 64-hex content digest required by scheduler authority"
+      )
+      XCTAssertFalse(source.contains("manifestHash: hostwrightStableHash(manifestText)"))
+      XCTAssertFalse(source.contains("manifestHash: stableHash(manifestText)"))
+    }
+
+    let utilities = try String(
+      contentsOf: repository.appendingPathComponent(
+        "Sources/HostwrightCLI/CLIUtilities.swift"),
+      encoding: .utf8
+    )
+    XCTAssertTrue(utilities.contains("func hostwrightContentSHA256(_ value: String) -> String"))
+    XCTAssertTrue(utilities.contains("SHA256.hash(data: Data(value.utf8))"))
+  }
+
   func testStreamQualificationBootstrapDeclaresCliAndStreamSubjectsWhenCodeHashesDiffer() throws {
     let source = try String(
       contentsOfFile: "Sources/HostwrightStreamQualificationTool/main.swift",

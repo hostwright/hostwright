@@ -23,15 +23,63 @@ final class Phase09Gate15QualificationHarnessTests: XCTestCase {
     XCTAssertEqual(result.status, 0, result.stderr)
     for required in [
       "Gate 15 — 93.75%",
+      "bounded four-hour continuous macOS qualification",
       "mach_continuous_time",
-      "259200",
+      "14400 continuous",
       "300-second",
-      "864",
+      "48 completed 300-second intervals",
       "U/I/L/M/S/R",
       "canonical SHA-256 chained append-only samples",
       "No elapsed-time resume exists",
+      "does NOT",
+      "72-hour passage",
+      "e822aff52b78217955d5ee849ebe3eb31eb1f8462cca1fe9b9cfb0fa4c065793",
+      "a82cf3d6bf274b9f09cb25fa748f516c5e60ac990ae3ac66cbceb5b47a106fab",
     ] {
       XCTAssertTrue(result.stdout.contains(required), "missing Gate 15 contract: \(required)")
+    }
+    XCTAssertFalse(result.stdout.contains("one continuous 72-hour"), result.stdout)
+  }
+
+  func testDiagnoseStatesBoundedContractAndExplicitNonClaim() throws {
+    let result = try run(["diagnose"])
+    XCTAssertEqual(result.status, 0, result.stderr)
+    XCTAssertTrue(result.stdout.contains("\"claim\":\"none\""), result.stdout)
+    XCTAssertTrue(result.stdout.contains("\"formal\":false"), result.stdout)
+    XCTAssertTrue(result.stdout.contains("\"boundedDurationSeconds\":14400"), result.stdout)
+    XCTAssertTrue(result.stdout.contains("\"requiredIntervals\":48"), result.stdout)
+    XCTAssertTrue(result.stdout.contains("\"sampleCount\":49"), result.stdout)
+    XCTAssertTrue(result.stdout.contains("\"notAClaimOf\":\"72-hour passage\""), result.stdout)
+    XCTAssertFalse(result.stdout.contains("259200"), result.stdout)
+  }
+
+  func testScriptsFreezeBoundedDurationAndFaultScheduleRemap() throws {
+    let qualification = try String(contentsOf: qualificationHarness, encoding: .utf8)
+    let live = try String(contentsOf: liveHarness, encoding: .utf8)
+    let tool = try String(
+      contentsOf: repository.appendingPathComponent("Qualification/HostwrightPhase09QualificationTool/main.swift"),
+      encoding: .utf8
+    )
+    XCTAssertTrue(qualification.contains("readonly duration_seconds=14400"), qualification)
+    XCTAssertTrue(qualification.contains("readonly required_intervals=48"), qualification)
+    XCTAssertTrue(qualification.contains("readonly sample_count=49"), qualification)
+    XCTAssertTrue(qualification.contains("bounded required sample count"), qualification)
+    XCTAssertTrue(qualification.contains("below the bounded 14400-second requirement"), qualification)
+    XCTAssertFalse(qualification.contains("259200"), qualification)
+    XCTAssertFalse(qualification.contains("865 samples"), qualification)
+    XCTAssertTrue(tool.contains("durationSeconds: UInt64 = 14_400"), tool)
+    XCTAssertTrue(tool.contains("requiredIntervals: UInt64 = 48"), tool)
+    XCTAssertTrue(tool.contains("below the bounded 14400-second requirement"), tool)
+    XCTAssertTrue(live.contains("\\n2\\tconfiguration-churn-and-compaction\\t60"), live)
+    XCTAssertTrue(live.contains("\\n4\\tpressure-and-workload-recovery\\t120"), live)
+    XCTAssertTrue(live.contains("\\n8\\tplanned-daemon-restart\\t120"), live)
+    XCTAssertTrue(live.contains("\\n16\\thelper-process-tree-failure\\t120"), live)
+    XCTAssertTrue(live.contains("\\n32\\truntime-recovery\\t120"), live)
+    XCTAssertFalse(live.contains("\\n12\\tconfiguration-churn-and-compaction"), live)
+    XCTAssertFalse(live.contains("\\n576\\truntime-recovery"), live)
+    for source in [qualification, live, tool] {
+      XCTAssertFalse(source.contains("Phase 08"))
+      XCTAssertFalse(source.contains("phase08"))
     }
   }
 
@@ -50,7 +98,7 @@ final class Phase09Gate15QualificationHarnessTests: XCTestCase {
       XCTAssertEqual(manifest?["testOnly"] as? Bool, true)
       XCTAssertEqual(manifest?["certificateFingerprint"] as? String, "testing-cms-certificate")
       XCTAssertEqual(manifest?["teamID"] as? String, "testing")
-      XCTAssertEqual(manifest?["requiredSampleCount"] as? Int, 865)
+      XCTAssertEqual(manifest?["requiredSampleCount"] as? Int, 49)
       XCTAssertEqual(try permissions(root), 0o700)
       for file in [
         "manifest-v1.json", "dependency-evidence-v1.json", "state-v1.tsv",
@@ -63,7 +111,7 @@ final class Phase09Gate15QualificationHarnessTests: XCTestCase {
     }
   }
 
-  func testTestModeCannotManufacture72HourPassageAndPreservesLocks() throws {
+  func testTestModeCannotManufactureFormalBoundedPassageAndPreservesLocks() throws {
     try withRoot { root, environment in
       XCTAssertEqual(try run(["prepare", "15"], environment: environment).status, 0)
       let result = try run(["run", "15"], environment: environment)

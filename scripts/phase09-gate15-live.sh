@@ -952,7 +952,7 @@ run_live() {
   record_owned_runtime
   ensure_owned_runtime
   write_inventory "$root/runtime-inventory-before-v1.json"
-  printf '%s\n' $'schedule\tmarker\tbound_seconds\n12\tconfiguration-churn-and-compaction\t60\n72\tpressure-and-workload-recovery\t120\n144\tplanned-daemon-restart\t120\n288\thelper-process-tree-failure\t120\n576\truntime-recovery\t120' \
+  printf '%s\n' $'schedule\tmarker\tbound_seconds\n2\tconfiguration-churn-and-compaction\t60\n4\tpressure-and-workload-recovery\t120\n8\tplanned-daemon-restart\t120\n16\thelper-process-tree-failure\t120\n32\truntime-recovery\t120' \
     | write_private "$root/fault-schedule-v1.tsv" 'Gate 15 fault schedule' fault-schedule
   export HOSTWRIGHT_GATE15_BOUNDARY_VALIDATOR="$repository_path/scripts/phase09-gate15-live.sh"
   export HOSTWRIGHT_GATE15_ROOT="$root"

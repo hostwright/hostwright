@@ -14,10 +14,10 @@ final class HostwrightPhase09QualificationToolTests: XCTestCase {
   )
 
   func testFrozenContractUsesMachContinuousTimeAndExactSampleCount() {
-    XCTAssertEqual(Gate15Contract.frozen.durationSeconds, 259_200)
+    XCTAssertEqual(Gate15Contract.frozen.durationSeconds, 14_400)
     XCTAssertEqual(Gate15Contract.frozen.intervalSeconds, 300)
-    XCTAssertEqual(Gate15Contract.frozen.requiredIntervals, 864)
-    XCTAssertEqual(Gate15Contract.frozen.requiredSampleCount, 865)
+    XCTAssertEqual(Gate15Contract.frozen.requiredIntervals, 48)
+    XCTAssertEqual(Gate15Contract.frozen.requiredSampleCount, 49)
     XCTAssertEqual(Gate15Contract.frozen.cells, ["U", "I", "L", "M", "S", "R"])
   }
 

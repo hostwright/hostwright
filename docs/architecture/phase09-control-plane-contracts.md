@@ -473,9 +473,17 @@ Gate 14 consumes a passed, CMS-verified Gate 13 bundle and binds the exact
 diagnostic aggregate result has `claim: "none"`; it cannot be promoted to
 formal evidence by the dispatcher or by a fixture substitution.
 
-Gate 15 is the single continuous macOS qualification. It binds current Gates
+Gate 15 is the bounded continuous macOS qualification. It binds current Gates
 1–14 evidence, signed/notarized identities, owned-resource ledgers, and the
-same-process continuous-time sample chain. Its runner and daemon identities are
+same-process continuous-time sample chain over a bounded four-hour window
+(14400 continuous seconds, an initial sample plus 48 completed 300-second
+intervals). This bounded run does not by itself constitute a 72-hour passage;
+the completed cumulative checkpointed seventy-two-hour soak of the shared
+daemon core from the prior v0.0.2 phase remains retained duration evidence
+(final evidence seal SHA-256
+`e822aff52b78217955d5ee849ebe3eb31eb1f8462cca1fe9b9cfb0fa4c065793`, final
+checkpoint SHA-256
+`a82cf3d6bf274b9f09cb25fa748f516c5e60ac990ae3ac66cbceb5b47a106fab`). Its runner and daemon identities are
 versioned kernel-derived bindings over each canonical executable path, complete
 argv, and exact process start time, and each observed state database must report
 the current schema v22 authority. A failed or interrupted root is retained and

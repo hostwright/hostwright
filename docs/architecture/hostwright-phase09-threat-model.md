@@ -139,7 +139,7 @@ hardening:
 | G11 | Enforce reciprocal XPC identity, exact sandbox entitlement, bounded v1 protocol, and isolation. | U/I/L/M/S/R |
 | G12 | Verify signed packages and owned-only lifecycle cleanup, including live revoke/quarantine. | U/I/L/M/S/R |
 | G14 | Re-run cross-boundary adversarial qualification only where dependencies changed. | S/R aggregate |
-| G15 | Prove all controls during one signed macOS live qualification. | L/S/R 72-hour evidence |
+| G15 | Prove all controls during one signed macOS live qualification. | L/S/R bounded four-hour continuous evidence plus the retained cumulative checkpointed 72-hour daemon-core soak from the prior v0.0.2 phase |
 
 `U` is focused unit evidence; `I` is pipeline integration; `L` is live macOS
 runtime evidence; `M` is migration/compatibility evidence; `S` is adversarial

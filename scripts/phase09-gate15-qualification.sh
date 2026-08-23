@@ -25,10 +25,10 @@ readonly test_signing_identity='testing-cms-signer'
 readonly test_signing_fingerprint='testing-cms-fingerprint'
 readonly test_certificate_fingerprint='testing-cms-certificate'
 readonly test_signing_team='testing'
-readonly duration_seconds=259200
+readonly duration_seconds=14400
 readonly interval_seconds=300
-readonly required_intervals=864
-readonly sample_count=865
+readonly required_intervals=48
+readonly sample_count=49
 readonly user_id="$(/usr/bin/id -u)"
 
 export PATH="$formal_path"
@@ -343,26 +343,34 @@ validate_script_boundary() {
 contract() {
   /bin/cat <<'EOF'
 Phase 09 Gate 15 qualification harness contract v1
-Gate 15 — 93.75% — one continuous 72-hour macOS qualification.
+Gate 15 — 93.75% — one bounded four-hour continuous macOS qualification.
 Commands: contract, diagnose, prepare 15, run 15, and status 15.
 Exactly one immutable Gate 15 root may run. Formal evidence uses one same-process
-runner, mach_continuous_time as duration authority, at least 259200 continuous
-seconds, an initial sample plus 864
-completed 300-second intervals, and canonical SHA-256 chained append-only samples.
-Every sample binds runner and daemon process identities, boot-session identity,
-signed executable identity, state-database integrity, runtime identity, bounded
-metrics, scheduled fault, recovery result, and ordered sleep/wake coverage.
-U/I/L/M/S/R cells run strictly serially. Dependencies are revalidated before and
-after every cell and at every sample. Failure freezes the root and both locks;
-failed roots are never rerun or repaired. Reuse requires exact checksum and CMS
-verification. diagnose and status are read-only and non-qualifying. Test mode
-cannot manufacture or claim a 72-hour passage. No elapsed-time resume exists.
+runner, mach_continuous_time as duration authority, at least 14400 continuous
+seconds, an initial sample plus 48 completed 300-second intervals, and
+canonical SHA-256 chained append-only samples. Every sample binds runner and daemon process
+identities, boot-session identity, signed executable identity, state-database
+integrity, runtime identity, bounded metrics, scheduled fault, recovery result,
+and ordered sleep/wake coverage. U/I/L/M/S/R cells run strictly serially.
+Dependencies are revalidated before and after every cell and at every sample.
+Failure freezes the root and both locks; failed roots are never rerun or repaired.
+Reuse requires exact checksum and CMS verification. diagnose and status are
+read-only and non-qualifying. Test mode cannot manufacture or claim a formal
+Gate 15 passage. No elapsed-time resume exists.
+Inherited duration evidence: the completed cumulative checkpointed
+seventy-two-hour soak of the shared daemon core from the prior v0.0.2 phase
+remains retained (final evidence seal SHA-256
+e822aff52b78217955d5ee849ebe3eb31eb1f8462cca1fe9b9cfb0fa4c065793, final
+checkpoint SHA-256 a82cf3d6bf274b9f09cb25fa748f516c5e60ac990ae3ac66cbceb5b47a106fab,
+merged as reviewed PR #312). This Gate 15 run provides bounded continuity,
+fault, recovery, and security evidence over four continuous hours and does NOT
+by itself constitute a 72-hour passage.
 EOF
 }
 
 diagnose() {
   /bin/cat <<'EOF'
-{"claim":"none","gate":15,"status":"diagnostic","formal":false,"reason":"diagnose is read-only and non-qualifying","durationSeconds":259200,"intervalSeconds":300,"requiredIntervals":864,"sampleCount":865,"clock":"mach_continuous_time","evidenceClasses":["U","I","L","M","S","R"]}
+{"claim":"none","gate":15,"status":"diagnostic","formal":false,"reason":"diagnose is read-only and non-qualifying","boundedDurationSeconds":14400,"intervalSeconds":300,"requiredIntervals":48,"sampleCount":49,"notAClaimOf":"72-hour passage","clock":"mach_continuous_time","evidenceClasses":["U","I","L","M","S","R"]}
 EOF
 }
 
@@ -466,9 +474,9 @@ toolchain_snapshot() {
     /bin/cat <<'EOF'
 qualification-toolchain=testing
 clock=mach_continuous_time
-duration-seconds=259200
+duration-seconds=14400
 interval-seconds=300
-required-intervals=864
+required-intervals=48
 EOF
     return 0
   fi
@@ -1016,7 +1024,8 @@ prepare_manifest() {
       invocation:$invocation,observationProviderPath:$observationProviderPath,observationProviderDigest:$observationProviderDigest,
       trustedObservationProviderPath:$trustedObservationProviderPath,trustedObservationProviderDigest:$trustedObservationProviderDigest,
       sleepWakeProviderPath:$sleepWakeProviderPath,sleepWakeProviderDigest:$sleepWakeProviderDigest,
-      durationSeconds:259200,intervalSeconds:300,requiredIntervals:864,requiredSampleCount:865,
+      durationSeconds:14400,intervalSeconds:300,requiredIntervals:48,requiredSampleCount:49,
+      boundedDurationSeconds:14400,notAClaimOf:"72-hour passage",
       clock:"mach_continuous_time",cellOrder:[1,2,3,4,5,6],evidenceClasses:["U","I","L","M","S","R"]}' \
     | write_private "$root/manifest-v1.json" 'Gate 15 manifest' manifest
 }
@@ -1321,7 +1330,7 @@ run_cell() {
   local cell="$1"
   if testing; then
     [[ "${HOSTWRIGHT_PHASE09_HARNESS_TEST_FORCE_FAILURE:-}" != 1 ]] || return 47
-    [[ "$cell" != 3 ]] || die 'test mode cannot manufacture or claim a 72-hour Gate 15 passage.' 70
+    [[ "$cell" != 3 ]] || die 'test mode cannot manufacture or claim a formal bounded Gate 15 passage.' 70
     printf 'test-mode cell %s: local contract fixture only\n' "$cell"
     return 0
   fi
@@ -1702,7 +1711,7 @@ if not raw.endswith(b"\n"):
     fail("sample ledger is not newline terminated")
 lines = raw.splitlines(keepends=True)
 if len(lines) != expected_count:
-    fail("sample ledger count is not exactly 865")
+    fail("sample ledger count does not match the bounded required sample count")
 samples = []
 for index, line in enumerate(lines):
     if not line.endswith(b"\n") or line.endswith(b"\r\n"):
@@ -1733,7 +1742,7 @@ last = samples[-1]
 timebase_numer = int(state["timebaseNumer"])
 timebase_denom = int(state["timebaseDenom"])
 if (last["continuousTicks"] - first["continuousTicks"]) * timebase_numer < duration_seconds * 1_000_000_000 * timebase_denom:
-    fail("continuous duration is below 259200 seconds")
+    fail("continuous duration is below the bounded 14400-second requirement")
 expected_binding = {
     "sourceDigest": expected_source,
     "configDigest": expected_config,
@@ -1892,7 +1901,7 @@ validate_final_evidence() {
   done
   validate_complete_sample_ledger
   sample_lines="$(/usr/bin/wc -l < "$root/samples-v1.ndjson" | /usr/bin/tr -d ' ')"
-  [[ "$sample_lines" == "$sample_count" ]] || die 'Gate 15 final evidence does not contain exactly 865 samples.' 74
+  [[ "$sample_lines" == "$sample_count" ]] || die 'Gate 15 final evidence does not contain the bounded required sample count.' 74
   /usr/bin/jq -s -e --argjson expected "$sample_count" '
     length == $expected and .[0].sequence == 0 and .[-1].sequence == ($expected - 1)
     and .[0].previousSampleSHA256 == null

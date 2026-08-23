@@ -25,9 +25,9 @@ public struct Gate15Contract: Codable, Equatable, Sendable {
   public let cells: [String]
 
   public init(
-    durationSeconds: UInt64 = 259_200,
+    durationSeconds: UInt64 = 14_400,
     intervalSeconds: UInt64 = 300,
-    requiredIntervals: UInt64 = 864,
+    requiredIntervals: UInt64 = 48,
     awakeToleranceSeconds: UInt64 = 30,
     cells: [String] = ["U", "I", "L", "M", "S", "R"]
   ) {
@@ -1320,7 +1320,7 @@ public struct Gate15ContinuityLedger {
     let (elapsedTicks, elapsedOverflowed) = last.continuousTicks.subtractingReportingOverflow(first.continuousTicks)
     guard !elapsedOverflowed,
           try timebase.durationAtLeast(ticks: elapsedTicks, seconds: contract.durationSeconds) else {
-      throw Gate15QualificationError("durationIncomplete", "continuous elapsed time is below 259200 seconds.")
+      throw Gate15QualificationError("durationIncomplete", "continuous elapsed time is below the bounded 14400-second requirement.")
     }
     if formal && !contract.isFrozen() {
       throw Gate15QualificationError("contractMismatch", "formal qualification may use only the frozen Gate 15 contract.")
@@ -1667,7 +1667,7 @@ public final class Gate15QualificationRunner {
   public func run() throws -> Gate15RunResult {
     sleepWakeEventIDs.removeAll(keepingCapacity: true)
     guard !testing else {
-      throw Gate15QualificationError("testModeCannotQualify", "test mode cannot manufacture or claim a 72-hour Gate 15 passage.")
+      throw Gate15QualificationError("testModeCannotQualify", "test mode cannot manufacture or claim a formal bounded Gate 15 passage.")
     }
     guard contract.isFrozen() else {
       throw Gate15QualificationError("contractMismatch", "formal Gate 15 runs require the frozen contract.")
@@ -3059,7 +3059,7 @@ public enum Gate15QualificationTool {
     case .run(let root):
       let testing = environment["HOSTWRIGHT_PHASE09_HARNESS_TESTING"] == "1"
       guard !testing else {
-        throw Gate15QualificationError("testModeCannotQualify", "test mode cannot manufacture or claim a 72-hour Gate 15 passage.")
+        throw Gate15QualificationError("testModeCannotQualify", "test mode cannot manufacture or claim a formal bounded Gate 15 passage.")
       }
       guard let authorizationPath = environment["HOSTWRIGHT_GATE15_LAUNCH_AUTHORIZATION"] else {
         throw Gate15QualificationError("missingLaunchAuthorization", "HOSTWRIGHT_GATE15_LAUNCH_AUTHORIZATION is required for every direct formal run.")

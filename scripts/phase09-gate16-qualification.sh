@@ -568,7 +568,7 @@ verify_cms_bundle() {
     decoded="$bundle/.gate16-cms-decoded-v1"
     [[ ! -e "$decoded" ]] \
       || die 'Gate 16 CMS verification temporary already exists; preserve the root.' 73
-    /usr/bin/security cms -D -N "$expected_cms_identity" -u 9 -i "$bundle/$cms_name" -o "$decoded" >/dev/null 2>&1 \
+    /usr/bin/security cms -D -u 9 -i "$bundle/$cms_name" -o "$decoded" >/dev/null 2>&1 \
       || die 'Gate 16 CMS decode failed.' 73
     chmod 600 "$decoded"
     /usr/bin/cmp -s "$bundle/$checksum_name" "$decoded" \

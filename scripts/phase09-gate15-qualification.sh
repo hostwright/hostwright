@@ -564,7 +564,7 @@ verify_actual_cms_signer() {
 verify_cms_bundle() {
   local bundle="$1" checksum="$2" cms="$3" decoded signer_cert openssl_decoded output_directory
   require_private_file "$cms" 'Gate 15 CMS evidence'
-  decoded="$(/usr/bin/security cms -D -N "$expected_signing_identity" -u 9 -i "$cms" -o /dev/stdout 2>/dev/null | write_private_temp_from_stdin cms-decoded)" \
+  decoded="$(/usr/bin/security cms -D -u 9 -i "$cms" -o /dev/stdout 2>/dev/null | write_private_temp_from_stdin cms-decoded)" \
     || die 'Gate 15 CMS payload could not be decoded under the pinned identity.' 69
   private_file "$decoded" || die 'Gate 15 CMS decode lost private-file identity.' 69
   output_directory="$(make_private_temp_directory cms-openssl)" || die 'Gate 15 CMS verification directory could not be created.' 69
@@ -1960,7 +1960,7 @@ validate_consumed_launch_authorization() {
 verify_staged_cms_bundle() {
   local checksum_tmp="$1" cms_tmp="$2" decoded_tmp output_directory signer_cert openssl_decoded
   private_file "$cms_tmp" || die 'Gate 15 staged CMS evidence is not private.' 74
-  decoded_tmp="$(/usr/bin/security cms -D -N "$signing_identity" -u 9 -i "$cms_tmp" -o /dev/stdout 2>/dev/null | write_private_temp_from_stdin staged-cms-decoded)" \
+  decoded_tmp="$(/usr/bin/security cms -D -u 9 -i "$cms_tmp" -o /dev/stdout 2>/dev/null | write_private_temp_from_stdin staged-cms-decoded)" \
     || die 'Gate 15 staged CMS evidence could not be decoded.' 74
   output_directory="$(make_private_temp_directory staged-cms-openssl)"
   signer_cert="$output_directory/signer.der"

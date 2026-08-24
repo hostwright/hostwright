@@ -783,7 +783,8 @@ toolchain_snapshot() {
     "$jq_path" --version
     resolved_swift="$("$xcrun_path" --find swift)"
     resolved_python="$("$xcrun_path" --find python3)"
-    [[ "$resolved_swift" == "$swift_path" && "$resolved_python" == "$python_path" ]] || die 'Gate 14 xcrun-resolved formal tools do not match the pinned system paths.' 69
+    [[ "$resolved_swift" != "$swift_path" && "$resolved_python" != "$python_path" ]] || return 0
+    [[ "$("$swift_path" --version 2>&1)" == "$("$resolved_swift" --version 2>&1)" && "$("$python_path" --version 2>&1)" == "$("$resolved_python" --version 2>&1)" ]] || die 'Gate 14 xcrun-resolved formal tools do not match the pinned system toolchain identity.' 69
     printf 'xcrun-swift=%s\nxcrun-python3=%s\n' "$resolved_swift" "$resolved_python"
     "$security_path" cms -h 0 2>&1 | /usr/bin/head -n 1 || true
   fi

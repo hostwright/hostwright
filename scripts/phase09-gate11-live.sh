@@ -251,6 +251,9 @@ create_job() {
     [[ "$spath" == "$staged_service" ]] && continue
     record_staged temporary-file "$name" "$spath"
   done < <(/usr/bin/find "$staged_xpc" -type f -print0)
+  while IFS= read -r -d '' spath; do
+    record_staged temporary-directory "$name" "$spath"
+  done < <(/usr/bin/find "$staged_xpc" -type d -print0)
   [[ -f "$staged_service" && ! -L "$staged_service" ]] \
     || die "The staged $name XPC service binary is missing." 69
   record_staged temporary-file "$name" "$staged_service" \

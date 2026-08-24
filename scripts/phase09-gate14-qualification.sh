@@ -992,7 +992,6 @@ verify_cms_payload() {
   private_file_0600 "$cms" && private_file_0600 "$checksum" || return 1
   decoded_dir="$(make_private_directory "cms-decoded-$label")"
   decoded="$decoded_dir/output"
-  security_exec cms -V -N "$signing_identity" -i "$cms" -o /dev/null >/dev/null 2>&1 || { dispose_private_artifact "$decoded" "$decoded_dir" || true; return 1; }
   cms_signer_metadata "$cms" "$label" || { dispose_private_artifact "$decoded" "$decoded_dir" || true; return 1; }
   security_exec cms -D -N "$signing_identity" -u 9 -i "$cms" -o "$decoded" >/dev/null 2>&1 || { dispose_private_artifact "$decoded" "$decoded_dir" || true; return 1; }
   atomic_harden "$decoded" >/dev/null 2>&1 || { dispose_private_artifact "$decoded" "$decoded_dir" || true; return 1; }

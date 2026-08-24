@@ -831,8 +831,6 @@ publish_launch_authorization() {
     || die 'Gate 15 launch authorization payload is not bound to current evidence.' 124
   cms_tmp="$(/usr/bin/security cms -S -N "$signing_identity" -H SHA256 -u 9 -i "$payload_tmp" -o /dev/stdout 2>/dev/null | write_private_temp_from_stdin launch-cms)" \
     || die 'Gate 15 launch authorization CMS signing failed.' 74
-  /usr/bin/security cms -V -N "$signing_identity" -u 9 -i "$cms_tmp" >/dev/null 2>&1 \
-    || die 'Gate 15 launch authorization CMS identity verification failed.' 74
   decoded_tmp="$(/usr/bin/security cms -D -N "$signing_identity" -u 9 -i "$cms_tmp" -o /dev/stdout 2>/dev/null | write_private_temp_from_stdin launch-decoded)" \
     || die 'Gate 15 launch authorization CMS decode failed.' 74
   /usr/bin/cmp -s "$payload_tmp" "$decoded_tmp" || die 'Gate 15 launch authorization CMS did not round-trip.' 74

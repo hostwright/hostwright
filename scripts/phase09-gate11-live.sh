@@ -314,7 +314,8 @@ if [[ "$require_notary" == 1 ]]; then
   xcrun notarytool submit "$archive" --keychain-profile "$HOSTWRIGHT_NOTARY_PROFILE" --wait
   xcrun stapler staple "$normal_app"
   xcrun stapler validate "$normal_app"
-  /usr/bin/spctl --assess --type execute --verbose=2 "$normal_app"
+  record_tree "$normal_app" notary
+  /usr/sbin/spctl --assess --type execute --verbose=2 "$normal_app"
 fi
 
 printf '%s\n' 'Gate 11 signed XPC live qualification passed.'

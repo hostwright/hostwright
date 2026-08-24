@@ -980,7 +980,11 @@ cms_signer_metadata() {
     subject="$("$openssl_path" x509 -in "$certificate" -subject -nameopt RFC2253 -noout)"
     actual_team_id="$(printf '%s\n' "$subject" | "$awk_path" -F, '{for (i=1; i<=NF; i++) if ($i ~ /^OU=[A-Z0-9]+$/) {v=$i; sub(/^OU=/,"",v); if (length(v)==10) {print v; exit}}}')"
     actual_common_name="$(printf '%s\n' "$subject" | "$awk_path" -F, '{for (i=1; i<=NF; i++) if ($i ~ /^CN=/) {v=$i; sub(/^CN=/,"",v); print v; exit}}')"
-    actual_identity="${actual_common_name} (${actual_team_id})"
+    if [[ "$actual_common_name" == *"($actual_team_id)" ]]; then
+      actual_identity="$actual_common_name"
+    else
+      actual_identity="${actual_common_name} (${actual_team_id})"
+    fi
     dispose_private_artifact "$certificate" "$certificate_dir" || return 1
   fi
   [[ "$actual_certificate_sha256" =~ ^[a-f0-9]{64}$ && "$actual_fingerprint" =~ ^[A-F0-9]{40}$ && "$actual_team_id" =~ ^[A-Z0-9]{10}$ && -n "$actual_identity" ]] || return 1

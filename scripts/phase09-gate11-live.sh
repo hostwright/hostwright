@@ -202,7 +202,7 @@ create_info() {
 create_job() {
   local name="$1" mode="$2" service_signing="$3" service_id="$4" entitlements="$5" client_id="$6"
   local scenario="$7" label job app contents macos client xpc xpc_contents xpc_macos service info plist out err signing_entitlements
-  local staged_job staged_service
+  local staged_job staged_xpc staged_service
   label="dev.hostwright.xpc-provider.g11.$(/usr/bin/uuidgen | /usr/bin/tr '[:upper:]' '[:lower:]')"
   job="$live_root/$name"; /bin/mkdir "$job"; /bin/chmod 700 "$job"; record temporary-directory "$name" "$job"
   app="$job/HostwrightXPCQualification.app"; contents="$app/Contents"; macos="$contents/MacOS"
@@ -240,21 +240,19 @@ create_job() {
   record_tree "$app" "$name"
   staged_job="$staging_root/$name"; /bin/mkdir "$staged_job"; /bin/chmod 700 "$staged_job"
   record_staged temporary-directory "$name" "$staged_job"
-  staged_service="$staged_job/hostwright-xpc-provider-service"
-  /bin/cp "$service" "$staged_service"; /bin/chmod 500 "$staged_service"
-  if [[ "$service_signing" == adhoc ]]; then
-    /usr/bin/codesign --force --options runtime --sign - --identifier "$service_id" "$staged_service"
-  elif [[ "$entitlements" == sandbox || "$entitlements" == over-entitled ]]; then
-    /usr/bin/codesign --force --options runtime --timestamp --sign "$signing_identity" \
-      --identifier "$service_id" --entitlements "$signing_entitlements" "$staged_service"
-  else
-    /usr/bin/codesign --force --options runtime --timestamp --sign "$signing_identity" \
-      --identifier "$service_id" "$staged_service"
-  fi
-  /usr/bin/codesign --verify --strict "$staged_service" \
-    || die "The staged $name XPC service failed strict signature verification." 69
-  [[ "$(/usr/bin/codesign -d --verbose=4 "$staged_service" 2>&1 | /usr/bin/awk -F= '$1=="Identifier"{print $2}')" == "$service_id" ]] \
+  staged_xpc="$staged_job/${xpc##*/}"
+  staged_service="$staged_xpc/Contents/MacOS/${service##*/}"
+  /bin/cp -R "$xpc" "$staged_xpc"
+  /usr/bin/codesign --verify --strict "$staged_xpc" \
+    || die "The staged $name XPC service bundle failed strict signature verification." 69
+  [[ "$(/usr/bin/codesign -d --verbose=4 "$staged_xpc" 2>&1 | /usr/bin/awk -F= '$1=="Identifier"{print $2}')" == "$service_id" ]] \
     || die "The staged $name XPC service code identity changed during staging." 69
+  while IFS= read -r -d '' spath; do
+    [[ "$spath" == "$staged_service" ]] && continue
+    record_staged temporary-file "$name" "$spath"
+  done < <(/usr/bin/find "$staged_xpc" -type f -print0)
+  [[ -f "$staged_service" && ! -L "$staged_service" ]] \
+    || die "The staged $name XPC service binary is missing." 69
   record_staged temporary-file "$name" "$staged_service" \
     "owned=gate11;sha256=$(sha "$staged_service");bytes=$(/usr/bin/stat -f '%z' "$staged_service");source_commit=$source_commit;config_digest=$config_digest"
   plist="$staged_job/$label.plist"; out="$staged_job/service.stdout"; err="$staged_job/service.stderr"

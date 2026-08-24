@@ -131,7 +131,9 @@ final class Phase09Gate11QualificationHarnessTests: XCTestCase {
     XCTAssertTrue(source.contains("record_staged"))
     XCTAssertTrue(source.contains("$staging_root/$name"))
     XCTAssertTrue(source.contains("Add :ProgramArguments:0 string $staged_service"))
-    XCTAssertTrue(source.contains("codesign --verify --strict \"$staged_service\""))
+    XCTAssertTrue(source.contains("/bin/cp -R \"$xpc\" \"$staged_xpc\""))
+    XCTAssertTrue(source.contains("codesign --verify --strict \"$staged_xpc\""))
+    XCTAssertTrue(source.contains("The staged $name XPC service binary is missing."))
     XCTAssertFalse(source.contains("Add :ProgramArguments:0 string $service\""))
   }
 

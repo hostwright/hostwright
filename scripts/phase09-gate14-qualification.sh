@@ -1245,7 +1245,11 @@ run_cell() {
   HOSTWRIGHT_PHASE09_EXPECTED_TESTS="$expected" HOSTWRIGHT_PHASE09_EXPECTED_TESTCASES_JSON="$(/usr/bin/jq -c --argjson cell "$cell" '[.cells[]|select(.cell==$cell)|.testcases[]|"\(.classname)/\(.name)"]' "$matrix_path")" swift_exec test --jobs 1 --filter "$filter" --xunit-output "$xunit_base"
   runner_status=$?
   set -e
-  candidate="$xunit_base-swift-testing.xml"; [[ -e "$candidate" || -L "$candidate" ]] || candidate="$xunit_base"
+  candidate=''
+  for candidate_name in "$xunit_base-swift-testing.xml" "$xunit_base-swift-testing" "$xunit_base" "$xunit_base.xml"; do
+    if [[ -e "$candidate_name" || -L "$candidate_name" ]]; then candidate="$candidate_name"; break; fi
+  done
+  [[ -n "$candidate" ]] || candidate="$xunit_base"
   if [[ "$runner_status" != 0 ]]; then
     dispose_private_artifact "$candidate" "$xunit_dir" || true
     die 'Gate 14 structured result generation failed closed.' 74
@@ -1293,7 +1297,11 @@ run_diagnostic_cell() {
   output="$(HOSTWRIGHT_PHASE09_EXPECTED_TESTS="$expected" HOSTWRIGHT_PHASE09_EXPECTED_TESTCASES_JSON="$(/usr/bin/jq -c --argjson cell "$cell" '[.cells[]|select(.cell==$cell)|.testcases[]|"\(.classname)/\(.name)"]' "$matrix_path")" swift_exec test --jobs 1 --filter "$filter" --xunit-output "$xunit_base" 2>&1)"
   diagnostic_status=$?
   set -e
-  candidate="$xunit_base-swift-testing.xml"; [[ -e "$candidate" || -L "$candidate" ]] || candidate="$xunit_base"
+  candidate=''
+  for candidate_name in "$xunit_base-swift-testing.xml" "$xunit_base-swift-testing" "$xunit_base" "$xunit_base.xml"; do
+    if [[ -e "$candidate_name" || -L "$candidate_name" ]]; then candidate="$candidate_name"; break; fi
+  done
+  [[ -n "$candidate" ]] || candidate="$xunit_base"
   diagnostic_observed='null'
   [[ -f "$candidate" && ! -L "$candidate" ]] && atomic_harden "$candidate" 2>/dev/null || true
   [[ "$diagnostic_status" == 0 && -f "$candidate" && ! -L "$candidate" ]] && diagnostic_observed="$(validate_structured_results "$candidate" "$cell" 2>/dev/null || true)"

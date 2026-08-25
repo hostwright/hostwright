@@ -1180,8 +1180,11 @@ run_cell() {
     swift_exec test --jobs 1 --filter "$filter" --xunit-output "$xunit_base"
   runner_status=$?
   set -e
-  candidate="$xunit_base-swift-testing.xml"
-  [[ -e "$candidate" || -L "$candidate" ]] || candidate="$xunit_base"
+  candidate=''
+  for candidate_name in "$xunit_base-swift-testing.xml" "$xunit_base-swift-testing" "$xunit_base" "$xunit_base.xml"; do
+    if [[ -e "$candidate_name" || -L "$candidate_name" ]]; then candidate="$candidate_name"; break; fi
+  done
+  [[ -n "$candidate" ]] || candidate="$xunit_base"
   if [[ "$runner_status" != 0 ]]; then
     dispose_private_artifact "$candidate" "$xunit_dir" || true
     die 'Gate 13 structured result generation failed closed.' 74

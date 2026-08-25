@@ -937,7 +937,10 @@ validate_checksum_manifest() {
   local checksum="$1" directory="$2" expected name rest count=0 names='' expected_names expected_count
   private_file_0600 "$checksum" || return 1
   while IFS=$' \t' read -r expected name rest; do
-    [[ "$expected" =~ ^[a-f0-9]{64}$ && -n "$name" && -z "${rest:-}" && "$name" != */* && "$name" != .* ]] || return 1
+    case "$name" in
+      ..|*..*|/*|.*) return 1 ;;
+    esac
+    [[ "$expected" =~ ^[a-f0-9]{64}$ && -n "$name" && -z "${rest:-}" ]] || return 1
     private_file_0600 "$directory/$name" || return 1
     [[ "$(sha "$directory/$name")" == "$expected" ]] || return 1
     names="$names""$name"'\n'
@@ -1382,7 +1385,10 @@ validate_staged_digest() {
   local digest="$1" staged_manifest="$2" expected name rest actual count=0 names=''
   private_file_0600 "$digest" && private_file_0600 "$staged_manifest" || return 1
   while IFS=$' \t' read -r expected name rest; do
-    [[ "$expected" =~ ^[a-f0-9]{64}$ && -n "$name" && -z "${rest:-}" && "$name" != */* && "$name" != .* ]] || return 1
+    case "$name" in
+      ..|*..*|/*|.*) return 1 ;;
+    esac
+    [[ "$expected" =~ ^[a-f0-9]{64}$ && -n "$name" && -z "${rest:-}" ]] || return 1
     case "$name" in
       manifest-v1.json) actual="$staged_manifest" ;;
       *) actual="$root/$name" ;;

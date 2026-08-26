@@ -1822,6 +1822,13 @@ final class HostwrightCLITests: XCTestCase {
             services:
               \(serviceName):
                 image: local/demo:latest
+                resources:
+                  requests:
+                    cpus: 1
+                    memory: 512MiB
+                  limits:
+                    cpus: 1
+                    memory: 512MiB
                 restart:
                   policy: on-failure
             """
@@ -3726,6 +3733,13 @@ final class HostwrightCLITests: XCTestCase {
             services:
               api:
                 image: local/demo:latest
+                resources:
+                  requests:
+                    cpus: 1
+                    memory: 512MiB
+                  limits:
+                    cpus: 1
+                    memory: 512MiB
                 secretEnv:
                   SESSION: keychain://hostwright.api/session
                 ports:
@@ -3789,6 +3803,13 @@ final class HostwrightCLITests: XCTestCase {
             services:
               api:
                 image: local/demo:latest
+                resources:
+                  requests:
+                    cpus: 1
+                    memory: 512MiB
+                  limits:
+                    cpus: 1
+                    memory: 512MiB
                 secretEnv:
                   API_TOKEN: keychain://hostwright.api/api-token
                 ports:
@@ -3825,6 +3846,13 @@ final class HostwrightCLITests: XCTestCase {
             services:
               api:
                 image: local/demo:latest
+                resources:
+                  requests:
+                    cpus: 1
+                    memory: 512MiB
+                  limits:
+                    cpus: 1
+                    memory: 512MiB
                 secretEnv:
                   API_TOKEN: keychain://hostwright.api/api-token
                 ports:

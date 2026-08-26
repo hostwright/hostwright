@@ -61,6 +61,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """
         let manifest = try ManifestValidator.validated(source)
 
@@ -83,6 +86,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "driver must be one of: nat, hostOnly",
             path: "$.networks.backend.driver"
@@ -97,6 +103,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             code: "HW-MANIFEST-003",
             contains: "Unsupported top-level network field 'mtu'",
@@ -110,6 +119,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             code: "HW-MANIFEST-001",
             contains: "Expected a mapping",
@@ -197,6 +209,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 networks: [backend]
             """,
             contains: "overlaps network 'backend' IPv4 CIDR 10.42.0.0/24",
@@ -216,6 +231,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 networks: [backend]
             """,
             contains: "overlaps network 'backend' IPv6 CIDR fd42::/64",
@@ -233,6 +251,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 networks:
                   - missing
             """,
@@ -248,6 +269,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 networks:
                   - backend
                   - network: backend
@@ -265,6 +289,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 networks:
                   - network: backend
                     aliases: ["Bad_Alias"]
@@ -284,6 +311,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 networks:
                   - network: backend
                     aliases: [\(excessiveAliases)]
@@ -348,6 +378,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - bind: 127.0.0.1
                     target: /run/api.sock
@@ -363,6 +396,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - target: /run/api.sock
                     protocol: unix
@@ -381,6 +417,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 replicas: 2
                 ports:
                   - host: shared.sock
@@ -391,6 +430,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
                     protocol: unix
               worker:
                 image: local/worker:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - host: shared.sock
                     target: /run/worker.sock
@@ -607,6 +649,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 networks: [guarded]
                 hostAccess:
                   - hostname: api.hostwright.internal
@@ -664,6 +709,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - bind: localhost
                     host: 8080
@@ -691,6 +739,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - bind: 127.0.0.2
                     target: 8443
@@ -705,6 +756,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - bind: 0.0.0.0
                     target: 8443
@@ -725,6 +779,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - target: 8443
                     exposure:
@@ -742,6 +799,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - bind: 192.168.1.10
                     target: 8443
@@ -821,6 +881,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports: ["8080:8080"]
             """,
             code: "HW-MANIFEST-003",
@@ -913,6 +976,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports: ["8080:8080"]
             """,
             contains: "must attach to a declared Hostwright project network",
@@ -1144,7 +1210,7 @@ final class Phase07NetworkManifestTests: XCTestCase {
             version: 3
             project: no-policy
             services:
-              api: { image: local/api:latest }
+              api: { image: local/api:latest, resources: {requests: {cpus: 1, memory: 512MiB}, limits: {cpus: 1, memory: 512MiB}} }
             """
         )
         XCTAssertNil(legacy.services[0].networkPolicy)
@@ -1154,7 +1220,7 @@ final class Phase07NetworkManifestTests: XCTestCase {
             version: 3
             project: default-deny
             services:
-              api: { image: local/api:latest, networkPolicy: {} }
+              api: { image: local/api:latest, resources: {requests: {cpus: 1, memory: 512MiB}, limits: {cpus: 1, memory: 512MiB}}, networkPolicy: {} }
             """
         )
         XCTAssertEqual(
@@ -1171,6 +1237,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 networkPolicy: { ingress: [{}] }
             """,
             contains: "must contain at least one exact selector",
@@ -1183,6 +1252,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 networkPolicy:
                   egress:
                     - address: 10.42.0.7/24
@@ -1197,6 +1269,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 networkPolicy:
                   ingress:
                     - service: worker
@@ -1212,6 +1287,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 networkPolicy:
                   ingress:
                     - service: worker
@@ -1280,6 +1358,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - host: 8080
                     target: 8080
@@ -1303,6 +1384,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - host: 8080
                     target: 8080
@@ -1332,6 +1416,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - host: 8080
                     target: 8080
@@ -1358,6 +1445,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - host: 8080
                     target: 8080
@@ -1423,6 +1513,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports: ["8080:8080"]
             """,
             contains:
@@ -1445,6 +1538,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 replicas: 2
                 ports:
                   - host: 8080
@@ -1568,6 +1664,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - host: 8080
                     target: 8080
@@ -1601,6 +1700,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               client:
                 image: local/client:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "canonical lowercase SHA-256",
             path: "$.tunnels.peer-api.trust"
@@ -1626,6 +1728,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - host: 8080
                     target: 8080
@@ -1651,6 +1756,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - host: 8080
                     target: 8080

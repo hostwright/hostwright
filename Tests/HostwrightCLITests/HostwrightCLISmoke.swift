@@ -1690,13 +1690,15 @@ final class HostwrightCLITests: XCTestCase {
                 )
             )
 
-            XCTAssertEqual(result.exitCode, 0)
-            XCTAssertEqual(adapter.executedActions.map(\.kind), [.create])
-            XCTAssertTrue(result.standardOutput.contains("State DB: \(resolution.stateDatabasePath)"))
+            XCTAssertEqual(result.exitCode, CLIExitCode.unsafeOperation.rawValue)
+            XCTAssertTrue(result.standardError.contains("Manifest-only admission cannot authorize runtime mutation."))
+            XCTAssertEqual(adapter.executedActions.map(\.kind), [])
             let store = SQLiteStateStore(
                 configuration: StateStoreConfiguration(localPathResolution: resolution)
             )
-            XCTAssertEqual(try store.operations.loadAll().map(\.status), [.recorded, .succeeded])
+            XCTAssertEqual(try store.operations.loadAll().isEmpty, true)
+            XCTAssertEqual(try store.operationGroups.loadAll().isEmpty, true)
+            XCTAssertEqual(FileManager.default.fileExists(atPath: resolution.stateDatabasePath), true)
             XCTAssertEqual(try permissions(resolution.stateDatabasePath), 0o600)
         }
     }
@@ -1947,29 +1949,23 @@ final class HostwrightCLITests: XCTestCase {
                 environment: environment(files: files, runtimeAdapter: adapter)
             )
 
-            XCTAssertEqual(result.exitCode, 0)
-            XCTAssertTrue(result.standardOutput.contains("Applied action: restartManagedService demo/api"))
-            XCTAssertEqual(adapter.executedActions.map(\.kind), [.restart])
-            XCTAssertEqual(adapter.executedActions.map(\.isDestructive), [true])
+            XCTAssertEqual(result.exitCode, CLIExitCode.unsafeOperation.rawValue)
+            XCTAssertTrue(result.standardError.contains("Manifest-only admission cannot authorize runtime mutation."))
+            XCTAssertEqual(adapter.executedActions.map(\.kind), [])
 
             let operations = try store.operations.loadAll()
-            XCTAssertEqual(operations.map(\.plannedActionType), ["restartManagedService", "restartManagedService"])
-            XCTAssertEqual(operations.map(\.status), [.recorded, .succeeded])
+            XCTAssertEqual(operations.isEmpty, true)
 
             let recovery = try store.restartRecovery.loadAll()
-            XCTAssertEqual(recovery.map(\.status), [.prepared, .succeeded])
-            XCTAssertEqual(recovery.last?.completedStepsJSONRedacted, #"["stop","start"]"#)
-            XCTAssertTrue(recovery.last?.manualRecoveryHintRedacted.contains("No manual recovery") == true)
+            XCTAssertEqual(recovery.isEmpty, true)
 
             let states = try store.restartPolicies.loadProject(projectID: "project-demo")
-            XCTAssertEqual(states.count, 1)
-            XCTAssertEqual(states[0].status, .active)
-            XCTAssertEqual(states[0].attemptCount, 0)
+            XCTAssertEqual(states.count, 0)
 
             let events = try store.events.loadAll()
-            XCTAssertTrue(events.contains { $0.type == "apply.restart-intent-recorded" })
-            XCTAssertTrue(events.contains { $0.type == "apply.restarted-service" })
-            XCTAssertTrue(events.contains { $0.type == "restart.policy.active" })
+            XCTAssertFalse(events.contains { $0.type == "apply.restart-intent-recorded" })
+            XCTAssertFalse(events.contains { $0.type == "apply.restarted-service" })
+            XCTAssertFalse(events.contains { $0.type == "restart.policy.active" })
         }
     }
 
@@ -2006,32 +2002,23 @@ final class HostwrightCLITests: XCTestCase {
                 environment: environment(files: files, runtimeAdapter: adapter)
             )
 
-            XCTAssertEqual(result.exitCode, CLIExitCode.runtimeUnavailable.rawValue)
+            XCTAssertEqual(result.exitCode, CLIExitCode.unsafeOperation.rawValue)
             XCTAssertFalse(result.standardError.contains(fakeSecret))
-            XCTAssertEqual(adapter.executedActions.map(\.kind), [.restart])
+            XCTAssertEqual(adapter.executedActions.map(\.kind), [])
 
             let operations = try store.operations.loadAll()
-            XCTAssertEqual(operations.map(\.status), [.recorded, .failed])
-            XCTAssertFalse(operations.map(\.payloadJSONRedacted).joined().contains(fakeSecret))
+            XCTAssertEqual(operations.isEmpty, true)
 
             let recovery = try store.restartRecovery.loadAll()
-            XCTAssertEqual(recovery.map(\.status), [.prepared, .stopSucceeded, .failed])
-            XCTAssertEqual(recovery[1].completedStepsJSONRedacted, #"["stop"]"#)
-            XCTAssertTrue(recovery.last?.manualRecoveryHintRedacted.contains("Inspect the exact Hostwright-owned container") == true)
+            XCTAssertEqual(recovery.isEmpty, true)
             let groups = try store.operationGroups.loadAll()
-            XCTAssertEqual(groups.map(\.status), [.failed])
-            XCTAssertEqual(groups[0].checkpoint, "runtime-failed")
-            let steps = try store.operationGroupSteps.load(groupID: groups[0].id)
-            XCTAssertEqual(steps.map(\.stepKey), ["rollback", "runtime-execute", "restart-stop", "runtime-execute"])
-            XCTAssertEqual(steps.map(\.status), [.unsupported, .started, .succeeded, .failed])
+            XCTAssertEqual(groups.isEmpty, true)
 
             let states = try store.restartPolicies.loadProject(projectID: "project-demo")
-            XCTAssertEqual(states.count, 1)
-            XCTAssertEqual(states[0].status, .backingOff)
-            XCTAssertEqual(states[0].attemptCount, 1)
+            XCTAssertEqual(states.count, 0)
 
             let events = try store.events.loadAll()
-            XCTAssertTrue(events.contains { $0.type == "restart.policy.backoff" })
+            XCTAssertFalse(events.contains { $0.type == "restart.policy.backoff" })
             XCTAssertFalse(events.contains { $0.type == "apply.restarted-service" })
             XCTAssertFalse(events.map(\.message).joined().contains(fakeSecret))
         }
@@ -4328,6 +4315,13 @@ final class HostwrightCLITests: XCTestCase {
             command: ["serve"]
             env:
               APP_ENV: development
+            resources:
+              requests:
+                cpus: 1
+                memory: 512MiB
+              limits:
+                cpus: 1
+                memory: 512MiB
             ports:
               - "8080:8080"
 
@@ -4341,6 +4335,13 @@ final class HostwrightCLITests: XCTestCase {
         services:
           api:
             image: local/demo:latest
+            resources:
+              requests:
+                cpus: 1
+                memory: 512MiB
+              limits:
+                cpus: 1
+                memory: 512MiB
             ports:
               - "8080:8080"
             restart:
@@ -4356,6 +4357,13 @@ final class HostwrightCLITests: XCTestCase {
         services:
           api:
             image: local/demo:latest
+            resources:
+              requests:
+                cpus: 1
+                memory: 512MiB
+              limits:
+                cpus: 1
+                memory: 512MiB
             ports:
               - "8080:8080"
             health:

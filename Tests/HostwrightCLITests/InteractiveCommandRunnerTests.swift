@@ -697,6 +697,9 @@ private func withLiveFixture(
     services:
       api:
         image: local/api:latest
+        resources:
+          requests: {cpus: 1, memory: 512MiB}
+          limits: {cpus: 1, memory: 512MiB}
     """
     let manifest = try ManifestValidator.validated(manifestText)
     let resolution = try HostwrightLocalPathResolver.resolve(

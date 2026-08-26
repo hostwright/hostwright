@@ -22,6 +22,23 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertEqual(violations, [], "Test-double types must remain outside production Sources.")
     }
 
+    func testSecureProcessExecutionTruthIsDocumentedAndFoundationProcessIsAbsent() throws {
+        let root = try packageRoot()
+        let processReference = try read("docs/reference/process-execution.md", root: root)
+        XCTAssertTrue(processReference.contains("Status: implemented for v0.0.2 Phase 02 issue #116."))
+        XCTAssertTrue(processReference.contains("Phase 09 issues #203 and #204"))
+        let sources = root.appendingPathComponent("Sources", isDirectory: true)
+        let enumerator = try XCTUnwrap(FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil))
+        var foundationProcessCallSites: [String] = []
+        for case let fileURL as URL in enumerator where fileURL.pathExtension == "swift" {
+            let contents = try String(contentsOf: fileURL, encoding: .utf8)
+            if contents.range(of: #"\bFoundation\s*\.\s*Process\s*\("#, options: .regularExpression) != nil {
+                foundationProcessCallSites.append(fileURL.path.replacingOccurrences(of: root.path + "/", with: ""))
+            }
+        }
+        XCTAssertEqual(foundationProcessCallSites, [])
+    }
+
     func testSecureProcessExecutionTruthUsesOnlyTheSecureBoundary() throws {
         let root = try packageRoot()
         let processReference = try read("docs/reference/process-execution.md", root: root)

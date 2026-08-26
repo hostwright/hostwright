@@ -129,6 +129,9 @@ final class DockerProxyProcessIntegrationTests: XCTestCase {
         services:
           hostile-service:
             image: ghcr.io/example/should-never-run:latest
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
         """
         try Data(hostileManifest.utf8).write(
             to: root.appendingPathComponent("hostwright.yaml"),

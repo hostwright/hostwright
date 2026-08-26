@@ -148,6 +148,9 @@ private struct Fixture {
         services:
           api:
             image: local/api:latest
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
         """.write(toFile: manifestPath, atomically: true, encoding: .utf8)
     }
 

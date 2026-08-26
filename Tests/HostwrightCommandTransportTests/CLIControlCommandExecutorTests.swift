@@ -186,6 +186,9 @@ final class CLIControlCommandExecutorTests: XCTestCase {
         services:
           api:
             image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
             deploy:
               resources:
                 reservations:
@@ -229,6 +232,54 @@ final class CLIControlCommandExecutorTests: XCTestCase {
         let lossReport = try XCTUnwrap(output["lossReport"] as? [String: Any])
         XCTAssertEqual(lossReport["operation"] as? String, "import")
         XCTAssertEqual((lossReport["losses"] as? [[String: Any]])?.count, 0)
+    }
+
+    func testImportStackSnapshotsComposeInputWithoutTreatingItAsAHostwrightManifest() throws {
+        let compose = """
+        name: gate09-import-snapshot
+        services:
+          api:
+            image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+            deploy:
+              resources:
+                reservations:
+                  cpus: "1"
+                  memory: 512m
+                limits:
+                  cpus: "2"
+                  memory: 1g
+        """
+        let reads = LockedCounter()
+        let environment = environment(
+            logSink: LogCapture(),
+            readTextFile: { path in
+                XCTAssertEqual(path, "/qualified/compose.yaml")
+                reads.increment()
+                return compose
+            }
+        )
+        let route = try CLIControlRoute.classify(arguments: [
+            "import-stack", "/qualified/compose.yaml", "--output", "json",
+        ])
+
+        let response = try XCTUnwrap(CLIControlCommandExecutor.execute(
+            request: request(for: route),
+            environment: environment
+        ))
+        let result = try CLIControlResultContract.result(from: response)
+
+        XCTAssertEqual(response.status, .completed)
+        XCTAssertEqual(result.exitCode, CLIExitCode.success.rawValue)
+        XCTAssertEqual(reads.value, 1)
+        XCTAssertTrue(result.standardError.isEmpty)
+        let output = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: Data(result.standardOutput.utf8)) as? [String: Any]
+        )
+        XCTAssertEqual(output["kind"] as? String, "composeImport")
+        XCTAssertNotEqual(output["kind"] as? String, "status")
+        XCTAssertTrue((output["manifestText"] as? String)?.contains("memory: 512MiB") == true)
+        XCTAssertTrue((output["manifestText"] as? String)?.contains("memory: 1GiB") == true)
+        XCTAssertFalse(result.standardOutput.contains("HW-MANIFEST"))
     }
 
     func testComposeExportAndUpdatePlanUnaryControlSnapshotEachInputOnce() throws {

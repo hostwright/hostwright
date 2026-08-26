@@ -170,6 +170,9 @@ final class ManifestMigrationTests: XCTestCase {
         services:
           api:
             image: local/demo:latest
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
             # odd placement and comments must not confuse structural detection
             resources: {cpus: 2, memory: 1GiB}
         """

@@ -195,6 +195,9 @@ final class HostwrightCommandRunnerTests: XCTestCase {
         services:
           api:
             image: ghcr.io/example/api:latest
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
             deploy:
               resources:
                 reservations:

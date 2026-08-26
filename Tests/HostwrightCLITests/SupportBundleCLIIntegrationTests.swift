@@ -585,6 +585,9 @@ final class SupportBundleCLIIntegrationTests: XCTestCase {
             services:
               private-service-name:
                 image: docker.io/library/python@sha256:26730869004e2b9c4b9ad09cab8625e81d256d1ce97e72df5520e806b1709f92
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 command: ["python3", "-m", "http.server", "8080"]
                 ports: ["18080:8080"]
                 probes:

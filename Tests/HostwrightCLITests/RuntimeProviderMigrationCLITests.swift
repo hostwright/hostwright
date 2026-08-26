@@ -208,6 +208,9 @@ private struct RuntimeProviderMigrationCLIFixture {
         services:
           api:
             image: registry.example/api:1.0.0
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
 
         """
         let manifestFilePath = directory.appendingPathComponent("hostwright.yaml").path

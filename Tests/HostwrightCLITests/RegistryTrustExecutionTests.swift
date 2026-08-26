@@ -191,6 +191,9 @@ final class RegistryTrustExecutionTests: XCTestCase {
         services:
           api:
             image: registry.example.com/team/api@\(subjectDigest)
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
         """
         try Data(manifest.utf8).write(
             to: URL(fileURLWithPath: manifestPath)

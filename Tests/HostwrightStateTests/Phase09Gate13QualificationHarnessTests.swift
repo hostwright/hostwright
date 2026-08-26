@@ -443,7 +443,7 @@ final class Phase09Gate13QualificationHarnessTests: XCTestCase {
 
   func testSourceContainsPinnedCMSStructuredInventoryAndNoBroadCleanup() throws {
     let source = try String(contentsOf: harness, encoding: .utf8)
-    for required in ["cms -V -N", "cms -S -N", "validate_staged_digest", "compare_inventory", "validate_structured_results", "claim none", "O_CREAT | O_EXCL | O_NOFOLLOW", "RENAME_NOFOLLOW_ANY", "atomic_run_outputs", "atomic_publish", "atomic_copy", "create-dir", "replace-log", "path_parent"] {
+    for required in ["cms -M", "cms -D -u 9", "cms -S -N", "validate_staged_digest", "compare_inventory", "validate_structured_results", "claim none", "O_CREAT | O_EXCL | O_NOFOLLOW", "RENAME_NOFOLLOW_ANY", "atomic_run_outputs", "atomic_publish", "atomic_copy", "create-dir", "replace-log", "path_parent"] {
       XCTAssertTrue(source.contains(required), required)
     }
     XCTAssertFalse(source.contains("O_APPEND"))

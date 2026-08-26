@@ -67,6 +67,9 @@ final class MaintenanceManifestTests: XCTestCase {
         services:
           api:
             image: local/api:latest
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
         """
 
         XCTAssertThrowsError(try ManifestValidator.validated(invalid))

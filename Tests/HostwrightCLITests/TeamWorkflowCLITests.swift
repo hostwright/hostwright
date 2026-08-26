@@ -502,6 +502,9 @@ final class TeamWorkflowCLITests: XCTestCase {
         services:
           api:
             image: local/demo:latest
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
 
         """
     }
@@ -513,6 +516,9 @@ final class TeamWorkflowCLITests: XCTestCase {
         services:
           api:
             image: \(digestImage)
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
             restart:
               policy: on-failure
 
@@ -525,6 +531,9 @@ final class TeamWorkflowCLITests: XCTestCase {
         services:
           api:
             image: \(digestImage)
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
             command: ["serve"]
             deploy:
               resources:

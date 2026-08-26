@@ -291,6 +291,9 @@ private struct ApplyCompatibilityFixture {
         services:
           api:
             image: example.invalid/api@sha256:\(String(repeating: "1", count: 64))
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
 
         """.write(to: manifest, atomically: true, encoding: .utf8)
         try writeJSON(

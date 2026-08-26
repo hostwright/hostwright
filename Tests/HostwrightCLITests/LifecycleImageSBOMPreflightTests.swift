@@ -231,6 +231,9 @@ final class LifecycleImageSBOMPreflightTests: XCTestCase {
         services:
           api:
             image: \(reference)
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
         """
         try manifestText.write(
             toFile: manifestPath,

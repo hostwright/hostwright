@@ -609,6 +609,9 @@ final class RegistrySBOMExecutionTests: XCTestCase {
         services:
           api:
             image: registry.example.test/team/image@\(subject.canonicalValue)
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
         """
     }
 

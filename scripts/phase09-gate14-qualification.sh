@@ -9,6 +9,7 @@ readonly repository_root='/Users/dev/Documents/hostwright-phase09'
 readonly harness_path='/Users/dev/Documents/hostwright-phase09/scripts/phase09-gate14-qualification.sh'
 readonly matrix_path='contracts/v0.0.2/phase09-gate14-aggregate-matrix-v1.json'
 readonly gate13_matrix_path='contracts/v0.0.2/phase09-gate13-compatibility-matrix-v1.json'
+readonly xctest_observer_source='Tools/Phase09XCTestObserver.m'
 readonly product_test_count=500
 readonly frozen_matrix_digest='e118eafcc76e3351c160dbc597c3cef7ad0cccc3b5946727fcdcd45e7705b0ab'
 readonly state_header=$'gate\tcell\tstatus\tsource_digest\tconfig_digest\ttoolchain_digest\tstarted_at\tfinished_at\tstdout_sha256\tstderr_sha256\tstructured_result_sha256'
@@ -32,7 +33,7 @@ readonly xcodebuild_path='/usr/bin/xcodebuild'
 readonly xcrun_path='/usr/bin/xcrun'
 readonly bash_path='/bin/bash'
 
-export PATH='/usr/bin:/bin'
+export PATH='/usr/local/bin:/usr/bin:/bin'
 
 root=''
 parent=''
@@ -736,7 +737,7 @@ source_digest() {
       if [[ -f "$path" && ! -L "$path" ]]; then sha "$path"; else printf '%s\n' missing; fi
     done < <({
       "$git_path" ls-files --cached -z -- . ':(exclude)tmp' ':(exclude).codex' ':(exclude).claude'
-      printf '%s\0' scripts/phase09-gate13-qualification.sh scripts/phase09-gate14-qualification.sh Tests/HostwrightStateTests/Phase09Gate13QualificationHarnessTests.swift Tests/HostwrightStateTests/Phase09Gate14QualificationHarnessTests.swift
+      printf '%s\0' scripts/phase09-gate13-qualification.sh scripts/phase09-gate14-qualification.sh Tools/Phase09XCTestObserver.m Tests/HostwrightStateTests/Phase09Gate13QualificationHarnessTests.swift Tests/HostwrightStateTests/Phase09Gate14QualificationHarnessTests.swift
     } | LC_ALL=C /usr/bin/sort -z -u)
     "$git_path" submodule status --recursive 2>/dev/null || true
   } | stream_sha
@@ -745,7 +746,7 @@ source_digest() {
 config_digest() {
   local file
   {
-    for file in "$matrix_path" "$gate13_matrix_path" "scripts/phase09-gate14-qualification.sh" "Tests/HostwrightStateTests/Phase09Gate14QualificationHarnessTests.swift"; do
+    for file in "$matrix_path" "$gate13_matrix_path" "scripts/phase09-gate14-qualification.sh" "$xctest_observer_source" "Tests/HostwrightStateTests/Phase09Gate14QualificationHarnessTests.swift"; do
       [[ -f "$file" && ! -L "$file" ]] || die "Gate 14 configuration input is unavailable: $file" 69
       printf '%s  %s\n' "$(sha "$file")" "$file"
     done
@@ -754,11 +755,19 @@ config_digest() {
 }
 
 formal_toolchain_config() {
-  local path
+  local path resolved_clang resolved_xctest
   for path in "$git_path" "$awk_path" "$python_path" "$security_path" "$openssl_path" "$shasum_path" "$jq_path" "$swift_path" "$xcodebuild_path" "$xcrun_path" "$bash_path" /bin/realpath; do
     validate_formal_tool "$path"
     printf 'formal-tool=%s\tsha256=%s\n' "$path" "$(sha "$path")"
   done
+  if ! testing; then
+    resolved_clang="$("$xcrun_path" --find clang)"
+    resolved_xctest="$(/bin/realpath "$("$xcrun_path" --find xctest)")"
+    validate_formal_tool "$resolved_clang"
+    validate_formal_tool "$resolved_xctest"
+    printf 'formal-tool=%s\tsha256=%s\n' "$resolved_clang" "$(sha "$resolved_clang")"
+    printf 'formal-tool=%s\tsha256=%s\n' "$resolved_xctest" "$(sha "$resolved_xctest")"
+  fi
 }
 
 validate_formal_tool() {
@@ -1233,6 +1242,27 @@ cell_command() {
   esac
 }
 
+run_xctest_cell() {
+  local filter="$1" xunit_dir="$2" xunit_base="$3" expected="$4" test_bundle observer runner compiler platform sdk selectors
+  if testing; then
+    HOSTWRIGHT_PHASE09_EXPECTED_TESTS="$expected" HOSTWRIGHT_PHASE09_EXPECTED_TESTCASES_JSON="$(/usr/bin/jq -c --argjson cell "${HOSTWRIGHT_PHASE09_INTERNAL_CELL_ID:?}" '[.cells[]|select(.cell==$cell)|.testcases[]|"\(.classname)/\(.name)"]' "$matrix_path")" \
+      swift_exec test --jobs 1 --filter "$filter" --xunit-output "$xunit_base"
+    return
+  fi
+  swift_exec test list --jobs 1 >/dev/null
+  test_bundle="$(swift_exec build --show-bin-path)/hostwrightPackageTests.xctest"
+  [[ -d "$test_bundle" && ! -L "$test_bundle" && "$(/bin/realpath "$test_bundle")" == "$test_bundle" ]] || die 'Gate 14 XCTest bundle is unavailable or unsafe.' 74
+  compiler="$("$xcrun_path" --find clang)"; runner="$(/bin/realpath "$("$xcrun_path" --find xctest)")"; platform="$("$xcrun_path" --sdk macosx --show-sdk-platform-path)"; sdk="$(/bin/realpath "$("$xcrun_path" --sdk macosx --show-sdk-path)")"
+  validate_formal_tool "$compiler"; validate_formal_tool "$runner"
+  [[ -d "$platform" && ! -L "$platform" && "$(/bin/realpath "$platform")" == "$platform" && -d "$sdk" && ! -L "$sdk" && "$(/bin/realpath "$sdk")" == "$sdk" ]] || die 'Gate 14 XCTest platform is unavailable or unsafe.' 74
+  observer="$xunit_dir/phase09-xctest-observer.dylib"
+  "$compiler" -isysroot "$sdk" -fobjc-arc -dynamiclib -F "$platform/Developer/Library/Frameworks" -framework Foundation -framework XCTest "$xctest_observer_source" -o "$observer"
+  [[ -f "$observer" && ! -L "$observer" ]] || die 'Gate 14 XCTest observer compilation produced no regular file.' 74
+  selectors="${filter//|/,}"
+  HOSTWRIGHT_PHASE09_XCTEST_XUNIT_OUTPUT="$xunit_base" DYLD_INSERT_LIBRARIES="$observer" \
+    "$runner" -XCTest "$selectors" "$test_bundle"
+}
+
 run_cell() {
   local cell="$1" filter expected xunit_dir xunit_base candidate final_result runner_status
   if testing && [[ "${HOSTWRIGHT_PHASE09_HARNESS_TEST_FORCE_FAILURE_CELL:-}" == "$cell" ]]; then
@@ -1242,7 +1272,7 @@ run_cell() {
   [[ -n "$filter" && "$expected" =~ ^[1-9][0-9]*$ ]] || die 'Gate 14 cannot execute an empty selector set.' 69
   xunit_dir="$(make_private_directory "xunit-$cell")"; xunit_base="$xunit_dir/result"
   set +e
-  HOSTWRIGHT_PHASE09_EXPECTED_TESTS="$expected" HOSTWRIGHT_PHASE09_EXPECTED_TESTCASES_JSON="$(/usr/bin/jq -c --argjson cell "$cell" '[.cells[]|select(.cell==$cell)|.testcases[]|"\(.classname)/\(.name)"]' "$matrix_path")" swift_exec test --jobs 1 --filter "$filter" --xunit-output "$xunit_base"
+  HOSTWRIGHT_PHASE09_INTERNAL_CELL_ID="$cell" run_xctest_cell "$filter" "$xunit_dir" "$xunit_base" "$expected"
   runner_status=$?
   set -e
   candidate=''
@@ -1294,7 +1324,7 @@ run_diagnostic_cell() {
   /bin/chmod 700 "$diagnostic_dir"
   xunit_base="$diagnostic_dir/result"
   set +e
-  output="$(HOSTWRIGHT_PHASE09_EXPECTED_TESTS="$expected" HOSTWRIGHT_PHASE09_EXPECTED_TESTCASES_JSON="$(/usr/bin/jq -c --argjson cell "$cell" '[.cells[]|select(.cell==$cell)|.testcases[]|"\(.classname)/\(.name)"]' "$matrix_path")" swift_exec test --jobs 1 --filter "$filter" --xunit-output "$xunit_base" 2>&1)"
+  output="$(HOSTWRIGHT_PHASE09_INTERNAL_CELL_ID="$cell" run_xctest_cell "$filter" "$diagnostic_dir" "$xunit_base" "$expected" 2>&1)"
   diagnostic_status=$?
   set -e
   candidate=''

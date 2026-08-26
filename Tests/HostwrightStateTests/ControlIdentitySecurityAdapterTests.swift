@@ -76,6 +76,38 @@ final class ControlIdentitySecurityAdapterTests: XCTestCase {
     }
   }
 
+  func testInstalledRequirementAllowsCDHashRotationButRejectsDuplicateIdentity() throws {
+    try withAdapter { store, adapter, identity in
+      let replacement = CodeIdentity(
+        teamIdentifier: identity.codeIdentity.teamIdentifier,
+        signingIdentifier: identity.codeIdentity.signingIdentifier,
+        codeDirectoryHash: String(repeating: "c", count: 40),
+        validationMode: identity.codeIdentity.validationMode
+      )
+      let stored = try store.controlIdentities.rotateInstalledCodeIdentity(
+        subjectID: identity.subjectID,
+        expectedGeneration: identity.generation,
+        replacement: replacement,
+        updatedAt: "2026-08-02T20:03:00Z"
+      )
+      XCTAssertEqual(stored.subjectID, identity.subjectID)
+      let rotated = try adapter.resolve(userID: identity.userID, codeIdentity: replacement)
+      XCTAssertEqual(rotated.localSubject.identifier, identity.subjectID)
+      XCTAssertThrowsError(
+        try store.controlIdentities.declare(
+          ControlPeerIdentityRecord(
+            subjectID: "duplicate-pinned",
+            userID: identity.userID,
+            codeIdentity: replacement,
+            declaredBySubjectID: identity.subjectID,
+            declaredAt: "2026-08-02T20:03:01Z",
+            updatedAt: "2026-08-02T20:03:02Z"
+          )
+        )
+      )
+    }
+  }
+
   func testRevocationAndGenerationChangeInvalidateSessionImmediately() throws {
     try withAdapter { store, adapter, identity in
       let binding = self.binding(identity: identity)

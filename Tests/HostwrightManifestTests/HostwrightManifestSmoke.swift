@@ -135,6 +135,9 @@ final class HostwrightManifestTests: XCTestCase {
         services:
           api:
             image: ghcr.io/example/api:latest
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
             secretEnv:
               API_TOKEN: "env-file://\(privatePath)#BAD-KEY"
         """
@@ -174,6 +177,9 @@ final class HostwrightManifestTests: XCTestCase {
                 services:
                   api:
                     image: ghcr.io/example/api:latest
+                    resources:
+                      requests: {cpus: 1, memory: 512MiB}
+                      limits: {cpus: 1, memory: 512MiB}
                     env:
                       SOURCE_\(index): "\(reference)"
                 """,
@@ -216,6 +222,9 @@ final class HostwrightManifestTests: XCTestCase {
         services:
           api:
             image: ghcr.io/example/api:latest
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
         """
         let parsed = try ManifestParser.parse(text)
 
@@ -232,6 +241,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             code: "HW-MANIFEST-003",
             contains: "older than supported version 3"
@@ -244,6 +256,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             code: "HW-MANIFEST-003",
             contains: "newer than supported version 3"
@@ -294,6 +309,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "requires image 'ghcr.io/example/api:latest' to be digest-pinned"
         )
@@ -307,6 +325,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha512:abcdef
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "image digest must use @sha256:<64 lowercase hex characters>"
         )
@@ -318,6 +339,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:ABCDEF
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "image digest must use @sha256:<64 lowercase hex characters>"
         )
@@ -329,6 +353,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: https://ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "must be an OCI-style image reference"
         )
@@ -341,6 +368,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "imagePolicy must be one of"
         )
@@ -354,6 +384,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "imagePolicy must be declared at most once"
         )
@@ -367,6 +400,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "imagePolicy must be declared at most once"
         )
@@ -429,6 +465,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "imageTrust requires imagePolicy require-digest"
         )
@@ -447,6 +486,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "imageTrust.threshold must not exceed the authority count"
         )
@@ -466,6 +508,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "imageTrust.trustedRoot is required when any keyless authority is declared"
         )
@@ -489,6 +534,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "imageTrust authority ids must be unique; duplicate id 'signer'"
         )
@@ -509,6 +557,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "publicKey must be a normalized absolute host path"
         )
@@ -530,6 +581,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "must not declare publicKey"
         )
@@ -550,6 +604,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "issuer must be an exact HTTPS URL"
         )
@@ -572,6 +629,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "notBefore must not be after notAfter"
         )
@@ -593,6 +653,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "revokedAt must be an RFC3339 timestamp"
         )
@@ -620,6 +683,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "imageTrust must be declared at most once"
         )
@@ -639,6 +705,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "Unsupported manifest field 'extra'"
         )
@@ -691,6 +760,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "imageSBOM requires imagePolicy require-digest"
         )
@@ -701,12 +773,16 @@ final class HostwrightManifestTests: XCTestCase {
             project: api-local
             imagePolicy: require-digest
             imageSBOM:
-              version: 3              requirement: optional
+              version: 3
+              requirement: optional
               formats:
                 - spdx-json
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "imageSBOM.version must be 1"
         )
@@ -722,6 +798,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "imageSBOM.formats must contain between 1 and 2 unique formats"
         )
@@ -740,6 +819,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "imageSBOM.formats must contain between 1 and 2 unique formats"
         )
@@ -762,6 +844,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "imageSBOM must be declared at most once"
         )
@@ -778,6 +863,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "imageSBOM.requirement must be one of: optional, required"
         )
@@ -794,6 +882,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "imageSBOM.formats must be one of: spdx-json, cyclonedx-json"
         )
@@ -811,6 +902,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "Unsupported manifest field 'extra'"
         )
@@ -902,6 +996,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """
         )
         let policy = try XCTUnwrap(manifest.imageVulnerability)
@@ -950,6 +1047,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "imageVulnerability is supported only in manifest version 3"
         )
@@ -970,6 +1070,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "imageVulnerability requires imagePolicy require-digest"
         )
@@ -991,6 +1094,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "imageVulnerability requires imageTrust"
         )
@@ -1082,6 +1188,9 @@ final class HostwrightManifestTests: XCTestCase {
         services:
           api:
             image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
         """
 
         assertManifestFailure(
@@ -1293,6 +1402,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "imageProvenance requires imagePolicy require-digest"
         )
@@ -1313,6 +1425,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "imageProvenance is supported only in manifest version 3"
         )
@@ -1404,6 +1519,9 @@ final class HostwrightManifestTests: XCTestCase {
         services:
           api:
             image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
         """
         let policy = """
         imageProvenance:
@@ -1478,6 +1596,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             code: "HW-MANIFEST-002",
             contains: "Manifest version must be an integer"
@@ -1490,6 +1611,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "project"
         )
@@ -1517,6 +1641,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - "not-a-port"
             """,
@@ -1532,6 +1659,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: --mount=src=/,dst=/host
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "image must not begin"
         )
@@ -1543,6 +1673,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: -bad
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "image must not begin"
         )
@@ -1591,6 +1724,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 env:
                   1TOKEN: value
             """,
@@ -1604,6 +1740,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 env:
                   API-TOKEN: value
             """,
@@ -1617,6 +1756,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 env:
                   API_TOKEN: token=plaintext
             """,
@@ -1630,6 +1772,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 env:
                   API_TOKEN: keychain://hostwright.api/api-token
             """,
@@ -1643,6 +1788,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 env:
                   API_TOKEN: literal
                 secretEnv:
@@ -1658,6 +1806,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 secretEnv:
                   API_TOKEN: env://hostwright.api/api-token
             """,
@@ -1672,6 +1823,9 @@ final class HostwrightManifestTests: XCTestCase {
                 services:
                   api:
                     image: ghcr.io/example/api:latest
+                    resources:
+                      requests: {cpus: 1, memory: 512MiB}
+                      limits: {cpus: 1, memory: 512MiB}
                     volumes:
                       - "\(rootEquivalent)"
                 """,
@@ -1686,6 +1840,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 volumes:
                   - "../data:/data:ro"
             """,
@@ -1718,6 +1875,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             code: "HW-MANIFEST-003",
             contains: "Unsupported top-level manifest field 'apiVersion'"
@@ -1730,6 +1890,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 build: .
             """,
             code: "HW-MANIFEST-003",
@@ -1743,6 +1906,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 health:
                   command: ["curl", "-f", "http://localhost:8080/health"]
                   timeout: 5s
@@ -1758,6 +1924,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 restart:
                   policy: on-failure
                   burstLimit: 3
@@ -1778,6 +1947,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 restart:
                   policy: on-failure
                   maxAttempts: 7
@@ -1853,6 +2025,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 update:
                   progressDeadline: 60s
                   stableObservation: 10s
@@ -1877,6 +2052,9 @@ final class HostwrightManifestTests: XCTestCase {
                 services:
                   api:
                     image: ghcr.io/example/api:latest
+                    resources:
+                      requests: {cpus: 1, memory: 512MiB}
+                      limits: {cpus: 1, memory: 512MiB}
                     restart:
                       policy: on-failure
                       \(fields)
@@ -1895,6 +2073,9 @@ final class HostwrightManifestTests: XCTestCase {
                 services:
                   api:
                     image: ghcr.io/example/api:latest
+                    resources:
+                      requests: {cpus: 1, memory: 512MiB}
+                      limits: {cpus: 1, memory: 512MiB}
                     restart:
                       policy: on-failure
                       \(fields)
@@ -1911,6 +2092,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "restartBudget.maxAttempts"
         )
@@ -1925,6 +2109,9 @@ final class HostwrightManifestTests: XCTestCase {
                 services:
                   api:
                     image: ghcr.io/example/api:latest
+                    resources:
+                      requests: {cpus: 1, memory: 512MiB}
+                      limits: {cpus: 1, memory: 512MiB}
                     \(field): unsupported
                 """,
                 code: "HW-MANIFEST-003",

@@ -12,7 +12,7 @@ final class ControlIdentitySchemaV22MigrationTests: XCTestCase {
 
       try store.migrate()
 
-      XCTAssertEqual(try store.schemaVersion(), 22)
+      XCTAssertEqual(try store.schemaVersion(), MigrationRunner.latestSchemaVersion)
       let sql = try store.withConnection(createIfNeeded: false, readOnly: true) { connection in
         try connection.query(
           "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'peer_identities_active_installed_bucket_idx'"

@@ -217,11 +217,21 @@ private enum OffscreenSnapshotRenderer {
             throw SnapshotError.windowBecameKey
         }
 
-        guard let bitmap = hostingView.bitmapImageRepForCachingDisplay(
-            in: hostingView.bounds
+        guard let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(size.width * 2),
+            pixelsHigh: Int(size.height * 2),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
         ) else {
             throw SnapshotError.bitmapUnavailable
         }
+        bitmap.size = size
         hostingView.cacheDisplay(in: hostingView.bounds, to: bitmap)
         guard let png = bitmap.representation(using: .png, properties: [:]) else {
             throw SnapshotError.pngEncodingFailed

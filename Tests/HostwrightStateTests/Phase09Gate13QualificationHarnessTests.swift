@@ -696,16 +696,22 @@ final class Phase09Gate13QualificationHarnessTests: XCTestCase {
     process.arguments = ["-c", """
       {
         /usr/bin/git rev-parse HEAD
-        while IFS= read -r -d '' path; do
-          case \"$path\" in
-            tmp|tmp/*|.codex|.codex/*|.claude|.claude/*) continue ;;
-          esac
-          printf '%s\\0' \"$path\"
-          if [[ -f \"$path\" && ! -L \"$path\" ]]; then /usr/bin/shasum -a 256 \"$path\" | /usr/bin/awk '{ print $1 }'; else printf '%s\\n' missing; fi
-        done < <({
+        {
           /usr/bin/git ls-files --cached -z -- . ':(exclude)tmp' ':(exclude).codex' ':(exclude).claude'
           printf '%s\\0' scripts/phase09-gate13-qualification.sh scripts/phase09-gate14-qualification.sh Tests/HostwrightStateTests/Phase09Gate13QualificationHarnessTests.swift Tests/HostwrightStateTests/Phase09Gate14QualificationHarnessTests.swift
-        } | LC_ALL=C /usr/bin/sort -z -u)
+        } | LC_ALL=C /usr/bin/sort -z -u | /usr/bin/python3 -c 'import hashlib, os, sys
+      for path in sys.stdin.buffer.read().split(b"\\0"):
+          if not path:
+              continue
+          sys.stdout.buffer.write(path + b"\\0")
+          if os.path.isfile(path) and not os.path.islink(path):
+              digest = hashlib.sha256()
+              with open(path, "rb") as source:
+                  for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                      digest.update(chunk)
+              sys.stdout.buffer.write(digest.hexdigest().encode() + b"\\n")
+          else:
+              sys.stdout.buffer.write(b"missing\\n")'
         /usr/bin/git submodule status --recursive 2>/dev/null || true
       } | /usr/bin/shasum -a 256 | /usr/bin/awk '{ print $1 }'
       """]

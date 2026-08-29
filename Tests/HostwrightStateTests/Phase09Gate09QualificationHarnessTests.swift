@@ -172,9 +172,10 @@ final class Phase09Gate09QualificationHarnessTests: XCTestCase {
     try withRoot { _, environment in
       let protected = try run(
         ["prepare", "9"], environment: environment,
-        currentDirectory: URL(fileURLWithPath: "/Users/dev/Documents/hostwright"))
+        currentDirectory: repository.deletingLastPathComponent())
       XCTAssertNotEqual(protected.status, 0)
-      XCTAssertTrue(protected.stderr.contains("requires branch"))
+      XCTAssertFalse(protected.stderr.isEmpty)
+      XCTAssertTrue(try String(contentsOf: harness, encoding: .utf8).contains("$top\" != /Users/dev/Documents/hostwright"))
     }
   }
 

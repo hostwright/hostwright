@@ -5,8 +5,8 @@ readonly schema='hostwright.phase09.gate14.qualification.manifest.v1'
 readonly gate=14
 readonly branch='feat/v0.0.2-phase-09'
 readonly live_parent='/Volumes/T9/hostwright/qualification'
-readonly repository_root='/Users/dev/Documents/hostwright-phase09'
-readonly harness_path='/Users/dev/Documents/hostwright-phase09/scripts/phase09-gate14-qualification.sh'
+readonly formal_repository_root='/Users/dev/Documents/hostwright-phase09'
+readonly formal_harness_path='/Users/dev/Documents/hostwright-phase09/scripts/phase09-gate14-qualification.sh'
 readonly matrix_path='contracts/v0.0.2/phase09-gate14-aggregate-matrix-v1.json'
 readonly gate13_matrix_path='contracts/v0.0.2/phase09-gate13-compatibility-matrix-v1.json'
 readonly xctest_observer_source='Tools/Phase09XCTestObserver.m'
@@ -54,6 +54,9 @@ run_succeeded=0
 run_active=0
 diagnostic_status=0
 diagnostic_observed=''
+repository_root="$formal_repository_root"
+harness_path="$formal_harness_path"
+script_invocation="${BASH_SOURCE[0]}"
 
 die() {
   printf '%s\n' "$1" >&2
@@ -688,12 +691,24 @@ dependency_parent() {
 }
 
 validate_worktree() {
-  local top current_branch
+  local top current_branch invocation canonical
+  if testing; then
+    if [[ "$script_invocation" == /* ]]; then invocation="$script_invocation"; else invocation="$PWD/$script_invocation"; fi
+    [[ -f "$invocation" && ! -L "$invocation" ]] || die 'Gate 14 test script invocation is unsafe.' 66
+    canonical="$(/bin/realpath "$invocation")" || die 'Gate 14 test script cannot be resolved.' 66
+    repository_root="$(/bin/realpath "$(dirname "$canonical")/..")" || die 'Gate 14 test repository cannot be resolved.' 66
+    harness_path="$canonical"
+    [[ "$harness_path" == "$repository_root/scripts/phase09-gate14-qualification.sh" \
+      && "$repository_root" != '/Users/dev/Documents/hostwright' ]] \
+      || die 'Gate 14 test script is outside its invoking repository.' 66
+    top="$(cd "$repository_root" && "$git_path" rev-parse --show-toplevel)"
+    [[ "$(/bin/realpath "$top")" == "$repository_root" ]] || die 'Gate 14 test repository identity changed.' 66
+    return
+  fi
   top="$(cd "$repository_root" && "$git_path" rev-parse --show-toplevel)"
-  testing && return
   current_branch="$(cd "$repository_root" && "$git_path" branch --show-current)"
   [[ "$current_branch" == "$branch" ]] || die "Gate 14 requires branch $branch." 66
-  [[ "$top" == '/Users/dev/Documents/hostwright-phase09' ]] || die 'Gate 14 requires the isolated Phase 09 worktree.' 66
+  [[ "$top" == "$formal_repository_root" ]] || die 'Gate 14 requires the isolated Phase 09 worktree.' 66
 }
 
 validate_root() {

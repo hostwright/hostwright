@@ -662,6 +662,7 @@ final class Phase09Gate13QualificationHarnessTests: XCTestCase {
     process.executableURL = URL(fileURLWithPath: "/bin/bash")
     process.arguments = [harness.path] + arguments
     var values = ProcessInfo.processInfo.environment
+    values["HOSTWRIGHT_PHASE09_HARNESS_TESTING"] = "1"
     for (key, value) in environment { values[key] = value }
     process.environment = values
     process.currentDirectoryURL = repository

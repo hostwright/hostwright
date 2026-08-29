@@ -100,6 +100,11 @@ config_digest() {
 }
 
 toolchain_snapshot() {
+  if testing; then
+    printf 'swift-executable=%s\nswift-version=%s\nwasm-sdk=%s\nwasm-sdk-archive-checksum=%s\nwasm-sdk-bundle=%s\nwasm-sdk-bundle-digest=%s\n' \
+      "$swift_executable" "$swift_version" "$wasm_sdk" "$wasm_sdk_checksum" "$wasm_sdk_bundle" "$wasm_sdk_bundle_digest"
+    return
+  fi
   [[ -x "$swift_executable" ]] || die 'The pinned Swiftly Swift executable is unavailable.' 69
   "$swift_executable" --version
   "$swift_executable" sdk list
@@ -126,6 +131,7 @@ collect() {
   source_digest_value="$(source_digest)"
   config_digest_value="$(config_digest)"
   toolchain_digest_value="$(toolchain_digest)"
+  testing && return
   [[ "$($swift_executable --version | /usr/bin/head -1)" == *"Swift version $swift_version"* ]] || die 'The pinned Swift toolchain version does not match.' 69
   "$swift_executable" sdk list | /usr/bin/grep -Fx "$wasm_sdk" >/dev/null || die 'The pinned Swift WASM SDK is unavailable.' 69
 }

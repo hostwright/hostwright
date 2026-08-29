@@ -42,7 +42,13 @@ validate_worktree(){ local top; top="$(/bin/realpath "$(git rev-parse --show-top
 validate_root(){ : "${HOSTWRIGHT_PHASE09_GATE_ROOT:?HOSTWRIGHT_PHASE09_GATE_ROOT is required}"; root="$HOSTWRIGHT_PHASE09_GATE_ROOT"; parent="$(qualification_parent)"; local canonical; canonical="$(/bin/realpath "$parent")"; [[ -d "$parent" && ! -L "$parent" && "$canonical" == "$parent" ]] || die 'qualification parent must be canonical and non-symlinked.' 66; if testing; then [[ "$canonical" == /private/var/folders/*/T/hostwright-phase09-harness-* || "$canonical" == /var/folders/*/T/hostwright-phase09-harness-* ]] || die 'test parent must be isolated.' 66; else [[ "$canonical" == "$live_parent" ]] || die 'Gate 8 evidence must use the fixed qualification parent.' 66; fi; [[ "$root" == /* && -d "$root" && ! -L "$root" && "$(/bin/realpath "$root")" == "$root" && "$(/bin/realpath "$(dirname "$root")")" == "$canonical" ]] || die 'evidence root is unsafe.' 66; [[ "${root##*/}" =~ ^phase09-gate08-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$ ]] || die 'evidence root name is not a Gate 8 lowercase UUID.' 66; [[ "$(stat -f '%u' "$root")" == "$(id -u)" && "$(stat -f '%Lp' "$root")" == 700 ]] || die 'evidence root must be current-user-owned and mode 0700.' 66; parent="$canonical"; }
 empty_root(){ [[ -z "$(/usr/bin/find "$root" -mindepth 1 -maxdepth 1 -print -quit)" ]] || die 'prepare requires an empty evidence root.' 73; }
 source_digest(){ { git rev-parse HEAD; git diff --binary HEAD -- . ':(exclude)tmp'; while IFS= read -r -d '' p; do [[ "$p" == tmp/* || "$p" == .codex/* || "$p" == .claude/* ]] && continue; printf '%s\0' "$p"; /usr/bin/shasum -a 256 "$p"; done < <(git ls-files --others --exclude-standard -z | LC_ALL=C /usr/bin/sort -z); } | stream_sha; }
-toolchain(){ { /usr/bin/sw_vers; xcodebuild -version; swift --version; container --version; xcrun --find codesign; security find-identity -p codesigning -v; } 2>&1; }
+toolchain(){
+  if testing; then
+    { /usr/bin/sw_vers; xcodebuild -version; swift --version; printf '%s\n' 'container=not-required-in-harness-test-mode'; xcrun --find codesign; security find-identity -p codesigning -v; } 2>&1
+  else
+    { /usr/bin/sw_vers; xcodebuild -version; swift --version; container --version; xcrun --find codesign; security find-identity -p codesigning -v; } 2>&1
+  fi
+}
 cell_command(){ case "$1" in
 1) printf '%s\n' "swift test --filter 'ControlStreamFrameContractTests|ControlStreamSessionStateTests|ControlStreamCursorTests'";;
 2) printf '%s\n' "swift test --filter 'PersistentControlStreamIntegrationTests|DaemonControlStreamSourcesTests|DaemonControlStreamAuthorizationPipelineTests|ControlIdentitySecurityAdapterTests|RBACAuthorizationEngineTests/testStreamAuthorizationMapsWatchAndExecuteToExactProjectAndResourceScopes'";;

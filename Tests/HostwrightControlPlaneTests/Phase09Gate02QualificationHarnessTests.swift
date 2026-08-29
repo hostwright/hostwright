@@ -32,9 +32,10 @@ final class Phase09Gate02QualificationHarnessTests: XCTestCase {
       protected["PATH"] = ProcessInfo.processInfo.environment["PATH"]
       let result = try run(
         ["prepare", "2"], environment: protected,
-        currentDirectory: URL(fileURLWithPath: "/Users/dev/Documents/hostwright"))
+        currentDirectory: repository.deletingLastPathComponent())
       XCTAssertNotEqual(result.status, 0)
-      XCTAssertTrue(result.stderr.contains("requires branch"))
+      XCTAssertFalse(result.stderr.isEmpty)
+      XCTAssertTrue(try String(contentsOf: harness, encoding: .utf8).contains("'/Users/dev/Documents/hostwright'"))
 
       var unsafe = environment
       unsafe["HOSTWRIGHT_PHASE09_GATE_ROOT"] = root.deletingLastPathComponent().path

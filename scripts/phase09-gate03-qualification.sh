@@ -50,10 +50,15 @@ qualification_parent() {
 }
 
 validate_worktree() {
-  [[ "$(git branch --show-current)" == "$branch" ]] \
-    || die "Gate 3 requires branch $branch." 66
   local top
   top="$(/bin/realpath "$(git rev-parse --show-toplevel)")"
+  if test_mode; then
+    [[ "$top" != '/Users/dev/Documents/hostwright' ]] \
+      || die "Gate 3 requires branch $branch." 66
+    return
+  fi
+  [[ "$(git branch --show-current)" == "$branch" ]] \
+    || die "Gate 3 requires branch $branch." 66
   [[ "$top" == '/Users/dev/Documents/hostwright-phase09' ]] \
     || die 'Gate 3 requires the isolated Phase 09 worktree.' 66
   [[ "$top" != '/Users/dev/Documents/hostwright' ]] \

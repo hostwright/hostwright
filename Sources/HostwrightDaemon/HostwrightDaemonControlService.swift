@@ -21,6 +21,7 @@ import Synchronization
 
 final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sendable {
   private let configuration: DaemonConfiguration
+  private let commandEnvironment: CLIEnvironment
   private let lock = NSLock()
   private var listener: ControlUnixSocketListener?
   private var stopped = false
@@ -33,13 +34,30 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
     attributes: .concurrent
   )
 
-  private init(configuration: DaemonConfiguration) {
+  private init(
+    configuration: DaemonConfiguration,
+    commandEnvironment: CLIEnvironment
+  ) {
     self.configuration = configuration
+    self.commandEnvironment = commandEnvironment
     acceptQueue.setSpecific(key: acceptQueueKey, value: ())
   }
 
   static func make(configuration: DaemonConfiguration) throws -> any DaemonControlServing {
-    HostwrightDaemonControlService(configuration: configuration)
+    HostwrightDaemonControlService(
+      configuration: configuration,
+      commandEnvironment: .live
+    )
+  }
+
+  static func make(
+    configuration: DaemonConfiguration,
+    commandEnvironment: CLIEnvironment
+  ) throws -> any DaemonControlServing {
+    HostwrightDaemonControlService(
+      configuration: configuration,
+      commandEnvironment: commandEnvironment
+    )
   }
 
   static func recoverInterruptedUnaryRequests(
@@ -99,7 +117,7 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
       )
     )
     let authoritativeStatePath = configuration.stateDatabasePath
-    var mutableCommandEnvironment = CLIEnvironment.live
+    var mutableCommandEnvironment = commandEnvironment
     mutableCommandEnvironment.localPathResolution = { explicitPath in
       if let explicitPath {
         let normalized = try HostwrightLocalPathResolver.normalizedAbsolutePath(

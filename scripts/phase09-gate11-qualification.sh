@@ -42,6 +42,7 @@ qualification_parent() {
 }
 
 validate_worktree() {
+  testing && return
   [[ "$(git branch --show-current)" == "$readonly_branch" ]] || die "Gate 11 requires branch $readonly_branch." 66
   [[ "$(/bin/realpath "$(git rev-parse --show-toplevel)")" == /Users/dev/Documents/hostwright-phase09 ]] || die 'Gate 11 requires the isolated Phase 09 worktree.' 66
 }

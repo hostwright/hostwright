@@ -11,6 +11,7 @@ import XCTest
 @testable import HostwrightCore
 @testable import HostwrightDaemon
 @testable import HostwrightDaemonCore
+@testable import HostwrightRuntime
 @testable import HostwrightState
 
 final class HostwrightDaemonControlServiceTests: XCTestCase {
@@ -530,8 +531,15 @@ final class HostwrightDaemonControlServiceTests: XCTestCase {
       lockFilePath: resolution.layout.daemonLock,
       maxIterations: 1
     )
+    let runtimeAdapter = DaemonControlTestRuntimeAdapter()
+    var commandEnvironment = CLIEnvironment.live
+    commandEnvironment.runtimeAdapter = { runtimeAdapter }
+    commandEnvironment.runtimeAdapterForProvider = { _ in runtimeAdapter }
     return (
-      try HostwrightDaemonControlService.make(configuration: configuration),
+      try HostwrightDaemonControlService.make(
+        configuration: configuration,
+        commandEnvironment: commandEnvironment
+      ),
       resolution.layout.controlSocket,
       resolution.stateDatabasePath,
       try stateConfiguration.maintenancePaths().accessLockPath
@@ -674,6 +682,59 @@ final class HostwrightDaemonControlServiceTests: XCTestCase {
     )
     defer { try? FileManager.default.removeItem(at: home) }
     try body(home)
+  }
+}
+
+private final class DaemonControlTestRuntimeAdapter: RuntimeAdapter, @unchecked Sendable {
+  func metadata() async -> RuntimeAdapterMetadata {
+    RuntimeAdapterMetadata(
+      providerID: .appleContainerCLI,
+      adapterName: "DaemonControlTestRuntimeAdapter",
+      adapterVersion: "test",
+      runtimeName: "test-runtime",
+      runtimeVersion: "test",
+      supportsMutation: false,
+      capabilities: [.readOnlyObservation]
+    )
+  }
+
+  func capabilities() async throws -> [RuntimeCapability] {
+    [.readOnlyObservation]
+  }
+
+  func observe(desiredState: DesiredRuntimeState) async throws -> ObservedRuntimeState {
+    ObservedRuntimeState(
+      projectName: desiredState.projectName,
+      services: [],
+      adapterMetadata: await metadata()
+    )
+  }
+
+  func plan(
+    desiredState: DesiredRuntimeState,
+    observedState: ObservedRuntimeState
+  ) async throws -> RuntimePlan {
+    RuntimePlan(actions: [])
+  }
+
+  func logs(
+    for service: ObservedRuntimeService,
+    tail: Int
+  ) async throws -> RuntimeLogResult {
+    RuntimeLogResult(identity: service.identity, text: "", lineLimit: tail)
+  }
+
+  func runtimeVersion() async throws -> String {
+    "test"
+  }
+
+  func execute(
+    _ action: PlannedRuntimeAction,
+    confirmation: RuntimeMutationConfirmation?
+  ) async throws -> RuntimeEvent {
+    throw RuntimeAdapterError.mutationUnavailableByPolicy(
+      "Daemon control service tests do not authorize runtime mutation."
+    )
   }
 }
 

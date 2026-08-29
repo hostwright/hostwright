@@ -75,7 +75,7 @@ final class SecretRecoveryCommandTests: XCTestCase {
         try withFixture { fixture in
             let itemID = fixture.manager.seed(
                 reference: fixture.reference,
-                version: 3
+                version: 2
             )
             let journal = try fixture.persistInterrupted(
                 operation: "delete",
@@ -145,7 +145,7 @@ final class SecretRecoveryCommandTests: XCTestCase {
         try withFixture { fixture in
             let itemID = fixture.manager.seed(
                 reference: fixture.reference,
-                version: 3
+                version: 2
             )
             let journal = try fixture.persistInterrupted(
                 operation: "update",

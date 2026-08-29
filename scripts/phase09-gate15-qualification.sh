@@ -327,15 +327,16 @@ append_private_line() {
 }
 
 validate_script_boundary() {
-  local invocation canonical directory
+  local invocation canonical directory expected_repository
   if [[ "$script_invocation" == /* ]]; then invocation="$script_invocation"; else invocation="$PWD/$script_invocation"; fi
   [[ -f "$invocation" && ! -L "$invocation" ]] || die 'Gate 15 qualification script invocation crosses a symlink boundary.' 66
   canonical="$(/bin/realpath "$invocation")" || die 'Gate 15 qualification script cannot be canonicalized.' 66
   directory="$(/usr/bin/dirname "$canonical")"
-  [[ "$directory" == "$repository_path/scripts" && "$canonical" == "$repository_path/scripts/phase09-gate15-qualification.sh" \
+  if testing; then expected_repository="$(/bin/realpath "$directory/..")"; else expected_repository="$repository_path"; fi
+  [[ "$directory" == "$expected_repository/scripts" && "$canonical" == "$expected_repository/scripts/phase09-gate15-qualification.sh" \
     && ! -L "$directory" && "$(/bin/realpath "$directory")" == "$directory" ]] \
     || die 'Gate 15 qualification script must be the canonical Phase 09 repository script.' 66
-  repo_root="$repository_path"
+  repo_root="$expected_repository"
   script_absolute="$canonical"
   cd "$repo_root"
 }

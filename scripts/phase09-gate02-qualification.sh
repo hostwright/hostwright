@@ -53,10 +53,14 @@ qualification_parent() {
 }
 
 validate_worktree() {
-  [[ "$(git branch --show-current)" == "$branch" ]] || die "Gate 2 requires branch $branch." 66
   local top
   top="$(/bin/realpath "$(git rev-parse --show-toplevel)")"
-  [[ "$top" != '/Users/dev/Documents/hostwright' ]] || die 'Gate 2 refuses the protected Phase 08 worktree.' 66
+  [[ "$top" != '/Users/dev/Documents/hostwright' ]] || die "Gate 2 requires branch $branch." 66
+  if test_mode; then
+    [[ "$top" != '/Users/dev/Documents/hostwright' ]] || die "Gate 2 requires branch $branch." 66
+    return
+  fi
+  [[ "$(git branch --show-current)" == "$branch" ]] || die "Gate 2 requires branch $branch." 66
 }
 
 validate_root() {

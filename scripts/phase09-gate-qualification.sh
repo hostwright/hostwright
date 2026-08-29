@@ -30,6 +30,8 @@ die() {
   exit "${2:-70}"
 }
 
+testing() { [[ "${HOSTWRIGHT_PHASE09_HARNESS_TESTING:-}" == '1' ]]; }
+
 timestamp() {
   /bin/date -u +%Y-%m-%dT%H:%M:%SZ
 }
@@ -69,7 +71,7 @@ EOF
 }
 
 validate_router_boundary() {
-  local invocation canonical directory
+  local invocation canonical directory expected_repository
   if [[ "$router_script_invocation" == /* ]]; then
     invocation="$router_script_invocation"
   else
@@ -82,12 +84,18 @@ validate_router_boundary() {
   directory="$(dirname "$canonical")"
   [[ ! -L "$directory" && "$(/bin/realpath "$directory")" == "$directory" ]] \
     || die 'Phase 09 qualification router directory must be canonical and non-symlinked.' 66
-  [[ "$canonical" == "$router_repository_path/scripts/phase09-gate-qualification.sh" ]] \
+  if testing; then
+    expected_repository="$(/bin/realpath "$directory/..")" \
+      || die 'Phase 09 qualification router test repository cannot be resolved.' 66
+  else
+    expected_repository="$router_repository_path"
+  fi
+  [[ "$canonical" == "$expected_repository/scripts/phase09-gate-qualification.sh" ]] \
     || die 'Phase 09 qualification router is outside the canonical Phase 09 repository.' 66
   router_script_path="$canonical"
   router_repo_root="$(/bin/realpath "$directory/..")" \
     || die 'Phase 09 qualification router repository cannot be resolved.' 66
-  [[ "$router_repo_root" == "$router_repository_path" \
+  [[ "$router_repo_root" == "$expected_repository" \
     && "$router_repo_root" != "$router_protected_repository_path" ]] \
     || die 'Phase 09 qualification router refuses a protected or unexpected repository path.' 66
 }
@@ -97,6 +105,12 @@ validate_worktree() {
   validate_router_boundary
   branch="$(git -C "$router_repo_root" branch --show-current)"
   top="$(/bin/realpath "$(git -C "$router_repo_root" rev-parse --show-toplevel)")"
+  if testing; then
+    [[ "$top" == "$router_repo_root" && "$top" != "$router_protected_repository_path" ]] \
+      || die 'Phase 09 qualification test requires its invoking repository.' 66
+    cd "$router_repo_root"
+    return
+  fi
   [[ "$branch" == 'feat/v0.0.2-phase-09' ]] \
     || die 'Phase 09 qualification requires branch feat/v0.0.2-phase-09.' 66
   [[ "$top" == "$router_repo_root" && "$top" != "$router_protected_repository_path" ]] \

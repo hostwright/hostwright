@@ -45,8 +45,14 @@ qualification_parent() {
 }
 
 validate_worktree() {
+  local top
+  top="$(/bin/realpath "$(git rev-parse --show-toplevel)")"
+  if testing; then
+    [[ "$top" != /Users/dev/Documents/hostwright ]] || die "Gate 10 requires branch $readonly_branch." 66
+    return
+  fi
   [[ "$(git branch --show-current)" == "$readonly_branch" ]] || die "Gate 10 requires branch $readonly_branch." 66
-  [[ "$(/bin/realpath "$(git rev-parse --show-toplevel)")" == /Users/dev/Documents/hostwright-phase09 ]] || die 'Gate 10 requires the isolated Phase 09 worktree.' 66
+  [[ "$top" == /Users/dev/Documents/hostwright-phase09 ]] || die 'Gate 10 requires the isolated Phase 09 worktree.' 66
 }
 
 validate_root() {

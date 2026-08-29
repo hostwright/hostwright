@@ -27,7 +27,7 @@ final class Phase01ContractCLITests: XCTestCase {
         XCTAssertFalse(report.capabilities.isEmpty)
     }
 
-    func testMigrationPreviewIsReadOnly() throws {
+    func testMigrationPreviewIsReadOnlyAndFailsClosedWithoutExplicitCapacity() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("hostwright-migrate-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -37,13 +37,15 @@ final class Phase01ContractCLITests: XCTestCase {
 
         let result = HostwrightCLI.run(arguments: ["migrate", "preview", manifestURL.path, "--output", "json"])
 
-        XCTAssertEqual(result.exitCode, 0)
-        XCTAssertEqual(result.standardError, "")
+        XCTAssertEqual(result.exitCode, CLIExitCode.validation.rawValue)
+        XCTAssertEqual(result.standardOutput, "")
         XCTAssertEqual(try String(contentsOf: manifestURL, encoding: .utf8), source)
-        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(result.standardOutput.utf8)) as? [String: Any])
-        XCTAssertEqual(object["kind"] as? String, "manifestMigrationPreview")
-        XCTAssertEqual(object["sourceVersion"] as? Int, 1)
-        XCTAssertEqual(object["targetVersion"] as? Int, 3)
-        XCTAssertTrue((object["migratedManifest"] as? String)?.hasPrefix("version: 3") == true)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(result.standardError.utf8)) as? [String: Any])
+        XCTAssertEqual(object["kind"] as? String, "error")
+        XCTAssertEqual(object["code"] as? String, HostwrightErrorCode.manifestValidationFailed.rawValue)
+        let issues = try XCTUnwrap(object["issues"] as? [[String: Any]])
+        XCTAssertTrue(issues.contains {
+            ($0["message"] as? String)?.contains("requires an explicit CPU and memory requests/limits contract") == true
+        })
     }
 }

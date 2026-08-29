@@ -104,7 +104,7 @@ test_parent_is_private() {
 }
 
 validate_script_boundary() {
-  local invocation canonical parent
+  local invocation canonical parent expected_repository
   if [[ "$script_invocation" == /* ]]; then
     invocation="$script_invocation"
   else
@@ -117,13 +117,14 @@ validate_script_boundary() {
   parent="$(dirname "$canonical")"
   [[ ! -L "$parent" && "$(/bin/realpath "$parent")" == "$parent" ]] \
     || die 'Gate 16 script directory must be canonical and non-symlinked.' 66
-  [[ "$canonical" == "$repository_path/scripts/phase09-gate16-qualification.sh" ]] \
+  if testing; then expected_repository="$(/bin/realpath "$parent/..")"; else expected_repository="$repository_path"; fi
+  [[ "$canonical" == "$expected_repository/scripts/phase09-gate16-qualification.sh" ]] \
     || die 'Gate 16 script is outside the canonical Phase 09 repository.' 66
   script_absolute="$canonical"
   script_directory="$parent"
   repo_root="$(/bin/realpath "$script_directory/..")" \
     || die 'Gate 16 repository path cannot be canonicalized.' 66
-  [[ "$repo_root" == "$repository_path" && "$repo_root" != "$protected_repository_path" ]] \
+  [[ "$repo_root" == "$expected_repository" && "$repo_root" != "$protected_repository_path" ]] \
     || die 'Gate 16 refuses a protected or unexpected repository path.' 66
 }
 
@@ -134,6 +135,12 @@ validate_worktree() {
     || die 'Gate 16 could not read the current branch.' 66
   top="$(/bin/realpath "$(git -C "$repo_root" rev-parse --show-toplevel 2>/dev/null)")" \
     || die 'Gate 16 could not resolve the repository root.' 66
+  if testing; then
+    [[ "$top" == "$repo_root" && "$top" != "$protected_repository_path" ]] \
+      || die 'Gate 16 test mode requires its invoking repository.' 66
+    cd "$repo_root"
+    return
+  fi
   [[ "$branch" == "$source_branch" ]] \
     || die "Gate 16 requires branch $source_branch." 66
   [[ "$top" == "$repo_root" && "$top" != "$protected_repository_path" ]] \

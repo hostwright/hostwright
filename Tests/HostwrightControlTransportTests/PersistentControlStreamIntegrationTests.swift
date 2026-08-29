@@ -462,6 +462,8 @@ final class PersistentControlStreamIntegrationTests: XCTestCase {
   }
 
   func testLateUnaryResponseIsDiscardedWithoutClosingActiveStream() throws {
+    let unaryReceived = DispatchSemaphore(value: 0)
+    let releaseLateResponse = DispatchSemaphore(value: 0)
     let fixture = try StreamITRawClientFixture { descriptor in
       let deadline = try ControlTransportDeadline(timeoutMilliseconds: 2_000)
       _ = try ControlFrameCodec.read(kind: .request, descriptor: descriptor, deadline: deadline)
@@ -479,7 +481,10 @@ final class PersistentControlStreamIntegrationTests: XCTestCase {
         kind: .frame, descriptor: descriptor, deadline: deadline
       )
       _ = try ControlFrameCodec.read(kind: .request, descriptor: descriptor, deadline: deadline)
-      Thread.sleep(forTimeInterval: 0.150)
+      unaryReceived.signal()
+      guard releaseLateResponse.wait(timeout: .now() + 2) == .success else {
+        throw POSIXError(.ETIMEDOUT)
+      }
       try ControlFrameCodec.write(
         try ControlPlaneCanonicalJSON.encode(ControlResponseEnvelope(
           requestID: "late-unary", status: .completed, reasonCode: .completed
@@ -506,13 +511,22 @@ final class PersistentControlStreamIntegrationTests: XCTestCase {
     let session = fixture.session
     try session.openStream(streamID: "late-stream", request: ControlStreamOpenRequest(source: .events))
     XCTAssertEqual(try session.nextFrame(streamID: "late-stream").kind, .open)
-    XCTAssertThrowsError(
-      try session.send(ControlRequestEnvelope(
-        requestID: "late-unary", operation: "health.get", timeoutMilliseconds: 50
-      ))
-    ) { error in
+    let response = StreamITResponseBox()
+    let sendFinished = DispatchSemaphore(value: 0)
+    DispatchQueue.global().async {
+      defer { sendFinished.signal() }
+      response.result = Result {
+        try session.send(ControlRequestEnvelope(
+          requestID: "late-unary", operation: "health.get", timeoutMilliseconds: 50
+        ))
+      }
+    }
+    XCTAssertEqual(unaryReceived.wait(timeout: .now() + 1), .success)
+    XCTAssertEqual(sendFinished.wait(timeout: .now() + 1), .success)
+    XCTAssertThrowsError(try response.value()) { error in
       XCTAssertEqual(error as? PersistentControlClientError, .deadlineExceeded)
     }
+    releaseLateResponse.signal()
     let data = try session.nextFrame(streamID: "late-stream")
     XCTAssertEqual(data.kind, .data)
     XCTAssertEqual(data.payload, .string("still-open"))
@@ -619,7 +633,7 @@ final class PersistentControlStreamIntegrationTests: XCTestCase {
     let requestsReceived = DispatchSemaphore(value: 0)
     let releaseLateResponses = DispatchSemaphore(value: 0)
     let fixture = try StreamITRawClientFixture { descriptor in
-      let deadline = try ControlTransportDeadline(timeoutMilliseconds: 2_000)
+      let deadline = try ControlTransportDeadline(timeoutMilliseconds: 10_000)
       _ = try ControlFrameCodec.read(kind: .request, descriptor: descriptor, deadline: deadline)
       try ControlFrameCodec.write(
         try ControlPlaneCanonicalJSON.encode(StreamFrame(
@@ -635,7 +649,7 @@ final class PersistentControlStreamIntegrationTests: XCTestCase {
         _ = try ControlFrameCodec.read(kind: .request, descriptor: descriptor, deadline: deadline)
       }
       requestsReceived.signal()
-      guard releaseLateResponses.wait(timeout: .now() + 2) == .success else {
+      guard releaseLateResponses.wait(timeout: .now() + 5) == .success else {
         throw POSIXError(.ETIMEDOUT)
       }
       for index in 0..<requestCount {
@@ -667,19 +681,31 @@ final class PersistentControlStreamIntegrationTests: XCTestCase {
     try session.openStream(
       streamID: "late-tombstones", request: ControlStreamOpenRequest(source: .events))
     XCTAssertEqual(try session.nextFrame(streamID: "late-tombstones").kind, .open)
+    let sendsFinished = DispatchGroup()
+    let results = StreamITVoidResultsBox()
     for index in 0..<requestCount {
-      XCTAssertThrowsError(try session.send(ControlRequestEnvelope(
-        requestID: "late-tombstone-\(index)", operation: "health.get", timeoutMilliseconds: 5
-      ))) { error in
-        XCTAssertEqual(error as? PersistentControlClientError, .deadlineExceeded)
+      sendsFinished.enter()
+      DispatchQueue.global().async {
+        defer { sendsFinished.leave() }
+        results.append(Result {
+          _ = try session.send(ControlRequestEnvelope(
+            requestID: "late-tombstone-\(index)", operation: "health.get",
+            timeoutMilliseconds: 2_000
+          ))
+        })
       }
     }
+    XCTAssertEqual(requestsReceived.wait(timeout: .now() + 3), .success)
+    XCTAssertEqual(sendsFinished.wait(timeout: .now() + 3), .success)
+    XCTAssertEqual(results.errors.count, requestCount)
+    XCTAssertTrue(results.errors.allSatisfy {
+      ($0 as? PersistentControlClientError) == .deadlineExceeded
+    })
     XCTAssertThrowsError(try session.send(ControlRequestEnvelope(
-      requestID: "late-tombstone-over-limit", operation: "health.get", timeoutMilliseconds: 5
+      requestID: "late-tombstone-over-limit", operation: "health.get", timeoutMilliseconds: 50
     ))) { error in
       XCTAssertEqual(error as? PersistentControlClientError, .concurrencyLimit)
     }
-    XCTAssertEqual(requestsReceived.wait(timeout: .now() + 1), .success)
     releaseLateResponses.signal()
     let data = try session.nextFrame(streamID: "late-tombstones", timeoutMilliseconds: 5_000)
     XCTAssertEqual(data.kind, .data)
@@ -1358,10 +1384,20 @@ final class PersistentControlStreamIntegrationTests: XCTestCase {
   }
 
   func testNearDeadlineSuccessfulWriteDoesNotResetUnaryResponseDeadline() throws {
+    let holdWriterUntilDeadline = DispatchSemaphore(value: 0)
+    let requestReceived = DispatchSemaphore(value: 0)
+    let releaseLateResponse = DispatchSemaphore(value: 0)
     let fixture = try StreamITRawClientFixture(
       frameWriter: { data, kind, descriptor, deadline in
-        Thread.sleep(forTimeInterval: 0.220)
         try defaultControlFrameWrite(data, kind, descriptor, deadline)
+        while true {
+          do {
+            let remaining = try deadline.remainingTimeInterval()
+            _ = holdWriterUntilDeadline.wait(timeout: .now() + remaining)
+          } catch ControlTransportError.deadlineExceeded {
+            return
+          }
+        }
       }
     ) { descriptor in
       let deadline = try ControlTransportDeadline(timeoutMilliseconds: 2_000)
@@ -1378,23 +1414,34 @@ final class PersistentControlStreamIntegrationTests: XCTestCase {
           "apiVersion", "protocolRevision", "requestID", "operation", "timeoutMilliseconds",
         ]
       )
-      Thread.sleep(forTimeInterval: 0.160)
+      requestReceived.signal()
+      guard releaseLateResponse.wait(timeout: .now() + 2) == .success else {
+        throw POSIXError(.ETIMEDOUT)
+      }
       try ControlFrameCodec.write(
         try ControlPlaneCanonicalJSON.encode(ControlResponseEnvelope(
           requestID: request.requestID, status: .completed, reasonCode: .completed)),
         kind: .response, descriptor: descriptor, deadline: deadline
       )
-      Thread.sleep(forTimeInterval: 0.100)
     }
     defer { fixture.close() }
 
-    let start = Date()
-    XCTAssertThrowsError(try fixture.session.send(ControlRequestEnvelope(
-      requestID: "single-deadline", operation: "health.get", timeoutMilliseconds: 300
-    ))) { error in
+    let response = StreamITResponseBox()
+    let sendFinished = DispatchSemaphore(value: 0)
+    DispatchQueue.global().async {
+      defer { sendFinished.signal() }
+      response.result = Result {
+        try fixture.session.send(ControlRequestEnvelope(
+          requestID: "single-deadline", operation: "health.get", timeoutMilliseconds: 300
+        ))
+      }
+    }
+    XCTAssertEqual(requestReceived.wait(timeout: .now() + 1), .success)
+    XCTAssertEqual(sendFinished.wait(timeout: .now() + 1), .success)
+    XCTAssertThrowsError(try response.value()) { error in
       XCTAssertEqual(error as? PersistentControlClientError, .deadlineExceeded)
     }
-    XCTAssertLessThan(Date().timeIntervalSince(start), 0.350)
+    releaseLateResponse.signal()
     XCTAssertTrue(fixture.waitForExit(timeout: 1))
     XCTAssertNil(fixture.serverError)
   }

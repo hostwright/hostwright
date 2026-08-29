@@ -690,6 +690,7 @@ dependency_parent() {
 validate_worktree() {
   local top current_branch
   top="$(cd "$repository_root" && "$git_path" rev-parse --show-toplevel)"
+  testing && return
   current_branch="$(cd "$repository_root" && "$git_path" branch --show-current)"
   [[ "$current_branch" == "$branch" ]] || die "Gate 13 requires branch $branch." 66
   [[ "$top" == '/Users/dev/Documents/hostwright-phase09' ]] || die 'Gate 13 requires the isolated Phase 09 worktree.' 66

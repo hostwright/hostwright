@@ -646,6 +646,11 @@ let package = Package(
             path: "Tests/HostwrightTestSupport"
         ),
         .executableTarget(
+            name: "HostwrightLocalIntegrationTool",
+            dependencies: ["HostwrightCLI"],
+            path: "Qualification/HostwrightLocalIntegrationTool"
+        ),
+        .executableTarget(
             name: "HostwrightTunnelQualificationTool",
             dependencies: [
                 "HostwrightManifest",

@@ -14,8 +14,13 @@ from typing import Any
 QUALIFICATION_TARGET = "HostwrightPhase09QualificationTool"
 QUALIFICATION_PATH = "Qualification/HostwrightPhase09QualificationTool"
 QUALIFICATION_TARGET_PATHS = {
+    "HostwrightLocalIntegrationTool": "Qualification/HostwrightLocalIntegrationTool",
     "HostwrightPhase09QualificationTool": QUALIFICATION_PATH,
     "HostwrightTunnelQualificationTool": "Tests/HostwrightTunnelQualificationTool",
+}
+NON_PRODUCT_QUALIFICATION_TARGETS = {
+    "HostwrightLocalIntegrationTool",
+    QUALIFICATION_TARGET,
 }
 TEST_SUPPORT_TARGET = "HostwrightTestSupport"
 TEST_SUPPORT_PATH = "Tests/HostwrightTestSupport"
@@ -142,8 +147,9 @@ def validate(package: dict[str, Any], root: Path) -> None:
             require(name != TEST_SUPPORT_TARGET,
                     f"product {product_name} reaches test-only support target")
             pending.extend(sorted(local_dependencies[name]))
-        require(QUALIFICATION_TARGET not in closure,
-                f"product {product_name} reaches qualification target")
+        for qualification_target in NON_PRODUCT_QUALIFICATION_TARGETS:
+            require(qualification_target not in closure,
+                    f"product {product_name} reaches qualification target")
         scanned.update(closure)
 
     for name in sorted(scanned):
@@ -238,6 +244,27 @@ def self_test() -> None:
         })
         (root / "Tests/HostwrightTunnelQualificationTool").mkdir(parents=True, exist_ok=True)
         validate(tunnel, root)
+
+        integration_path = QUALIFICATION_TARGET_PATHS["HostwrightLocalIntegrationTool"]
+        integration = fixture(root)
+        integration["targets"].append({
+            "name": "HostwrightLocalIntegrationTool",
+            "type": "executable",
+            "path": integration_path,
+            "dependencies": [],
+        })
+        (root / integration_path).mkdir(parents=True, exist_ok=True)
+        (root / integration_path / "main.swift").write_text("print(\"integration\")\n", encoding="utf-8")
+        validate(integration, root)
+
+        integration_product = fixture(root, product_target="HostwrightLocalIntegrationTool")
+        integration_product["targets"].append({
+            "name": "HostwrightLocalIntegrationTool",
+            "type": "executable",
+            "path": integration_path,
+            "dependencies": [],
+        })
+        expect_failure(integration_product, root, "reaches qualification target")
 
 
 def main() -> int:

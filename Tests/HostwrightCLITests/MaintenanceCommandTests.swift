@@ -134,7 +134,7 @@ private struct Fixture {
         manifestPath = root.appendingPathComponent("hostwright.yaml").path
         databasePath = root.appendingPathComponent("state.sqlite").path
         try """
-        version: 2
+        version: 3
         project: demo
         maintenance:
           timezone: UTC
@@ -148,6 +148,9 @@ private struct Fixture {
         services:
           api:
             image: local/api:latest
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
         """.write(toFile: manifestPath, atomically: true, encoding: .utf8)
     }
 

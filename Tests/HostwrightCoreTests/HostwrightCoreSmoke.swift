@@ -25,16 +25,35 @@ final class HostwrightCoreTests: XCTestCase {
     func testSecureProcessExecutionTruthIsDocumentedAndFoundationProcessIsAbsent() throws {
         let root = try packageRoot()
         let processReference = try read("docs/reference/process-execution.md", root: root)
+        XCTAssertTrue(processReference.contains("Status: implemented for v0.0.2 Phase 02 issue #116."))
+        XCTAssertTrue(processReference.contains("Phase 09 issues #203 and #204"))
+        let sources = root.appendingPathComponent("Sources", isDirectory: true)
+        let enumerator = try XCTUnwrap(FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil))
+        var foundationProcessCallSites: [String] = []
+        for case let fileURL as URL in enumerator where fileURL.pathExtension == "swift" {
+            let contents = try String(contentsOf: fileURL, encoding: .utf8)
+            if contents.range(of: #"\bFoundation\s*\.\s*Process\s*\("#, options: .regularExpression) != nil {
+                foundationProcessCallSites.append(fileURL.path.replacingOccurrences(of: root.path + "/", with: ""))
+            }
+        }
+        XCTAssertEqual(foundationProcessCallSites, [])
+    }
+
+    func testSecureProcessExecutionTruthUsesOnlyTheSecureBoundary() throws {
+        let root = try packageRoot()
+        let processReference = try read("docs/reference/process-execution.md", root: root)
         let securityReference = try read("docs/reference/security-safety.md", root: root)
         let installReference = try read("docs/reference/install.md", root: root)
         let limitations = try read("docs/reference/limitations.md", root: root)
+        let lint = try read("scripts/lint.sh", root: root)
+        let shippedBoundary = try read("scripts/check-shipped-process-boundary.py", root: root)
         let sources = root.appendingPathComponent("Sources", isDirectory: true)
         let enumerator = try XCTUnwrap(FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil))
         var processCallSites: [String] = []
 
         for case let fileURL as URL in enumerator where fileURL.pathExtension == "swift" {
             let contents = try String(contentsOf: fileURL, encoding: .utf8)
-            if contents.range(of: #"\bProcess\s*\("#, options: .regularExpression) != nil {
+            if contents.range(of: #"\b(?:Foundation\s*\.\s*)?Process\s*\("#, options: .regularExpression) != nil {
                 processCallSites.append(fileURL.path.replacingOccurrences(of: root.path + "/", with: ""))
             }
         }
@@ -47,7 +66,25 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertTrue(securityReference.contains("[Secure Process Execution](process-execution.md)"))
         XCTAssertTrue(installReference.contains("[secure process execution boundary](process-execution.md)"))
         XCTAssertTrue(limitations.contains("Phase 02 issue #116 is implemented"))
-        XCTAssertEqual(processCallSites, [])
+        XCTAssertTrue(
+            lint.contains(
+                "swift package dump-package | python3 scripts/check-shipped-process-boundary.py"
+            )
+        )
+        XCTAssertTrue(
+            lint.contains("python3 scripts/check-shipped-process-boundary.py --self-test")
+        )
+        XCTAssertTrue(
+            shippedBoundary.contains(
+                #"QUALIFICATION_PATH = "Qualification/HostwrightPhase09QualificationTool""#
+            )
+        )
+        XCTAssertTrue(shippedBoundary.contains("product {product_name} reaches qualification target"))
+        XCTAssertTrue(shippedBoundary.contains("shipped product closure contains Process callsite"))
+        XCTAssertEqual(
+            Set(processCallSites),
+            []
+        )
         XCTAssertFalse(
             FileManager.default.fileExists(
                 atPath: root.appendingPathComponent(
@@ -382,7 +419,7 @@ final class HostwrightCoreTests: XCTestCase {
             devlog
         ].joined(separator: "\n")
 
-        XCTAssertTrue(architecture.contains("Status: Phase 32 local policy boundary."))
+        XCTAssertTrue(architecture.contains("Status: Experimental Phase 10 policy-to-admission boundary."))
         XCTAssertTrue(reference.contains("Hostwright policy is local and deterministic."))
         XCTAssertTrue(manifest.contains("Policy evaluation is local and non-mutating"))
         XCTAssertTrue(limitations.contains("Policy evaluation is local and deterministic."))
@@ -429,13 +466,16 @@ final class HostwrightCoreTests: XCTestCase {
 
         XCTAssertTrue(cli.contains("hostwright import-stack <path> [--output text|json]"))
         XCTAssertTrue(guide.contains("Status: Phase 28 import-only conversion."))
-        XCTAssertTrue(manifest.contains("`hostwright import-stack <path>` can convert a smaller stack-file subset"))
+        XCTAssertTrue(guide.contains("fails closed with structured validation diagnostics and emits no manifest text"))
+        XCTAssertTrue(manifest.contains("`hostwright import-stack <path>` can assess a smaller stack-file subset"))
+        XCTAssertTrue(manifest.contains("fails closed and emits no manifest text"))
         XCTAssertTrue(limitations.contains("The stack-file importer is also not a general YAML or Compose parser."))
+        XCTAssertTrue(limitations.contains("a missing manual resource mapping returns diagnostics and no manifest text"))
         XCTAssertTrue(policy.contains("Stack-file import uses local policy reason codes"))
         XCTAssertTrue(requirements.contains("HW-COMPAT-008"))
         XCTAssertTrue(acceptance.contains("Phase 28 Gate: Stack-File Import And Migration Tooling"))
         XCTAssertTrue(implementationPlan.contains("## Phase 28 Outputs"))
-        XCTAssertTrue(buildStatus.contains("Phase 28 adds import-only stack-file conversion"))
+        XCTAssertTrue(buildStatus.contains("Phase 28 adds fail-closed import-only stack-file assessment"))
         XCTAssertTrue(devlog.contains("No Docker Compose parity."))
 
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports Docker Compose"))
@@ -554,7 +594,7 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("scheduler API is implemented"))
     }
 
-    func testAdvisorySchedulerDocsDescribeLocalAdvisoryBoundary() throws {
+    func testSchedulerDocsDescribeExperimentalDirectAdmissionBoundary() throws {
         let root = try packageRoot()
         let architecture = try read("docs/architecture/advisory-scheduler.md", root: root)
         let limitations = try read("docs/reference/limitations.md", root: root)
@@ -564,8 +604,6 @@ final class HostwrightCoreTests: XCTestCase {
         let acceptance = try read("docs/requirements/ACCEPTANCE_MATRIX.md", root: root)
         let traceability = try read("docs/requirements/SOURCE_TRACEABILITY.md", root: root)
         let implementationPlan = try read("docs/IMPLEMENTATION_PLAN.md", root: root)
-        let buildStatus = try read("docs/BUILD_STATUS.md", root: root)
-        let devlog = try read("docs/devlog/0031-scheduler-placement-engine.md", root: root)
         let publicDocs = [
             architecture,
             limitations,
@@ -574,35 +612,28 @@ final class HostwrightCoreTests: XCTestCase {
             requirements,
             acceptance,
             traceability,
-            implementationPlan,
-            buildStatus,
-            devlog
+            implementationPlan
         ].joined(separator: "\n")
 
-        XCTAssertTrue(architecture.contains("Status: Phase 31 local advisory model."))
-        XCTAssertTrue(architecture.contains("advisoryOnly = true"))
-        XCTAssertTrue(architecture.contains("requested accelerator dimensions are blockers"))
-        XCTAssertTrue(limitations.contains("Local advisory scheduler reports"))
-        XCTAssertTrue(limitations.contains("Advisory scheduling is local and diagnostic."))
-        XCTAssertTrue(policy.contains("Advisory scheduling consumes local policy decisions"))
-        XCTAssertTrue(resourceIntelligence.contains("Phase 31 advisory scheduling may consume resource reports"))
+        XCTAssertTrue(architecture.contains("Status: Phase 10 / issue #207 implementation boundary"))
+        XCTAssertTrue(architecture.contains("one scheduler boundary"))
+        XCTAssertTrue(architecture.contains("Requests drive placement and capacity accounting."))
+        XCTAssertTrue(limitations.contains("Experimental Phase 10 scheduler/admission contracts"))
+        XCTAssertTrue(limitations.contains("Phase 10 scheduler admission is experimental and evidence-gated."))
+        XCTAssertTrue(policy.contains("Experimental Phase 10 scheduler admission consumes these policy decisions"))
+        XCTAssertTrue(resourceIntelligence.contains("Resource intelligence is not scheduler capacity authority."))
         XCTAssertTrue(requirements.contains("HW-COMPAT-010"))
-        XCTAssertTrue(acceptance.contains("Phase 31 Gate: Scheduler And Placement Engine"))
+        XCTAssertTrue(acceptance.contains("Superseded Phase 31 / Phase 10 Scheduler And Admission Gate"))
         XCTAssertTrue(traceability.contains("HW-COMPAT-010"))
-        XCTAssertTrue(implementationPlan.contains("## Phase 31 Outputs"))
-        XCTAssertTrue(buildStatus.contains("Phase 31 adds a local advisory scheduler model"))
-        XCTAssertTrue(devlog.contains("No automatic placement."))
+        XCTAssertTrue(implementationPlan.contains("one direct production boundary"))
 
-        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright automatically places workloads"))
-        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright reserves capacity"))
-        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports scheduler API"))
-        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright implements scheduler API"))
-        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright supports remote placement"))
-        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright schedules accelerators"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Status: Phase 31 local advisory model."))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Local advisory scheduler reports"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Advisory scheduling is local and diagnostic."))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("AdvisoryScheduler"))
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("automatic placement is implemented"))
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("resource reservation is implemented"))
-        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("remote placement is implemented"))
-        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("scheduler API is implemented"))
+        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("accelerator-aware scheduling is implemented"))
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("accelerator-aware scheduling is implemented"))
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Kubernetes scheduler behavior is implemented"))
     }
@@ -800,7 +831,7 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("control API listener is implemented"))
     }
 
-    func testExtensionArchitectureDocsDescribeDeclarationPolicyAndHandshakeOnly() throws {
+    func testExtensionArchitectureDocsSeparateLegacyHandshakeFromSecurePluginRuntime() throws {
         let root = try packageRoot()
         let architecture = try read("docs/architecture/plugin-extension-architecture.md", root: root)
         let policy = try read("docs/reference/policy.md", root: root)
@@ -829,7 +860,9 @@ final class HostwrightCoreTests: XCTestCase {
             cli
         ].joined(separator: "\n")
 
-        XCTAssertTrue(architecture.contains("Status: Phase 33 declaration policy plus Phase 41 reviewed-local handshake host."))
+        XCTAssertTrue(architecture.contains("Status: Phase 09 secure provider and package lifecycle implementation; aggregate qualification pending."))
+        XCTAssertTrue(architecture.contains("Hostwright retains the earlier reviewed-local declaration handshake and now adds a separate Plugin ABI v1 path."))
+        XCTAssertTrue(architecture.contains("Plugin packages are explicit-source, CMS-signed, immutable, digest-addressed, capability-limited"))
         XCTAssertTrue(architecture.contains("fixed `hostwright-extension-handshake-v1` protocol operation"))
         XCTAssertTrue(architecture.contains("A passing check proves only that the exact reviewed file completed this protocol handshake."))
         XCTAssertTrue(architecture.contains("| Tunnel provider | The general extension host blocks tunnel authority; Phase 07's separate SPI grants only exact brokered origins, secret references, identities, and routes. |"))

@@ -324,7 +324,7 @@ final class LifecycleImageProvenancePreflightTests:
         let manifestPath = directory
             .appendingPathComponent("hostwright.yaml").path
         let manifestText = """
-        version: 2
+        version: 3
         project: demo
         imagePolicy: require-digest
         imageProvenance:
@@ -342,6 +342,9 @@ final class LifecycleImageProvenancePreflightTests:
         services:
           api:
             image: \(reference)
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
         """
         try manifestText.write(
             toFile: manifestPath,

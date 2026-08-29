@@ -1,6 +1,7 @@
 import Foundation
 import HostwrightCore
 import HostwrightRuntime
+import HostwrightState
 
 public enum DaemonReconciliationStatus: String, Codable, Equatable, Sendable {
     case converged
@@ -112,6 +113,22 @@ public struct DaemonReconciliationRequest: Codable, Equatable, Sendable {
     public let selectedServiceNames: [String]?
     public let operationIdempotencyKeySHA256: String?
     public let maintenanceAdmission: DaemonMaintenanceAdmission?
+    public let schedulerAuthorityBinding: DaemonSchedulerAuthorityBinding?
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion
+        case manifestPath
+        case manifestSHA256
+        case configurationSetSHA256
+        case configurationTargets
+        case stateDatabasePath
+        case projectID
+        case maximumParallelism
+        case selectedServiceNames
+        case operationIdempotencyKeySHA256
+        case maintenanceAdmission
+        case schedulerAuthorityBinding
+    }
 
     public init(
         schemaVersion: Int = 1,
@@ -122,7 +139,8 @@ public struct DaemonReconciliationRequest: Codable, Equatable, Sendable {
         stateDatabasePath: String,
         projectID: String,
         maximumParallelism: Int,
-        operationIdempotencyKeySHA256: String? = nil
+        operationIdempotencyKeySHA256: String? = nil,
+        schedulerAuthorityBinding: DaemonSchedulerAuthorityBinding? = nil
     ) throws {
         try self.init(
             schemaVersion: schemaVersion,
@@ -134,7 +152,8 @@ public struct DaemonReconciliationRequest: Codable, Equatable, Sendable {
             projectID: projectID,
             maximumParallelism: maximumParallelism,
             selectedServiceNames: nil,
-            operationIdempotencyKeySHA256: operationIdempotencyKeySHA256
+            operationIdempotencyKeySHA256: operationIdempotencyKeySHA256,
+            schedulerAuthorityBinding: schedulerAuthorityBinding
         )
     }
 
@@ -149,7 +168,8 @@ public struct DaemonReconciliationRequest: Codable, Equatable, Sendable {
         maximumParallelism: Int,
         selectedServiceNames: [String]?,
         operationIdempotencyKeySHA256: String? = nil,
-        maintenanceAdmission: DaemonMaintenanceAdmission? = nil
+        maintenanceAdmission: DaemonMaintenanceAdmission? = nil,
+        schedulerAuthorityBinding: DaemonSchedulerAuthorityBinding? = nil
     ) throws {
         guard schemaVersion == 1,
               !manifestPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -188,6 +208,12 @@ public struct DaemonReconciliationRequest: Codable, Equatable, Sendable {
                       of: "^[a-f0-9]{64}$",
                       options: .regularExpression
                   ) != nil
+              }) ?? true,
+              schedulerAuthorityBinding.map({ binding in
+                  binding.reservations.allSatisfy {
+                      $0.configDigest == manifestSHA256 &&
+                          $0.lifecyclePlanDigest == manifestSHA256
+                  }
               }) ?? true else {
             throw HostwrightDiagnostic(
                 code: .daemonInvalid,
@@ -205,6 +231,71 @@ public struct DaemonReconciliationRequest: Codable, Equatable, Sendable {
         self.selectedServiceNames = selectedServiceNames
         self.operationIdempotencyKeySHA256 = operationIdempotencyKeySHA256
         self.maintenanceAdmission = maintenanceAdmission
+        self.schedulerAuthorityBinding = schedulerAuthorityBinding
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        try self.init(
+            schemaVersion: values.decode(Int.self, forKey: .schemaVersion),
+            manifestPath: values.decode(String.self, forKey: .manifestPath),
+            manifestSHA256: values.decode(String.self, forKey: .manifestSHA256),
+            configurationSetSHA256: values.decode(
+                String.self,
+                forKey: .configurationSetSHA256
+            ),
+            configurationTargets: values.decode(
+                [DaemonConfigurationTarget].self,
+                forKey: .configurationTargets
+            ),
+            stateDatabasePath: values.decode(
+                String.self,
+                forKey: .stateDatabasePath
+            ),
+            projectID: values.decode(String.self, forKey: .projectID),
+            maximumParallelism: values.decode(
+                Int.self,
+                forKey: .maximumParallelism
+            ),
+            selectedServiceNames: values.decodeIfPresent(
+                [String].self,
+                forKey: .selectedServiceNames
+            ),
+            operationIdempotencyKeySHA256: values.decodeIfPresent(
+                String.self,
+                forKey: .operationIdempotencyKeySHA256
+            ),
+            maintenanceAdmission: values.decodeIfPresent(
+                DaemonMaintenanceAdmission.self,
+                forKey: .maintenanceAdmission
+            ),
+            schedulerAuthorityBinding: values.decodeIfPresent(
+                DaemonSchedulerAuthorityBinding.self,
+                forKey: .schedulerAuthorityBinding
+            )
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(schemaVersion, forKey: .schemaVersion)
+        try values.encode(manifestPath, forKey: .manifestPath)
+        try values.encode(manifestSHA256, forKey: .manifestSHA256)
+        try values.encode(configurationSetSHA256, forKey: .configurationSetSHA256)
+        try values.encode(configurationTargets, forKey: .configurationTargets)
+        try values.encode(stateDatabasePath, forKey: .stateDatabasePath)
+        try values.encode(projectID, forKey: .projectID)
+        try values.encode(maximumParallelism, forKey: .maximumParallelism)
+        try values.encodeIfPresent(selectedServiceNames, forKey: .selectedServiceNames)
+        try values.encodeIfPresent(
+            operationIdempotencyKeySHA256,
+            forKey: .operationIdempotencyKeySHA256
+        )
+        try values.encodeIfPresent(maintenanceAdmission, forKey: .maintenanceAdmission)
+        try values.encodeIfPresent(
+            schedulerAuthorityBinding,
+            forKey: .schedulerAuthorityBinding
+        )
     }
 
     init(
@@ -237,6 +328,84 @@ public struct DaemonReconciliationRequest: Codable, Equatable, Sendable {
             selectedServiceNames: nil,
             operationIdempotencyKeySHA256: operationIdempotencyKeySHA256
         )
+    }
+}
+
+public struct DaemonSchedulerAuthorityBinding: Codable, Equatable, Sendable {
+    public let schemaVersion: Int
+    public let projectResourceUUID: String
+    public let reservations: [SchedulerReservationRecord]
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion
+        case projectResourceUUID
+        case reservations
+    }
+
+    public init(
+        schemaVersion: Int = 1,
+        projectResourceUUID: String,
+        reservations: [SchedulerReservationRecord]
+    ) throws {
+        let orderedReservations = reservations.sorted {
+            $0.workloadID.uuidString.lowercased() <
+                $1.workloadID.uuidString.lowercased()
+        }
+        guard schemaVersion == 1,
+              HostwrightResourceUUID.isValid(projectResourceUUID),
+              !orderedReservations.isEmpty,
+              orderedReservations == reservations,
+              Set(orderedReservations.map(\.workloadID)).count == orderedReservations.count,
+              Set(orderedReservations.map(\.reservationID)).count == orderedReservations.count,
+              orderedReservations.allSatisfy({
+                  $0.projectUUID == projectResourceUUID.lowercased() &&
+                      $0.status == .committed &&
+                      Self.isSHA256($0.capacityDigest) &&
+                      Self.isSHA256($0.inputDigest) &&
+                      Self.isSHA256($0.configDigest) &&
+                      Self.isSHA256($0.profileDigest) &&
+                      Self.isSHA256($0.lifecyclePlanDigest) &&
+                      !$0.ownerSubjectID.isEmpty &&
+                      $0.ownerSubjectID == $0.ownerSubjectID.trimmingCharacters(
+                          in: .whitespacesAndNewlines
+                      ) &&
+                      $0.fencingToken.nodeEpoch >= 1 &&
+                      $0.fencingToken.reservationSequence >= 1
+              }) else {
+            throw HostwrightDiagnostic(
+                code: .daemonInvalid,
+                message: "Daemon scheduler authority binding is invalid or incomplete."
+            )
+        }
+        self.schemaVersion = schemaVersion
+        self.projectResourceUUID = projectResourceUUID.lowercased()
+        self.reservations = orderedReservations
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        try self.init(
+            schemaVersion: values.decode(Int.self, forKey: .schemaVersion),
+            projectResourceUUID: values.decode(
+                String.self,
+                forKey: .projectResourceUUID
+            ),
+            reservations: values.decode(
+                [SchedulerReservationRecord].self,
+                forKey: .reservations
+            )
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(schemaVersion, forKey: .schemaVersion)
+        try values.encode(projectResourceUUID, forKey: .projectResourceUUID)
+        try values.encode(reservations, forKey: .reservations)
+    }
+
+    private static func isSHA256(_ value: String) -> Bool {
+        value.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil
     }
 }
 
@@ -343,4 +512,21 @@ public protocol DaemonReconciliationDriving: Sendable {
     func reconcile(
         request: DaemonReconciliationRequest
     ) async throws -> DaemonReconciliationResult
+
+    func reconcileAuthorized(
+        request: DaemonReconciliationRequest,
+        schedulerAuthorityBinding: DaemonSchedulerAuthorityBinding
+    ) async throws -> DaemonReconciliationResult
+}
+
+public extension DaemonReconciliationDriving {
+    func reconcileAuthorized(
+        request: DaemonReconciliationRequest,
+        schedulerAuthorityBinding: DaemonSchedulerAuthorityBinding
+    ) async throws -> DaemonReconciliationResult {
+        throw HostwrightDiagnostic(
+            code: .unsafeExposure,
+            message: "scheduler-authority-unavailable: this reconciliation driver cannot consume the exact daemon scheduler authority binding. No runtime mutation was attempted."
+        )
+    }
 }

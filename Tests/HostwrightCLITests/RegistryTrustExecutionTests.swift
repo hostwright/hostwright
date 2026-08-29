@@ -178,7 +178,7 @@ final class RegistryTrustExecutionTests: XCTestCase {
         }
         XCTAssertEqual(chmod(cosignPath, 0o700), 0)
         let manifest = """
-        version: 2
+        version: 3
         project: demo
         imagePolicy: require-digest
         imageTrust:
@@ -191,6 +191,9 @@ final class RegistryTrustExecutionTests: XCTestCase {
         services:
           api:
             image: registry.example.com/team/api@\(subjectDigest)
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
         """
         try Data(manifest.utf8).write(
             to: URL(fileURLWithPath: manifestPath)

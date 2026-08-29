@@ -163,11 +163,18 @@ public enum ManifestValidator {
             issues.append(issue(service, "must define a non-empty image."))
         }
 
-        if let cpus = service.resources?.cpus, cpus <= 0 {
-            issues.append(issue(service, "resources.cpus must be a positive integer."))
+        if let resources = service.resources {
+            validateResources(resources, service: service, issues: &issues)
+        } else {
+            issues.append(
+                issue(
+                    service,
+                    "resources must declare explicit requests and limits, including CPU and memory, for an executable v3 service."
+                )
+            )
         }
-        if let memory = service.resources?.memory {
-            validateSize(memory, field: "resources.memory", service: service, issues: &issues)
+        if let scheduling = service.scheduling {
+            validateScheduling(scheduling, replicas: service.replicas, service: service, issues: &issues)
         }
         if let shmSize = service.shmSize {
             validateSize(shmSize, field: "shmSize", service: service, issues: &issues)
@@ -309,6 +316,506 @@ public enum ManifestValidator {
         if service.rosetta && !service.virtualization {
             issues.append(issue(service, "rosetta requires virtualization."))
         }
+    }
+
+    private static func validateResources(
+        _ resources: HostwrightResources,
+        service: HostwrightService,
+        issues: inout [ManifestIssue]
+    ) {
+        guard !resources.requests.isEmpty else {
+            issues.append(issue(service, "resources.requests must declare at least one quantity."))
+            return
+        }
+        validateResourceSet(resources.requests, prefix: "resources.requests", service: service, issues: &issues)
+        guard let limits = resources.limits else {
+            issues.append(issue(service, "resources.limits must be declared for an executable resource contract."))
+            return
+        }
+        guard !limits.isEmpty else {
+            issues.append(issue(service, "resources.limits must declare at least one executable quantity."))
+            return
+        }
+        validateResourceSet(limits, prefix: "resources.limits", service: service, issues: &issues)
+
+        validateResourceParity(
+            resources.requests.cpus != nil,
+            limits.cpus != nil,
+            field: "cpus",
+            service: service,
+            issues: &issues
+        )
+        validateResourceParity(
+            resources.requests.memory != nil,
+            limits.memory != nil,
+            field: "memory",
+            service: service,
+            issues: &issues
+        )
+        validateResourceParity(
+            resources.requests.disk != nil,
+            limits.disk != nil,
+            field: "disk",
+            service: service,
+            issues: &issues
+        )
+        validateResourceParity(
+            resources.requests.io != nil,
+            limits.io != nil,
+            field: "io",
+            service: service,
+            issues: &issues
+        )
+        validateResourceParity(
+            resources.requests.network != nil,
+            limits.network != nil,
+            field: "network",
+            service: service,
+            issues: &issues
+        )
+        validateResourceParity(
+            resources.requests.process != nil,
+            limits.process != nil,
+            field: "process",
+            service: service,
+            issues: &issues
+        )
+        validateRequiredResourcePair(
+            resources.requests.cpus != nil,
+            limits.cpus != nil,
+            requestField: "resources.requests.cpus",
+            limitField: "resources.limits.cpus",
+            service: service,
+            issues: &issues
+        )
+        validateRequiredResourcePair(
+            resources.requests.memory != nil,
+            limits.memory != nil,
+            requestField: "resources.requests.memory",
+            limitField: "resources.limits.memory",
+            service: service,
+            issues: &issues
+        )
+
+        compareIntegerResource(
+            resources.requests.cpus,
+            limits.cpus,
+            field: "cpus",
+            service: service,
+            issues: &issues
+        )
+        compareQuantityResource(
+            resources.requests.memory,
+            limits.memory,
+            field: "memory",
+            suffixes: [
+                ("TiB", 1_099_511_627_776),
+                ("GiB", 1_073_741_824),
+                ("MiB", 1_048_576),
+                ("KiB", 1_024),
+                ("B", 1)
+            ],
+            service: service,
+            issues: &issues
+        )
+        compareQuantityResource(
+            resources.requests.disk,
+            limits.disk,
+            field: "disk",
+            suffixes: [
+                ("TiB", 1_099_511_627_776),
+                ("GiB", 1_073_741_824),
+                ("MiB", 1_048_576),
+                ("KiB", 1_024),
+                ("B", 1)
+            ],
+            service: service,
+            issues: &issues
+        )
+        compareQuantityResource(
+            resources.requests.io,
+            limits.io,
+            field: "io",
+            suffixes: [
+                ("GiBps", 1_073_741_824),
+                ("MiBps", 1_048_576),
+                ("KiBps", 1_024),
+                ("Bps", 1)
+            ],
+            service: service,
+            issues: &issues
+        )
+        compareQuantityResource(
+            resources.requests.network,
+            limits.network,
+            field: "network",
+            suffixes: [
+                ("Gbps", 1_000_000_000),
+                ("Mbps", 1_000_000),
+                ("Kbps", 1_000),
+                ("bps", 1)
+            ],
+            service: service,
+            issues: &issues
+        )
+        compareIntegerResource(
+            resources.requests.process,
+            limits.process,
+            field: "process",
+            service: service,
+            issues: &issues
+        )
+    }
+
+    private static func validateResourceParity(
+        _ requestDeclared: Bool,
+        _ limitDeclared: Bool,
+        field: String,
+        service: HostwrightService,
+        issues: inout [ManifestIssue]
+    ) {
+        guard requestDeclared == limitDeclared else {
+            let missingSide = requestDeclared ? "limits" : "requests"
+            issues.append(
+                issue(
+                    service,
+                    "resources.\(missingSide).\(field) must be declared when the other side declares it."
+                )
+            )
+            return
+        }
+    }
+
+    private static func validateRequiredResourcePair(
+        _ requestDeclared: Bool,
+        _ limitDeclared: Bool,
+        requestField: String,
+        limitField: String,
+        service: HostwrightService,
+        issues: inout [ManifestIssue]
+    ) {
+        guard !requestDeclared, !limitDeclared else { return }
+        validateRequiredResource(
+            field: requestField,
+            service: service,
+            issues: &issues
+        )
+        validateRequiredResource(
+            field: limitField,
+            service: service,
+            issues: &issues
+        )
+    }
+
+    private static func validateResourceSet(
+        _ values: HostwrightResourceSet,
+        prefix: String,
+        service: HostwrightService,
+        issues: inout [ManifestIssue]
+    ) {
+        if let cpus = values.cpus, cpus <= 0 {
+            issues.append(issue(service, "\(prefix).cpus must be a positive integer."))
+        }
+        if let memory = values.memory {
+            validateSize(memory, field: "\(prefix).memory", service: service, issues: &issues)
+        }
+        if let disk = values.disk {
+            validateSize(disk, field: "\(prefix).disk", service: service, issues: &issues)
+        }
+        if let io = values.io {
+            validateRate(
+                io,
+                field: "\(prefix).io",
+                suffixes: [
+                    ("GiBps", 1_073_741_824),
+                    ("MiBps", 1_048_576),
+                    ("KiBps", 1_024),
+                    ("Bps", 1)
+                ],
+                service: service,
+                issues: &issues
+            )
+        }
+        if let network = values.network {
+            validateRate(
+                network,
+                field: "\(prefix).network",
+                suffixes: [
+                    ("Gbps", 1_000_000_000),
+                    ("Mbps", 1_000_000),
+                    ("Kbps", 1_000),
+                    ("bps", 1)
+                ],
+                service: service,
+                issues: &issues
+            )
+        }
+        if let process = values.process, process <= 0 {
+            issues.append(issue(service, "\(prefix).process must be a positive integer."))
+        }
+    }
+
+    private static func validateRequiredResource(
+        field: String,
+        service: HostwrightService,
+        issues: inout [ManifestIssue]
+    ) {
+        issues.append(issue(service, "\(field) must be declared for executable capacity and enforcement."))
+    }
+
+    private static func compareIntegerResource(
+        _ request: Int?,
+        _ limit: Int?,
+        field: String,
+        service: HostwrightService,
+        issues: inout [ManifestIssue]
+    ) {
+        guard let request, let limit, request > limit else { return }
+        issues.append(issue(service, "resources.requests.\(field) must not exceed resources.limits.\(field)."))
+    }
+
+    private static func compareQuantityResource(
+        _ request: String?,
+        _ limit: String?,
+        field: String,
+        suffixes: [(String, UInt64)],
+        service: HostwrightService,
+        issues: inout [ManifestIssue]
+    ) {
+        guard let request, let limit,
+              let requestValue = quantityValue(request, suffixes: suffixes),
+              let limitValue = quantityValue(limit, suffixes: suffixes),
+              requestValue > limitValue else { return }
+        issues.append(issue(service, "resources.requests.\(field) must not exceed resources.limits.\(field)."))
+    }
+
+    private static func validateRate(
+        _ value: String,
+        field: String,
+        suffixes: [(String, UInt64)],
+        service: HostwrightService,
+        issues: inout [ManifestIssue]
+    ) {
+        guard let (suffix, _) = suffixes.first(where: { value.hasSuffix($0.0) }),
+              let count = UInt64(value.dropLast(suffix.count)),
+              count > 0,
+              String(count) == value.dropLast(suffix.count) else {
+            issues.append(issue(service, "\(field) must use a normalized positive rate with an explicit unit."))
+            return
+        }
+        guard quantityValue(value, suffixes: suffixes) != nil else {
+            issues.append(issue(service, "\(field) exceeds UInt64 rate capacity."))
+            return
+        }
+    }
+
+    private static func quantityValue(
+        _ value: String,
+        suffixes: [(String, UInt64)]
+    ) -> UInt64? {
+        guard let (suffix, multiplier) = suffixes.first(where: { value.hasSuffix($0.0) }),
+              let count = UInt64(value.dropLast(suffix.count)) else { return nil }
+        let (result, overflow) = count.multipliedReportingOverflow(by: multiplier)
+        return overflow ? nil : result
+    }
+
+    private static func validateScheduling(
+        _ policy: HostwrightSchedulingPolicy,
+        replicas: Int,
+        service: HostwrightService,
+        issues: inout [ManifestIssue]
+    ) {
+        if !(-1_000_000...1_000_000).contains(policy.priority) {
+            issues.append(issue(service, "scheduling.priority must be between -1000000 and 1000000."))
+        }
+        validateSelectors(policy.requiredAffinity, field: "requiredAffinity", service: service, issues: &issues)
+        validateSelectors(policy.requiredAntiAffinity, field: "requiredAntiAffinity", service: service, issues: &issues)
+        validatePreferences(policy.preferredAffinity, field: "preferredAffinity", service: service, issues: &issues)
+        validatePreferences(policy.preferredAntiAffinity, field: "preferredAntiAffinity", service: service, issues: &issues)
+
+        if policy.topologySpread.count > HostwrightSchedulingPolicy.maximumTopologySpreads {
+            issues.append(issue(service, "scheduling.topologySpread must contain at most 16 entries."))
+        }
+        var topologyKeys = Set<String>()
+        for spread in policy.topologySpread {
+            if !isSchedulingIdentifier(spread.topologyKey) {
+                issues.append(issue(service, "scheduling.topologySpread topologyKey must be a bounded identifier."))
+            }
+            if !topologyKeys.insert(spread.topologyKey).inserted {
+                issues.append(issue(service, "scheduling.topologySpread must not contain duplicate topologyKey '\(spread.topologyKey)'."))
+            }
+            if !(1...100).contains(spread.maxSkew) {
+                issues.append(issue(service, "scheduling.topologySpread maxSkew must be between 1 and 100."))
+            }
+        }
+
+        if policy.tolerations.count > HostwrightSchedulingPolicy.maximumTolerations {
+            issues.append(issue(service, "scheduling.tolerations must contain at most 64 entries."))
+        }
+        var tolerationKeys = Set<String>()
+        for toleration in policy.tolerations {
+            if let key = toleration.key, !isSchedulingIdentifier(key) {
+                issues.append(issue(service, "scheduling.toleration key must be a bounded identifier."))
+            }
+            if let value = toleration.value, !isSchedulingText(value) {
+                issues.append(issue(service, "scheduling.toleration value must be bounded printable text."))
+            }
+            switch toleration.operator {
+            case .equals:
+                if toleration.key == nil || toleration.value == nil {
+                    issues.append(issue(service, "scheduling.toleration equals requires key and value."))
+                }
+            case .exists:
+                if toleration.value != nil {
+                    issues.append(issue(service, "scheduling.toleration exists must not declare value."))
+                }
+            }
+            let identity = [
+                toleration.key ?? "",
+                toleration.value ?? "",
+                toleration.effect?.rawValue ?? "",
+                toleration.operator.rawValue
+            ].joined(separator: "\u{1e}")
+            if !tolerationKeys.insert(identity).inserted {
+                issues.append(issue(service, "scheduling.tolerations must not contain duplicate entries."))
+            }
+        }
+
+        if let disruption = policy.disruption {
+            if disruption.maxUnavailable != nil && disruption.minAvailable != nil {
+                issues.append(issue(service, "scheduling.disruption must declare maxUnavailable or minAvailable, not both."))
+            }
+            if let maxUnavailable = disruption.maxUnavailable,
+               !(0...replicas).contains(maxUnavailable) {
+                issues.append(issue(service, "scheduling.disruption.maxUnavailable must be between 0 and replicas."))
+            }
+            if let minAvailable = disruption.minAvailable,
+               !(0...replicas).contains(minAvailable) {
+                issues.append(issue(service, "scheduling.disruption.minAvailable must be between 0 and replicas."))
+            }
+        }
+
+        if let provider = policy.provider, !isSchedulingIdentifier(provider) {
+            issues.append(issue(service, "scheduling.provider must be a bounded identifier."))
+        }
+        validateAcceleratorClaims(
+            policy.acceleratorClaims,
+            field: "scheduling.acceleratorClaims",
+            service: service,
+            issues: &issues
+        )
+    }
+
+    private static func validateSelectors(
+        _ selectors: [HostwrightSchedulingSelector],
+        field: String,
+        service: HostwrightService,
+        issues: inout [ManifestIssue]
+    ) {
+        if selectors.count > HostwrightSchedulingPolicy.maximumRules {
+            issues.append(issue(service, "scheduling.\(field) must contain at most 64 entries."))
+        }
+        var seen = Set<String>()
+        for selector in selectors {
+            validateSelector(selector, field: "scheduling.\(field)", service: service, issues: &issues)
+            if !seen.insert(selectorKey(selector)).inserted {
+                issues.append(issue(service, "scheduling.\(field) must not contain duplicate selectors."))
+            }
+        }
+    }
+
+    private static func validatePreferences(
+        _ preferences: [HostwrightSchedulingPreference],
+        field: String,
+        service: HostwrightService,
+        issues: inout [ManifestIssue]
+    ) {
+        if preferences.count > HostwrightSchedulingPolicy.maximumRules {
+            issues.append(issue(service, "scheduling.\(field) must contain at most 64 entries."))
+        }
+        var seen = Set<String>()
+        for preference in preferences {
+            if !(1...100).contains(preference.weight) {
+                issues.append(issue(service, "scheduling.\(field) weight must be between 1 and 100."))
+            }
+            validateSelector(preference.match, field: "scheduling.\(field)", service: service, issues: &issues)
+            let identity = selectorKey(preference.match)
+            if !seen.insert(identity).inserted {
+                issues.append(issue(service, "scheduling.\(field) must not contain duplicate preferences."))
+            }
+        }
+    }
+
+    private static func validateSelector(
+        _ selector: HostwrightSchedulingSelector,
+        field: String,
+        service: HostwrightService,
+        issues: inout [ManifestIssue]
+    ) {
+        if !isSchedulingIdentifier(selector.key) {
+            issues.append(issue(service, "\(field) key must be a bounded identifier."))
+        }
+        if selector.values.count > 64 {
+            issues.append(issue(service, "\(field) values must contain at most 64 entries."))
+        }
+        if Set(selector.values).count != selector.values.count {
+            issues.append(issue(service, "\(field) values must not contain duplicates."))
+        }
+        for value in selector.values where !isSchedulingText(value) {
+            issues.append(issue(service, "\(field) values must be bounded printable text."))
+        }
+        switch selector.operator {
+        case .in, .notIn:
+            if selector.values.isEmpty {
+                issues.append(issue(service, "\(field) in and not-in require at least one value."))
+            }
+        case .exists, .doesNotExist:
+            if !selector.values.isEmpty {
+                issues.append(issue(service, "\(field) exists and does-not-exist must not declare values."))
+            }
+        }
+    }
+
+    private static func validateAcceleratorClaims(
+        _ claims: [HostwrightAcceleratorClaim],
+        field: String,
+        service: HostwrightService,
+        issues: inout [ManifestIssue]
+    ) {
+        if claims.count > HostwrightSchedulingPolicy.maximumAcceleratorClaims {
+            issues.append(issue(service, "\(field) must contain at most 16 entries."))
+        }
+        var names = Set<String>()
+        for claim in claims {
+            if !isSchedulingIdentifier(claim.name) {
+                issues.append(issue(service, "\(field) names must be bounded identifiers."))
+            }
+            if claim.count <= 0 {
+                issues.append(issue(service, "\(field) counts must be positive integers."))
+            }
+            if !names.insert(claim.name).inserted {
+                issues.append(issue(service, "\(field) must not contain duplicate claim names."))
+            }
+        }
+    }
+
+    private static func selectorKey(_ selector: HostwrightSchedulingSelector) -> String {
+        [
+            selector.key,
+            selector.operator.rawValue,
+            selector.values.sorted().joined(separator: "\u{1f}")
+        ].joined(separator: "\u{1e}")
+    }
+
+    private static func isSchedulingIdentifier(_ value: String) -> Bool {
+        value.utf8.count <= 128 &&
+            value.range(of: #"^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$"#, options: .regularExpression) != nil
+    }
+
+    private static func isSchedulingText(_ value: String) -> Bool {
+        !value.isEmpty && value.utf8.count <= 128 &&
+            value == value.trimmingCharacters(in: .whitespacesAndNewlines) &&
+            !value.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) }
     }
 
     private static func validateHostAccess(
@@ -1261,7 +1768,7 @@ public enum ManifestValidator {
             issues.append(
                 ManifestIssue(
                     code: .manifestValidationFailed,
-                    message: "imageTrust is supported only in manifest version 2."
+                    message: "imageTrust is supported only in manifest version 3."
                 )
             )
             return
@@ -1350,7 +1857,7 @@ public enum ManifestValidator {
             issues.append(
                 ManifestIssue(
                     code: .manifestValidationFailed,
-                    message: "imageSBOM is supported only in manifest version 2."
+                    message: "imageSBOM is supported only in manifest version 3."
                 )
             )
             return
@@ -1394,7 +1901,7 @@ public enum ManifestValidator {
             issues.append(
                 ManifestIssue(
                     code: .manifestValidationFailed,
-                    message: "imageVulnerability is supported only in manifest version 2."
+                    message: "imageVulnerability is supported only in manifest version 3."
                 )
             )
             return
@@ -1644,7 +2151,7 @@ public enum ManifestValidator {
             issues.append(
                 ManifestIssue(
                     code: .manifestValidationFailed,
-                    message: "imageProvenance is supported only in manifest version 2."
+                    message: "imageProvenance is supported only in manifest version 3."
                 )
             )
             return
@@ -3059,7 +3566,9 @@ public enum ManifestValidator {
                 }
             }
             guard rendered != nil else { return nil }
-            return String(cString: buffer)
+            guard let terminator = buffer.firstIndex(of: 0) else { return nil }
+            let utf8 = buffer[..<terminator].map { UInt8(bitPattern: $0) }
+            return String(decoding: utf8, as: UTF8.self)
         }
     }
 

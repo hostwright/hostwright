@@ -1,0 +1,797 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hostwright.dev/schemas/hostwright-release-qualification.schema.json",
+  "title": "Hostwright release qualification contracts",
+  "description": "Schema version 1 for strict, canonical release-qualification plans, detections, evidence, and private-ledger records. The Swift decoder is the normative validator.",
+  "oneOf": [
+    { "$ref": "#/$defs/planDocument" },
+    { "$ref": "#/$defs/detectionDocument" },
+    { "$ref": "#/$defs/evidence" },
+    { "$ref": "#/$defs/journal" },
+    { "$ref": "#/$defs/ledgerSummary" },
+    { "$ref": "#/$defs/resumeReport" },
+    { "$ref": "#/$defs/registry" },
+    { "$ref": "#/$defs/safeCheckResult" }
+  ],
+  "$defs": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "commit": {
+      "type": "string",
+      "pattern": "^(?!0{40}$)[a-f0-9]{40}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[^\\r\\n]+Z$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+    },
+    "availability": {
+      "type": "object",
+      "required": ["status"],
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "enum": ["available", "unavailable", "malformed"]
+        },
+        "reason": {
+          "enum": [
+            "unknownFact",
+            "unavailableFact",
+            "malformedFact",
+            "sourceCommitUnavailable",
+            "dirtySource",
+            "futureVersion",
+            "unsupportedVersion",
+            "unsupportedMacOSVersion",
+            "unsupportedArchitecture",
+            "unsupportedHardware",
+            "unsupportedProvider",
+            "unsupportedClient",
+            "unsupportedMatrixCell",
+            "mixedVersions",
+            "missingTool",
+            "missingCorpus",
+            "corpusMismatch",
+            "phase08ReleaseUnavailable",
+            "outputLimitExceeded",
+            "unsafePath",
+            "missingExplicitAuthority",
+            "liveRuntimePhase08Boundary",
+            "heavyLaneNotExecutable",
+            "sanitizerUnavailable",
+            "fuzzingProviderUnavailable",
+            "dependencyUnavailable",
+            "sastToolUnavailable",
+            "secretScanUnavailable",
+            "licenseMetadataUnavailable",
+            "externalAssessmentUnavailable",
+            "signingNotAuthorized",
+            "publicationNotAuthorized",
+            "simulatedEvidence",
+            "fixtureEvidence",
+            "mockEvidence",
+            "staleEvidence",
+            "tamperedEvidence",
+            "artifactOwnershipUnproven",
+            "unmanagedPath",
+            "cancellation",
+            "futureSchema",
+            "schemaMismatch",
+            "noSupportedClaim"
+          ]
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "required": ["availability", "commit", "dirty", "dirtyStateSHA256"],
+      "additionalProperties": false,
+      "properties": {
+        "availability": { "$ref": "#/$defs/availability" },
+        "commit": { "$ref": "#/$defs/commit" },
+        "dirty": { "type": "boolean" },
+        "dirtyStateSHA256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "phase08Release": {
+      "type": "object",
+      "required": ["availability", "releaseCommit", "sourceContainsRelease"],
+      "additionalProperties": false,
+      "properties": {
+        "availability": { "$ref": "#/$defs/availability" },
+        "releaseCommit": {
+          "anyOf": [
+            { "$ref": "#/$defs/commit" },
+            { "type": "null" }
+          ]
+        },
+        "sourceContainsRelease": {
+          "type": ["boolean", "null"]
+        }
+      }
+    },
+    "host": {
+      "type": "object",
+      "required": [
+        "availability",
+        "macOSVersion",
+        "build",
+        "architecture",
+        "hardwareModel",
+        "memoryBytes",
+        "arm64Capability"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "availability": { "$ref": "#/$defs/availability" },
+        "macOSVersion": { "$ref": "#/$defs/version" },
+        "build": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "architecture": { "enum": ["arm64", "x86_64", "unknown"] },
+        "hardwareModel": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "memoryBytes": { "type": "integer", "minimum": 1 },
+        "arm64Capability": { "type": "boolean" }
+      }
+    },
+    "commandIdentity": {
+      "type": "object",
+      "required": ["executablePath", "arguments", "workingDirectory", "purpose"],
+      "additionalProperties": false,
+      "properties": {
+        "executablePath": { "type": "string", "pattern": "^/[^\\r\\n]+$" },
+        "arguments": {
+          "type": "array",
+          "maxItems": 64,
+          "items": { "type": "string", "maxLength": 4096 }
+        },
+        "workingDirectory": { "type": "string", "pattern": "^/[^\\r\\n]+$" },
+        "purpose": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+    "command": {
+      "type": "object",
+      "required": [
+        "identity",
+        "startedAt",
+        "endedAt",
+        "durationMilliseconds",
+        "exitStatus",
+        "standardOutputSHA256",
+        "standardErrorSHA256",
+        "standardOutputBytes",
+        "standardErrorBytes",
+        "standardOutputTruncated",
+        "standardErrorTruncated"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "identity": { "$ref": "#/$defs/commandIdentity" },
+        "startedAt": { "$ref": "#/$defs/timestamp" },
+        "endedAt": { "$ref": "#/$defs/timestamp" },
+        "durationMilliseconds": { "type": "integer", "minimum": 0 },
+        "exitStatus": { "type": "integer" },
+        "standardOutputSHA256": { "$ref": "#/$defs/sha256" },
+        "standardErrorSHA256": { "$ref": "#/$defs/sha256" },
+        "standardOutputBytes": { "type": "integer", "minimum": 0 },
+        "standardErrorBytes": { "type": "integer", "minimum": 0 },
+        "standardOutputTruncated": { "type": "boolean" },
+        "standardErrorTruncated": { "type": "boolean" }
+      }
+    },
+    "tool": {
+      "type": "object",
+      "required": ["tool", "origin", "availability"],
+      "additionalProperties": false,
+      "properties": {
+        "tool": { "type": "string", "minLength": 1 },
+        "origin": {
+          "enum": ["process", "committed-manifest", "package-resolved"]
+        },
+        "availability": { "$ref": "#/$defs/availability" },
+        "executablePath": {
+          "type": ["string", "null"],
+          "pattern": "^/[^\\r\\n]+$"
+        },
+        "version": {
+          "anyOf": [
+            { "$ref": "#/$defs/version" },
+            { "type": "null" }
+          ]
+        },
+        "rawOutputSHA256": {
+          "anyOf": [
+            { "$ref": "#/$defs/sha256" },
+            { "type": "null" }
+          ]
+        },
+        "command": {
+          "anyOf": [
+            { "$ref": "#/$defs/commandIdentity" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "required": ["schemaVersion", "source", "host", "tools", "commands"],
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": { "$ref": "#/$defs/schemaVersion" },
+        "source": { "$ref": "#/$defs/source" },
+        "phase08Release": {
+          "anyOf": [
+            { "$ref": "#/$defs/phase08Release" },
+            { "type": "null" }
+          ]
+        },
+        "host": { "$ref": "#/$defs/host" },
+        "tools": {
+          "type": "array",
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/tool" }
+        },
+        "commands": {
+          "type": "array",
+          "maxItems": 256,
+          "items": { "$ref": "#/$defs/command" }
+        }
+      }
+    },
+    "blocker": {
+      "type": "object",
+      "required": ["reason", "field", "detail"],
+      "additionalProperties": false,
+      "properties": {
+        "reason": { "$ref": "#/$defs/availability/properties/reason" },
+        "field": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "detail": { "type": "string", "minLength": 1, "maxLength": 1024 }
+      }
+    },
+    "claim": {
+      "type": "object",
+      "required": [
+        "id",
+        "title",
+        "matrixCellID",
+        "executionMode",
+        "authority",
+        "requiredEvidenceClasses",
+        "requiresCleanSource",
+        "requiresRealEvidence"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+        },
+        "title": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "matrixCellID": {
+          "type": ["string", "null"],
+          "maxLength": 128
+        },
+        "executionMode": {
+          "enum": [
+            "safe-local",
+            "live-runtime",
+            "heavy",
+            "signing",
+            "external-authority",
+            "public-action"
+          ]
+        },
+        "authority": {
+          "enum": [
+            "local",
+            "phase08-runtime",
+            "future-provider",
+            "independent-assessor",
+            "signing-identity",
+            "public-maintainer",
+            "homebrew-core"
+          ]
+        },
+        "requiredEvidenceClasses": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "requiresCleanSource": { "type": "boolean" },
+        "requiresRealEvidence": { "type": "boolean" }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "required": [
+        "relativePath",
+        "sha256",
+        "sizeBytes",
+        "retention",
+        "ownershipToken"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "relativePath": {
+          "type": "string",
+          "pattern": "^[^/].*$",
+          "maxLength": 4096
+        },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "sizeBytes": { "type": "integer", "minimum": 0 },
+        "retention": { "enum": ["retain", "remove-on-cleanup"] },
+        "ownershipToken": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{32}$"
+        }
+      }
+    },
+    "outcome": {
+      "enum": [
+        "passed",
+        "failed",
+        "blocked",
+        "skipped",
+        "cancelled",
+        "stale",
+        "dirty",
+        "mock",
+        "fixture",
+        "unavailable"
+      ]
+    },
+    "evidenceClass": {
+      "enum": [
+        "unit-contract",
+        "local-integration",
+        "live-runtime",
+        "hardware-benchmark",
+        "distribution-artifact",
+        "migration-upgrade",
+        "security-assessment",
+        "resilience-chaos",
+        "multi-host",
+        "interop-conformance",
+        "ux-accessibility"
+      ]
+    },
+    "evidence": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "runID",
+        "claim",
+        "evidenceClass",
+        "status",
+        "simulation",
+        "source",
+        "environment",
+        "startedAt",
+        "endedAt",
+        "durationMilliseconds",
+        "commands",
+        "rawOutputSHA256",
+        "artifacts",
+        "blockers",
+        "failures",
+        "replayKey"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": { "$ref": "#/$defs/schemaVersion" },
+        "runID": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "claim": { "$ref": "#/$defs/claim" },
+        "evidenceClass": { "$ref": "#/$defs/evidenceClass" },
+        "status": { "$ref": "#/$defs/outcome" },
+        "simulation": { "enum": ["real", "mock", "fixture"] },
+        "source": { "$ref": "#/$defs/source" },
+        "environment": { "$ref": "#/$defs/environment" },
+        "startedAt": { "$ref": "#/$defs/timestamp" },
+        "endedAt": { "$ref": "#/$defs/timestamp" },
+        "durationMilliseconds": { "type": "integer", "minimum": 0 },
+        "commands": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "items": { "$ref": "#/$defs/command" }
+        },
+        "rawOutputSHA256": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/sha256" }
+        },
+        "artifacts": {
+          "type": "array",
+          "maxItems": 256,
+          "items": { "$ref": "#/$defs/artifact" }
+        },
+        "blockers": {
+          "type": "array",
+          "maxItems": 128,
+          "items": { "$ref": "#/$defs/blocker" }
+        },
+        "failures": {
+          "type": "array",
+          "maxItems": 128,
+          "items": { "type": "string", "minLength": 1, "maxLength": 1024 }
+        },
+        "replayKey": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "matrixCell": {
+      "type": "object",
+      "required": [
+        "id",
+        "macOSMajor",
+        "architecture",
+        "hardware",
+        "provider",
+        "requiredTools",
+        "requiredEvidenceClasses",
+        "executionMode",
+        "authority",
+        "claim"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$" },
+        "macOSMajor": { "type": "integer", "minimum": 1 },
+        "architecture": { "enum": ["arm64", "x86_64", "unknown"] },
+        "hardware": { "enum": ["apple-silicon"] },
+        "provider": {
+          "enum": ["apple-container-cli", "apple-containerization"]
+        },
+        "runtimeVersion": {
+          "anyOf": [
+            { "$ref": "#/$defs/version" },
+            { "type": "null" }
+          ]
+        },
+        "frameworkVersion": {
+          "anyOf": [
+            { "$ref": "#/$defs/version" },
+            { "type": "null" }
+          ]
+        },
+        "requiredTools": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "requiredEvidenceClasses": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "executionMode": { "$ref": "#/$defs/claim/properties/executionMode" },
+        "authority": { "$ref": "#/$defs/claim/properties/authority" },
+        "claim": { "type": "string", "minLength": 1, "maxLength": 1024 }
+      }
+    },
+    "matrix": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "releaseTarget",
+        "macOSMajors",
+        "architectures",
+        "hardwareCells",
+        "appleContainerVersions",
+        "containerizationVersions",
+        "kubernetesVersions",
+        "dockerAPIVersions",
+        "clientFamilies",
+        "providers",
+        "cells"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": { "$ref": "#/$defs/schemaVersion" },
+        "releaseTarget": { "type": "string", "const": "v0.0.2" },
+        "macOSMajors": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "integer", "minimum": 1 }
+        },
+        "architectures": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "enum": ["arm64", "x86_64", "unknown"] }
+        },
+        "hardwareCells": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "enum": ["apple-silicon"] }
+        },
+        "appleContainerVersions": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/version" }
+        },
+        "containerizationVersions": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/version" }
+        },
+        "kubernetesVersions": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/version" }
+        },
+        "dockerAPIVersions": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/version" }
+        },
+        "clientFamilies": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "providers": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "cells": {
+          "type": "array",
+          "maxItems": 256,
+          "items": { "$ref": "#/$defs/matrixCell" }
+        }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "required": [
+        "maximumDurationSeconds",
+        "maximumCPUHours",
+        "maximumInputBytes",
+        "maximumOutputBytes"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "maximumDurationSeconds": { "type": "integer", "minimum": 1 },
+        "maximumCPUHours": { "type": "integer", "minimum": 0 },
+        "maximumInputBytes": { "type": "integer", "minimum": 0 },
+        "maximumOutputBytes": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "corpus": {
+      "type": "object",
+      "required": ["id", "relativePath", "sha256", "sizeBytes", "expectation"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$" },
+        "relativePath": { "type": "string", "pattern": "^[^/].*$" },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "sizeBytes": { "type": "integer", "minimum": 0 },
+        "expectation": { "enum": ["accept", "reject"] }
+      }
+    },
+    "lane": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "target",
+        "executionMode",
+        "authority",
+        "requiredEvidenceClasses",
+        "budget",
+        "corpus",
+        "exclusions"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$" },
+        "kind": {
+          "enum": [
+            "parser-fuzz",
+            "protocol-fuzz",
+            "sanitizer",
+            "dependency",
+            "sast",
+            "secret",
+            "license",
+            "sbom",
+            "provenance",
+            "signing",
+            "performance",
+            "disaster-recovery",
+            "upgrade-lineage",
+            "distribution",
+            "public-submission"
+          ]
+        },
+        "target": { "type": "string", "minLength": 1 },
+        "executionMode": { "$ref": "#/$defs/claim/properties/executionMode" },
+        "authority": { "$ref": "#/$defs/claim/properties/authority" },
+        "requiredEvidenceClasses": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "budget": { "$ref": "#/$defs/budget" },
+        "corpus": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/corpus" }
+        },
+        "exclusions": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "registry": {
+      "type": "object",
+      "required": ["schemaVersion", "lanes"],
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": { "$ref": "#/$defs/schemaVersion" },
+        "lanes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/lane" }
+        }
+      }
+    },
+    "lanePlan": {
+      "type": "object",
+      "required": ["laneID", "status", "blockers", "observedCorpus"],
+      "additionalProperties": false,
+      "properties": {
+        "laneID": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["ready", "blocked", "unavailable"] },
+        "blockers": {
+          "type": "array",
+          "maxItems": 128,
+          "items": { "$ref": "#/$defs/blocker" }
+        },
+        "observedCorpus": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/corpus" }
+        }
+      }
+    },
+    "planDocument": {
+      "type": "object",
+      "required": ["schemaVersion", "kind", "matrix", "registry", "lanes"],
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": { "$ref": "#/$defs/schemaVersion" },
+        "kind": { "const": "hostwright.release-qualification.plan.v1" },
+        "matrix": { "$ref": "#/$defs/matrix" },
+        "registry": { "$ref": "#/$defs/registry" },
+        "lanes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/lanePlan" }
+        }
+      }
+    },
+    "evaluation": {
+      "type": "object",
+      "required": ["cellID", "status", "blockers", "matched"],
+      "additionalProperties": false,
+      "properties": {
+        "cellID": { "type": "string", "minLength": 1 },
+        "status": { "$ref": "#/$defs/outcome" },
+        "blockers": {
+          "type": "array",
+          "maxItems": 128,
+          "items": { "$ref": "#/$defs/blocker" }
+        },
+        "matched": { "type": "boolean" }
+      }
+    },
+    "detectionDocument": {
+      "type": "object",
+      "required": ["schemaVersion", "kind", "environment", "evaluations"],
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": { "$ref": "#/$defs/schemaVersion" },
+        "kind": { "const": "hostwright.release-qualification.detect.v1" },
+        "environment": { "$ref": "#/$defs/environment" },
+        "evaluations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/evaluation" }
+        }
+      }
+    },
+    "journal": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "runID",
+        "state",
+        "claim",
+        "replayKey",
+        "createdAt",
+        "updatedAt",
+        "evidence"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": { "$ref": "#/$defs/schemaVersion" },
+        "runID": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$" },
+        "state": { "enum": ["running", "interrupted", "completed", "cancelled"] },
+        "claim": { "$ref": "#/$defs/claim" },
+        "replayKey": { "$ref": "#/$defs/sha256" },
+        "createdAt": { "$ref": "#/$defs/timestamp" },
+        "updatedAt": { "$ref": "#/$defs/timestamp" },
+        "evidence": {
+          "anyOf": [
+            { "$ref": "#/$defs/evidence" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "ledgerSummary": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "running",
+        "interrupted",
+        "completed",
+        "cancelled",
+        "satisfyingGates"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": { "$ref": "#/$defs/schemaVersion" },
+        "running": { "type": "integer", "minimum": 0 },
+        "interrupted": { "type": "integer", "minimum": 0 },
+        "completed": { "type": "integer", "minimum": 0 },
+        "cancelled": { "type": "integer", "minimum": 0 },
+        "satisfyingGates": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "resumeReport": {
+      "type": "object",
+      "required": ["recoveredRunIDs", "summary"],
+      "additionalProperties": false,
+      "properties": {
+        "recoveredRunIDs": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "summary": { "$ref": "#/$defs/ledgerSummary" }
+      }
+    },
+    "safeCheckResult": {
+      "type": "object",
+      "required": ["checkID", "status", "scannedBytes", "blockers", "failures"],
+      "additionalProperties": false,
+      "properties": {
+        "checkID": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$" },
+        "status": { "$ref": "#/$defs/outcome" },
+        "scannedBytes": { "type": "integer", "minimum": 0 },
+        "blockers": {
+          "type": "array",
+          "maxItems": 128,
+          "items": { "$ref": "#/$defs/blocker" }
+        },
+        "failures": {
+          "type": "array",
+          "maxItems": 128,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

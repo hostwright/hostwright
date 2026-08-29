@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hostwright.dev/schemas/hostwright-yaml.schema.json",
-  "title": "Hostwright Manifest v2",
-  "description": "Strict, bounded Hostwright Manifest v2 workload contract.",
+  "title": "Hostwright Manifest v3",
+  "description": "Strict, bounded Hostwright Manifest v3 workload contract.",
   "type": "object",
   "required": ["version", "project", "services"],
   "additionalProperties": false,
@@ -93,7 +93,7 @@
   "properties": {
     "version": {
       "type": "integer",
-      "const": 2
+      "const": 3
     },
     "project": {
       "$ref": "#/$defs/name"
@@ -1045,6 +1045,9 @@
         "resources": {
           "$ref": "#/$defs/resources"
         },
+        "scheduling": {
+          "$ref": "#/$defs/scheduling"
+        },
         "user": {
           "type": "integer",
           "minimum": 0,
@@ -1290,6 +1293,20 @@
     },
     "resources": {
       "type": "object",
+      "required": ["requests", "limits"],
+      "additionalProperties": false,
+      "properties": {
+        "requests": {
+          "$ref": "#/$defs/resourceSet"
+        },
+        "limits": {
+          "$ref": "#/$defs/resourceSet"
+        }
+      }
+    },
+    "resourceSet": {
+      "type": "object",
+      "minProperties": 1,
       "additionalProperties": false,
       "properties": {
         "cpus": {
@@ -1298,6 +1315,219 @@
         },
         "memory": {
           "$ref": "#/$defs/size"
+        },
+        "disk": {
+          "$ref": "#/$defs/size"
+        },
+        "io": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*(Bps|KiBps|MiBps|GiBps)$"
+        },
+        "network": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*(bps|Kbps|Mbps|Gbps)$"
+        },
+        "process": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "scheduling": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "priority": {
+          "type": "integer",
+          "minimum": -100,
+          "maximum": 100
+        },
+        "requiredAffinity": {
+          "$ref": "#/$defs/selectorArray"
+        },
+        "preferredAffinity": {
+          "$ref": "#/$defs/preferenceArray"
+        },
+        "requiredAntiAffinity": {
+          "$ref": "#/$defs/selectorArray"
+        },
+        "preferredAntiAffinity": {
+          "$ref": "#/$defs/preferenceArray"
+        },
+        "topologySpread": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/topologySpread"
+          }
+        },
+        "tolerations": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/toleration"
+          }
+        },
+        "disruption": {
+          "$ref": "#/$defs/disruption"
+        },
+        "preemption": {
+          "enum": ["disabled", "lower-priority"]
+        },
+        "provider": {
+          "$ref": "#/$defs/providerID"
+        },
+        "acceleratorClaims": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/acceleratorClaim"
+          }
+        }
+      }
+    },
+    "selectorArray": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "$ref": "#/$defs/selector"
+      }
+    },
+    "selector": {
+      "type": "object",
+      "required": ["key", "operator"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "operator": {
+          "enum": ["in", "not-in", "exists", "does-not-exist"]
+        },
+        "values": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        }
+      }
+    },
+    "preferenceArray": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "$ref": "#/$defs/preference"
+      }
+    },
+    "preference": {
+      "type": "object",
+      "required": ["weight", "key", "operator"],
+      "additionalProperties": false,
+      "properties": {
+        "weight": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "operator": {
+          "enum": ["in", "not-in", "exists", "does-not-exist"]
+        },
+        "values": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        }
+      }
+    },
+    "topologySpread": {
+      "type": "object",
+      "required": ["topologyKey"],
+      "additionalProperties": false,
+      "properties": {
+        "topologyKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "maxSkew": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "whenUnsatisfiable": {
+          "enum": ["do-not-schedule", "schedule-anyway"]
+        }
+      }
+    },
+    "toleration": {
+      "type": "object",
+      "required": ["operator"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "value": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "effect": {
+          "enum": ["no-schedule", "no-execute"]
+        },
+        "operator": {
+          "enum": ["equals", "exists"]
+        }
+      }
+    },
+    "disruption": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "maxUnavailable": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 256
+        },
+        "minAvailable": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 256
+        }
+      }
+    },
+    "acceleratorClaim": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/name"
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
         }
       }
     },

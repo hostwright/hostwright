@@ -1,6 +1,6 @@
 # Policy Engine
 
-Status: Phase 32 local policy boundary.
+Status: Experimental Phase 10 policy-to-admission boundary.
 
 Hostwright now has a local policy module, `HostwrightPolicy`, for deterministic and explainable safety decisions. The policy engine does not call Apple container, write SQLite, contact registries, upload telemetry, or mutate runtime state.
 
@@ -12,8 +12,8 @@ Hostwright now has a local policy module, `HostwrightPolicy`, for deterministic 
 - Cleanup classification uses policy decisions for ownership-backed and observed-only resources while preserving the existing dry-run/token/confirmation/delete gates.
 - Image policy decisions explain local digest-policy failures without registry calls.
 - Secret-reference decisions fail closed without carrying raw keychain labels in messages or stable keys.
-- Untrusted-manifest, secure-exposure, lifecycle, and accelerator requests have fail-closed policy decisions for current unsupported scope.
-- Advisory scheduling consumes local policy decisions as explanation and scoring inputs without changing policy semantics.
+- Untrusted-manifest and secure-exposure requests have fail-closed policy decisions; lifecycle and accelerator/provider claims are admitted only through the Phase 10 profile and runtime-enforcement gates.
+- Experimental Phase 10 scheduler admission consumes validated policy decisions as placement, capacity, and runtime gates without changing policy semantics.
 
 ## Categories
 
@@ -28,8 +28,8 @@ Hostwright now has a local policy module, `HostwrightPolicy`, for deterministic 
 | Cleanup | Only exact Hostwright-owned non-running containers can become eligible; every other classification fails closed. |
 | Lifecycle | Only existing narrow create, managed-start, managed-restart, and cleanup gates are allowed. Broad lifecycle actions are blockers. |
 | Untrusted manifests | Unsupported fields are blockers. |
-| Accelerators | Apple GPU, ANE, Metal, Core ML, MLX, PyTorch MPS, host-native helpers, and accelerator scheduler dimensions are blockers in current core scope. |
-| Scheduling | Local advisory scheduler reports can reuse policy blockers and warnings, but policy does not place workloads or reserve capacity. |
+| Accelerators | Accelerator claims are profile-gated and map to the scheduler contract, but selected runtime enforcement and host-native execution remain unavailable until their Phase 10 qualification gates pass. |
+| Scheduling | The single `HostwrightScheduler` admission boundary consumes validated policy decisions for placement and capacity; policy evaluation itself remains non-mutating. |
 
 ## Defaults And Overrides
 
@@ -44,4 +44,4 @@ There is no remote policy service, central policy distribution, silent bypass, r
 - Cleanup remains destructive only after dry-run, exact ownership, live observation, eligible lifecycle, token confirmation, and exact identifiers.
 - Secret values and keychain reference labels are redacted from display, state, diagnostics, and policy-facing error surfaces.
 - Policy decisions are diagnostic and gating data. They do not perform remediation automatically.
-- Advisory scheduling remains in memory and non-mutating; it does not change `ReconciliationPlan` hashes, execute runtime actions, or write scheduler state.
+- `HostwrightScheduler` admission consumes policy output at the lifecycle/control boundary; it does not create a second advisory scheduler, bypass runtime/state gates, or mutate state from policy evaluation.

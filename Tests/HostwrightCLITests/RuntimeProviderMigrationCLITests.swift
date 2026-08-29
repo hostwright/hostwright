@@ -25,7 +25,7 @@ final class RuntimeProviderMigrationCLITests: XCTestCase {
             let replacementFence = "44444444-4444-4444-8444-444444444444"
             let advanced = try fixture.store.ownership.advanceFencingToken(
                 resourceIdentifier: try XCTUnwrap(plan.resources.first).resourceIdentifier,
-                runtimeAdapter: RuntimeProviderID.appleContainerCLI.rawValue,
+                runtimeAdapter: RuntimeProviderID.appleContainerization.rawValue,
                 expectedResourceUUID: fixture.resourceUUID,
                 expectedFencingToken: fixture.sourceFence,
                 newFencingToken: replacementFence,
@@ -63,13 +63,13 @@ final class RuntimeProviderMigrationCLITests: XCTestCase {
             XCTAssertTrue(try fixture.store.operationGroupSteps.loadAll().isEmpty)
 
             let project = try fixture.store.desiredStates.loadProject(id: fixture.projectID)
-            XCTAssertEqual(project.mutationProvider, RuntimeProviderID.appleContainerCLI.rawValue)
+            XCTAssertEqual(project.mutationProvider, RuntimeProviderID.appleContainerization.rawValue)
             XCTAssertEqual(project.providerGeneration, 1)
             let ownership = try XCTUnwrap(
                 fixture.store.ownership.loadAll().first { $0.resourceUUID == fixture.resourceUUID }
             )
             XCTAssertEqual(ownership.fencingToken, replacementFence)
-            XCTAssertEqual(ownership.runtimeAdapter, RuntimeProviderID.appleContainerCLI.rawValue)
+            XCTAssertEqual(ownership.runtimeAdapter, RuntimeProviderID.appleContainerization.rawValue)
             XCTAssertEqual(ownership.providerGeneration, 1)
             XCTAssertEqual(ownership.resourceGeneration, 1)
         }
@@ -89,8 +89,8 @@ final class RuntimeProviderMigrationCLITests: XCTestCase {
                 from: Data(dryRun.standardOutput.utf8)
             )
             XCTAssertTrue(plan.confirmationToken.hasPrefix(RuntimeProviderMigrationPlan.confirmationPrefix))
-            XCTAssertEqual(plan.sourceProviderID, .appleContainerCLI)
-            XCTAssertEqual(plan.targetProviderID, .appleContainerization)
+            XCTAssertEqual(plan.sourceProviderID, .appleContainerization)
+            XCTAssertEqual(plan.targetProviderID, .appleContainerCLI)
             XCTAssertEqual(plan.resources.map(\.resourceUUID), [fixture.resourceUUID])
             XCTAssertEqual(
                 try adapterSnapshot(fixture.source).mutations,
@@ -104,7 +104,7 @@ final class RuntimeProviderMigrationCLITests: XCTestCase {
             )
             XCTAssertTrue(try fixture.store.operationGroups.loadAll().isEmpty)
             let before = try fixture.store.desiredStates.loadProject(id: fixture.projectID)
-            XCTAssertEqual(before.mutationProvider, RuntimeProviderID.appleContainerCLI.rawValue)
+            XCTAssertEqual(before.mutationProvider, RuntimeProviderID.appleContainerization.rawValue)
             XCTAssertEqual(before.providerGeneration, 1)
 
             let confirmed = HostwrightCLI.run(
@@ -117,7 +117,7 @@ final class RuntimeProviderMigrationCLITests: XCTestCase {
             XCTAssertEqual(confirmed.exitCode, 0, confirmed.standardError)
             XCTAssertEqual(confirmed.standardError, "")
             let report = try jsonObject(confirmed.standardOutput)
-            XCTAssertEqual(report["providerID"] as? String, RuntimeProviderID.appleContainerization.rawValue)
+            XCTAssertEqual(report["providerID"] as? String, RuntimeProviderID.appleContainerCLI.rawValue)
             XCTAssertEqual(report["providerGeneration"] as? Int, 2)
             XCTAssertEqual(
                 report["checkpoint"] as? Int,
@@ -127,12 +127,12 @@ final class RuntimeProviderMigrationCLITests: XCTestCase {
 
             let after = try fixture.store.desiredStates.loadProject(id: fixture.projectID)
             XCTAssertEqual(after.resourceUUID, before.resourceUUID)
-            XCTAssertEqual(after.mutationProvider, RuntimeProviderID.appleContainerization.rawValue)
+            XCTAssertEqual(after.mutationProvider, RuntimeProviderID.appleContainerCLI.rawValue)
             XCTAssertEqual(after.providerGeneration, 2)
             XCTAssertEqual(
                 try fixture.store.desiredStates.loadDesiredServices(projectID: fixture.projectID)
                     .map(\.mutationProvider),
-                [RuntimeProviderID.appleContainerization.rawValue]
+                [RuntimeProviderID.appleContainerCLI.rawValue]
             )
 
             let ownership = try fixture.store.ownership.loadAll()
@@ -140,7 +140,7 @@ final class RuntimeProviderMigrationCLITests: XCTestCase {
             let targetOwnership = try XCTUnwrap(ownership.first)
             XCTAssertEqual(targetOwnership.resourceUUID, fixture.resourceUUID)
             XCTAssertEqual(targetOwnership.projectResourceUUID, before.resourceUUID)
-            XCTAssertEqual(targetOwnership.runtimeAdapter, RuntimeProviderID.appleContainerization.rawValue)
+            XCTAssertEqual(targetOwnership.runtimeAdapter, RuntimeProviderID.appleContainerCLI.rawValue)
             XCTAssertEqual(targetOwnership.providerGeneration, 2)
             XCTAssertEqual(targetOwnership.resourceGeneration, 1)
             XCTAssertEqual(targetOwnership.projectGeneration, 1)
@@ -153,7 +153,7 @@ final class RuntimeProviderMigrationCLITests: XCTestCase {
             XCTAssertEqual(targetState.resources.count, 1)
             XCTAssertEqual(targetState.resources.first?.resourceUUID, fixture.resourceUUID)
             XCTAssertEqual(targetState.resources.first?.lifecycle, .running)
-            XCTAssertEqual(targetState.resources.first?.providerID, .appleContainerization)
+            XCTAssertEqual(targetState.resources.first?.providerID, .appleContainerCLI)
             XCTAssertEqual(targetState.resources.first?.providerGeneration, 2)
 
             let operations = try fixture.store.operationGroups.loadProject(projectID: fixture.projectID)
@@ -203,11 +203,14 @@ private struct RuntimeProviderMigrationCLIFixture {
 
     init(directory: URL) throws {
         let manifestText = """
-        version: 2
+        version: 3
         project: sample
         services:
           api:
             image: registry.example/api:1.0.0
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
 
         """
         let manifestFilePath = directory.appendingPathComponent("hostwright.yaml").path
@@ -224,7 +227,7 @@ private struct RuntimeProviderMigrationCLIFixture {
             desiredGeneration: 1,
             manifest: manifest,
             timestamp: "2026-07-19T12:00:00Z",
-            mutationProvider: RuntimeProviderID.appleContainerCLI.rawValue
+            mutationProvider: RuntimeProviderID.appleContainerization.rawValue
         )
         let project = try store.desiredStates.loadProject(id: projectID)
         let desired = DesiredRuntimeService(
@@ -236,7 +239,7 @@ private struct RuntimeProviderMigrationCLIFixture {
             projectUUID: project.resourceUUID,
             resourceGeneration: 1,
             projectGeneration: 1,
-            providerID: .appleContainerCLI,
+            providerID: .appleContainerization,
             providerGeneration: 1,
             fencingToken: sourceFence
         )
@@ -247,7 +250,7 @@ private struct RuntimeProviderMigrationCLIFixture {
                 resourceType: "container",
                 projectID: projectID,
                 serviceName: "api",
-                runtimeAdapter: RuntimeProviderID.appleContainerCLI.rawValue,
+                runtimeAdapter: RuntimeProviderID.appleContainerization.rawValue,
                 createdAt: "2026-07-19T12:00:00Z",
                 observedAt: "2026-07-19T12:00:00Z",
                 cleanupEligible: true,
@@ -262,10 +265,10 @@ private struct RuntimeProviderMigrationCLIFixture {
             )
         )
 
-        let sourceSnapshot = runtimeProviderMigrationCLISnapshot(providerID: .appleContainerCLI)
-        let targetSnapshot = runtimeProviderMigrationCLISnapshot(providerID: .appleContainerization)
+        let sourceSnapshot = runtimeProviderMigrationCLISnapshot(providerID: .appleContainerization)
+        let targetSnapshot = runtimeProviderMigrationCLISnapshot(providerID: .appleContainerCLI)
         source = RuntimeProviderMigrationCLIAdapter(
-            providerID: .appleContainerCLI,
+            providerID: .appleContainerization,
             capabilitySnapshot: sourceSnapshot,
             resources: [
                 RuntimeProviderMigrationCLIResource(
@@ -285,7 +288,7 @@ private struct RuntimeProviderMigrationCLIFixture {
             operatingSystem: "linux"
         )
         target = RuntimeProviderMigrationCLIAdapter(
-            providerID: .appleContainerization,
+            providerID: .appleContainerCLI,
             capabilitySnapshot: targetSnapshot,
             resources: [],
             localImages: [image.reference: image]
@@ -313,9 +316,9 @@ private struct RuntimeProviderMigrationCLIFixture {
             runtimeAdapterForProvider: { providerID in
                 switch providerID {
                 case .appleContainerCLI:
-                    return sourceAdapter
-                case .appleContainerization:
                     return targetAdapter
+                case .appleContainerization:
+                    return sourceAdapter
                 default:
                     throw RuntimeProviderSelectionError.providerUnavailable(providerID)
                 }
@@ -333,7 +336,7 @@ private struct RuntimeProviderMigrationCLIFixture {
         [
             "runtime", "migrate", manifestPath,
             "--state-db", databasePath,
-            "--to", "containerization"
+            "--to", "apple-cli"
         ] + mode
     }
 }

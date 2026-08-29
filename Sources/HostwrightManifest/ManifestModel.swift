@@ -789,6 +789,7 @@ public struct HostwrightService: Equatable, Sendable {
     public var replicas: Int
     public var platform: HostwrightPlatform
     public var resources: HostwrightResources?
+    public var scheduling: HostwrightSchedulingPolicy?
     public var user: UInt32?
     public var group: UInt32?
     public var workdir: String?
@@ -823,6 +824,7 @@ public struct HostwrightService: Equatable, Sendable {
         replicas: Int = 1,
         platform: HostwrightPlatform = HostwrightPlatform(),
         resources: HostwrightResources? = nil,
+        scheduling: HostwrightSchedulingPolicy? = nil,
         user: UInt32? = nil,
         group: UInt32? = nil,
         workdir: String? = nil,
@@ -856,6 +858,7 @@ public struct HostwrightService: Equatable, Sendable {
             replicas: replicas,
             platform: platform,
             resources: resources,
+            scheduling: scheduling,
             user: user,
             group: group,
             workdir: workdir,
@@ -892,6 +895,7 @@ public struct HostwrightService: Equatable, Sendable {
         replicas: Int = 1,
         platform: HostwrightPlatform = HostwrightPlatform(),
         resources: HostwrightResources? = nil,
+        scheduling: HostwrightSchedulingPolicy? = nil,
         user: UInt32? = nil,
         group: UInt32? = nil,
         workdir: String? = nil,
@@ -925,6 +929,7 @@ public struct HostwrightService: Equatable, Sendable {
         self.replicas = replicas
         self.platform = platform
         self.resources = resources
+        self.scheduling = scheduling
         self.user = user
         self.group = group
         self.workdir = workdir
@@ -978,13 +983,210 @@ public enum HostwrightArchitecture: String, Equatable, Sendable {
     case amd64
 }
 
-public struct HostwrightResources: Equatable, Sendable {
+public struct HostwrightAcceleratorClaim: Equatable, Sendable {
+    public var name: String
+    public var count: Int
+
+    public init(name: String, count: Int = 1) {
+        self.name = name
+        self.count = count
+    }
+}
+
+public struct HostwrightResourceSet: Equatable, Sendable {
     public var cpus: Int?
     public var memory: String?
+    public var disk: String?
+    public var io: String?
+    public var network: String?
+    public var process: Int?
 
-    public init(cpus: Int? = nil, memory: String? = nil) {
+    public init(
+        cpus: Int? = nil,
+        memory: String? = nil,
+        disk: String? = nil,
+        io: String? = nil,
+        network: String? = nil,
+        process: Int? = nil
+    ) {
         self.cpus = cpus
         self.memory = memory
+        self.disk = disk
+        self.io = io
+        self.network = network
+        self.process = process
+    }
+
+    public var isEmpty: Bool {
+        cpus == nil && memory == nil && disk == nil && io == nil && network == nil &&
+            process == nil
+    }
+}
+
+public struct HostwrightResources: Equatable, Sendable {
+    public var requests: HostwrightResourceSet
+    public var limits: HostwrightResourceSet?
+
+    public init(
+        requests: HostwrightResourceSet = HostwrightResourceSet(),
+        limits: HostwrightResourceSet? = nil
+    ) {
+        self.requests = requests
+        self.limits = limits
+    }
+}
+
+public enum HostwrightAffinityOperator: String, Equatable, Sendable {
+    case `in`
+    case notIn = "not-in"
+    case exists
+    case doesNotExist = "does-not-exist"
+}
+
+public struct HostwrightSchedulingSelector: Equatable, Sendable {
+    public var key: String
+    public var `operator`: HostwrightAffinityOperator
+    public var values: [String]
+
+    public init(
+        key: String,
+        operator: HostwrightAffinityOperator,
+        values: [String] = []
+    ) {
+        self.key = key
+        self.operator = `operator`
+        self.values = values
+    }
+}
+
+public struct HostwrightSchedulingPreference: Equatable, Sendable {
+    public var weight: Int
+    public var match: HostwrightSchedulingSelector
+
+    public init(weight: Int, match: HostwrightSchedulingSelector) {
+        self.weight = weight
+        self.match = match
+    }
+}
+
+public enum HostwrightTopologyUnsatisfiableAction: String, Equatable, Sendable {
+    case doNotSchedule = "do-not-schedule"
+    case scheduleAnyway = "schedule-anyway"
+}
+
+public struct HostwrightTopologySpread: Equatable, Sendable {
+    public var topologyKey: String
+    public var maxSkew: Int
+    public var whenUnsatisfiable: HostwrightTopologyUnsatisfiableAction
+
+    public init(
+        topologyKey: String,
+        maxSkew: Int = 1,
+        whenUnsatisfiable: HostwrightTopologyUnsatisfiableAction = .doNotSchedule
+    ) {
+        self.topologyKey = topologyKey
+        self.maxSkew = maxSkew
+        self.whenUnsatisfiable = whenUnsatisfiable
+    }
+}
+
+public enum HostwrightTolerationOperator: String, Equatable, Sendable {
+    case equals
+    case exists
+}
+
+public enum HostwrightTaintEffect: String, Equatable, Sendable {
+    case noSchedule = "no-schedule"
+    case noExecute = "no-execute"
+}
+
+public struct HostwrightSchedulingToleration: Equatable, Sendable {
+    public var key: String?
+    public var value: String?
+    public var effect: HostwrightTaintEffect?
+    public var `operator`: HostwrightTolerationOperator
+
+    public init(
+        key: String? = nil,
+        value: String? = nil,
+        effect: HostwrightTaintEffect? = nil,
+        operator: HostwrightTolerationOperator
+    ) {
+        self.key = key
+        self.value = value
+        self.effect = effect
+        self.operator = `operator`
+    }
+}
+
+public struct HostwrightDisruptionPolicy: Equatable, Sendable {
+    public var maxUnavailable: Int?
+    public var minAvailable: Int?
+
+    public init(maxUnavailable: Int? = nil, minAvailable: Int? = nil) {
+        self.maxUnavailable = maxUnavailable
+        self.minAvailable = minAvailable
+    }
+
+    public var isEmpty: Bool {
+        maxUnavailable == nil && minAvailable == nil
+    }
+}
+
+public enum HostwrightPreemptionPolicy: String, Equatable, Sendable {
+    case disabled
+    case lowerPriority = "lower-priority"
+}
+
+public struct HostwrightSchedulingPolicy: Equatable, Sendable {
+    public static let maximumRules = 64
+    public static let maximumTopologySpreads = 16
+    public static let maximumTolerations = 64
+    public static let maximumAcceleratorClaims = 16
+
+    public var priority: Int
+    public var requiredAffinity: [HostwrightSchedulingSelector]
+    public var preferredAffinity: [HostwrightSchedulingPreference]
+    public var requiredAntiAffinity: [HostwrightSchedulingSelector]
+    public var preferredAntiAffinity: [HostwrightSchedulingPreference]
+    public var topologySpread: [HostwrightTopologySpread]
+    public var tolerations: [HostwrightSchedulingToleration]
+    public var disruption: HostwrightDisruptionPolicy?
+    public var preemption: HostwrightPreemptionPolicy
+    public var provider: String?
+    public var acceleratorClaims: [HostwrightAcceleratorClaim]
+
+    public init(
+        priority: Int = 0,
+        requiredAffinity: [HostwrightSchedulingSelector] = [],
+        preferredAffinity: [HostwrightSchedulingPreference] = [],
+        requiredAntiAffinity: [HostwrightSchedulingSelector] = [],
+        preferredAntiAffinity: [HostwrightSchedulingPreference] = [],
+        topologySpread: [HostwrightTopologySpread] = [],
+        tolerations: [HostwrightSchedulingToleration] = [],
+        disruption: HostwrightDisruptionPolicy? = nil,
+        preemption: HostwrightPreemptionPolicy = .disabled,
+        provider: String? = nil,
+        acceleratorClaims: [HostwrightAcceleratorClaim] = []
+    ) {
+        self.priority = priority
+        self.requiredAffinity = requiredAffinity
+        self.preferredAffinity = preferredAffinity
+        self.requiredAntiAffinity = requiredAntiAffinity
+        self.preferredAntiAffinity = preferredAntiAffinity
+        self.topologySpread = topologySpread
+        self.tolerations = tolerations
+        self.disruption = disruption
+        self.preemption = preemption
+        self.provider = provider
+        self.acceleratorClaims = acceleratorClaims
+    }
+
+    public var isEmpty: Bool {
+        priority == 0 && requiredAffinity.isEmpty && preferredAffinity.isEmpty &&
+            requiredAntiAffinity.isEmpty && preferredAntiAffinity.isEmpty &&
+            topologySpread.isEmpty && tolerations.isEmpty && disruption == nil &&
+            preemption == .disabled && provider == nil && acceleratorClaims.isEmpty
     }
 }
 

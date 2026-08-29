@@ -253,7 +253,7 @@ final class EventStreamTests: XCTestCase {
         XCTAssertFalse(page.moreAvailable)
     }
 
-    func testSchemaV16EventProjectsIntoV1CursorAfterV17Upgrade() throws {
+    func testSchemaV16EventProjectsIntoV1CursorAfterV20Upgrade() throws {
         try withUnmigratedStore { store in
             try MigrationRunner().apply(to: store, throughVersion: 16)
             let legacy = event("event-v16")
@@ -274,7 +274,7 @@ final class EventStreamTests: XCTestCase {
             }
             try store.migrate()
 
-            XCTAssertEqual(try store.schemaVersion(), 17)
+            XCTAssertEqual(try store.schemaVersion(), MigrationRunner.latestSchemaVersion)
             let page = try store.events.streamPage(after: nil)
             XCTAssertEqual(page.events.map(\.event.id), ["event-v16"])
             XCTAssertEqual(try HostwrightEventCursor(token: page.events[0].cursor).eventID, "event-v16")

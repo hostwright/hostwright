@@ -14,13 +14,14 @@ final class StateTraceTests: XCTestCase {
         XCTAssertEqual(try store.schemaVersion(), 16)
 
         try store.migrate()
-        XCTAssertEqual(try store.schemaVersion(), 17)
+        XCTAssertEqual(try store.schemaVersion(), MigrationRunner.latestSchemaVersion)
         XCTAssertTrue(try store.traces.inspect(limit: 20).traces.isEmpty)
         try store.withValidatedConnection { connection in
             try connection.transaction {
                 try connection.run(
                     "INSERT INTO schema_migrations(version, description, checksum, applied_at) " +
-                        "VALUES (18, 'future', 'future', '2026-08-01T00:00:00Z')"
+                        "VALUES (?, 'future', 'future', '2026-08-01T00:00:00Z')",
+                    bindings: [.int64(Int64(MigrationRunner.latestSchemaVersion + 1))]
                 )
             }
         }

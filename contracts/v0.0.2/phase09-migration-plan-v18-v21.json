@@ -1,0 +1,6 @@
+[
+  { "fromVersion": 17, "toVersion": 18, "ownedTableGroups": ["peer_identities", "control_sessions", "identity_revocations", "control_requests", "idempotency_records"], "requiresVerifiedPreMigrationBackup": true, "oldBinaryPolicy": "safe-refusal", "rollbackPolicy": "restore-backup" },
+  { "fromVersion": 18, "toVersion": 19, "ownedTableGroups": ["audit_segments", "audit_records", "audit_key_metadata", "audit_retention_anchors"], "requiresVerifiedPreMigrationBackup": true, "oldBinaryPolicy": "safe-refusal", "rollbackPolicy": "restore-backup" },
+  { "fromVersion": 19, "toVersion": 20, "ownedTableGroups": ["rbac_roles", "rbac_bindings", "rbac_delegations", "admission_policies", "admission_exceptions", "workload_profiles"], "requiresVerifiedPreMigrationBackup": true, "oldBinaryPolicy": "safe-refusal", "rollbackPolicy": "restore-backup" },
+  { "fromVersion": 20, "toVersion": 21, "ownedTableGroups": ["plugin_packages", "plugin_provenance", "plugin_grants", "plugin_activations", "plugin_revocations", "plugin_quarantine", "plugin_rollback_state"], "requiresVerifiedPreMigrationBackup": true, "oldBinaryPolicy": "safe-refusal", "rollbackPolicy": "restore-backup" }
+]

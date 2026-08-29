@@ -185,7 +185,7 @@ public struct HostwrightEventStreamRecord: Equatable, Sendable {
     public let operationReferences: [String]
     public let auditReference: String?
 
-    fileprivate init(position: UInt64, event: EventRecord) throws {
+    public init(position: UInt64, event: EventRecord) throws {
         let digest = try EventStreamDigest.sha256(event)
         let redacted = event.redacted()
         self.position = position

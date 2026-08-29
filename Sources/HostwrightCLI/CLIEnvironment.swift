@@ -1,9 +1,11 @@
 import Darwin
 import Dispatch
 import Foundation
+import HostwrightControlSecurity
 import HostwrightCore
 import HostwrightDaemonCore
 import HostwrightHealth
+import HostwrightManifest
 import HostwrightObservability
 import HostwrightRegistry
 import HostwrightRuntime
@@ -13,6 +15,7 @@ import HostwrightStorage
 public struct CLIEnvironment: @unchecked Sendable {
     public var fileExists: (String) -> Bool
     public var readTextFile: (String) throws -> String
+    public var readBoundedTextFile: (String, Int) throws -> String
     public var writeTextFile: (String, String) throws -> Void
     public var writeNewTextFile: (String, String) throws -> Void
     public var executablePath: (String) -> String?
@@ -52,6 +55,7 @@ public struct CLIEnvironment: @unchecked Sendable {
     public var benchmarkUUID: () -> UUID
     public var benchmarkNotice: (String) -> Void
     public var daemonLifecycleController: () -> DaemonLifecycleController
+    public var controlIdentityBootstrap: () throws -> Void
     public var observabilitySink: any HostwrightLogSinking
     public var observabilityCorrelationID: () -> String
     public var observabilityStatus: () -> HostwrightObservabilityStatus
@@ -60,6 +64,9 @@ public struct CLIEnvironment: @unchecked Sendable {
     public var eventWatchCancelled: () -> Bool
     public var metricsDate: @Sendable () -> Date
     public var metricsCancelled: () -> Bool
+    public var metricsExport: (
+        Data, String, Int, @escaping () -> Bool
+    ) throws -> (outputSHA256: String, outputBytes: UInt64)
     public var traceDate: @Sendable () -> Date
     public var traceCancelled: () -> Bool
     public var supportDate: @Sendable () -> Date
@@ -70,6 +77,7 @@ public struct CLIEnvironment: @unchecked Sendable {
     public init(
         fileExists: @escaping (String) -> Bool,
         readTextFile: @escaping (String) throws -> String,
+        readBoundedTextFile: ((String, Int) throws -> String)? = nil,
         writeTextFile: @escaping (String, String) throws -> Void,
         writeNewTextFile: @escaping (String, String) throws -> Void = { path, text in
             try hostwrightCreateNewTextFile(path: path, text: text)
@@ -142,6 +150,7 @@ public struct CLIEnvironment: @unchecked Sendable {
         daemonLifecycleController: @escaping () -> DaemonLifecycleController = {
             DaemonLifecycleController()
         },
+        controlIdentityBootstrap: @escaping () throws -> Void = {},
         observabilitySink: any HostwrightLogSinking = DisabledHostwrightLogSink(),
         observabilityCorrelationID: @escaping () -> String = { UUID().uuidString.lowercased() },
         observabilityStatus: @escaping () -> HostwrightObservabilityStatus = {
@@ -156,6 +165,10 @@ public struct CLIEnvironment: @unchecked Sendable {
         eventWatchCancelled: @escaping () -> Bool = { false },
         metricsDate: @escaping @Sendable () -> Date = Date.init,
         metricsCancelled: @escaping () -> Bool = { false },
+        metricsExport: @escaping (
+            Data, String, Int, @escaping () -> Bool
+        ) throws -> (outputSHA256: String, outputBytes: UInt64) =
+            CLIEnvironment.defaultMetricsExport,
         traceDate: @escaping @Sendable () -> Date = Date.init,
         traceCancelled: @escaping () -> Bool = { false },
         supportDate: @escaping @Sendable () -> Date = Date.init,
@@ -167,6 +180,16 @@ public struct CLIEnvironment: @unchecked Sendable {
     ) {
         self.fileExists = fileExists
         self.readTextFile = readTextFile
+        self.readBoundedTextFile = readBoundedTextFile ?? { path, maximumBytes in
+            guard maximumBytes > 0, maximumBytes < Int.max else {
+                throw CLITextFileReadError.invalidLimit
+            }
+            let text = try readTextFile(path)
+            guard text.utf8.count <= maximumBytes else {
+                return String(repeating: "x", count: maximumBytes + 1)
+            }
+            return text
+        }
         self.writeTextFile = writeTextFile
         self.writeNewTextFile = writeNewTextFile
         self.executablePath = executablePath
@@ -229,6 +252,7 @@ public struct CLIEnvironment: @unchecked Sendable {
         self.benchmarkUUID = benchmarkUUID
         self.benchmarkNotice = benchmarkNotice
         self.daemonLifecycleController = daemonLifecycleController
+        self.controlIdentityBootstrap = controlIdentityBootstrap
         self.observabilitySink = observabilitySink
         self.observabilityCorrelationID = observabilityCorrelationID
         self.observabilityStatus = observabilityStatus
@@ -237,6 +261,7 @@ public struct CLIEnvironment: @unchecked Sendable {
         self.eventWatchCancelled = eventWatchCancelled
         self.metricsDate = metricsDate
         self.metricsCancelled = metricsCancelled
+        self.metricsExport = metricsExport
         self.traceDate = traceDate
         self.traceCancelled = traceCancelled
         self.supportDate = supportDate
@@ -245,9 +270,31 @@ public struct CLIEnvironment: @unchecked Sendable {
         self.supportEncrypt = supportEncrypt
     }
 
+    public static func defaultMetricsExport(
+        _ data: Data,
+        _ path: String,
+        _ maximumBytes: Int,
+        _ isCancelled: @escaping () -> Bool
+    ) throws -> (outputSHA256: String, outputBytes: UInt64) {
+        let receipt = try SecureLocalExportWriter.write(
+            data,
+            to: path,
+            maximumBytes: maximumBytes,
+            isCancelled: isCancelled,
+            unsafeError: HostwrightMetricsError.unsafeExportPath
+        )
+        return (receipt.outputSHA256, receipt.outputBytes)
+    }
+
     public static let live = CLIEnvironment(
         fileExists: { FileManager.default.fileExists(atPath: $0) },
         readTextFile: { try String(contentsOfFile: $0, encoding: .utf8) },
+        readBoundedTextFile: { path, maximumBytes in
+            try hostwrightReadBoundedUTF8TextFile(
+                path: path,
+                maximumBytes: maximumBytes
+            )
+        },
         writeTextFile: { path, text in try text.write(toFile: path, atomically: true, encoding: .utf8) },
         writeNewTextFile: { path, text in
             try hostwrightCreateNewTextFile(path: path, text: text)
@@ -332,6 +379,9 @@ public struct CLIEnvironment: @unchecked Sendable {
         benchmarkNotice: { message in
             FileHandle.standardError.write(Data((message + "\n").utf8))
         },
+        controlIdentityBootstrap: {
+            try HostwrightControlIdentityBootstrap.bootstrapAPIProcesses()
+        },
         observabilitySink: HostwrightOSLogSink(),
         observabilityStatus: { HostwrightObservabilityStatus(configuration: .live) },
         supportLogs: { SupportBundleOSLogCollector.collect() },
@@ -339,6 +389,129 @@ public struct CLIEnvironment: @unchecked Sendable {
             try SupportBundlePlatformEncryptor.encrypt(data, recipientReference: recipient)
         }
     )
+}
+
+public extension CLIEnvironment {
+    func resolvingRelativePaths(against workingDirectory: String?) throws -> CLIEnvironment {
+        guard let workingDirectory else { return self }
+        guard workingDirectory.hasPrefix("/"), workingDirectory.utf8.count <= 4_096,
+              URL(fileURLWithPath: workingDirectory).standardizedFileURL.path
+                == workingDirectory else {
+            throw HostwrightLocalPathError.invalidPath(
+                role: "Control API working directory",
+                path: workingDirectory,
+                reason: "the path is not a canonical absolute directory"
+            )
+        }
+        var scoped = self
+        let originalFileExists = fileExists
+        let originalReadTextFile = readTextFile
+        let originalReadBoundedTextFile = readBoundedTextFile
+        let originalWriteTextFile = writeTextFile
+        let originalWriteNewTextFile = writeNewTextFile
+        let originalExecutablePath = executablePath
+        let originalLocalPathResolution = localPathResolution
+        func resolve(_ path: String) -> String {
+            guard !path.hasPrefix("/") else {
+                return URL(fileURLWithPath: path).standardizedFileURL.path
+            }
+            return URL(fileURLWithPath: workingDirectory, isDirectory: true)
+                .appendingPathComponent(path).standardizedFileURL.path
+        }
+        scoped.fileExists = { originalFileExists(resolve($0)) }
+        scoped.readTextFile = { try originalReadTextFile(resolve($0)) }
+        scoped.readBoundedTextFile = { path, maximumBytes in
+            try originalReadBoundedTextFile(resolve(path), maximumBytes)
+        }
+        scoped.writeTextFile = { try originalWriteTextFile(resolve($0), $1) }
+        scoped.writeNewTextFile = { try originalWriteNewTextFile(resolve($0), $1) }
+        scoped.executablePath = { value in
+            value.contains("/") ? originalExecutablePath(resolve(value)) : originalExecutablePath(value)
+        }
+        scoped.localPathResolution = { explicitPath in
+            try originalLocalPathResolution(explicitPath.map(resolve))
+        }
+        return scoped
+    }
+}
+
+private enum CLITextFileReadError: Error {
+    case invalidLimit
+    case unsafeFile
+    case changedDuringRead
+    case readFailed
+}
+
+func hostwrightReadBoundedUTF8TextFile(
+    path: String,
+    maximumBytes: Int
+) throws -> String {
+    guard maximumBytes > 0, maximumBytes < Int.max else {
+        throw CLITextFileReadError.invalidLimit
+    }
+    let descriptor = Darwin.open(
+        path,
+        O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC
+    )
+    guard descriptor >= 0 else {
+        throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+    }
+    defer { _ = Darwin.close(descriptor) }
+
+    var opened = stat()
+    guard fstat(descriptor, &opened) == 0,
+          opened.st_mode & S_IFMT == S_IFREG,
+          opened.st_size >= 0 else {
+        throw CLITextFileReadError.unsafeFile
+    }
+
+    var data = Data()
+    data.reserveCapacity(min(Int(opened.st_size), maximumBytes + 1))
+    var buffer = [UInt8](repeating: 0, count: 16 * 1_024)
+    while data.count <= maximumBytes {
+        let remaining = maximumBytes + 1 - data.count
+        let count = Darwin.read(descriptor, &buffer, min(buffer.count, remaining))
+        if count < 0, errno == EINTR { continue }
+        guard count >= 0 else {
+            throw CLITextFileReadError.readFailed
+        }
+        if count == 0 { break }
+        data.append(contentsOf: buffer.prefix(count))
+    }
+    guard data.count <= maximumBytes else {
+        var oversizedFinal = stat()
+        guard fstat(descriptor, &oversizedFinal) == 0,
+              oversizedFinal.st_mode & S_IFMT == S_IFREG,
+              oversizedFinal.st_dev == opened.st_dev,
+              oversizedFinal.st_ino == opened.st_ino else {
+            throw CLITextFileReadError.changedDuringRead
+        }
+        return String(repeating: "x", count: maximumBytes + 1)
+    }
+
+    var final = stat()
+    guard fstat(descriptor, &final) == 0,
+          final.st_mode & S_IFMT == S_IFREG,
+          final.st_dev == opened.st_dev,
+          final.st_ino == opened.st_ino,
+          final.st_size == opened.st_size,
+          final.st_size == data.count,
+          final.st_mtimespec.tv_sec == opened.st_mtimespec.tv_sec,
+          final.st_mtimespec.tv_nsec == opened.st_mtimespec.tv_nsec,
+          final.st_ctimespec.tv_sec == opened.st_ctimespec.tv_sec,
+          final.st_ctimespec.tv_nsec == opened.st_ctimespec.tv_nsec else {
+        throw CLITextFileReadError.changedDuringRead
+    }
+    guard let text = String(data: data, encoding: .utf8) else {
+        throw ManifestParseError.failed([
+            ManifestIssue(
+                code: .manifestParseFailed,
+                message: "Manifest must be valid UTF-8 text.",
+                path: "$"
+            )
+        ])
+    }
+    return text
 }
 
 @usableFromInline

@@ -202,17 +202,18 @@ public enum ManifestCanonicalEncoder {
                 lines.append("      architecture: \(quote(service.platform.architecture.rawValue))")
             }
             if let resources = service.resources {
-                if resources.cpus == nil && resources.memory == nil {
+                if resources.requests.isEmpty && resources.limits == nil {
                     lines.append("    resources: {}")
                 } else {
                     lines.append("    resources:")
-                    if let cpus = resources.cpus {
-                        lines.append("      cpus: \(cpus)")
-                    }
-                    if let memory = resources.memory {
-                        lines.append("      memory: \(quote(memory))")
+                    appendResourceSet(resources.requests, key: "requests", indent: 6, to: &lines)
+                    if let limits = resources.limits {
+                        appendResourceSet(limits, key: "limits", indent: 6, to: &lines)
                     }
                 }
+            }
+            if let scheduling = service.scheduling {
+                appendScheduling(scheduling, to: &lines)
             }
             if let user = service.user {
                 lines.append("    user: \(user)")
@@ -329,6 +330,177 @@ public enum ManifestCanonicalEncoder {
             }
             appendStringMap(volume.labels, key: "labels", indent: 4, to: &lines)
         }
+    }
+
+    private static func appendResourceSet(
+        _ values: HostwrightResourceSet,
+        key: String,
+        indent: Int,
+        to lines: inout [String]
+    ) {
+        let prefix = String(repeating: " ", count: indent)
+        if values.isEmpty {
+            lines.append("\(prefix)\(key): {}")
+            return
+        }
+        lines.append("\(prefix)\(key):")
+        let valuePrefix = String(repeating: " ", count: indent + 2)
+        if let cpus = values.cpus {
+            lines.append("\(valuePrefix)cpus: \(cpus)")
+        }
+        if let memory = values.memory {
+            lines.append("\(valuePrefix)memory: \(quote(memory))")
+        }
+        if let disk = values.disk {
+            lines.append("\(valuePrefix)disk: \(quote(disk))")
+        }
+        if let io = values.io {
+            lines.append("\(valuePrefix)io: \(quote(io))")
+        }
+        if let network = values.network {
+            lines.append("\(valuePrefix)network: \(quote(network))")
+        }
+        if let process = values.process {
+            lines.append("\(valuePrefix)process: \(process)")
+        }
+    }
+
+    private static func appendScheduling(
+        _ scheduling: HostwrightSchedulingPolicy,
+        to lines: inout [String]
+    ) {
+        if scheduling.isEmpty {
+            lines.append("    scheduling: {}")
+            return
+        }
+        lines.append("    scheduling:")
+        if scheduling.priority != 0 {
+            lines.append("      priority: \(scheduling.priority)")
+        }
+        appendSelectors(scheduling.requiredAffinity, key: "requiredAffinity", to: &lines)
+        appendPreferences(scheduling.preferredAffinity, key: "preferredAffinity", to: &lines)
+        appendSelectors(scheduling.requiredAntiAffinity, key: "requiredAntiAffinity", to: &lines)
+        appendPreferences(scheduling.preferredAntiAffinity, key: "preferredAntiAffinity", to: &lines)
+        if !scheduling.topologySpread.isEmpty {
+            lines.append("      topologySpread:")
+            for spread in scheduling.topologySpread.sorted(by: {
+                if $0.topologyKey != $1.topologyKey { return $0.topologyKey < $1.topologyKey }
+                return $0.maxSkew < $1.maxSkew
+            }) {
+                lines.append("        - topologyKey: \(quote(spread.topologyKey))")
+                if spread.maxSkew != 1 {
+                    lines.append("          maxSkew: \(spread.maxSkew)")
+                }
+                if spread.whenUnsatisfiable != .doNotSchedule {
+                    lines.append("          whenUnsatisfiable: \(quote(spread.whenUnsatisfiable.rawValue))")
+                }
+            }
+        }
+        if !scheduling.tolerations.isEmpty {
+            lines.append("      tolerations:")
+            for toleration in scheduling.tolerations.sorted(by: { tolerationKey($0) < tolerationKey($1) }) {
+                lines.append("        - operator: \(quote(toleration.operator.rawValue))")
+                if let key = toleration.key {
+                    lines.append("          key: \(quote(key))")
+                }
+                if let value = toleration.value {
+                    lines.append("          value: \(quote(value))")
+                }
+                if let effect = toleration.effect {
+                    lines.append("          effect: \(quote(effect.rawValue))")
+                }
+            }
+        }
+        if let disruption = scheduling.disruption {
+            lines.append("      disruption:")
+            if let maxUnavailable = disruption.maxUnavailable {
+                lines.append("        maxUnavailable: \(maxUnavailable)")
+            }
+            if let minAvailable = disruption.minAvailable {
+                lines.append("        minAvailable: \(minAvailable)")
+            }
+        }
+        if scheduling.preemption != .disabled {
+            lines.append("      preemption: \(quote(scheduling.preemption.rawValue))")
+        }
+        if let provider = scheduling.provider {
+            lines.append("      provider: \(quote(provider))")
+        }
+        if !scheduling.acceleratorClaims.isEmpty {
+            lines.append("      acceleratorClaims:")
+            for claim in scheduling.acceleratorClaims.sorted(by: {
+                if $0.name != $1.name { return $0.name < $1.name }
+                return $0.count < $1.count
+            }) {
+                lines.append("        - name: \(quote(claim.name))")
+                if claim.count != 1 {
+                    lines.append("          count: \(claim.count)")
+                }
+            }
+        }
+    }
+
+    private static func appendSelectors(
+        _ selectors: [HostwrightSchedulingSelector],
+        key: String,
+        to lines: inout [String]
+    ) {
+        guard !selectors.isEmpty else { return }
+        lines.append("      \(key):")
+        for selector in selectors.sorted(by: selectorPrecedes) {
+            lines.append("        - key: \(quote(selector.key))")
+            lines.append("          operator: \(quote(selector.operator.rawValue))")
+            if !selector.values.isEmpty {
+                lines.append("          values:")
+                for value in selector.values.sorted() {
+                    lines.append("            - \(quote(value))")
+                }
+            }
+        }
+    }
+
+    private static func appendPreferences(
+        _ preferences: [HostwrightSchedulingPreference],
+        key: String,
+        to lines: inout [String]
+    ) {
+        guard !preferences.isEmpty else { return }
+        lines.append("      \(key):")
+        for preference in preferences.sorted(by: {
+            if $0.weight != $1.weight { return $0.weight < $1.weight }
+            return selectorKey($0.match) < selectorKey($1.match)
+        }) {
+            lines.append("        - weight: \(preference.weight)")
+            lines.append("          key: \(quote(preference.match.key))")
+            lines.append("          operator: \(quote(preference.match.operator.rawValue))")
+            if !preference.match.values.isEmpty {
+                lines.append("          values:")
+                for value in preference.match.values.sorted() {
+                    lines.append("            - \(quote(value))")
+                }
+            }
+        }
+    }
+
+    private static func selectorPrecedes(
+        _ lhs: HostwrightSchedulingSelector,
+        _ rhs: HostwrightSchedulingSelector
+    ) -> Bool {
+        selectorKey(lhs) < selectorKey(rhs)
+    }
+
+    private static func selectorKey(_ selector: HostwrightSchedulingSelector) -> String {
+        [selector.key, selector.operator.rawValue, selector.values.sorted().joined(separator: "\u{1f}")]
+            .joined(separator: "\u{1e}")
+    }
+
+    private static func tolerationKey(_ toleration: HostwrightSchedulingToleration) -> String {
+        [
+            toleration.key ?? "",
+            toleration.value ?? "",
+            toleration.effect?.rawValue ?? "",
+            toleration.operator.rawValue
+        ].joined(separator: "\u{1e}")
     }
 
     private static func appendNetworkDefinitions(

@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import HostwrightControlPlane
 import HostwrightCore
 import HostwrightRegistry
 
@@ -183,25 +184,32 @@ public struct StateIntegrityService: Sendable {
             ).compactMap { $0.first ?? nil }
         )
         let missingIndexes = Self.requiredIndexes.filter { !presentIndexes.contains($0) }
-        if missingTables.isEmpty, missingIndexes.isEmpty {
+        let presentTriggers = Set(
+            try connection.query(
+                "SELECT name FROM sqlite_master WHERE type = 'trigger'"
+            ).compactMap { $0.first ?? nil }
+        )
+        let missingTriggers = Self.requiredTriggers.filter { !presentTriggers.contains($0) }
+        if missingTables.isEmpty, missingIndexes.isEmpty, missingTriggers.isEmpty {
             checks.append(.init(
                 identifier: "hostwright.schema-objects",
                 status: .passed,
-                message: "All required state tables and indexes are present."
+                message: "All required state tables, indexes, and triggers are present."
             ))
         } else {
             unrecoverable = true
             let missing = (missingTables.map { "table:\($0)" }
-                + missingIndexes.map { "index:\($0)" }).joined(separator: ", ")
+                + missingIndexes.map { "index:\($0)" }
+                + missingTriggers.map { "trigger:\($0)" }).joined(separator: ", ")
             checks.append(.init(
                 identifier: "hostwright.schema-objects",
                 status: .failed,
                 message: "Missing required schema object(s): \(missing).",
-                affectedRows: missingTables.count + missingIndexes.count
+                affectedRows: missingTables.count + missingIndexes.count + missingTriggers.count
             ))
         }
 
-        if missingTables.isEmpty, missingIndexes.isEmpty {
+        if missingTables.isEmpty, missingIndexes.isEmpty, missingTriggers.isEmpty {
             let sqlAuthoritativeProblems = try count(
                 connection,
                 sql: """
@@ -225,6 +233,19 @@ public struct StateIntegrityService: Sendable {
                      WHERE id = '' OR timestamp = '' OR type = '' OR source = '' OR message = ''
                         OR severity NOT IN ('info', 'warning', 'error')
                         OR json_type(CASE WHEN json_valid(payload_json_redacted) THEN payload_json_redacted ELSE 'null' END) != 'object')
+                  + (SELECT COUNT(*) FROM accelerator_state_journal
+                     WHERE id = '' OR timestamp = '' OR type NOT LIKE 'accelerator.state.%'
+                        OR source != 'accelerator-state-journal'
+                        OR severity != 'info' OR message != 'durable accelerator state append'
+                        OR json_type(CASE WHEN json_valid(payload_json_redacted) THEN payload_json_redacted ELSE 'null' END) != 'object'
+                        OR json_extract(payload_json_redacted, '$.envelopeVersion') != 1)
+                  + (SELECT COUNT(*) FROM accelerator_state_current
+                     WHERE id = '' OR timestamp = '' OR type NOT LIKE 'accelerator.state.%'
+                        OR source != 'accelerator-state-journal'
+                        OR severity != 'info' OR message != 'durable accelerator state append'
+                        OR record_id = '' OR generation < 1
+                        OR json_type(CASE WHEN json_valid(payload_json_redacted) THEN payload_json_redacted ELSE 'null' END) != 'object'
+                        OR json_extract(payload_json_redacted, '$.envelopeVersion') != 1)
                   + (SELECT COUNT(*) FROM operation_ledger
                      WHERE id = '' OR created_at = '' OR updated_at = '' OR planned_action_type = ''
                         OR status NOT IN ('planned', 'recorded', 'succeeded', 'failed', 'abandoned')
@@ -265,6 +286,46 @@ public struct StateIntegrityService: Sendable {
                         OR length(policy_sha256) != 64 OR policy_sha256 GLOB '*[^0-9a-f]*'
                         OR (hold_token IS NOT NULL AND (length(hold_token) != 64 OR hold_token GLOB '*[^0-9a-f]*'))
                         OR json_type(CASE WHEN json_valid(metadata_json_redacted) THEN metadata_json_redacted ELSE 'null' END) != 'object')
+                  + (SELECT COUNT(*) FROM peer_identities
+                     WHERE subject_id = '' OR user_id < 0 OR signing_identifier = '' OR generation < 1
+                        OR length(code_directory_hash) NOT IN (40, 64)
+                        OR code_directory_hash GLOB '*[^0-9a-f]*'
+                        OR validation_mode NOT IN ('installedRequirement', 'pinnedAdHoc')
+                        OR (validation_mode = 'installedRequirement' AND team_identifier IS NULL)
+                        OR (validation_mode = 'pinnedAdHoc' AND team_identifier IS NOT NULL)
+                        OR (credential_id IS NULL) != (credential_public_key_base64 IS NULL)
+                        OR julianday(declared_at) IS NULL OR julianday(updated_at) IS NULL)
+                  + (SELECT COUNT(*) FROM control_sessions
+                     WHERE session_id = '' OR subject_id = '' OR daemon_generation < 1
+                        OR length(server_nonce_sha256) != 64 OR server_nonce_sha256 GLOB '*[^0-9a-f]*'
+                        OR socket_device < 0 OR socket_inode < 1 OR euid < 0 OR egid < 0
+                        OR pid < 1 OR pid_version < 0 OR audit_session_id < 0
+                        OR length(code_directory_hash) NOT IN (40, 64)
+                        OR code_directory_hash GLOB '*[^0-9a-f]*'
+                        OR julianday(created_at) IS NULL OR julianday(expires_at) IS NULL
+                        OR julianday(expires_at) <= julianday(created_at) OR julianday(updated_at) IS NULL)
+                  + (SELECT COUNT(*) FROM identity_revocations
+                     WHERE revocation_id = '' OR target_identifier = '' OR reason = ''
+                        OR target_kind NOT IN ('subject', 'credential', 'codeHash', 'session')
+                        OR (target_kind = 'codeHash' AND (length(target_identifier) NOT IN (40, 64) OR target_identifier GLOB '*[^0-9a-f]*'))
+                        OR actor_subject_id = '' OR julianday(revoked_at) IS NULL)
+                  + (SELECT COUNT(*) FROM control_requests
+                     WHERE request_id = '' OR subject_id = ''
+                        OR length(request_digest_sha256) != 64 OR request_digest_sha256 GLOB '*[^0-9a-f]*'
+                        OR status NOT IN ('accepted', 'completed', 'rejected', 'error')
+                        OR (response_json IS NOT NULL AND (length(response_json) NOT BETWEEN 2 AND 1048576 OR NOT json_valid(response_json)))
+                        OR (response_json IS NOT NULL AND (
+                          COALESCE(json_extract(CASE WHEN json_valid(response_json) THEN response_json ELSE '{}' END, '$.requestID'), '') != request_id
+                          OR COALESCE(json_extract(CASE WHEN json_valid(response_json) THEN response_json ELSE '{}' END, '$.status'), '') != status
+                          OR COALESCE(json_extract(CASE WHEN json_valid(response_json) THEN response_json ELSE '{}' END, '$.operationRef'), '') != COALESCE(operation_reference, '')
+                        ))
+                        OR julianday(created_at) IS NULL OR julianday(updated_at) IS NULL)
+                  + (SELECT COUNT(*) FROM idempotency_records
+                     WHERE subject_id = '' OR idempotency_key = '' OR request_id = ''
+                        OR length(request_digest_sha256) != 64 OR request_digest_sha256 GLOB '*[^0-9a-f]*'
+                        OR status NOT IN ('accepted', 'completed', 'rejected', 'error')
+                        OR julianday(created_at) IS NULL OR julianday(expires_at) IS NULL
+                        OR julianday(expires_at) <= julianday(created_at))
                   + (SELECT COUNT(*) FROM restart_recovery_records
                      WHERE id = '' OR operation_id = '' OR service_name = '' OR resource_identifier = ''
                         OR plan_hash = '' OR created_at = '' OR updated_at = ''
@@ -664,6 +725,141 @@ public struct StateIntegrityService: Sendable {
             let invalidServiceTunnelContent =
                 try ServiceTunnelStateRepository
                     .invalidStoredRecordCount(on: connection)
+            let invalidAuditStructure = try count(
+                connection,
+                sql: """
+                SELECT
+                    (SELECT COUNT(*)
+                     FROM audit_records record
+                     JOIN audit_segments segment ON segment.segment_id = record.segment_id
+                     WHERE segment.first_sequence != record.sequence
+                        OR segment.last_sequence != record.sequence
+                        OR segment.record_count != 1
+                        OR segment.first_record_digest != record.record_digest
+                        OR segment.last_record_digest != record.record_digest
+                        OR segment.key_id != record.signing_key_id
+                        OR length(record.canonical_json) > 1048576)
+                  + (SELECT COUNT(*)
+                     FROM audit_segments segment
+                     LEFT JOIN audit_records record ON record.segment_id = segment.segment_id
+                     WHERE record.record_id IS NULL)
+                  + (SELECT CASE WHEN COUNT(*) > 1 THEN COUNT(*) ELSE 0 END
+                     FROM audit_key_metadata WHERE status = 'active')
+                  + (SELECT COUNT(*)
+                     FROM audit_key_metadata
+                     WHERE public_key_sha256 != substr(key_id, 6)
+                        OR length(public_key_sha256) != 64
+                        OR public_key_sha256 GLOB '*[^0-9a-f]*')
+                  + (SELECT COUNT(*)
+                     FROM audit_retention_anchors
+                     WHERE removed_through_ordinal < 1
+                        OR length(canonical_json) > 1048576)
+                """
+            )
+            let invalidPolicyProfileStructure = try count(
+                connection,
+                sql: """
+                SELECT
+                    (SELECT CASE
+                        WHEN (SELECT COUNT(*) FROM peer_identities) = 0 THEN
+                            CASE WHEN (SELECT COUNT(*) FROM rbac_bindings WHERE role_id = 'owner' AND scope_kind = 'global') = 0 THEN 0 ELSE 1 END
+                        WHEN (SELECT COUNT(*) FROM rbac_bindings WHERE role_id = 'owner' AND scope_kind = 'global') >= 1 THEN 0
+                        ELSE 1
+                    END)
+                  + (SELECT CASE
+                        WHEN COUNT(*) = 5
+                         AND SUM(CASE WHEN role_id IN ('viewer','operator','maintainer','security-admin','owner') THEN 1 ELSE 0 END) = 5
+                        THEN 0 ELSE 1 END
+                     FROM rbac_roles WHERE built_in = 1)
+                  + (SELECT COUNT(*) FROM rbac_roles
+                     WHERE role_id = '' OR built_in NOT IN (0, 1) OR generation < 1
+                        OR json_type(CASE WHEN json_valid(rules_json) THEN rules_json ELSE 'null' END) != 'array'
+                        OR length(rules_json) > 262144
+                        OR julianday(created_at) IS NULL OR julianday(updated_at) IS NULL
+                        OR julianday(updated_at) < julianday(created_at))
+                  + (SELECT COUNT(*) FROM rbac_bindings
+                     WHERE binding_id = '' OR subject_id = '' OR role_id = '' OR generation < 1
+                        OR scope_kind NOT IN ('global','project','resource')
+                        OR (scope_kind = 'global' AND scope_identifier IS NOT NULL)
+                        OR (scope_kind != 'global' AND (scope_identifier IS NULL OR scope_identifier = ''))
+                        OR julianday(created_at) IS NULL OR julianday(updated_at) IS NULL
+                        OR julianday(updated_at) < julianday(created_at))
+                  + (SELECT COUNT(*) FROM rbac_delegations
+                     WHERE delegation_id = '' OR delegator_subject_id = '' OR delegate_subject_id = ''
+                        OR delegator_subject_id = delegate_subject_id OR generation < 1
+                        OR json_type(CASE WHEN json_valid(role_ids_json) THEN role_ids_json ELSE 'null' END) != 'array'
+                        OR json_type(CASE WHEN json_valid(delegated_rules_json) THEN delegated_rules_json ELSE 'null' END) != 'array'
+                        OR (json_array_length(role_ids_json) = 0 AND json_array_length(delegated_rules_json) = 0)
+                        OR EXISTS (SELECT 1 FROM json_each(rbac_delegations.role_ids_json) WHERE value = 'owner')
+                        OR julianday(expires_at) <= julianday(created_at)
+                        OR (revoked_at IS NOT NULL AND julianday(revoked_at) < julianday(created_at)))
+                  + (SELECT COUNT(*) FROM admission_policies
+                     WHERE policy_id = '' OR version < 1 OR generation < 1
+                        OR source_kind NOT IN ('built-in','extension')
+                        OR stage NOT IN ('builtInMutation','extensionMutation','builtInValidation','extensionValidation')
+                        OR failure_policy NOT IN ('deny','ignore') OR advisory NOT IN (0, 1)
+                        OR mutating NOT IN (0, 1) OR enabled NOT IN (0, 1)
+                        OR (failure_policy = 'ignore' AND NOT (source_kind = 'extension' AND stage = 'extensionValidation' AND advisory = 1 AND mutating = 0))
+                        OR json_type(CASE WHEN json_valid(document_json) THEN document_json ELSE 'null' END) != 'object'
+                        OR length(document_sha256) != 64 OR document_sha256 GLOB '*[^0-9a-f]*')
+                  + (SELECT COUNT(*) FROM admission_exceptions
+                     WHERE exception_id = '' OR policy_id = '' OR subject_id = '' OR target = ''
+                        OR length(plan_hash) != 64 OR plan_hash GLOB '*[^0-9a-f]*'
+                        OR approval_identity = '' OR generation < 1
+                        OR julianday(expires_at) <= julianday(created_at))
+                  + (SELECT COUNT(*) FROM workload_profiles
+                     WHERE profile_id = '' OR version != 1 OR generation < 1
+                        OR parent_profile_id = profile_id
+                        OR json_type(CASE WHEN json_valid(profile_json) THEN profile_json ELSE 'null' END) != 'object'
+                        OR length(profile_sha256) != 64 OR profile_sha256 GLOB '*[^0-9a-f]*')
+                  + (SELECT COUNT(*) FROM plugin_packages
+                     WHERE length(package_digest) != 71 OR package_digest NOT GLOB 'sha256:*'
+                        OR plugin_identifier = '' OR package_version = ''
+                        OR provider_kind NOT IN ('wasi','xpc')
+                        OR json_type(CASE WHEN json_valid(manifest_json) THEN manifest_json ELSE 'null' END) != 'object'
+                        OR length(manifest_digest) != 71 OR manifest_digest NOT GLOB 'sha256:*'
+                        OR lifecycle_state NOT IN ('discovered','verified','staged','active','rollback','quarantined','revoked','uninstalled')
+                        OR json_type(CASE WHEN json_valid(ownership_ledger_json) THEN ownership_ledger_json ELSE 'null' END) != 'array'
+                        OR generation < 1 OR julianday(created_at) IS NULL OR julianday(updated_at) IS NULL
+                        OR julianday(updated_at) < julianday(created_at))
+                  + (SELECT COUNT(*) FROM plugin_provenance
+                     WHERE length(checksum) != 71 OR checksum NOT GLOB 'sha256:*'
+                        OR source_kind NOT IN ('localDirectory','httpsRegistry')
+                        OR json_type(CASE WHEN json_valid(canonical_json) THEN canonical_json ELSE 'null' END) != 'object'
+                        OR julianday(verified_at) IS NULL)
+                  + (SELECT COUNT(*) FROM plugin_grants
+                     WHERE capability NOT IN ('policy','observation','storage','network','diagnostics','scheduler','secret-metadata')
+                        OR scope = '' OR approval_ref = '' OR julianday(granted_at) IS NULL
+                        OR (revoked_at IS NOT NULL AND julianday(revoked_at) < julianday(granted_at)))
+                  + (SELECT COUNT(*) FROM plugin_activations
+                     WHERE plugin_identifier = '' OR generation < 1
+                        OR health_status NOT IN ('pending','healthy','degraded','unhealthy','revoked')
+                        OR julianday(activated_at) IS NULL OR julianday(updated_at) IS NULL
+                        OR julianday(updated_at) < julianday(activated_at)
+                        OR (SELECT plugin_identifier FROM plugin_packages WHERE package_digest = active_package_digest) != plugin_identifier
+                        OR (prior_package_digest IS NOT NULL AND
+                            (SELECT plugin_identifier FROM plugin_packages WHERE package_digest = prior_package_digest) != plugin_identifier))
+                  + (SELECT COUNT(*) FROM plugin_revocations
+                     WHERE target_kind NOT IN ('package','signer') OR target_identifier = ''
+                        OR reason = '' OR julianday(revoked_at) IS NULL)
+                  + (SELECT COUNT(*) FROM plugin_quarantine
+                     WHERE reason_code = '' OR length(detail_digest) != 71 OR detail_digest NOT GLOB 'sha256:*'
+                        OR julianday(quarantined_at) IS NULL
+                        OR (resolved_at IS NOT NULL AND julianday(resolved_at) < julianday(quarantined_at)))
+                  + (SELECT COUNT(*) FROM plugin_rollback_state
+                     WHERE plugin_identifier = '' OR stage NOT IN ('intent','install-intent','rollback-intent','uninstall-intent','staged','health-check','activation','cleanup','recovery-success-audit','recovery-failure-audit','complete','failed','cancelled')
+                        OR status NOT IN ('pending','running','succeeded','failed','cancelled')
+                        OR idempotency_key = ''
+                        OR json_type(CASE WHEN json_valid(ownership_effects_json) THEN ownership_effects_json ELSE 'null' END) != 'array'
+                        OR generation < 1 OR julianday(created_at) IS NULL OR julianday(updated_at) IS NULL
+                        OR julianday(updated_at) < julianday(created_at))
+                """
+            )
+            let invalidFrozenRBACDefaults = try frozenRBACDefaultProblems(connection)
+            let invalidAdmissionContent = try admissionContentProblems(connection)
+            let invalidWorkloadProfileContent = try workloadProfileContentProblems(connection)
+            let invalidPluginContent = try PluginLifecycleRepository(store: store)
+                .integrityProblems(on: connection)
             let authoritativeProblems = sqlAuthoritativeProblems +
                 invalidIdentityProblems + invalidReferrerContent +
                 invalidImageTrustContent + invalidImageSBOMContent +
@@ -671,7 +867,11 @@ public struct StateIntegrityService: Sendable {
                 invalidImageProvenanceContent +
                 invalidStorageContent + invalidNetworkContent
                 + invalidProjectDNSContent + invalidCertificateContent
-                + invalidServiceTunnelContent
+                + invalidServiceTunnelContent + invalidAuditStructure
+                + invalidPolicyProfileStructure + invalidFrozenRBACDefaults
+                + invalidAdmissionContent
+                + invalidWorkloadProfileContent
+                + invalidPluginContent
             if authoritativeProblems == 0 {
                 checks.append(.init(identifier: "hostwright.authoritative-records", status: .passed, message: "Authoritative state records satisfy the v\(MigrationRunner.latestSchemaVersion) logical contract."))
             } else {
@@ -1787,6 +1987,144 @@ public struct StateIntegrityService: Sendable {
         return fractional.date(from: value) ?? whole.date(from: value)
     }
 
+    private func frozenRBACDefaultProblems(_ connection: SQLiteConnection) throws -> Int {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        let expected = try Dictionary(
+            uniqueKeysWithValues: RBACRepository.defaultRoles(
+                timestamp: "2001-01-01T00:00:00Z"
+            ).map { role in
+                (role.roleID, String(decoding: try encoder.encode(role.rules), as: UTF8.self))
+            }
+        )
+        let stored = try connection.query(
+            "SELECT role_id, rules_json FROM rbac_roles WHERE built_in = 1 ORDER BY role_id"
+        )
+        guard stored.count == expected.count else { return 1 }
+        for row in stored {
+            guard row.count == 2, let roleID = row[0], let rules = row[1],
+                expected[roleID] == rules
+            else { return 1 }
+        }
+        return 0
+    }
+
+    private func admissionContentProblems(_ connection: SQLiteConnection) throws -> Int {
+        var problems = 0
+        for row in try connection.query(
+            """
+            SELECT policy_id, version, source_kind, stage, failure_policy, advisory, mutating,
+                   document_json, document_sha256, enabled, generation,
+                   created_by_subject_id, created_at, updated_at
+            FROM admission_policies ORDER BY policy_id
+            """
+        ) {
+            do {
+                guard row.count == 14, let policyID = row[0],
+                    let version = row[1].flatMap(Int.init), let sourceRaw = row[2],
+                    let source = AdmissionPolicySourceKind(rawValue: sourceRaw),
+                    let stageRaw = row[3], let stage = AdmissionStage(rawValue: stageRaw),
+                    let failureRaw = row[4],
+                    let failure = AdmissionFailurePolicy(rawValue: failureRaw),
+                    let advisory = row[5].flatMap(Int.init),
+                    let mutating = row[6].flatMap(Int.init), let documentJSON = row[7],
+                    let documentData = documentJSON.data(using: .utf8),
+                    let document = try? JSONDecoder().decode(
+                        ControlPlaneJSONValue.self, from: documentData),
+                    let documentSHA = row[8], let enabled = row[9].flatMap(Int.init),
+                    let generation = row[10].flatMap(Int.init), let creator = row[11],
+                    let createdAt = row[12], let updatedAt = row[13],
+                    [advisory, mutating, enabled].allSatisfy({ $0 == 0 || $0 == 1 })
+                else { throw StateStoreError.invalidRecord("Malformed admission policy") }
+                _ = try AdmissionPolicyRecord(
+                    policyID: policyID, version: version, sourceKind: source, stage: stage,
+                    failurePolicy: failure, advisory: advisory == 1, mutating: mutating == 1,
+                    document: document, documentSHA256: documentSHA, enabled: enabled == 1,
+                    generation: generation, createdBySubjectID: creator,
+                    createdAt: createdAt, updatedAt: updatedAt
+                ).canonicalized()
+                guard String(
+                    decoding: try ControlPlaneCanonicalJSON.encode(document), as: UTF8.self
+                ) == documentJSON else {
+                    throw StateStoreError.invalidRecord("Noncanonical admission policy JSON")
+                }
+            } catch { problems += 1 }
+        }
+        for row in try connection.query(
+            """
+            SELECT exception_id, policy_id, subject_id, target, plan_hash, approval_identity,
+                   expires_at, created_by_subject_id, generation, created_at, updated_at
+            FROM admission_exceptions ORDER BY exception_id
+            """
+        ) {
+            do {
+                guard row.count == 11, let exceptionID = row[0], let policyID = row[1],
+                    let subjectID = row[2], let target = row[3], let planHash = row[4],
+                    let approval = row[5], let expiresAt = row[6], let creator = row[7],
+                    let generation = row[8].flatMap(Int.init), let createdAt = row[9],
+                    let updatedAt = row[10]
+                else { throw StateStoreError.invalidRecord("Malformed admission exception") }
+                _ = try AdmissionExceptionRecord(
+                    exceptionID: exceptionID, policyID: policyID, subjectID: subjectID,
+                    target: target, planHash: planHash, approvalIdentity: approval,
+                    expiresAt: expiresAt, createdBySubjectID: creator,
+                    generation: generation, createdAt: createdAt, updatedAt: updatedAt
+                ).canonicalized()
+            } catch { problems += 1 }
+        }
+        return problems
+    }
+
+    private func workloadProfileContentProblems(_ connection: SQLiteConnection) throws -> Int {
+        var problems = 0
+        let rows = try connection.query(
+            """
+            SELECT profile_id, version, parent_profile_id, profile_json, profile_sha256,
+                   generation, created_by_subject_id, created_at, updated_at
+            FROM workload_profiles ORDER BY profile_id
+            """
+        )
+        let identifiers = Set(rows.compactMap { $0.first ?? nil })
+        var parents: [String: String] = [:]
+        for row in rows {
+            do {
+                guard row.count == 9, let identifier = row[0],
+                    let version = row[1].flatMap(Int.init), let profileJSON = row[3],
+                    let data = profileJSON.data(using: .utf8),
+                    let profile = try? JSONDecoder().decode(WorkloadProfile.self, from: data),
+                    let digest = row[4], let generation = row[5].flatMap(Int.init),
+                    let creator = row[6], let createdAt = row[7], let updatedAt = row[8],
+                    profile.identifier == identifier, profile.version == version,
+                    profile.parent == row[2]
+                else { throw StateStoreError.invalidRecord("Malformed workload profile") }
+                if let parent = profile.parent {
+                    guard identifiers.contains(parent) else {
+                        throw StateStoreError.invalidRecord("Missing workload profile parent")
+                    }
+                    parents[identifier] = parent
+                }
+                _ = try WorkloadProfileRecord(
+                    profile: profile, profileSHA256: digest, generation: generation,
+                    createdBySubjectID: creator, createdAt: createdAt, updatedAt: updatedAt)
+                guard String(
+                    decoding: try ControlPlaneCanonicalJSON.encode(profile), as: UTF8.self
+                ) == profileJSON else {
+                    throw StateStoreError.invalidRecord("Noncanonical workload profile JSON")
+                }
+            } catch { problems += 1 }
+        }
+        for identifier in identifiers {
+            var seen = Set<String>()
+            var current: String? = identifier
+            while let value = current {
+                guard seen.insert(value).inserted else { problems += 1; break }
+                guard seen.count <= 32 else { problems += 1; break }
+                current = parents[value]
+            }
+        }
+        return problems
+    }
+
     private func sha256(_ data: Data) -> String {
         SHA256.hash(data: data).map {
             String(format: "%02x", $0)
@@ -1800,6 +2138,8 @@ public struct StateIntegrityService: Sendable {
         "observed_runtime_snapshots",
         "observed_services",
         "event_ledger",
+        "accelerator_state_journal",
+        "accelerator_state_current",
         "operation_ledger",
         "ownership_records",
         "health_check_results",
@@ -1840,13 +2180,47 @@ public struct StateIntegrityService: Sendable {
         "network_dns_instances",
         "network_port_reservations",
         "network_certificates",
-        "service_tunnel_sessions"
+        "service_tunnel_sessions",
+        "peer_identities",
+        "control_sessions",
+        "identity_revocations",
+        "control_requests",
+        "idempotency_records",
+        "audit_key_metadata",
+        "audit_segments",
+        "audit_records",
+        "audit_retention_anchors",
+        "rbac_roles",
+        "rbac_bindings",
+        "rbac_delegations",
+        "admission_policies",
+        "admission_exceptions",
+        "workload_profiles",
+        "scheduler_node_capacity_snapshots",
+        "scheduler_fence_state",
+        "scheduler_decisions",
+        "scheduler_reservations",
+        "scheduler_fairness_accounting",
+        "scheduler_disruption_budgets",
+        "scheduler_preemption_intents",
+        "scheduler_host_pressure",
+        "plugin_packages",
+        "plugin_provenance",
+        "plugin_grants",
+        "plugin_activations",
+        "plugin_revocations",
+        "plugin_quarantine",
+        "plugin_rollback_state"
     ]
 
     private static let requiredIndexes = [
         "desired_services_project_idx",
         "observed_services_snapshot_idx",
         "event_ledger_timestamp_idx",
+        "accelerator_state_journal_type_id_idx",
+        "accelerator_state_current_record_scope_idx",
+        "accelerator_state_current_generation_idx",
+        "accelerator_state_current_record_idx",
         "operation_ledger_project_idx",
         "ownership_records_project_idx",
         "health_check_results_project_idx",
@@ -1855,6 +2229,53 @@ public struct StateIntegrityService: Sendable {
         "restart_attempt_history_project_idx",
         "restart_attempt_history_workload_idx",
         "restart_attempt_history_operation_idx",
+        "peer_identities_code_hash_idx",
+        "peer_identities_active_code_idx",
+        "peer_identities_active_installed_bucket_idx",
+        "peer_identities_active_credential_idx",
+        "control_sessions_subject_idx",
+        "control_sessions_code_hash_idx",
+        "identity_revocations_target_idx",
+        "control_requests_subject_idempotency_idx",
+        "control_requests_subject_status_idx",
+        "idempotency_records_request_idx",
+        "audit_key_metadata_active_idx",
+        "audit_segments_key_idx",
+        "audit_segments_prior_digest_idx",
+        "audit_records_segment_idx",
+        "audit_records_subject_idx",
+        "audit_records_request_idx",
+        "audit_records_deduplication_idx",
+        "audit_retention_key_idx",
+        "rbac_roles_builtin_idx",
+        "rbac_bindings_subject_idx",
+        "rbac_bindings_role_idx",
+        "rbac_bindings_identity_idx",
+        "rbac_delegations_delegate_idx",
+        "rbac_delegations_delegator_idx",
+        "admission_policies_active_idx",
+        "admission_exceptions_lookup_idx",
+        "workload_profiles_parent_idx",
+        "workload_profiles_digest_idx",
+        "scheduler_node_capacity_generation_idx",
+        "scheduler_decisions_node_idx",
+        "scheduler_decisions_workload_idx",
+        "scheduler_reservations_active_workload_idx",
+        "scheduler_reservations_decision_idx",
+        "scheduler_reservations_node_idx",
+        "scheduler_reservations_workload_idx",
+        "scheduler_fairness_project_idx",
+        "scheduler_disruption_budgets_project_idx",
+        "scheduler_preemption_intents_project_idx",
+        "scheduler_host_pressure_generation_idx",
+        "plugin_packages_identifier_idx",
+        "plugin_packages_state_idx",
+        "plugin_provenance_signer_idx",
+        "plugin_grants_capability_idx",
+        "plugin_activations_digest_idx",
+        "plugin_revocations_target_idx",
+        "plugin_quarantine_package_idx",
+        "plugin_rollback_operation_idx",
         "restart_recovery_operation_idx",
         "restart_recovery_project_idx",
         "operation_groups_operation_idx",
@@ -1944,5 +2365,20 @@ public struct StateIntegrityService: Sendable {
         "service_tunnel_active_peer_idx",
         "service_tunnel_operation_idx",
         "service_tunnel_recovery_idx"
+    ]
+
+    private static let requiredTriggers = [
+        "rbac_builtin_role_update",
+        "rbac_builtin_role_delete",
+        "rbac_last_owner_delete",
+        "rbac_delegation_owner_insert",
+        "rbac_delegation_owner_update",
+        "rbac_owner_binding_update",
+        "plugin_package_immutable_content",
+        "plugin_provenance_immutable",
+        "plugin_provenance_delete",
+        "plugin_grant_delete",
+        "plugin_active_package_match_insert",
+        "plugin_active_package_match_update"
     ]
 }

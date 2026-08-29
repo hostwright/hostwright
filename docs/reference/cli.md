@@ -79,6 +79,7 @@ hostwright init
 hostwright import-stack <path> [--output text|json] [--team-profile <path>]
 hostwright validate [path] [--team-profile <path>]
 hostwright plan [path] [--output text|json] [--team-profile <path>]
+hostwright scheduler status|plan|simulate|explain|apply (--request <absolute-path> | --stdin) [--output text|json]
 hostwright status [path] [--state-db <path>] [--output text|json] [--runtime-provider auto|apple-cli|containerization]
 hostwright restart-budget status [--project <project-id>] [--state-db <path>] [--output text|json]
 hostwright restart-budget release --project <project-id> --service <name> --confirm-hold <sha256> [--state-db <path>] [--output text|json]
@@ -242,7 +243,7 @@ hostwright metrics snapshot [--state-db <path>] [--output text|json]
 hostwright metrics export --output-path <absolute-new-path> --confirm-snapshot <sha256> [--state-db <path>] [--output text|json]
 ```
 
-`snapshot` is a schema-v1 read-only projection over one existing compatible schema-v17 database. It reports the fixed 59-series catalog, bounded histogram/summary values, three minimum-sample SLO results, source database identity, dropped-sample accounting, retention authority, and `snapshotSHA256`. It does not create, migrate, repair, sample, inspect runtime, listen, or upload.
+`snapshot` is a schema-v1 read-only projection over one existing compatible schema-v23 database. It reports the fixed 59-series catalog, bounded histogram/summary values, three minimum-sample SLO results, source database identity, dropped-sample accounting, retention authority, and `snapshotSHA256`. It does not create, migrate, repair, sample, inspect runtime, listen, or upload.
 
 `export` recomputes the snapshot, requires the exact current hash, and creates one canonical new mode-`0600` file under an existing private current-user directory. It refuses overwrite, stale confirmation, symlink/parent/path/hard-link races, cancellation, or unverifiable bytes. The result remains operator-owned and is never uploaded or automatically removed. See [Bounded Local Metrics and SLOs](metrics.md).
 
@@ -262,19 +263,19 @@ Manifest workload injection additionally accepts guarded `env-file:///absolute/p
 
 `registry referrers` treats signatures, attestations, SBOMs, and provenance as opaque typed OCI artifacts; Gate 6 assigns no trust meaning. Discovery uses the OCI 1.1 referrers API with bounded same-origin pagination and the subject-digest fallback tag only when that truncated tag preserves exact identity; a SHA-512 native-API `404` reports unsupported fallback before any tag request. Fetch verifies every digest, size, media type, graph edge, and root subject before schema-v9 cache publication. Publish and copy persist durable intent before effects, upload children before manifests, observe exact remote content after mutations, use conditional fallback-index updates, and can resume the exact fenced operation group. `retain` and `release` use exact fencing tokens. `prune` first emits an exact plan hash and executes only when the confirmed hash, Hostwright publication proof, inactive lease state, remote manifest, and subject binding all match; it never deletes blobs or unrelated manifests.
 
-`registry trust verify` consumes one complete cached Gate 6 discovery, exact subject-manifest bytes, a validated Manifest v2 `imageTrust` policy, and an absolute cosign executable path. It supports cosign major 3 from v3.0.6, accepts only Sigstore bundle v0.3 message signatures, and verifies the subject on stdin with either an exact keyed authority or exact keyless issuer/identity plus a caller-managed TrustedRoot JSON document. Trust material is copied into a private temporary directory, verifier I/O and time are bounded, and cleanup removes only the exact files created by the verification.
+`registry trust verify` consumes one complete cached Gate 6 discovery, exact subject-manifest bytes, a validated Manifest v3 `imageTrust` policy, and an absolute cosign executable path. It supports cosign major 3 from v3.0.6, accepts only Sigstore bundle v0.3 message signatures, and verifies the subject on stdin with either an exact keyed authority or exact keyless issuer/identity plus a caller-managed TrustedRoot JSON document. Trust material is copied into a private temporary directory, verifier I/O and time are bounded, and cleanup removes only the exact files created by the verification.
 
 `registry trust status`, `grant-exception`, and `revoke-exception` use schema-v10 immutable verification, subject-manifest, and exception evidence. Exception approvals are strict bounded JSON records bound to one project, service, descriptor digest, reason, approver, approval/expiry timestamps, and idempotency UUID. Lifecycle execution accepts only a current policy/material match with a revalidated graph and subject manifest, or one exact unexpired and unrevoked exception. Recovery revalidates its plan-bound authorization before further effects. The one-shot Control API maps all four operations to the same CLI implementation.
 
 `registry sbom generate` securely inspects an OCI image-layout tar archive, verifies the exact digest-pinned image configuration, manifest, layers, and package-database extraction, and emits a deterministic SPDX 2.3 or CycloneDX 1.6 OCI artifact graph. It does not contact a registry; publish remains the explicit Gate 6 operation. `ingest` accepts only a complete digest-verified Gate 6 graph and persists an immutable schema-v11 record bound to the image descriptor, policy, document, normalized components, SBOM referrer, operation group, and optional provenance descriptor/referrer identities. `query` and `export` re-observe that graph and verify content digests rather than treating state rows or mutation output as truth. Export creates one `0600` file without overwrite and removes only that exact newly created file after failure. Generate, ingest, and export persist bounded non-secret intent; cancellation leaves an interrupted group, and `resume` requires its exact plan hash. The one-shot Control API maps all five operations to the same CLI implementation and exposes no credential fields.
 
-`registry vulnerability evaluate` consumes one complete Gate 6 graph, one exact vulnerability-report referrer digest, a Manifest v2 `imageVulnerability` policy, and the manifest's `imageTrust` policy. It accepts only a bounded `hostwright.dev/image-vulnerability-report/v1` document whose subject, report digest, referrer, database identity/version/update time, generated time, normalized findings, and Sigstore bundle bind exactly. Cosign verifies the report bytes, not merely the image signature. Schema-v12 state stores the canonical passed signature proof, exact bundle digests, verifier identity, trust-material hashes, immutable report evidence, and explainable decisions with candidate, allowlisted, and blocking findings plus stable reason codes.
+`registry vulnerability evaluate` consumes one complete Gate 6 graph, one exact vulnerability-report referrer digest, a Manifest v3 `imageVulnerability` policy, and the manifest's `imageTrust` policy. It accepts only a bounded `hostwright.dev/image-vulnerability-report/v1` document whose subject, report digest, referrer, database identity/version/update time, generated time, normalized findings, and Sigstore bundle bind exactly. Cosign verifies the report bytes, not merely the image signature. Schema-v12 state stores the canonical passed signature proof, exact bundle digests, verifier identity, trust-material hashes, immutable report evidence, and explainable decisions with candidate, allowlisted, and blocking findings plus stable reason codes.
 
 Severity, minimum age, exploitability, and fix-availability selectors are ANDed. Database staleness or report unavailability follows the explicit fail-open/fail-closed policy, but fail-open never overrides a known matching finding or a report signed under different trust material. The newest `databaseUpdatedAt`, then newest `generatedAt`, is authoritative; equally fresh conflicting reports fail closed. `status` re-observes the exact graph, exact signature bundles, active authority windows, and current trust-material hashes before reevaluating freshness. Exceptions require strict external JSON approval bound to one prior blocked decision, report/referrer, image digest, vulnerability and signature policy hashes, database identity/version, and blocked-findings digest; expiry or revocation takes effect immediately. Evaluate, grant, and revoke persist non-secret durable intent, cancellation becomes an interrupted checkpoint, and `resume` requires the exact plan hash. Lifecycle execution and recovery reload the exact plan-bound manifest and reevaluate current signed evidence before effects. The one-shot Control API maps all five operations to the same implementation and rejects credential fields.
 
 `registry provenance generate` reads a strict bounded build record and a verified local OCI archive, proves the archive root is the exact manifest digest named by the selected service, emits an in-toto Statement v1 with the SLSA provenance v1 predicate, and wraps it in a DSSE Ed25519 envelope. Source, dependency, and material URIs are limited to bounded credential-free HTTPS or URN values; the command model records digests and approved names rather than native argv, host paths, environment values, or secret values. The signing key is resolved only from the exact typed secret-provider reference and is never accepted as a value argument or persisted.
 
-`verify` accepts only the exact provenance referrer from one complete digest-verified Gate 6 graph, revalidates its OCI subject and DSSE envelope, resolves the current Manifest v2 signer material, and checks the exact image, builder, build type, timestamps, materials, reproducibility requirement, signature, and policy hash before immutable schema-v14 persistence. `status`, lifecycle execution, and recovery reload the exact graph and current policy material instead of treating a prior row or generation output as current state. Generation and verification persist bounded redacted intent, interruption requires the exact plan hash, and resumed generation requires the same typed signing-key reference digest. The one-shot Control API maps all four operations to the same CLI implementation and rejects credential values.
+`verify` accepts only the exact provenance referrer from one complete digest-verified Gate 6 graph, revalidates its OCI subject and DSSE envelope, resolves the current Manifest v3 signer material, and checks the exact image, builder, build type, timestamps, materials, reproducibility requirement, signature, and policy hash before immutable schema-v14 persistence. `status`, lifecycle execution, and recovery reload the exact graph and current policy material instead of treating a prior row or generation output as current state. Generation and verification persist bounded redacted intent, interruption requires the exact plan hash, and resumed generation requires the same typed signing-key reference digest. The one-shot Control API maps all four operations to the same CLI implementation and rejects credential values.
 
 No registry credential, username, access token, refresh token, helper stderr, or auth-file content is written to command arguments, state, output, or diagnostics. Registry commands authenticate and report capability; image commands consume only provider-managed authentication and never copy credentials into their request, argv, state, progress, or result.
 
@@ -294,7 +295,7 @@ Result JSON is schema version 1 and includes the provider, provider version, ope
 
 ## `hostwright volume ...`
 
-Provides current schema-v17 inspection, capacity, health, recovery, exact deletion/prune, snapshot, and verified backup/restore operations through Storage Provider API v1. The shipped `hostwright-local` provider stores exact Hostwright-owned resources on one Mac. `list`, `inspect`, `capacity`, and `health` are read-only. `recover` requires the persisted idempotency key for the exact interrupted volume operation.
+Provides current schema-v23 inspection, capacity, health, recovery, exact deletion/prune, snapshot, and verified backup/restore operations through Storage Provider API v1. The shipped `hostwright-local` provider stores exact Hostwright-owned resources on one Mac. `list`, `inspect`, `capacity`, and `health` are read-only. `recover` requires the persisted idempotency key for the exact interrupted volume operation.
 
 Every destructive operation requires exactly one `--dry-run` or `--confirm-plan <sha256>`. Confirmation binds provider and capability identity, project/resource UUIDs, generation, fence, ownership, attachments, holds, reclaim policy, protection evidence, and current observation. Changed or ambiguous evidence fails before provider mutation. `prune` never invokes global or name-based cleanup.
 
@@ -388,7 +389,7 @@ Do not confuse `hostwright state recover` with `hostwright recovery`: the former
 
 ## `hostwright migrate preview <path> [--json | --output text|json]`
 
-Reads a manifest and prints the deterministic Manifest v2 preview without writing the source, state, or runtime. Explicit v1 has its version replaced, versionless input receives `version: 2`, legacy `health` becomes an equivalent typed liveness probe, and v2 is idempotent. Future or unsupported versions fail closed.
+Reads a manifest and prints the deterministic Manifest v3 preview without writing the source, state, or runtime. Explicit v1/v2 has its version replaced, versionless input receives `version: 3`, legacy flat resources map each declared value to both requests and limits, legacy `health` becomes an equivalent typed liveness probe, and v3 is idempotent. Future or unsupported versions fail closed.
 
 ## `hostwright init`
 
@@ -432,7 +433,7 @@ Text success prints the converted manifest and warnings on stderr. JSON success 
   "kind": "stackImport",
   "sourcePath": "compose.yaml",
   "succeeded": true,
-  "manifest": "version: 2\nproject: demo\n...",
+  "manifest": "version: 3\nproject: demo\n...",
   "warnings": []
 }
 ```
@@ -509,6 +510,18 @@ JSON shape:
   "actions": []
 }
 ```
+
+## `hostwright scheduler status|plan|simulate|explain|apply`
+
+These commands use the persistent authenticated Control API 2.2 seam. They do not run a local scheduler, read SQLite directly, or bypass durable admission authority. Provide exactly one bounded JSON request with `--request <absolute-path>` or `--stdin`; `--output text|json` selects the presentation only.
+
+The operation bodies are strict:
+
+- `plan` and `simulate`: `{"projectID":"...","input":{...}}`. `plan` persists an immutable decision; `simulate` is pure and persists neither a decision nor a reservation.
+- `status` and `explain`: `{"projectID":"...","decisionID":"<uuid>"}`.
+- `apply`: `{"projectID":"...","decisionID":"<uuid>","workloadID":"<uuid>","expectedInputDigest":"<64 lowercase hex>"}`. Apply revalidates the complete durable decision, capacity generation, pressure, profile, and fence bindings before any runtime effect.
+
+The sealed current-source scheduler qualification covers the pure contract and retains 382 replayable intentional optimization-gap diagnostics; it does not make runtime mutation or `scheduler.optimization` available. `scheduler.apply` remains fail-closed with `scheduler-authority-unavailable` when the repository-backed lifecycle/runtime handoff or remaining G13-G15 evidence is unavailable.
 
 ## `hostwright apply [path] [--state-db <path>] --confirm-plan <hash> [--team-profile <path> --approval-record <path>]`
 
@@ -592,21 +605,21 @@ HW-RUNTIME-001: logs requires an observed Hostwright-managed service.
 
 ## `hostwright restart-budget ...`
 
-`restart-budget status` reads schema-v17 workload/project budget state without observing runtime, creating state, or migrating a missing database. Optional `--project` uses the exact persisted `project-*` identity. Text and JSON include workload status, reason class, attempts, rolling windows, priority, backoff, policy digest, release generation, and the current hold token when one exists.
+`restart-budget status` reads schema-v23 workload/project budget state without observing runtime, creating state, or migrating a missing database. Optional `--project` uses the exact persisted `project-*` identity. Text and JSON include workload status, reason class, attempts, rolling windows, priority, backoff, policy digest, release generation, and the current hold token when one exists.
 
 `restart-budget release` requires exact `--project`, Manifest service name, and lowercase SHA-256 `--confirm-hold`. It atomically resets only the matching held workload, increments its release generation, and records append-only manual-release history plus `restart.policy.manual-release`. A stale token or changed workload generation returns confirmation mismatch and changes nothing. Release never starts, restarts, or otherwise touches runtime; the daemon must re-observe on its next level-triggered iteration.
 
 ## `hostwright maintenance ...`
 
-`maintenance preview` securely parses and validates the named Manifest v2 file, then evaluates one or more unique elective `--action` values at the current time or an optional canonical UTC `--at`. It is read-only: it does not create or open state and reports the active or next applicable window plus the exact policy digest.
+`maintenance preview` securely parses and validates the named Manifest v3 file, then evaluates one or more unique elective `--action` values at the current time or an optional canonical UTC `--at`. It is read-only: it does not create or open state and reports the active or next applicable window plus the exact policy digest.
 
-`maintenance status` reads the latest append-only schema-v17 deferral state for one exact project or all projects. A deferred record reports its action classes, plan and policy digests, hard deadline, state, and exact confirmation token.
+`maintenance status` reads the latest append-only schema-v23 deferral state for one exact project or all projects. A deferred record reports its action classes, plan and policy digests, hard deadline, state, and exact confirmation token.
 
 `maintenance cancel` atomically cancels only the current matching deferred or override-authorized record. `maintenance override` atomically authorizes only the current matching deferred record and requires a bounded redacted reason. Both require the exact project and `--confirm-deferral` SHA-256; stale, superseded, admitted, failed, or mismatched input changes nothing. Neither command touches runtime. The daemon re-observes and revalidates the exact binding immediately before any admitted lifecycle effect.
 
 ## `hostwright ownership ...`
 
-`ownership status` is a local read-only view over the already-migrated schema-v17 ownership authority and active or interrupted mutation groups. Text and schema-v1 JSON distinguish active, deleting, released, quarantined, legacy, and invalid ownership and report only bounded non-secret identity, proof, finalizer, deletion, lease, and handoff fields. It does not create or migrate state, inspect runtime, or infer ownership from a resource name.
+`ownership status` is a local read-only view over the already-migrated schema-v23 ownership authority and active or interrupted mutation groups. Text and schema-v1 JSON distinguish active, deleting, released, quarantined, legacy, and invalid ownership and report only bounded non-secret identity, proof, finalizer, deletion, lease, and handoff fields. It does not create or migrate state, inspect runtime, or infer ownership from a resource name.
 
 `ownership handoff` performs one exact expired-lease compare-and-swap for `lifecycle-v1` operation groups, whose recovery driver can immediately claim the fixed handoff controller through the same local effect fence. It requires the operation-group UUID, persisted plan SHA-256, fencing UUID, prior controller, canonical prior UTC expiry, target local controller (`resume` or `rollback`), and a 1–900 second lease. Success atomically rebinds the group and every exact ownership record attached to it. A live, in-flight, unsupported-kind, stale, malformed, or mismatched tuple returns confirmation mismatch and changes nothing. Other mutation kinds retain their existing native recovery contracts and cannot be handed off through this command. Handoff does not execute recovery or runtime mutation, bypass finalizers, authorize another user, or add a multi-host lease.
 

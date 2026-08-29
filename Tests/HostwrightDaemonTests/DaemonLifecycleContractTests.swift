@@ -1250,7 +1250,7 @@ final class DaemonLifecycleContractTests: XCTestCase {
             withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700]
         )
-        try Data("version: 2\nproject: \(project)\nservices: {}\n".utf8).write(to: url)
+        try Data("version: 3\nproject: \(project)\nservices: {}\n".utf8).write(to: url)
         try chmodPath(path, mode: 0o600)
     }
 

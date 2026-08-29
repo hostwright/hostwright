@@ -829,7 +829,13 @@ public actor ContainerizationHelperClient: RuntimeNetworkProvider {
             idempotencyKey: "observe/\(UUID().uuidString.lowercased())",
             payload: ContainerizationHelperObservePayload(includeResourceUsage: true)
         )
-        do { return try result.validatedInventory() }
+        do {
+            let inventory = try result.validatedInventory()
+            return try RuntimeInventoryBuilder.markRuntimeListAuthoritative(
+                inventory,
+                source: .appleContainerizationRuntimeList
+            )
+        }
         catch { throw ContainerizationHelperClientError.invalidResponse }
     }
 

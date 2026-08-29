@@ -917,7 +917,7 @@ final class StorageLifecycleCoordinatorTests: XCTestCase {
             identifier: projectID
         )
         let manifest = HostwrightManifest(
-            version: 2,
+            version: 3,
             project: projectName,
             imagePolicy: nil,
             imageTrust: nil,

@@ -7,8 +7,8 @@ final class HostwrightManifestTests: XCTestCase {
     func testValidManifestParsesAndValidates() throws {
         let manifest = try ManifestValidator.validated(Self.validManifest)
 
-        XCTAssertEqual(manifest.version, 2)
-        XCTAssertEqual(manifest.effectiveVersion, 2)
+        XCTAssertEqual(manifest.version, 3)
+        XCTAssertEqual(manifest.effectiveVersion, 3)
         XCTAssertNil(manifest.imagePolicy)
         XCTAssertEqual(manifest.effectiveImagePolicy, .allowTags)
         XCTAssertEqual(manifest.project, "api-local")
@@ -45,11 +45,14 @@ final class HostwrightManifestTests: XCTestCase {
     func testStructuredPortsParseAndValidate() throws {
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: demo
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - bind: 127.0.0.1
                     host: 18080
@@ -78,11 +81,14 @@ final class HostwrightManifestTests: XCTestCase {
     func testSecretEnvironmentReferencesParseAndValidate() throws {
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 env:
                   APP_ENV: development
                 secretEnv:
@@ -124,11 +130,14 @@ final class HostwrightManifestTests: XCTestCase {
     func testSecretEnvironmentReferenceFailuresAreRedactedAndListSupportedShapes() {
         let privatePath = "/Users/dev/private/customer-a/secret.env"
         let text = """
-        version: 2
+        version: 3
         project: api-local
         services:
           api:
             image: ghcr.io/example/api:latest
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
             secretEnv:
               API_TOKEN: "env-file://\(privatePath)#BAD-KEY"
         """
@@ -163,11 +172,14 @@ final class HostwrightManifestTests: XCTestCase {
         for (index, reference) in references.enumerated() {
             assertManifestFailure(
                 """
-                version: 2
+                version: 3
                 project: api-local
                 services:
                   api:
                     image: ghcr.io/example/api:latest
+                    resources:
+                      requests: {cpus: 1, memory: 512MiB}
+                      limits: {cpus: 1, memory: 512MiB}
                     env:
                       SOURCE_\(index): "\(reference)"
                 """,
@@ -179,11 +191,14 @@ final class HostwrightManifestTests: XCTestCase {
     func testQuotedScalarsAndInlineArraysPreserveCommasAndEscapes() throws {
         let manifest = try ManifestValidator.validated(
             #"""
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 command: ["python", "print(a,b)"]
                 env:
                   JSON_DOC: '{"a":1}'
@@ -207,12 +222,15 @@ final class HostwrightManifestTests: XCTestCase {
         services:
           api:
             image: ghcr.io/example/api:latest
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
         """
         let parsed = try ManifestParser.parse(text)
 
         XCTAssertNil(parsed.version)
         XCTAssertEqual(parsed.effectiveVersion, HostwrightManifest.legacyVersion)
-        assertManifestFailure(text, code: "HW-MANIFEST-003", contains: "must declare version: 2")
+        assertManifestFailure(text, code: "HW-MANIFEST-003", contains: "must declare version: 3")
     }
 
     func testExplicitOlderAndNewerManifestVersionsFailClosed() {
@@ -223,21 +241,27 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             code: "HW-MANIFEST-003",
-            contains: "older than supported version 2"
+            contains: "older than supported version 3"
         )
 
         assertManifestFailure(
             """
-            version: 3
+            version: 4
             project: api-local
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             code: "HW-MANIFEST-003",
-            contains: "newer than supported version 2"
+            contains: "newer than supported version 3"
         )
     }
 
@@ -245,12 +269,15 @@ final class HostwrightManifestTests: XCTestCase {
         let digest = String(repeating: "a", count: 64)
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             services:
               api:
                 image: ghcr.io/example/api@sha256:\(digest)
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """
         )
 
@@ -261,24 +288,30 @@ final class HostwrightManifestTests: XCTestCase {
         XCTAssertNoThrow(
             try ManifestValidator.validated(
                 """
-                version: 2
+                version: 3
                 project: api-local
                 imagePolicy: allow-tags
                 services:
                   api:
                     image: ghcr.io/example/api:latest
+                    resources:
+                      requests: {cpus: 1, memory: 512MiB}
+                      limits: {cpus: 1, memory: 512MiB}
                 """
             )
         )
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "requires image 'ghcr.io/example/api:latest' to be digest-pinned"
         )
@@ -287,71 +320,89 @@ final class HostwrightManifestTests: XCTestCase {
     func testImageDigestSyntaxFailsClosedWithoutRegistryLookup() {
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
                 image: ghcr.io/example/api@sha512:abcdef
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "image digest must use @sha256:<64 lowercase hex characters>"
         )
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
                 image: ghcr.io/example/api@sha256:ABCDEF
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "image digest must use @sha256:<64 lowercase hex characters>"
         )
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
                 image: https://ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "must be an OCI-style image reference"
         )
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: content-trust
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "imagePolicy must be one of"
         )
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imagePolicy: allow-tags
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "imagePolicy must be declared at most once"
         )
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: content-trust
             imagePolicy: require-digest
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "imagePolicy must be declared at most once"
         )
@@ -361,7 +412,7 @@ final class HostwrightManifestTests: XCTestCase {
         let digest = String(repeating: "a", count: 64)
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageTrust:
@@ -380,6 +431,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:\(digest)
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """
         )
 
@@ -400,7 +454,7 @@ final class HostwrightManifestTests: XCTestCase {
     func testImageTrustValidationFailsClosedForCrossFieldAndAuthorityRules() {
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imageTrust:
               threshold: 1
@@ -411,13 +465,16 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "imageTrust requires imagePolicy require-digest"
         )
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageTrust:
@@ -429,13 +486,16 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "imageTrust.threshold must not exceed the authority count"
         )
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageTrust:
@@ -448,13 +508,16 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "imageTrust.trustedRoot is required when any keyless authority is declared"
         )
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageTrust:
@@ -471,6 +534,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "imageTrust authority ids must be unique; duplicate id 'signer'"
         )
@@ -479,7 +545,7 @@ final class HostwrightManifestTests: XCTestCase {
     func testImageTrustValidationRejectsTypeSpecificFieldsPathsAndDates() {
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageTrust:
@@ -491,13 +557,16 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "publicKey must be a normalized absolute host path"
         )
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageTrust:
@@ -512,13 +581,16 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "must not declare publicKey"
         )
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageTrust:
@@ -532,13 +604,16 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "issuer must be an exact HTTPS URL"
         )
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageTrust:
@@ -554,13 +629,16 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "notBefore must not be after notAfter"
         )
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageTrust:
@@ -575,6 +653,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "revokedAt must be an RFC3339 timestamp"
         )
@@ -583,7 +664,7 @@ final class HostwrightManifestTests: XCTestCase {
     func testImageTrustParserRejectsDuplicateAndUnknownTopLevelFields() {
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageTrust:
@@ -602,13 +683,16 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "imageTrust must be declared at most once"
         )
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageTrust:
@@ -621,6 +705,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "Unsupported manifest field 'extra'"
         )
@@ -630,7 +717,7 @@ final class HostwrightManifestTests: XCTestCase {
         let digest = String(repeating: "a", count: 64)
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageSBOM:
@@ -642,6 +729,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:\(digest)
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """
         )
 
@@ -661,7 +751,7 @@ final class HostwrightManifestTests: XCTestCase {
     func testImageSBOMValidationFailsClosedForDigestVersionAndFormats() {
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imageSBOM:
               requirement: optional
@@ -670,30 +760,36 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "imageSBOM requires imagePolicy require-digest"
         )
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageSBOM:
-              version: 2
+              version: 3
               requirement: optional
               formats:
                 - spdx-json
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "imageSBOM.version must be 1"
         )
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageSBOM:
@@ -702,13 +798,16 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "imageSBOM.formats must contain between 1 and 2 unique formats"
         )
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageSBOM:
@@ -720,6 +819,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "imageSBOM.formats must contain between 1 and 2 unique formats"
         )
@@ -728,7 +830,7 @@ final class HostwrightManifestTests: XCTestCase {
     func testImageSBOMParserRejectsDuplicateUnknownAndInvalidEnums() {
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageSBOM:
@@ -742,13 +844,16 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "imageSBOM must be declared at most once"
         )
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageSBOM:
@@ -758,13 +863,16 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "imageSBOM.requirement must be one of: optional, required"
         )
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageSBOM:
@@ -774,13 +882,16 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "imageSBOM.formats must be one of: spdx-json, cyclonedx-json"
         )
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageSBOM:
@@ -791,6 +902,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "Unsupported manifest field 'extra'"
         )
@@ -800,7 +914,7 @@ final class HostwrightManifestTests: XCTestCase {
         let digest = String(repeating: "a", count: 64)
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageTrust:
@@ -830,6 +944,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:\(digest)
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """
         )
 
@@ -857,7 +974,7 @@ final class HostwrightManifestTests: XCTestCase {
     func testImageVulnerabilityAcceptsExactBoundaryValues() throws {
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageTrust:
@@ -879,6 +996,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """
         )
         let policy = try XCTUnwrap(manifest.imageVulnerability)
@@ -892,7 +1012,7 @@ final class HostwrightManifestTests: XCTestCase {
         maximumPolicy.maximumDatabaseAgeSeconds =
             HostwrightImageVulnerabilityPolicy.maximumMaximumDatabaseAgeSeconds
         let maximumManifest = HostwrightManifest(
-            version: 2,
+            version: 3,
             project: "api-local",
             imagePolicy: .requireDigest,
             imageTrust: manifest.imageTrust,
@@ -927,13 +1047,16 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
-            contains: "imageVulnerability is supported only in manifest version 2"
+            contains: "imageVulnerability is supported only in manifest version 3"
         )
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imageVulnerability:
               severityThreshold: high
@@ -947,13 +1070,16 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "imageVulnerability requires imagePolicy require-digest"
         )
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageVulnerability:
@@ -968,6 +1094,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "imageVulnerability requires imageTrust"
         )
@@ -1001,7 +1130,7 @@ final class HostwrightManifestTests: XCTestCase {
             allowlist: entries
         )
         let manifest = HostwrightManifest(
-            version: 2,
+            version: 3,
             project: "api-local",
             imagePolicy: .requireDigest,
             imageTrust: trust,
@@ -1010,7 +1139,11 @@ final class HostwrightManifestTests: XCTestCase {
             services: [
                 HostwrightService(
                     name: "api",
-                    image: "ghcr.io/example/api@sha256:\(String(repeating: "a", count: 64))"
+                    image: "ghcr.io/example/api@sha256:\(String(repeating: "a", count: 64))",
+                    resources: HostwrightResources(
+                        requests: HostwrightResourceSet(cpus: 1, memory: "512MiB"),
+                        limits: HostwrightResourceSet(cpus: 1, memory: "512MiB")
+                    )
                 )
             ]
         )
@@ -1041,7 +1174,7 @@ final class HostwrightManifestTests: XCTestCase {
 
     func testImageVulnerabilityRejectsInvalidEnumsUnknownFieldsAndDuplicateEntries() {
         let prefix = """
-        version: 2
+        version: 3
         project: api-local
         imagePolicy: require-digest
         imageTrust:
@@ -1055,6 +1188,9 @@ final class HostwrightManifestTests: XCTestCase {
         services:
           api:
             image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
         """
 
         assertManifestFailure(
@@ -1139,7 +1275,7 @@ final class HostwrightManifestTests: XCTestCase {
         let digest = String(repeating: "a", count: 64)
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: api-local
             imagePolicy: require-digest
             imageProvenance:
@@ -1164,6 +1300,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:\(digest)
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """
         )
 
@@ -1220,7 +1359,7 @@ final class HostwrightManifestTests: XCTestCase {
             requireReproducible: false
         )
         let manifest = HostwrightManifest(
-            version: 2,
+            version: 3,
             project: "api-local",
             imagePolicy: .requireDigest,
             imageTrust: nil,
@@ -1230,7 +1369,11 @@ final class HostwrightManifestTests: XCTestCase {
             services: [
                 HostwrightService(
                     name: "api",
-                    image: "ghcr.io/example/api@sha256:\(String(repeating: "a", count: 64))"
+                    image: "ghcr.io/example/api@sha256:\(String(repeating: "a", count: 64))",
+                    resources: HostwrightResources(
+                        requests: HostwrightResourceSet(cpus: 1, memory: "512MiB"),
+                        limits: HostwrightResourceSet(cpus: 1, memory: "512MiB")
+                    )
                 )
             ]
         )
@@ -1245,7 +1388,7 @@ final class HostwrightManifestTests: XCTestCase {
     func testImageProvenanceFailsClosedForGatesBoundsAndSignerRules() {
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             imageProvenance:
               requirement: required
@@ -1259,6 +1402,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "imageProvenance requires imagePolicy require-digest"
         )
@@ -1279,12 +1425,15 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
-            contains: "imageProvenance is supported only in manifest version 2"
+            contains: "imageProvenance is supported only in manifest version 3"
         )
 
         let invalidPolicy = HostwrightImageProvenancePolicy(
-            version: 2,
+            version: 3,
             requirement: .required,
             builderIDs: [],
             buildTypes: ["file:///tmp/build", "file:///tmp/build"],
@@ -1305,7 +1454,7 @@ final class HostwrightManifestTests: XCTestCase {
             requireReproducible: true
         )
         let manifest = HostwrightManifest(
-            version: 2,
+            version: 3,
             project: "api-local",
             imagePolicy: .requireDigest,
             imageTrust: nil,
@@ -1370,6 +1519,9 @@ final class HostwrightManifestTests: XCTestCase {
         services:
           api:
             image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
         """
         let policy = """
         imageProvenance:
@@ -1383,7 +1535,7 @@ final class HostwrightManifestTests: XCTestCase {
           requireReproducible: true
         """
         let prefix = """
-        version: 2
+        version: 3
         project: api-local
         imagePolicy: require-digest
         """
@@ -1444,6 +1596,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             code: "HW-MANIFEST-002",
             contains: "Manifest version must be an integer"
@@ -1456,6 +1611,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "project"
         )
@@ -1464,7 +1622,7 @@ final class HostwrightManifestTests: XCTestCase {
     func testMissingImageFailsValidation() {
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
@@ -1478,11 +1636,14 @@ final class HostwrightManifestTests: XCTestCase {
     func testMalformedPortFailsValidation() {
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - "not-a-port"
             """,
@@ -1493,33 +1654,42 @@ final class HostwrightManifestTests: XCTestCase {
     func testFlagLikeImagesFailWhileCommandArgumentsRemainExecutable() throws {
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
                 image: --mount=src=/,dst=/host
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "image must not begin"
         )
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
                 image: -bad
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "image must not begin"
         )
 
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 command: ["--flag"]
             """
         )
@@ -1530,11 +1700,14 @@ final class HostwrightManifestTests: XCTestCase {
         XCTAssertNoThrow(
             try ManifestValidator.validated(
                 """
-                version: 2
+                version: 3
                 project: api-local
                 services:
                   api:
                     image: ghcr.io/example/api:latest
+                    resources:
+                      requests: {cpus: 1, memory: 512MiB}
+                      limits: {cpus: 1, memory: 512MiB}
                     env:
                       AUTH_MODE: local
                       KEYCLOAK_URL: http://localhost:8080
@@ -1546,11 +1719,14 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 env:
                   1TOKEN: value
             """,
@@ -1559,11 +1735,14 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 env:
                   API-TOKEN: value
             """,
@@ -1572,11 +1751,14 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 env:
                   API_TOKEN: token=plaintext
             """,
@@ -1585,11 +1767,14 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 env:
                   API_TOKEN: keychain://hostwright.api/api-token
             """,
@@ -1598,11 +1783,14 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 env:
                   API_TOKEN: literal
                 secretEnv:
@@ -1613,11 +1801,14 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 secretEnv:
                   API_TOKEN: env://hostwright.api/api-token
             """,
@@ -1627,11 +1818,14 @@ final class HostwrightManifestTests: XCTestCase {
         for rootEquivalent in ["/:/host:ro", "//:/host:ro", "/./:/host:ro", "/data/..:/host:ro"] {
             assertManifestFailure(
                 """
-                version: 2
+                version: 3
                 project: api-local
                 services:
                   api:
                     image: ghcr.io/example/api:latest
+                    resources:
+                      requests: {cpus: 1, memory: 512MiB}
+                      limits: {cpus: 1, memory: 512MiB}
                     volumes:
                       - "\(rootEquivalent)"
                 """,
@@ -1641,11 +1835,14 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 volumes:
                   - "../data:/data:ro"
             """,
@@ -1673,11 +1870,14 @@ final class HostwrightManifestTests: XCTestCase {
         assertManifestFailure(
             """
             apiVersion: hostwright.dev/v1
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             code: "HW-MANIFEST-003",
             contains: "Unsupported top-level manifest field 'apiVersion'"
@@ -1685,11 +1885,14 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 build: .
             """,
             code: "HW-MANIFEST-003",
@@ -1698,11 +1901,14 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 health:
                   command: ["curl", "-f", "http://localhost:8080/health"]
                   timeout: 5s
@@ -1713,11 +1919,14 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 restart:
                   policy: on-failure
                   burstLimit: 3
@@ -1730,7 +1939,7 @@ final class HostwrightManifestTests: XCTestCase {
     func testPhase08RestartBudgetsParseValidateAndRoundTripCanonically() throws {
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: api-local
             restartBudget:
               maxAttempts: 24
@@ -1738,6 +1947,9 @@ final class HostwrightManifestTests: XCTestCase {
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 restart:
                   policy: on-failure
                   maxAttempts: 7
@@ -1780,11 +1992,14 @@ final class HostwrightManifestTests: XCTestCase {
     func testPhase08RolloutStableObservationParsesValidatesAndRoundTrips() throws {
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: rollout-local
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 probes:
                   readiness:
                     exec: ["/bin/check-ready"]
@@ -1805,11 +2020,14 @@ final class HostwrightManifestTests: XCTestCase {
 
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: rollout-local
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 update:
                   progressDeadline: 60s
                   stableObservation: 10s
@@ -1829,11 +2047,14 @@ final class HostwrightManifestTests: XCTestCase {
         for fields in invalidFields {
             assertManifestFailure(
                 """
-                version: 2
+                version: 3
                 project: api-local
                 services:
                   api:
                     image: ghcr.io/example/api:latest
+                    resources:
+                      requests: {cpus: 1, memory: 512MiB}
+                      limits: {cpus: 1, memory: 512MiB}
                     restart:
                       policy: on-failure
                       \(fields)
@@ -1847,11 +2068,14 @@ final class HostwrightManifestTests: XCTestCase {
         ] {
             assertManifestFailure(
                 """
-                version: 2
+                version: 3
                 project: api-local
                 services:
                   api:
                     image: ghcr.io/example/api:latest
+                    resources:
+                      requests: {cpus: 1, memory: 512MiB}
+                      limits: {cpus: 1, memory: 512MiB}
                     restart:
                       policy: on-failure
                       \(fields)
@@ -1861,13 +2085,16 @@ final class HostwrightManifestTests: XCTestCase {
         }
         assertManifestFailure(
             """
-            version: 2
+            version: 3
             project: api-local
             restartBudget:
               maxAttempts: 1001
             services:
               api:
                 image: ghcr.io/example/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "restartBudget.maxAttempts"
         )
@@ -1877,11 +2104,14 @@ final class HostwrightManifestTests: XCTestCase {
         for field in ["dns", "dns_search", "domainname", "hostname", "network_mode", "aliases", "expose", "extra_hosts"] {
             assertManifestFailure(
                 """
-                version: 2
+                version: 3
                 project: api-local
                 services:
                   api:
                     image: ghcr.io/example/api:latest
+                    resources:
+                      requests: {cpus: 1, memory: 512MiB}
+                      limits: {cpus: 1, memory: 512MiB}
                     \(field): unsupported
                 """,
                 code: "HW-MANIFEST-003",
@@ -1904,7 +2134,7 @@ final class HostwrightManifestTests: XCTestCase {
         for examplePath in examplePaths {
             let manifestText = try read(examplePath, root: root)
             let manifest = try ManifestValidator.validated(manifestText)
-            XCTAssertEqual(manifest.version, 2, examplePath)
+            XCTAssertEqual(manifest.version, 3, examplePath)
             XCTAssertFalse(manifestText.contains("apiVersion"), examplePath)
             XCTAssertFalse(manifestText.contains("depends_on"), examplePath)
             XCTAssertFalse(manifestText.contains("deploy:"), examplePath)
@@ -2284,7 +2514,7 @@ final class HostwrightManifestTests: XCTestCase {
         XCTAssertEqual(
             Set(serviceProperties.keys),
             [
-                "image", "replicas", "platform", "resources", "user", "group", "workdir",
+                "image", "replicas", "platform", "resources", "scheduling", "user", "group", "workdir",
                 "entrypoint", "command", "init", "dependsOn", "env", "secretEnv", "labels",
                 "ports", "hostAccess", "networks", "volumes", "health", "probes",
                 "networkPolicy", "restart", "update", "hooks",
@@ -2540,12 +2770,15 @@ final class HostwrightManifestTests: XCTestCase {
     }
 
     private static let validManifest = """
-    version: 2
+    version: 3
     project: api-local
 
     services:
       api:
         image: ghcr.io/example/api:latest
+        resources:
+          requests: {cpus: 1, memory: 512MiB}
+          limits: {cpus: 1, memory: 512MiB}
         ports:
           - "8080:8080"
         health:

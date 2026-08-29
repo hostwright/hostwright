@@ -1,8 +1,8 @@
 # Plugin And Extension Architecture
 
-Status: Phase 33 declaration policy plus Phase 41 reviewed-local handshake host.
+Status: Phase 09 secure provider and package lifecycle implementation; aggregate qualification pending.
 
-Hostwright does not provide generic plugin loading, installation, distribution, discovery, or capability invocation. Phase 33 adds a typed declaration model and local policy evaluator. Phase 41 adds one explicit, reviewed-local executable handshake so a caller can verify a locally reviewed binary and declaration against that policy before any future capability API is designed.
+Hostwright retains the earlier reviewed-local declaration handshake and now adds a separate Plugin ABI v1 path. Plugin packages are explicit-source, CMS-signed, immutable, digest-addressed, capability-limited, and controlled only through the authenticated persistent Control API. No default public registry or ambient native subprocess compatibility path is introduced.
 
 ## Implemented Scope
 
@@ -15,6 +15,12 @@ Hostwright does not provide generic plugin loading, installation, distribution, 
 - Empty declarations fail closed instead of disappearing from policy output.
 
 Phase 33 remains a non-mutating declaration model. Phase 41 can execute only the fixed `hostwright-extension-handshake-v1` protocol operation; it does not send capability payloads or grant runtime, state, secret, networking, tunnel, accelerator, or control-plane access. Phase 07's signed, digest-bound Network Provider SPI is a separate restricted Wasm boundary inside `hostwright-network-helper`; it does not turn this general extension handshake into a plugin runtime.
+
+Phase 09 does not widen that legacy handshake. Its separate package path verifies canonical manifests, exact content and entrypoint digests, provenance and manifest CMS signatures, a bounded compatibility range, approved grants, and WASI or XPC provider identity before staging. Local directories and explicitly configured HTTPS package roots are supported; HTTPS materialization uses the existing bounded registry transport and a private, identity-pinned temporary ownership ledger.
+
+Schema v21 persists packages, provenance, grants, activation, revocation, quarantine, and rollback intent. Installation records durable intent before filesystem effects, publishes only into digest-addressed immutable storage, and records device/inode/content ownership. Restart recovery leaves a durable terminal-audit checkpoint after compensating or completing effects; the daemon appends the terminal audit before finalizing that checkpoint. Update uses full SemVer prerelease ordering, rejects substitution and downgrade, health-checks before atomic activation, retains the prior verified digest for rollback, and revocation cancels active provider sessions without restarting the daemon. Uninstall removes only the exact ledgered package tree after state has made it inactive. Immutable and HTTPS cleanup pins parent directories and removes children descriptor-relatively after identity rechecks.
+
+WASI providers receive fresh Preview 1 instances with no environment, preopens, ambient network, host socket, state database, Keychain, or runtime access. Active invocation resolves the durable activation pointer and exact digest-addressed module rather than accepting a caller path; revocation cancels an in-flight health process and prevents later active resolution. XPC providers must satisfy the frozen reciprocal team/identifier requirements and the sandbox-only entitlement projection. Both paths accept only host-brokered capability inputs and proposed actions. HTTPS requests carry a per-file response limit enforced by the transport while bytes are received, before materialization allocates the complete response.
 
 ## Executable Handshake Scope
 
@@ -43,7 +49,7 @@ A passing check proves only that the exact reviewed file completed this protocol
 | Runtime adapter | Runtime observation declarations can be evaluated only as non-mutating paths behind `RuntimeAdapter`; runtime mutation remains unsupported for extensions. |
 | Networking provider | The general extension host blocks networking configuration; Phase 07 certificate/tunnel providers use the separate signed Network Provider SPI. |
 | Tunnel provider | The general extension host blocks tunnel authority; Phase 07's separate SPI grants only exact brokered origins, secret references, identities, and routes. |
-| Scheduler integration | Declaration-only scheduler advice can be allowed when it stays advisory, local, redacted, audited, and non-mutating. |
+| Scheduler integration | A declaration-only `schedulerAdvice` capability may be evaluated only as local, redacted, audited metadata. It cannot recommend placement, reserve capacity, mutate runtime state, or act as a compatibility scheduler; placement and admission remain solely the `HostwrightScheduler`/`HostwrightState` boundary. |
 | Future extension | Must fail closed until a separate issue defines capability, threat model, and proof. |
 
 ## Capability Rules
@@ -55,7 +61,7 @@ Allowed in current declaration policy when required boundaries are present:
 - `diagnosticsRead`
 - `runtimeObservation`
 - `stateRead`
-- `schedulerAdvice`
+- `schedulerAdvice` (declaration-only metadata; it never produces placement, reservation, or runtime decisions)
 
 Blocked in current core scope:
 
@@ -112,11 +118,10 @@ Controls in this phase:
 
 ## Non-Goals
 
-- Generic plugin loader or capability invocation.
-- Remote plugin registry.
-- Binary plugin distribution.
-- Untrusted code execution.
-- Sandboxing or descendant-process containment guarantees.
+- A default public plugin registry, registry search, or implicit network discovery.
+- Unsigned, mutable, version-incompatible, downgraded, or ambient-subprocess plugins.
+- Arbitrary native-code execution outside the signed sandboxed XPC boundary.
+- Direct plugin access to Hostwright state, Keychain, runtime adapters, control sockets, or host networking.
 - Runtime mutation extension path.
 - Provider networking, DNS, tunnel, reverse proxy, or cloud exposure integration through the general extension host.
 - Secret backend extension path.

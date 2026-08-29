@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "component": "DockerContextStore",
+  "root": {
+    "mode": "0700",
+    "owner": "effective-user",
+    "symlinks": "rejected"
+  },
+  "document": {
+    "fileMode": "0600",
+    "fileType": "regular",
+    "owner": "effective-user",
+    "linkCount": 1,
+    "maximumBytes": 16384,
+    "namePattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+    "socketPathMaximumBytes": 99,
+    "generationMinimum": 1
+  },
+  "activeMarker": {
+    "fileName": "active",
+    "fileMode": "0600",
+    "maximumBytes": 128,
+    "symlink": "rejected"
+  },
+  "updates": {
+    "write": "bounded-temporary-file-then-rename",
+    "delete": "exact-context-path-only"
+  }
+}

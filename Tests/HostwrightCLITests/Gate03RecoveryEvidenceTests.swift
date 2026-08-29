@@ -9,11 +9,14 @@ final class Gate03RecoveryStateEvidenceTests: XCTestCase {
         try withStore { store in
             let manifest = try ManifestValidator.validated(
                 """
-                version: 2
+                version: 3
                 project: sample
                 services:
                   api:
                     image: example.local/api:1
+                    resources:
+                      requests: {cpus: 1, memory: 512MiB}
+                      limits: {cpus: 1, memory: 512MiB}
                 """
             )
             try store.desiredStates.saveManifestSnapshot(

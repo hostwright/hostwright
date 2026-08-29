@@ -505,7 +505,7 @@ final class RegistryProvenanceExecutionTests: XCTestCase {
         publicKeyPath: String
     ) -> String {
         """
-        version: 2
+        version: 3
         project: demo
         imagePolicy: require-digest
         imageProvenance:
@@ -523,6 +523,9 @@ final class RegistryProvenanceExecutionTests: XCTestCase {
         services:
           api:
             image: registry.example.test/team/image@\(subject.canonicalValue)
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
         """
     }
 

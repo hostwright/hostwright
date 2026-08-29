@@ -45,6 +45,30 @@ public struct SQLiteStateStore: StateStore {
         EventLedger(store: self)
     }
 
+    public var controlIdentities: ControlIdentityRepository {
+        ControlIdentityRepository(store: self)
+    }
+
+    public var rbac: RBACRepository {
+        RBACRepository(store: self)
+    }
+
+    public var admission: AdmissionRepository {
+        AdmissionRepository(store: self)
+    }
+
+    public var schedulerAdmissions: SchedulerAdmissionRepository {
+        SchedulerAdmissionRepository(store: self)
+    }
+
+    public var workloadProfiles: WorkloadProfileRepository {
+        WorkloadProfileRepository(store: self)
+    }
+
+    public var plugins: PluginLifecycleRepository {
+        PluginLifecycleRepository(store: self)
+    }
+
     public var operations: OperationLedger {
         OperationLedger(store: self)
     }
@@ -123,6 +147,23 @@ public struct SQLiteStateStore: StateStore {
         try configuration.prepareStateAccessFoundation()
         return try StateAccessCoordinator(configuration: configuration)
             .acquireOperationMutationFence(groupID: groupID)
+    }
+
+    public func withReadObservationFence<T>(
+        waitTimeoutNanoseconds: UInt64 = 30_000_000_000,
+        _ body: () throws -> T
+    ) throws -> T {
+        guard (1...30_000_000_000).contains(waitTimeoutNanoseconds) else {
+            throw StateStoreError.invalidRecord(
+                "read-observation wait timeout is outside the bounded range"
+            )
+        }
+        try configuration.prepareStateAccessFoundation()
+        return try StateAccessCoordinator(configuration: configuration).withLock(
+            .observation,
+            waitTimeoutNanoseconds: waitTimeoutNanoseconds,
+            body
+        )
     }
 
     public func schemaVersion() throws -> Int {

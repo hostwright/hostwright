@@ -1,8 +1,8 @@
 import Darwin
 import Foundation
-import HostwrightCLI
+import HostwrightCommandTransport
 
-let result = HostwrightCLI.run(arguments: Array(CommandLine.arguments.dropFirst()))
+let result = HostwrightCommandRunner.run(arguments: Array(CommandLine.arguments.dropFirst()))
 if !result.standardOutput.isEmpty {
     FileHandle.standardOutput.write(Data(result.standardOutput.utf8))
 }

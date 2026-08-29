@@ -12,11 +12,38 @@ import XCTest
 @testable import HostwrightState
 
 final class HostwrightCLITests: XCTestCase {
+    func testContentSHA256MatchesKnownVector() {
+        XCTAssertEqual(
+            hostwrightContentSHA256("abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        )
+    }
+
     func testCommandParserRecognizesSupportedCommands() throws {
         XCTAssertEqual(try CLICommand.parse(arguments: ["--version"]), .version)
         XCTAssertEqual(try CLICommand.parse(arguments: ["init"]), .initManifest)
         XCTAssertEqual(try CLICommand.parse(arguments: ["import-stack", "compose.yaml"]), .importStack(path: "compose.yaml", output: .text, teamProfilePath: nil))
         XCTAssertEqual(try CLICommand.parse(arguments: ["import-stack", "compose.yaml", "--output", "json"]), .importStack(path: "compose.yaml", output: .json, teamProfilePath: nil))
+        XCTAssertEqual(
+            try CLICommand.parse(arguments: ["export-stack", "hostwright.yaml"]),
+            .exportStack(path: "hostwright.yaml", output: .text)
+        )
+        XCTAssertEqual(
+            try CLICommand.parse(arguments: [
+                "export-stack", "hostwright.yaml", "--output", "json",
+            ]),
+            .exportStack(path: "hostwright.yaml", output: .json)
+        )
+        XCTAssertEqual(
+            try CLICommand.parse(arguments: [
+                "plan-stack-update", "current.yaml", "desired.yaml", "--output", "json",
+            ]),
+            .planStackUpdate(
+                currentPath: "current.yaml",
+                desiredPath: "desired.yaml",
+                output: .json
+            )
+        )
         XCTAssertEqual(try CLICommand.parse(arguments: ["validate"]), .validate(path: "hostwright.yaml", teamProfilePath: nil))
         XCTAssertEqual(try CLICommand.parse(arguments: ["validate", "custom.yaml"]), .validate(path: "custom.yaml", teamProfilePath: nil))
         XCTAssertEqual(try CLICommand.parse(arguments: ["plan"]), .plan(path: "hostwright.yaml", output: .text, teamProfilePath: nil))
@@ -231,6 +258,20 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["doctor", "--state-db"]))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["import-stack"]))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["import-stack", "compose.yaml", "--write"]))
+        XCTAssertThrowsError(try CLICommand.parse(arguments: ["export-stack"]))
+        XCTAssertThrowsError(try CLICommand.parse(arguments: ["export-stack", "a.yaml", "b.yaml"]))
+        XCTAssertThrowsError(try CLICommand.parse(arguments: ["export-stack", "a.yaml", "--write"]))
+        XCTAssertThrowsError(try CLICommand.parse(arguments: ["plan-stack-update", "current.yaml"]))
+        XCTAssertThrowsError(
+            try CLICommand.parse(arguments: [
+                "plan-stack-update", "current.yaml", "desired.yaml", "extra.yaml",
+            ])
+        )
+        XCTAssertThrowsError(
+            try CLICommand.parse(arguments: [
+                "plan-stack-update", "current.yaml", "desired.yaml", "--write",
+            ])
+        )
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["events", "--state-db", "/tmp/state.sqlite", "--sort", "newest"]))
         XCTAssertThrowsError(try CLICommand.parse(arguments: ["recovery", "resume"]))
         XCTAssertThrowsError(
@@ -605,6 +646,8 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertEqual(usageFailure.exitCode, CLIExitCode.commandUsage.rawValue)
         XCTAssertTrue(result.standardOutput.contains("hostwright plan [path] [--output text|json]"))
         XCTAssertTrue(result.standardOutput.contains("hostwright import-stack <path> [--output text|json]"))
+        XCTAssertTrue(result.standardOutput.contains("hostwright export-stack <manifest> [--output text|json]"))
+        XCTAssertTrue(result.standardOutput.contains("hostwright plan-stack-update <current> <desired> [--output text|json]"))
         XCTAssertTrue(result.standardOutput.contains("hostwright status [path] [--state-db <path>] [--output text|json]"))
         for command in ["up", "down", "run", "start", "stop", "restart", "rm", "update"] {
             XCTAssertTrue(
@@ -635,13 +678,49 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertTrue(result.standardOutput.contains("hostwright migrate preview <path> [--json|--output text|json]"))
         XCTAssertTrue(result.standardOutput.contains("JSON output is supported for capabilities, paths, migrate preview"))
         XCTAssertTrue(result.standardOutput.contains("import-stack reads a narrow safe stack-file subset"))
+        XCTAssertTrue(result.standardOutput.contains("Neither command writes files, resolves state, or observes or mutates runtime."))
         XCTAssertTrue(result.standardOutput.contains("Diagnostics-v1 remains a local redacted JSON export."))
         XCTAssertTrue(result.standardOutput.contains("hostwright import-stack compose.yaml --output json"))
+        XCTAssertTrue(result.standardOutput.contains("hostwright export-stack hostwright.yaml --output json"))
+        XCTAssertTrue(result.standardOutput.contains("hostwright plan-stack-update current.yaml desired.yaml --output json"))
         XCTAssertTrue(result.standardOutput.contains("hostwright doctor --output json"))
         XCTAssertTrue(result.standardOutput.contains("--team-profile <path>"))
         XCTAssertTrue(result.standardOutput.contains("--approval-record <path>"))
         XCTAssertTrue(result.standardOutput.contains("Team profiles and approvals are loaded only from explicit local paths."))
         XCTAssertTrue(result.standardOutput.contains("it is not sandboxed"))
+    }
+
+    func testMigratePreviewConvertsLegacyFlatResourcesToV3WithoutWritingSource() {
+        let source = """
+        version: 2
+        project: demo
+        services:
+          api:
+            image: local/demo:latest
+            resources: {cpus: 2, memory: 512MiB}
+        """
+        let files = FileBox(files: [HostwrightIdentity.manifestFileName: source])
+
+        let textResult = HostwrightCLI.run(
+            arguments: ["migrate", "preview", HostwrightIdentity.manifestFileName],
+            environment: environment(files: files)
+        )
+
+        XCTAssertEqual(textResult.exitCode, 0)
+        XCTAssertTrue(textResult.standardOutput.contains("version: 3"))
+        XCTAssertTrue(textResult.standardOutput.contains("requests:"))
+        XCTAssertTrue(textResult.standardOutput.contains("limits:"))
+        XCTAssertEqual(files.files[HostwrightIdentity.manifestFileName], source)
+
+        let jsonResult = HostwrightCLI.run(
+            arguments: [
+                "migrate", "preview", HostwrightIdentity.manifestFileName, "--json"
+            ],
+            environment: environment(files: files)
+        )
+        XCTAssertEqual(jsonResult.exitCode, 0)
+        XCTAssertTrue(jsonResult.standardOutput.contains(#""targetVersion":3"#))
+        XCTAssertTrue(jsonResult.standardOutput.contains("legacy flat resource fields"))
     }
 
     func testExtensionCheckJSONErrorUsesStableCodeAndDoesNotCreateState() throws {
@@ -681,46 +760,58 @@ final class HostwrightCLITests: XCTestCase {
         XCTAssertEqual(existingFiles.files[HostwrightIdentity.manifestFileName], "project: existing\nservices:\n")
     }
 
-    func testImportStackPrintsConvertedManifestWithoutWritingFiles() throws {
+    func testImportStackFailsClosedForMissingV3ResourcesWithoutWritingFiles() throws {
         let files = FileBox(files: ["compose.yaml": safeStackFile])
 
         let result = HostwrightCLI.run(arguments: ["import-stack", "compose.yaml"], environment: environment(files: files))
 
-        XCTAssertEqual(result.exitCode, 0)
-        XCTAssertEqual(result.standardError, "")
-        XCTAssertTrue(result.standardOutput.contains("version: 2\nproject: demo"))
-        XCTAssertTrue(result.standardOutput.contains("image: ghcr.io/example/api:latest"))
-        XCTAssertTrue(result.standardOutput.contains("env:\n      APP_ENV: development"))
+        XCTAssertEqual(result.exitCode, CLIExitCode.validation.rawValue)
+        XCTAssertEqual(result.standardOutput, "")
+        XCTAssertTrue(result.standardError.contains("resources must declare explicit requests and limits"))
         XCTAssertNil(files.files[HostwrightIdentity.manifestFileName])
-        XCTAssertNoThrow(try ManifestValidator.validated(result.standardOutput))
+        XCTAssertEqual(files.files, ["compose.yaml": safeStackFile])
     }
 
-    func testImportStackJSONOutputIncludesManifestAndWarnings() throws {
+    func testImportStackJSONMapsComposeCapacityDeterministicallyWithoutWritingFiles() throws {
         let stack = """
-        version: "3.9"
         name: demo
         services:
           api:
             image: ghcr.io/example/api:latest
+            deploy:
+              resources:
+                reservations:
+                  cpus: "1"
+                  memory: 512m
+                limits:
+                  cpus: "2"
+                  memory: 1g
 
         """
         let files = FileBox(files: ["compose.yaml": stack])
 
         let result = HostwrightCLI.run(arguments: ["import-stack", "compose.yaml", "--output", "json"], environment: environment(files: files))
+        let repeated = HostwrightCLI.run(arguments: ["import-stack", "compose.yaml", "--output", "json"], environment: environment(files: files))
 
-        XCTAssertEqual(result.exitCode, 0)
+        XCTAssertEqual(result.exitCode, CLIExitCode.success.rawValue)
         XCTAssertEqual(result.standardError, "")
+        XCTAssertEqual(repeated, result)
+        XCTAssertEqual(files.files, ["compose.yaml": stack])
         let object = try jsonObject(result.standardOutput)
-        XCTAssertEqual(object["kind"] as? String, "stackImport")
+        XCTAssertEqual(object["kind"] as? String, "composeImport")
         XCTAssertEqual(object["sourcePath"] as? String, "compose.yaml")
+        XCTAssertEqual(object["schemaVersion"] as? Int, 1)
+        XCTAssertEqual(object["contractVersion"] as? String, "v1")
         XCTAssertEqual(object["succeeded"] as? Bool, true)
-        XCTAssertTrue((object["manifest"] as? String)?.contains("project: demo") == true)
-        let warnings = try XCTUnwrap(object["warnings"] as? [[String: Any]])
-        XCTAssertEqual(warnings.count, 1)
-        XCTAssertEqual(warnings.first?["severity"] as? String, "warning")
+        XCTAssertTrue((object["manifestText"] as? String)?.contains("requests:\n        cpus: 1\n        memory: 512MiB") == true)
+        XCTAssertTrue((object["canonicalComposeText"] as? String)?.contains("memory: \"512m\"") == true)
+        let lossReport = try XCTUnwrap(object["lossReport"] as? [String: Any])
+        XCTAssertEqual(lossReport["operation"] as? String, "import")
+        let losses = try XCTUnwrap(lossReport["losses"] as? [[String: Any]])
+        XCTAssertEqual(losses.count, 0)
     }
 
-    func testImportStackJSONErrorsFailClosedForUnsupportedFields() throws {
+    func testImportStackJSONErrorsUseVersionedComposeLossEnvelopeAndFailClosed() throws {
         let stack = """
         name: demo
         services:
@@ -735,12 +826,360 @@ final class HostwrightCLITests: XCTestCase {
 
         XCTAssertEqual(result.exitCode, CLIExitCode.validation.rawValue)
         XCTAssertEqual(result.standardOutput, "")
+        XCTAssertEqual(files.files, ["compose.yaml": stack])
         let object = try jsonObject(result.standardError)
-        XCTAssertEqual(object["kind"] as? String, "error")
-        XCTAssertEqual(object["exitCode"] as? Int, Int(CLIExitCode.validation.rawValue))
-        let issues = try XCTUnwrap(object["issues"] as? [[String: Any]])
-        XCTAssertEqual(issues.first?["policyReasonCode"] as? String, "secureExposureUnsupported")
-        XCTAssertTrue((issues.first?["message"] as? String)?.contains("network_mode") == true)
+        XCTAssertEqual(object["kind"] as? String, "composeImport")
+        XCTAssertEqual(object["schemaVersion"] as? Int, 1)
+        XCTAssertEqual(object["contractVersion"] as? String, "v1")
+        XCTAssertEqual(object["succeeded"] as? Bool, false)
+        XCTAssertTrue(object["manifestText"] is NSNull)
+        XCTAssertTrue(object["canonicalComposeText"] is NSNull)
+        let lossReport = try XCTUnwrap(object["lossReport"] as? [String: Any])
+        XCTAssertEqual(lossReport["operation"] as? String, "import")
+        let losses = try XCTUnwrap(lossReport["losses"] as? [[String: Any]])
+        XCTAssertEqual(losses.first?["code"] as? String, "HW-COMPOSE-001")
+        XCTAssertEqual(losses.first?["path"] as? String, "$.services.api.network_mode")
+        XCTAssertEqual(losses.first?["policyReasonCode"] as? String, "secureExposureUnsupported")
+        XCTAssertTrue((losses.first?["message"] as? String)?.contains("network_mode") == true)
+    }
+
+    func testExportStackTextAndJSONAreDeterministicAndReadOnly() throws {
+        let textFiles = FileBox(files: ["hostwright.yaml": composeExportManifest])
+        let textResult = HostwrightCLI.run(
+            arguments: ["export-stack", "hostwright.yaml"],
+            environment: composeReadOnlyEnvironment(files: textFiles)
+        )
+
+        XCTAssertEqual(textResult.exitCode, CLIExitCode.success.rawValue)
+        XCTAssertEqual(textResult.standardError, "")
+        XCTAssertTrue(textResult.standardOutput.contains("name: \"compose-cli\""))
+        XCTAssertTrue(textResult.standardOutput.contains("cpus: \"1\""))
+        XCTAssertTrue(textResult.standardOutput.contains("memory: \"512m\""))
+        XCTAssertEqual(textFiles.readCounts, ["hostwright.yaml": 1])
+        XCTAssertEqual(textFiles.writeCount, 0)
+
+        let jsonFiles = FileBox(files: ["hostwright.yaml": composeExportManifest])
+        let jsonEnvironment = composeReadOnlyEnvironment(files: jsonFiles)
+        let result = HostwrightCLI.run(
+            arguments: ["export-stack", "hostwright.yaml", "--output", "json"],
+            environment: jsonEnvironment
+        )
+        let repeated = HostwrightCLI.run(
+            arguments: ["export-stack", "hostwright.yaml", "--output", "json"],
+            environment: jsonEnvironment
+        )
+
+        XCTAssertEqual(repeated, result)
+        XCTAssertEqual(result.exitCode, CLIExitCode.success.rawValue)
+        XCTAssertEqual(result.standardError, "")
+        XCTAssertEqual(jsonFiles.readCounts, ["hostwright.yaml": 2])
+        XCTAssertEqual(jsonFiles.writeCount, 0)
+        let object = try jsonObject(result.standardOutput)
+        XCTAssertEqual(object["kind"] as? String, "composeExport")
+        XCTAssertEqual(object["sourcePath"] as? String, "hostwright.yaml")
+        XCTAssertEqual(object["schemaVersion"] as? Int, 1)
+        XCTAssertEqual(object["contractVersion"] as? String, "v1")
+        XCTAssertEqual(object["succeeded"] as? Bool, true)
+        XCTAssertTrue((object["composeText"] as? String)?.contains("memory: \"1g\"") == true)
+        let lossReport = try XCTUnwrap(object["lossReport"] as? [String: Any])
+        XCTAssertEqual(lossReport["operation"] as? String, "export")
+        XCTAssertEqual((lossReport["losses"] as? [[String: Any]])?.count, 0)
+    }
+
+    func testExportStackRejectsUnrepresentableManifestWithExactComposeLoss() throws {
+        let files = FileBox(files: ["hostwright.yaml": composeUnrepresentableManifest])
+        let environment = composeReadOnlyEnvironment(files: files)
+        let text = HostwrightCLI.run(
+            arguments: ["export-stack", "hostwright.yaml"],
+            environment: environment
+        )
+        let json = HostwrightCLI.run(
+            arguments: ["export-stack", "hostwright.yaml", "--output", "json"],
+            environment: environment
+        )
+
+        XCTAssertEqual(text.exitCode, CLIExitCode.validation.rawValue)
+        XCTAssertEqual(text.standardOutput, "")
+        XCTAssertTrue(text.standardError.contains("HW-COMPOSE-003"))
+        XCTAssertTrue(text.standardError.contains("$.imagePolicy"))
+        XCTAssertEqual(json.exitCode, CLIExitCode.validation.rawValue)
+        XCTAssertEqual(json.standardOutput, "")
+        let object = try jsonObject(json.standardError)
+        XCTAssertEqual(object["kind"] as? String, "composeExport")
+        XCTAssertEqual(object["succeeded"] as? Bool, false)
+        XCTAssertTrue(object["composeText"] is NSNull)
+        let report = try XCTUnwrap(object["lossReport"] as? [String: Any])
+        let losses = try XCTUnwrap(report["losses"] as? [[String: Any]])
+        XCTAssertEqual(losses.map { $0["code"] as? String }, ["HW-COMPOSE-003"])
+        XCTAssertEqual(losses.map { $0["path"] as? String }, ["$.imagePolicy"])
+        XCTAssertEqual(files.readCounts, ["hostwright.yaml": 2])
+        XCTAssertEqual(files.writeCount, 0)
+    }
+
+    func testComposeJSONParseFailuresRetainTypedEnvelopes() throws {
+        let invalidDocuments = [
+            "malformed": "version: [",
+            "oversized": String(repeating: "x", count: ManifestParser.maximumUTF8Bytes + 1),
+            "duplicate-key": "version: 3\nproject: first\nproject: second\nservices: {}\n",
+        ]
+        for (name, invalid) in invalidDocuments {
+            let export = HostwrightCLI.run(
+                arguments: ["export-stack", "./manifest.yaml", "--output", "json"],
+                environment: composeReadOnlyEnvironment(
+                    files: FileBox(files: ["manifest.yaml": invalid])
+                )
+            )
+            XCTAssertEqual(export.exitCode, CLIExitCode.validation.rawValue, name)
+            XCTAssertEqual(export.standardOutput, "", name)
+            let exportObject = try jsonObject(export.standardError)
+            XCTAssertEqual(exportObject["kind"] as? String, "composeExport", name)
+            XCTAssertEqual(exportObject["sourcePath"] as? String, "manifest.yaml", name)
+            XCTAssertEqual(exportObject["succeeded"] as? Bool, false, name)
+            let exportReport = try XCTUnwrap(
+                exportObject["lossReport"] as? [String: Any],
+                name
+            )
+            XCTAssertEqual(exportReport["operation"] as? String, "export", name)
+            XCTAssertFalse(
+                (exportReport["losses"] as? [[String: Any]])?.isEmpty ?? true,
+                name
+            )
+
+            let update = HostwrightCLI.run(
+                arguments: [
+                    "plan-stack-update", "./current.yaml", "folder/../desired.yaml",
+                    "--output", "json",
+                ],
+                environment: composeReadOnlyEnvironment(files: FileBox(files: [
+                    "current.yaml": composeExportManifest,
+                    "desired.yaml": invalid,
+                ]))
+            )
+            XCTAssertEqual(update.exitCode, CLIExitCode.validation.rawValue, name)
+            XCTAssertEqual(update.standardOutput, "", name)
+            let updateObject = try jsonObject(update.standardError)
+            XCTAssertEqual(updateObject["kind"] as? String, "composeUpdatePlan", name)
+            XCTAssertEqual(updateObject["currentPath"] as? String, "current.yaml", name)
+            XCTAssertEqual(updateObject["desiredPath"] as? String, "desired.yaml", name)
+            XCTAssertEqual(updateObject["accepted"] as? Bool, false, name)
+            XCTAssertEqual(updateObject["mutatesRuntime"] as? Bool, false, name)
+            XCTAssertEqual((updateObject["changes"] as? [[String: Any]])?.count, 0, name)
+        }
+    }
+
+    func testComposeBoundedReaderAcceptsExactLimitAndRejectsOversizedAndInvalidUTF8() throws {
+        try withTemporaryDirectory { directory in
+            let validSuffix = "\n" + """
+            version: 3
+            project: boundary
+            services:
+              api:
+                image: ghcr.io/example/api:1
+                resources:
+                  requests:
+                    cpus: 1
+                    memory: 512MiB
+                  limits:
+                    cpus: 1
+                    memory: 512MiB
+            """
+            let exactText = String(
+                repeating: "#",
+                count: ManifestParser.maximumUTF8Bytes - validSuffix.utf8.count
+            ) + validSuffix
+            let exactURL = directory.appendingPathComponent("exact.yaml")
+            let oversizedURL = directory.appendingPathComponent("oversized.yaml")
+            let invalidUTF8URL = directory.appendingPathComponent("invalid.yaml")
+            let unsafeURL = directory.appendingPathComponent("unsafe.yaml")
+            try Data(exactText.utf8).write(to: exactURL)
+            try Data(repeating: 0x61, count: ManifestParser.maximumUTF8Bytes + 1)
+                .write(to: oversizedURL)
+            try Data([0xFF, 0xFE, 0xFD]).write(to: invalidUTF8URL)
+            try FileManager.default.createSymbolicLink(
+                at: unsafeURL,
+                withDestinationURL: exactURL
+            )
+
+            var environment = composeReadOnlyEnvironment(files: FileBox())
+            environment.readTextFile = { _ in
+                XCTFail("Compose commands must not invoke the unbounded reader.")
+                throw CLIUsageError("unexpected unbounded read")
+            }
+            environment.readBoundedTextFile = { path, maximumBytes in
+                try hostwrightReadBoundedUTF8TextFile(
+                    path: path,
+                    maximumBytes: maximumBytes
+                )
+            }
+
+            let exact = HostwrightCLI.run(
+                arguments: ["export-stack", exactURL.path, "--output", "json"],
+                environment: environment
+            )
+            XCTAssertEqual(exact.exitCode, CLIExitCode.success.rawValue)
+            XCTAssertEqual(try jsonObject(exact.standardOutput)["succeeded"] as? Bool, true)
+
+            let oversized = HostwrightCLI.run(
+                arguments: ["export-stack", oversizedURL.path, "--output", "json"],
+                environment: environment
+            )
+            XCTAssertEqual(oversized.exitCode, CLIExitCode.validation.rawValue)
+            let oversizedObject = try jsonObject(oversized.standardError)
+            XCTAssertEqual(oversizedObject["kind"] as? String, "composeExport")
+            XCTAssertEqual(oversizedObject["succeeded"] as? Bool, false)
+            XCTAssertTrue(oversized.standardError.contains("1 MiB"))
+
+            let invalidUTF8 = HostwrightCLI.run(
+                arguments: ["export-stack", invalidUTF8URL.path, "--output", "json"],
+                environment: environment
+            )
+            XCTAssertEqual(invalidUTF8.exitCode, CLIExitCode.validation.rawValue)
+            let invalidUTF8Object = try jsonObject(invalidUTF8.standardError)
+            XCTAssertEqual(invalidUTF8Object["kind"] as? String, "composeExport")
+            XCTAssertEqual(invalidUTF8Object["succeeded"] as? Bool, false)
+            XCTAssertTrue(invalidUTF8.standardError.contains("valid UTF-8"))
+
+            let unsafe = HostwrightCLI.run(
+                arguments: ["export-stack", unsafeURL.path, "--output", "json"],
+                environment: environment
+            )
+            XCTAssertEqual(unsafe.exitCode, CLIExitCode.validation.rawValue)
+            let unsafeObject = try jsonObject(unsafe.standardError)
+            XCTAssertEqual(unsafeObject["kind"] as? String, "composeExport")
+            XCTAssertEqual(unsafeObject["succeeded"] as? Bool, false)
+            XCTAssertTrue(unsafe.standardError.contains("could not be read safely"))
+
+            let exactUpdate = HostwrightCLI.run(
+                arguments: [
+                    "plan-stack-update", exactURL.path, exactURL.path, "--output", "json",
+                ],
+                environment: environment
+            )
+            XCTAssertEqual(exactUpdate.exitCode, CLIExitCode.success.rawValue)
+            XCTAssertEqual(try jsonObject(exactUpdate.standardOutput)["accepted"] as? Bool, true)
+
+            for (path, expectedText) in [
+                (oversizedURL.path, "1 MiB"),
+                (invalidUTF8URL.path, "valid UTF-8"),
+                (unsafeURL.path, "could not be read safely"),
+            ] {
+                let update = HostwrightCLI.run(
+                    arguments: [
+                        "plan-stack-update", exactURL.path, path, "--output", "json",
+                    ],
+                    environment: environment
+                )
+                XCTAssertEqual(update.exitCode, CLIExitCode.validation.rawValue)
+                let object = try jsonObject(update.standardError)
+                XCTAssertEqual(object["kind"] as? String, "composeUpdatePlan")
+                XCTAssertEqual(object["accepted"] as? Bool, false)
+                XCTAssertTrue(update.standardError.contains(expectedText))
+            }
+        }
+    }
+
+    func testPlanStackUpdateTextJSONAndRejectedPlanRemainReadOnly() throws {
+        let files = FileBox(files: [
+            "current.yaml": composeExportManifest,
+            "desired.yaml": composeDesiredManifest,
+        ])
+        let environment = composeReadOnlyEnvironment(files: files)
+        let text = HostwrightCLI.run(
+            arguments: ["plan-stack-update", "current.yaml", "desired.yaml"],
+            environment: environment
+        )
+        let json = HostwrightCLI.run(
+            arguments: [
+                "plan-stack-update", "current.yaml", "desired.yaml", "--output", "json",
+            ],
+            environment: environment
+        )
+
+        XCTAssertEqual(text.exitCode, CLIExitCode.success.rawValue)
+        XCTAssertEqual(text.standardError, "")
+        XCTAssertTrue(text.standardOutput.contains("Accepted: true"))
+        XCTAssertTrue(text.standardOutput.contains("Mutates runtime: false"))
+        XCTAssertTrue(text.standardOutput.contains("update-service api: image"))
+        XCTAssertEqual(json.exitCode, CLIExitCode.success.rawValue)
+        XCTAssertEqual(json.standardError, "")
+        let object = try jsonObject(json.standardOutput)
+        XCTAssertEqual(object["kind"] as? String, "composeUpdatePlan")
+        XCTAssertEqual(object["currentPath"] as? String, "current.yaml")
+        XCTAssertEqual(object["desiredPath"] as? String, "desired.yaml")
+        XCTAssertEqual(object["accepted"] as? Bool, true)
+        XCTAssertEqual(object["mutatesRuntime"] as? Bool, false)
+        let changes = try XCTUnwrap(object["changes"] as? [[String: Any]])
+        XCTAssertEqual(changes.count, 1)
+        XCTAssertEqual(changes.first?["kind"] as? String, "update-service")
+        XCTAssertEqual(changes.first?["serviceName"] as? String, "api")
+        XCTAssertEqual(changes.first?["fields"] as? [String], ["image"])
+        XCTAssertEqual(files.readCounts, ["current.yaml": 2, "desired.yaml": 2])
+        XCTAssertEqual(files.writeCount, 0)
+
+        let rejectedFiles = FileBox(files: [
+            "current.yaml": composeExportManifest,
+            "desired.yaml": composeUnrepresentableManifest,
+        ])
+        let rejected = HostwrightCLI.run(
+            arguments: [
+                "plan-stack-update", "current.yaml", "desired.yaml", "--output", "json",
+            ],
+            environment: composeReadOnlyEnvironment(files: rejectedFiles)
+        )
+
+        XCTAssertEqual(rejected.exitCode, CLIExitCode.validation.rawValue)
+        XCTAssertEqual(rejected.standardOutput, "")
+        let rejectedObject = try jsonObject(rejected.standardError)
+        XCTAssertEqual(rejectedObject["accepted"] as? Bool, false)
+        XCTAssertEqual(rejectedObject["mutatesRuntime"] as? Bool, false)
+        XCTAssertEqual((rejectedObject["changes"] as? [[String: Any]])?.count, 0)
+        let rejectedReport = try XCTUnwrap(rejectedObject["lossReport"] as? [String: Any])
+        let rejectedLosses = try XCTUnwrap(rejectedReport["losses"] as? [[String: Any]])
+        XCTAssertEqual(rejectedLosses.map { $0["code"] as? String }, ["HW-COMPOSE-003"])
+        XCTAssertEqual(rejectedLosses.map { $0["path"] as? String }, ["$.desired.imagePolicy"])
+        XCTAssertEqual(rejectedFiles.readCounts, ["current.yaml": 1, "desired.yaml": 1])
+        XCTAssertEqual(rejectedFiles.writeCount, 0)
+    }
+
+    func testPlanStackUpdateReadsSameAndDotAliasInputIdentityOnlyOnce() throws {
+        for paths in [
+            ["manifest.yaml", "manifest.yaml"],
+            ["manifest.yaml", "./manifest.yaml"],
+        ] {
+            let files = FileBox()
+            var environment = composeReadOnlyEnvironment(files: files)
+            let readSnapshot: (String) throws -> String = { path in
+                XCTAssertTrue(paths.contains(path))
+                files.readCounts["canonical-manifest", default: 0] += 1
+                return files.readCounts["canonical-manifest"] == 1
+                    ? self.composeExportManifest
+                    : self.composeDesiredManifest.replacingOccurrences(
+                        of: "project: compose-cli",
+                        with: "project: swapped-after-first-read"
+                    )
+            }
+            environment.readTextFile = readSnapshot
+            environment.readBoundedTextFile = { path, _ in
+                try readSnapshot(path)
+            }
+
+            let result = HostwrightCLI.run(
+                arguments: [
+                    "plan-stack-update", paths[0], paths[1], "--output", "json",
+                ],
+                environment: environment
+            )
+
+            let caseDescription = paths.joined(separator: ", ")
+            XCTAssertEqual(result.exitCode, CLIExitCode.success.rawValue, caseDescription)
+            XCTAssertEqual(files.readCounts["canonical-manifest"], 1, caseDescription)
+            XCTAssertEqual(files.writeCount, 0, caseDescription)
+            let object = try jsonObject(result.standardOutput)
+            XCTAssertEqual(object["currentPath"] as? String, "manifest.yaml")
+            XCTAssertEqual(object["desiredPath"] as? String, "manifest.yaml")
+            XCTAssertEqual(object["accepted"] as? Bool, true)
+            XCTAssertEqual((object["changes"] as? [[String: Any]])?.count, 0)
+        }
     }
 
     func testValidateAndPlanRemainNonMutatingWhileStatusUsesSecureDefaultState() throws {
@@ -790,11 +1229,18 @@ final class HostwrightCLITests: XCTestCase {
         let files = FileBox(
             files: [
                 HostwrightIdentity.manifestFileName: """
-                version: 2
+                version: 3
                 project: api-local
                 services:
                   api:
                     image: ghcr.io/example/api:latest
+                    resources:
+                      requests:
+                        cpus: 1
+                        memory: 512MiB
+                      limits:
+                        cpus: 1
+                        memory: 512MiB
                     secretEnv:
                       API_TOKEN: keychain://hostwright.api/api-token
 
@@ -815,11 +1261,18 @@ final class HostwrightCLITests: XCTestCase {
         let files = FileBox(
             files: [
                 HostwrightIdentity.manifestFileName: """
-                version: 2
+                version: 3
                 project: api-local
                 services:
                   api:
                     image: ghcr.io/example/api:latest
+                    resources:
+                      requests:
+                        cpus: 1
+                        memory: 512MiB
+                      limits:
+                        cpus: 1
+                        memory: 512MiB
                     secretEnv:
                       API_TOKEN: keychain://hostwright.api/api-token
 
@@ -1105,7 +1558,7 @@ final class HostwrightCLITests: XCTestCase {
 
         let invalidManifest = HostwrightCLI.run(
             arguments: ["plan", "--output", "json"],
-            environment: environment(files: FileBox(files: [HostwrightIdentity.manifestFileName: "version: 2\nproject: demo\nservices: {}\n"]))
+            environment: environment(files: FileBox(files: [HostwrightIdentity.manifestFileName: "version: 3\nproject: demo\nservices: {}\n"]))
         )
 
         XCTAssertEqual(invalidManifest.exitCode, CLIExitCode.validation.rawValue)
@@ -1131,7 +1584,7 @@ final class HostwrightCLITests: XCTestCase {
         }
     }
 
-    func testApplyRejectsCapabilityChangeAfterPlanningBeforeStateOrRuntimeMutation() throws {
+    func testApplyBlocksBeforeCapabilityRevalidationWithoutCommittedSchedulerAuthority() throws {
         try withTemporaryDatabase { databasePath in
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
             let adapter = ScriptedApplyRuntimeAdapter(
@@ -1147,8 +1600,8 @@ final class HostwrightCLITests: XCTestCase {
                 environment: environment(files: files, runtimeAdapter: adapter)
             )
 
-            XCTAssertEqual(result.exitCode, CLIExitCode.runtimeUnavailable.rawValue)
-            XCTAssertTrue(result.standardError.contains("capability revalidation failed"))
+            XCTAssertEqual(result.exitCode, CLIExitCode.unsafeOperation.rawValue)
+            XCTAssertTrue(result.standardError.contains("Manifest-only admission cannot authorize runtime mutation."))
             XCTAssertTrue(adapter.executedActions.isEmpty)
             let store = SQLiteStateStore(path: databasePath)
             XCTAssertTrue(try store.operations.loadAll().isEmpty)
@@ -1167,7 +1620,7 @@ final class HostwrightCLITests: XCTestCase {
         }
     }
 
-    func testApplyPersistsIntentBeforeCreateAndRecordsSuccess() throws {
+    func testApplyWithoutCommittedSchedulerAuthorityPersistsNoIntent() throws {
         try withTemporaryDatabase { databasePath in
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
             let adapter = ScriptedApplyRuntimeAdapter()
@@ -1178,58 +1631,19 @@ final class HostwrightCLITests: XCTestCase {
                 environment: environment(files: files, runtimeAdapter: adapter)
             )
 
-            XCTAssertEqual(result.exitCode, 0)
-            XCTAssertTrue(result.standardOutput.contains("Applied action: createMissingService demo/api"))
+            XCTAssertEqual(result.exitCode, CLIExitCode.unsafeOperation.rawValue)
+            XCTAssertTrue(result.standardError.contains("Manifest-only admission cannot authorize runtime mutation."))
             XCTAssertFalse(result.standardOutput.contains(fakeSecret))
-            XCTAssertEqual(adapter.executedActions.map(\.kind), [.create])
-            let confirmation = try XCTUnwrap(adapter.confirmations.first)
-            let context = try XCTUnwrap(confirmation.context)
-            XCTAssertNil(context.validationIssue)
+            XCTAssertTrue(adapter.executedActions.isEmpty)
+            XCTAssertTrue(adapter.confirmations.isEmpty)
 
             let store = SQLiteStateStore(path: databasePath)
-            let operations = try store.operations.loadAll()
-            XCTAssertEqual(operations.map(\.status), [.recorded, .succeeded])
-            XCTAssertEqual(operations.map(\.planHash), [expectedHash, expectedHash])
-            for operation in operations {
-                XCTAssertEqual(
-                    try jsonObject(operation.payloadJSONRedacted)["capabilitySHA256"] as? String,
-                    context.capabilitySHA256
-                )
-            }
-            let groups = try store.operationGroups.loadAll()
-            XCTAssertEqual(groups.map(\.status), [.succeeded])
-            XCTAssertEqual(groups[0].checkpoint, "completed")
-            XCTAssertFalse(groups[0].rollbackAvailable)
-            XCTAssertTrue(groups[0].intentJSONRedacted.contains(context.resourceUUID))
-            XCTAssertEqual(
-                try jsonObject(groups[0].intentJSONRedacted)["capabilitySHA256"] as? String,
-                context.capabilitySHA256
-            )
-            XCTAssertEqual(groups[0].fencingToken, context.fencingToken)
-            let steps = try store.operationGroupSteps.load(groupID: groups[0].id)
-            XCTAssertEqual(steps.map(\.stepKey), ["rollback", "runtime-execute", "runtime-execute"])
-            XCTAssertEqual(steps.map(\.status), [.unsupported, .started, .succeeded])
-
-            let events = try store.events.loadAll()
-            XCTAssertTrue(events.contains { $0.type == "apply.create-intent-recorded" })
-            XCTAssertTrue(events.contains { $0.type == "apply.created-service" })
-            for event in events where event.type == "apply.create-intent-recorded" || event.type == "apply.created-service" {
-                XCTAssertEqual(
-                    try jsonObject(event.payloadJSONRedacted)["capabilitySHA256"] as? String,
-                    context.capabilitySHA256
-                )
-            }
-
-            let ownership = try store.ownership.loadAll()
-            XCTAssertEqual(ownership.count, 1)
-            XCTAssertTrue(ownership[0].cleanupEligible)
-            XCTAssertEqual(ownership[0].resourceUUID, context.resourceUUID)
-            XCTAssertEqual(ownership[0].projectResourceUUID, context.projectResourceUUID)
-            XCTAssertEqual(ownership[0].fencingToken, context.fencingToken)
-            XCTAssertEqual(
-                try jsonObject(ownership[0].metadataJSONRedacted)["capabilitySHA256"] as? String,
-                context.capabilitySHA256
-            )
+            XCTAssertTrue(try store.operations.loadAll().isEmpty)
+            XCTAssertTrue(try store.operationGroups.loadAll().isEmpty)
+            XCTAssertTrue(try store.events.loadAll().allSatisfy {
+                $0.type != "apply.create-intent-recorded" && $0.type != "apply.created-service"
+            })
+            XCTAssertTrue(try store.ownership.loadAll().isEmpty)
         }
     }
 
@@ -1255,13 +1669,15 @@ final class HostwrightCLITests: XCTestCase {
                 )
             )
 
-            XCTAssertEqual(result.exitCode, 0)
-            XCTAssertEqual(adapter.executedActions.map(\.kind), [.create])
-            XCTAssertTrue(result.standardOutput.contains("State DB: \(resolution.stateDatabasePath)"))
+            XCTAssertEqual(result.exitCode, CLIExitCode.unsafeOperation.rawValue)
+            XCTAssertTrue(result.standardError.contains("Manifest-only admission cannot authorize runtime mutation."))
+            XCTAssertEqual(adapter.executedActions.map(\.kind), [])
             let store = SQLiteStateStore(
                 configuration: StateStoreConfiguration(localPathResolution: resolution)
             )
-            XCTAssertEqual(try store.operations.loadAll().map(\.status), [.recorded, .succeeded])
+            XCTAssertEqual(try store.operations.loadAll().isEmpty, true)
+            XCTAssertEqual(try store.operationGroups.loadAll().isEmpty, true)
+            XCTAssertEqual(FileManager.default.fileExists(atPath: resolution.stateDatabasePath), true)
             XCTAssertEqual(try permissions(resolution.stateDatabasePath), 0o600)
         }
     }
@@ -1320,7 +1736,7 @@ final class HostwrightCLITests: XCTestCase {
         }
     }
 
-    func testApplyCanStartStoppedServiceWhenRestartPolicyAllowsIt() throws {
+    func testApplyBlocksStoppedServiceWithoutCommittedSchedulerAuthority() throws {
         try withTemporaryDatabase { databasePath in
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: restartableServiceManifest])
             let store = SQLiteStateStore(path: databasePath)
@@ -1350,41 +1766,34 @@ final class HostwrightCLITests: XCTestCase {
                 environment: environment(files: files, runtimeAdapter: adapter)
             )
 
-            XCTAssertEqual(result.exitCode, 0)
-            XCTAssertTrue(result.standardOutput.contains("Applied action: proposeStartStoppedService demo/api"))
-            XCTAssertEqual(adapter.executedActions.map(\.kind), [.start])
-            let context = try XCTUnwrap(adapter.confirmations.first?.context)
-            XCTAssertEqual(context.resourceUUID, originalOwnership.resourceUUID)
-            XCTAssertEqual(context.fencingToken, originalOwnership.fencingToken)
-            let operationGroup = try XCTUnwrap(store.operationGroups.loadAll().first)
-            let intent = try jsonObject(operationGroup.intentJSONRedacted)
-            XCTAssertEqual(intent["resourceUUID"] as? String, context.resourceUUID)
-            XCTAssertEqual(intent["resourceFencingToken"] as? String, context.fencingToken)
-            XCTAssertNotEqual(operationGroup.fencingToken, context.fencingToken)
-            XCTAssertEqual(try XCTUnwrap(store.ownership.loadAll().first).fencingToken, originalOwnership.fencingToken)
-
-            let states = try store.restartPolicies.loadProject(projectID: "project-demo")
-            XCTAssertEqual(states.count, 1)
-            XCTAssertEqual(states[0].policy, .onFailure)
-            XCTAssertEqual(states[0].status, .active)
-            XCTAssertEqual(states[0].attemptCount, 0)
-            XCTAssertNil(states[0].backoffUntil)
-
-            let events = try store.events.loadAll()
-            XCTAssertTrue(events.contains { $0.type == "apply.started-service" })
-            XCTAssertTrue(events.contains { $0.type == "restart.policy.active" })
+            XCTAssertEqual(result.exitCode, CLIExitCode.unsafeOperation.rawValue)
+            XCTAssertTrue(result.standardError.contains("Manifest-only admission cannot authorize runtime mutation."))
+            XCTAssertTrue(adapter.executedActions.isEmpty)
+            XCTAssertTrue(adapter.confirmations.isEmpty)
+            XCTAssertTrue(try store.operationGroups.loadAll().isEmpty)
+            XCTAssertEqual(
+                try XCTUnwrap(store.ownership.loadAll().first).fencingToken,
+                originalOwnership.fencingToken
+            )
         }
     }
 
-    func testApplyCanStartLegacyOwnedServiceWhoseIDMatchesV2Shape() throws {
+    func testApplyBlocksLegacyOwnedServiceWithoutCommittedSchedulerAuthority() throws {
         try withTemporaryDatabase { databasePath in
             let serviceName = "0123456789abcdef0123456789abcdef"
             let manifestText = """
-            version: 2
+            version: 3
             project: v2-a-b
             services:
               \(serviceName):
                 image: local/demo:latest
+                resources:
+                  requests:
+                    cpus: 1
+                    memory: 512MiB
+                  limits:
+                    cpus: 1
+                    memory: 512MiB
                 restart:
                   policy: on-failure
             """
@@ -1438,9 +1847,10 @@ final class HostwrightCLITests: XCTestCase {
                 environment: environment(files: files, runtimeAdapter: adapter)
             )
 
-            XCTAssertEqual(result.exitCode, 0)
-            XCTAssertEqual(adapter.executedActions.map(\.resourceIdentifier), [resourceIdentifier])
-            XCTAssertEqual(adapter.executedActions.map(\.kind), [.start])
+            XCTAssertEqual(result.exitCode, CLIExitCode.unsafeOperation.rawValue)
+            XCTAssertTrue(result.standardError.contains("Manifest-only admission cannot authorize runtime mutation."))
+            XCTAssertTrue(adapter.executedActions.isEmpty)
+            XCTAssertTrue(try store.operationGroups.loadAll().isEmpty)
         }
     }
 
@@ -1474,7 +1884,7 @@ final class HostwrightCLITests: XCTestCase {
             )
 
             XCTAssertEqual(result.exitCode, CLIExitCode.unsafeOperation.rawValue)
-            XCTAssertTrue(result.standardError.contains("Hostwright ownership record"))
+            XCTAssertTrue(result.standardError.contains("Manifest-only admission cannot authorize runtime mutation."))
             XCTAssertTrue(adapter.executedActions.isEmpty)
 
             XCTAssertTrue(try store.operations.loadAll().isEmpty)
@@ -1512,29 +1922,23 @@ final class HostwrightCLITests: XCTestCase {
                 environment: environment(files: files, runtimeAdapter: adapter)
             )
 
-            XCTAssertEqual(result.exitCode, 0)
-            XCTAssertTrue(result.standardOutput.contains("Applied action: restartManagedService demo/api"))
-            XCTAssertEqual(adapter.executedActions.map(\.kind), [.restart])
-            XCTAssertEqual(adapter.executedActions.map(\.isDestructive), [true])
+            XCTAssertEqual(result.exitCode, CLIExitCode.unsafeOperation.rawValue)
+            XCTAssertTrue(result.standardError.contains("Manifest-only admission cannot authorize runtime mutation."))
+            XCTAssertEqual(adapter.executedActions.map(\.kind), [])
 
             let operations = try store.operations.loadAll()
-            XCTAssertEqual(operations.map(\.plannedActionType), ["restartManagedService", "restartManagedService"])
-            XCTAssertEqual(operations.map(\.status), [.recorded, .succeeded])
+            XCTAssertEqual(operations.isEmpty, true)
 
             let recovery = try store.restartRecovery.loadAll()
-            XCTAssertEqual(recovery.map(\.status), [.prepared, .succeeded])
-            XCTAssertEqual(recovery.last?.completedStepsJSONRedacted, #"["stop","start"]"#)
-            XCTAssertTrue(recovery.last?.manualRecoveryHintRedacted.contains("No manual recovery") == true)
+            XCTAssertEqual(recovery.isEmpty, true)
 
             let states = try store.restartPolicies.loadProject(projectID: "project-demo")
-            XCTAssertEqual(states.count, 1)
-            XCTAssertEqual(states[0].status, .active)
-            XCTAssertEqual(states[0].attemptCount, 0)
+            XCTAssertEqual(states.count, 0)
 
             let events = try store.events.loadAll()
-            XCTAssertTrue(events.contains { $0.type == "apply.restart-intent-recorded" })
-            XCTAssertTrue(events.contains { $0.type == "apply.restarted-service" })
-            XCTAssertTrue(events.contains { $0.type == "restart.policy.active" })
+            XCTAssertFalse(events.contains { $0.type == "apply.restart-intent-recorded" })
+            XCTAssertFalse(events.contains { $0.type == "apply.restarted-service" })
+            XCTAssertFalse(events.contains { $0.type == "restart.policy.active" })
         }
     }
 
@@ -1571,32 +1975,23 @@ final class HostwrightCLITests: XCTestCase {
                 environment: environment(files: files, runtimeAdapter: adapter)
             )
 
-            XCTAssertEqual(result.exitCode, CLIExitCode.runtimeUnavailable.rawValue)
+            XCTAssertEqual(result.exitCode, CLIExitCode.unsafeOperation.rawValue)
             XCTAssertFalse(result.standardError.contains(fakeSecret))
-            XCTAssertEqual(adapter.executedActions.map(\.kind), [.restart])
+            XCTAssertEqual(adapter.executedActions.map(\.kind), [])
 
             let operations = try store.operations.loadAll()
-            XCTAssertEqual(operations.map(\.status), [.recorded, .failed])
-            XCTAssertFalse(operations.map(\.payloadJSONRedacted).joined().contains(fakeSecret))
+            XCTAssertEqual(operations.isEmpty, true)
 
             let recovery = try store.restartRecovery.loadAll()
-            XCTAssertEqual(recovery.map(\.status), [.prepared, .stopSucceeded, .failed])
-            XCTAssertEqual(recovery[1].completedStepsJSONRedacted, #"["stop"]"#)
-            XCTAssertTrue(recovery.last?.manualRecoveryHintRedacted.contains("Inspect the exact Hostwright-owned container") == true)
+            XCTAssertEqual(recovery.isEmpty, true)
             let groups = try store.operationGroups.loadAll()
-            XCTAssertEqual(groups.map(\.status), [.failed])
-            XCTAssertEqual(groups[0].checkpoint, "runtime-failed")
-            let steps = try store.operationGroupSteps.load(groupID: groups[0].id)
-            XCTAssertEqual(steps.map(\.stepKey), ["rollback", "runtime-execute", "restart-stop", "runtime-execute"])
-            XCTAssertEqual(steps.map(\.status), [.unsupported, .started, .succeeded, .failed])
+            XCTAssertEqual(groups.isEmpty, true)
 
             let states = try store.restartPolicies.loadProject(projectID: "project-demo")
-            XCTAssertEqual(states.count, 1)
-            XCTAssertEqual(states[0].status, .backingOff)
-            XCTAssertEqual(states[0].attemptCount, 1)
+            XCTAssertEqual(states.count, 0)
 
             let events = try store.events.loadAll()
-            XCTAssertTrue(events.contains { $0.type == "restart.policy.backoff" })
+            XCTAssertFalse(events.contains { $0.type == "restart.policy.backoff" })
             XCTAssertFalse(events.contains { $0.type == "apply.restarted-service" })
             XCTAssertFalse(events.map(\.message).joined().contains(fakeSecret))
         }
@@ -1622,8 +2017,8 @@ final class HostwrightCLITests: XCTestCase {
                 environment: environment(files: files, runtimeAdapter: adapter)
             )
 
-            XCTAssertEqual(result.exitCode, CLIExitCode.runtimeUnavailable.rawValue)
-            XCTAssertTrue(result.standardError.contains("No executable createMissingService, startManagedService, or restartManagedService action exists"))
+            XCTAssertEqual(result.exitCode, CLIExitCode.unsafeOperation.rawValue)
+            XCTAssertTrue(result.standardError.contains("Manifest-only admission cannot authorize runtime mutation."))
             XCTAssertTrue(adapter.executedActions.isEmpty)
             XCTAssertTrue(try store.restartRecovery.loadAll().isEmpty)
         }
@@ -1650,8 +2045,8 @@ final class HostwrightCLITests: XCTestCase {
                 environment: environment(files: files, runtimeAdapter: adapter)
             )
 
-            XCTAssertEqual(result.exitCode, CLIExitCode.runtimeUnavailable.rawValue)
-            XCTAssertTrue(result.standardError.contains("No executable createMissingService, startManagedService, or restartManagedService action exists"))
+            XCTAssertEqual(result.exitCode, CLIExitCode.unsafeOperation.rawValue)
+            XCTAssertTrue(result.standardError.contains("Manifest-only admission cannot authorize runtime mutation."))
             XCTAssertTrue(adapter.executedActions.isEmpty)
             XCTAssertTrue(try store.restartRecovery.loadAll().isEmpty)
         }
@@ -1681,8 +2076,9 @@ final class HostwrightCLITests: XCTestCase {
                 environment: environment(files: files, runtimeAdapter: adapter)
             )
 
-            XCTAssertEqual(apply.exitCode, 0)
-            XCTAssertEqual(adapter.executedActions.map(\.kind), [.restart])
+            XCTAssertEqual(apply.exitCode, CLIExitCode.unsafeOperation.rawValue)
+            XCTAssertTrue(apply.standardError.contains("Manifest-only admission cannot authorize runtime mutation."))
+            XCTAssertTrue(adapter.executedActions.isEmpty)
         }
     }
 
@@ -1770,13 +2166,14 @@ final class HostwrightCLITests: XCTestCase {
                 environment: environment(files: files, runtimeAdapter: adapter)
             )
 
-            XCTAssertEqual(apply.exitCode, CLIExitCode.runtimeUnavailable.rawValue)
+            XCTAssertEqual(apply.exitCode, CLIExitCode.unsafeOperation.rawValue)
+            XCTAssertTrue(apply.standardError.contains("Manifest-only admission cannot authorize runtime mutation."))
             XCTAssertTrue(apply.standardError.contains("crash-loop protection"))
             XCTAssertTrue(adapter.executedActions.isEmpty)
         }
     }
 
-    func testApplyUsesFreshPersistedHealthResultForManagedRestart() throws {
+    func testApplyWithFreshHealthStillRequiresCommittedSchedulerAuthority() throws {
         try withTemporaryDatabase { databasePath in
             let manifestText = managedRestartHealthManifest
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: manifestText])
@@ -1811,9 +2208,10 @@ final class HostwrightCLITests: XCTestCase {
                 environment: environment(files: files, runtimeAdapter: adapter)
             )
 
-            XCTAssertEqual(result.exitCode, 0)
-            XCTAssertEqual(adapter.executedActions.map(\.kind), [.restart])
-            XCTAssertTrue(try store.restartRecovery.loadAll().contains { $0.status == .succeeded })
+            XCTAssertEqual(result.exitCode, CLIExitCode.unsafeOperation.rawValue)
+            XCTAssertTrue(result.standardError.contains("Manifest-only admission cannot authorize runtime mutation."))
+            XCTAssertTrue(adapter.executedActions.isEmpty)
+            XCTAssertTrue(try store.restartRecovery.loadAll().isEmpty)
         }
     }
 
@@ -1851,14 +2249,14 @@ final class HostwrightCLITests: XCTestCase {
                 environment: environment(files: files, runtimeAdapter: adapter)
             )
 
-            XCTAssertEqual(result.exitCode, CLIExitCode.runtimeUnavailable.rawValue)
-            XCTAssertTrue(result.standardError.contains("No executable createMissingService, startManagedService, or restartManagedService action exists"))
+            XCTAssertEqual(result.exitCode, CLIExitCode.unsafeOperation.rawValue)
+            XCTAssertTrue(result.standardError.contains("Manifest-only admission cannot authorize runtime mutation."))
             XCTAssertTrue(adapter.executedActions.isEmpty)
             XCTAssertTrue(try store.restartRecovery.loadAll().isEmpty)
         }
     }
 
-    func testApplySuccessfulStartPersistenceFailureDoesNotRecordFailedRestartAttempt() throws {
+    func testApplyWithoutSchedulerAuthorityDoesNotReachSuccessPersistence() throws {
         try withTemporaryDatabase { databasePath in
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: restartableServiceManifest])
             let store = SQLiteStateStore(path: databasePath)
@@ -1897,27 +2295,22 @@ final class HostwrightCLITests: XCTestCase {
                 environment: environment(files: files, runtimeAdapter: adapter)
             )
 
-            XCTAssertEqual(result.exitCode, CLIExitCode.stateUnavailable.rawValue)
-            XCTAssertTrue(result.standardError.contains(HostwrightErrorCode.stateStoreUnavailable.rawValue))
+            XCTAssertEqual(result.exitCode, CLIExitCode.unsafeOperation.rawValue)
+            XCTAssertTrue(result.standardError.contains("Manifest-only admission cannot authorize runtime mutation."))
             XCTAssertFalse(result.standardError.contains(HostwrightErrorCode.runtimeUnavailable.rawValue))
             XCTAssertFalse(result.standardError.contains("Runtime mutation failed"))
-            XCTAssertEqual(adapter.executedActions.map(\.kind), [.start])
+            XCTAssertTrue(adapter.executedActions.isEmpty)
 
             let states = try store.restartPolicies.loadProject(projectID: "project-demo")
             XCTAssertTrue(states.isEmpty)
-            let groups = try store.operationGroups.loadAll()
-            XCTAssertEqual(groups.map(\.status), [.interrupted])
-            XCTAssertEqual(groups[0].checkpoint, "runtime-finished-state-incomplete")
-            XCTAssertFalse(groups[0].rollbackAvailable)
-            let steps = try store.operationGroupSteps.load(groupID: groups[0].id)
-            XCTAssertEqual(steps.map(\.status), [.unsupported, .started, .succeeded])
+            XCTAssertTrue(try store.operationGroups.loadAll().isEmpty)
             let events = try store.events.loadAll()
             XCTAssertFalse(events.contains { $0.type == "restart.policy.backoff" })
             XCTAssertFalse(events.contains { $0.type == "restart.policy.crash-loop-blocked" })
         }
     }
 
-    func testApplyPreRuntimeStateFailureMarksOperationGroupInterruptedWithoutMutation() throws {
+    func testApplyWithoutSchedulerAuthorityDoesNotReachPreRuntimePersistence() throws {
         try withTemporaryDatabase { databasePath in
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
             let store = SQLiteStateStore(path: databasePath)
@@ -1940,14 +2333,10 @@ final class HostwrightCLITests: XCTestCase {
                 environment: environment(files: files, runtimeAdapter: adapter)
             )
 
-            XCTAssertEqual(result.exitCode, CLIExitCode.stateUnavailable.rawValue)
-            XCTAssertTrue(result.standardError.contains("pre-runtime state persistence failed before mutation"))
+            XCTAssertEqual(result.exitCode, CLIExitCode.unsafeOperation.rawValue)
+            XCTAssertTrue(result.standardError.contains("Manifest-only admission cannot authorize runtime mutation."))
             XCTAssertTrue(adapter.executedActions.isEmpty)
-            let groups = try store.operationGroups.loadAll()
-            XCTAssertEqual(groups.map(\.status), [.interrupted])
-            XCTAssertEqual(groups[0].checkpoint, "pre-runtime-state-incomplete")
-            let steps = try store.operationGroupSteps.load(groupID: groups[0].id)
-            XCTAssertEqual(steps.map(\.status), [.unsupported])
+            XCTAssertTrue(try store.operationGroups.loadAll().isEmpty)
         }
     }
 
@@ -1997,24 +2386,20 @@ final class HostwrightCLITests: XCTestCase {
                 environment: environment(files: files, runtimeAdapter: adapter)
             )
 
-            XCTAssertNotEqual(result.exitCode, 0)
-            XCTAssertTrue(result.standardError.contains("No executable createMissingService, startManagedService, or restartManagedService action exists"))
+            XCTAssertEqual(result.exitCode, CLIExitCode.unsafeOperation.rawValue)
+            XCTAssertTrue(result.standardError.contains("Manifest-only admission cannot authorize runtime mutation."))
             XCTAssertTrue(result.standardError.contains("crash-loop protection"))
             XCTAssertTrue(adapter.executedActions.isEmpty)
         }
     }
 
-    func testManagedStartDoesNotRemoveCleanupEligibilityFromCreatedOwnership() throws {
+    func testBlockedManagedStartPreservesCleanupEligibility() throws {
         try withTemporaryDatabase { databasePath in
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: restartableServiceManifest])
-            let createAdapter = ScriptedApplyRuntimeAdapter()
-            let createHash = try planHash(for: restartableServiceManifest, observed: createAdapter.observedState)
-
-            let createResult = HostwrightCLI.run(
-                arguments: ["apply", "--state-db", databasePath, "--confirm-plan", createHash],
-                environment: environment(files: files, runtimeAdapter: createAdapter)
-            )
-            XCTAssertEqual(createResult.exitCode, 0)
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            try saveDesiredManifest(store: store, manifestText: restartableServiceManifest)
+            try saveOwnership(store: store)
 
             let stoppedObserved = ObservedRuntimeState(
                 projectName: "demo",
@@ -2036,8 +2421,10 @@ final class HostwrightCLITests: XCTestCase {
                 environment: environment(files: files, runtimeAdapter: startAdapter)
             )
 
-            XCTAssertEqual(startResult.exitCode, 0)
-            let ownership = try SQLiteStateStore(path: databasePath).ownership.loadAll()
+            XCTAssertEqual(startResult.exitCode, CLIExitCode.unsafeOperation.rawValue)
+            XCTAssertTrue(startResult.standardError.contains("Manifest-only admission cannot authorize runtime mutation."))
+            XCTAssertTrue(startAdapter.executedActions.isEmpty)
+            let ownership = try store.ownership.loadAll()
             XCTAssertEqual(ownership.count, 1)
             XCTAssertTrue(ownership[0].cleanupEligible)
         }
@@ -2097,12 +2484,19 @@ final class HostwrightCLITests: XCTestCase {
     func testStatusReportsMultipleReplicasWithoutDuplicateKeyFailure() throws {
         try withTemporaryDatabase { databasePath in
             let manifest = """
-            version: 2
+            version: 3
             project: demo
             services:
               api:
                 image: local/demo:latest
                 replicas: 2
+                resources:
+                  requests:
+                    cpus: 1
+                    memory: 512MiB
+                  limits:
+                    cpus: 1
+                    memory: 512MiB
 
             """
             let primaryIdentity = RuntimeServiceIdentity(
@@ -3062,19 +3456,14 @@ final class HostwrightCLITests: XCTestCase {
         }
     }
 
-    func testApplyOwnershipUsesObservedAdapterAndCleanupBlocksAdapterMismatch() throws {
+    func testCleanupUsesPersistedAdapterAndBlocksAdapterMismatch() throws {
         try withTemporaryDatabase { databasePath in
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
-            let applyAdapter = ScriptedApplyRuntimeAdapter()
-            let expectedHash = try planHash(for: singleServiceManifest, observed: applyAdapter.observedState)
-
-            let apply = HostwrightCLI.run(
-                arguments: ["apply", "--state-db", databasePath, "--confirm-plan", expectedHash],
-                environment: environment(files: files, runtimeAdapter: applyAdapter)
-            )
-
-            XCTAssertEqual(apply.exitCode, 0)
-            let ownership = try SQLiteStateStore(path: databasePath).ownership.loadAll()
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            try saveDesiredManifest(store: store, manifestText: singleServiceManifest)
+            try saveOwnership(store: store)
+            let ownership = try store.ownership.loadAll()
             XCTAssertEqual(ownership.count, 1)
             XCTAssertEqual(ownership[0].runtimeAdapter, RuntimeProviderID.appleContainerCLI.rawValue)
             let resourceIdentifier = RuntimeServiceIdentity(projectName: "demo", serviceName: "api").managedResourceIdentifier
@@ -3261,7 +3650,7 @@ final class HostwrightCLITests: XCTestCase {
         }
     }
 
-    func testApplyPersistsFailureWithRedactedError() throws {
+    func testApplyWithoutSchedulerAuthorityDoesNotPersistRuntimeFailure() throws {
         try withTemporaryDatabase { databasePath in
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
             let adapter = ScriptedApplyRuntimeAdapter(executeError: .commandFailed(exitStatus: 2, message: "failed", standardError: "token=\(fakeSecret)"))
@@ -3272,38 +3661,33 @@ final class HostwrightCLITests: XCTestCase {
                 environment: environment(files: files, runtimeAdapter: adapter)
             )
 
-            XCTAssertEqual(result.exitCode, CLIExitCode.runtimeUnavailable.rawValue)
+            XCTAssertEqual(result.exitCode, CLIExitCode.unsafeOperation.rawValue)
+            XCTAssertTrue(result.standardError.contains("Manifest-only admission cannot authorize runtime mutation."))
             XCTAssertFalse(result.standardError.contains(fakeSecret))
+            XCTAssertTrue(adapter.executedActions.isEmpty)
 
             let store = SQLiteStateStore(path: databasePath)
-            let operations = try store.operations.loadAll()
-            XCTAssertEqual(operations.map(\.status), [.recorded, .failed])
-            let capabilityMarker = "\"capabilitySHA256\":\"\(ScriptedApplyRuntimeAdapter.testCapabilitySnapshot.canonicalSHA256)\""
-            for operation in operations {
-                XCTAssertTrue(operation.payloadJSONRedacted.contains(capabilityMarker))
-            }
-            let groups = try store.operationGroups.loadAll()
-            XCTAssertEqual(groups.map(\.status), [.failed])
-            XCTAssertEqual(groups[0].checkpoint, "runtime-failed")
-            let steps = try store.operationGroupSteps.load(groupID: groups[0].id)
-            XCTAssertEqual(steps.map(\.status), [.unsupported, .started, .failed])
-            XCTAssertFalse(steps.map { $0.lastErrorRedacted ?? "" }.joined().contains(fakeSecret))
-
-            let events = try store.events.loadAll()
-            let failedEvent = try XCTUnwrap(events.first { $0.type == "apply.failed" })
-            XCTAssertTrue(failedEvent.payloadJSONRedacted.contains(capabilityMarker))
-            XCTAssertFalse(events.map(\.message).joined(separator: "\n").contains(fakeSecret))
+            XCTAssertTrue(try store.operations.loadAll().isEmpty)
+            XCTAssertTrue(try store.operationGroups.loadAll().isEmpty)
+            XCTAssertFalse(try store.events.loadAll().map(\.message).joined(separator: "\n").contains(fakeSecret))
         }
     }
 
-    func testApplyExecutesWithOriginalSecretEnvAndRedactsSurfaces() throws {
+    func testApplyDoesNotResolveSecretWithoutCommittedSchedulerAuthority() throws {
         try withTemporaryDatabase { databasePath in
             let manifest = """
-            version: 2
+            version: 3
             project: demo
             services:
               api:
                 image: local/demo:latest
+                resources:
+                  requests:
+                    cpus: 1
+                    memory: 512MiB
+                  limits:
+                    cpus: 1
+                    memory: 512MiB
                 secretEnv:
                   SESSION: keychain://hostwright.api/session
                 ports:
@@ -3321,22 +3705,19 @@ final class HostwrightCLITests: XCTestCase {
                 environment: environment(files: files, runtimeAdapter: adapter, secretStore: secretStore)
             )
 
-            XCTAssertEqual(result.exitCode, 0)
+            XCTAssertEqual(result.exitCode, CLIExitCode.unsafeOperation.rawValue)
+            XCTAssertTrue(result.standardError.contains("Manifest-only admission cannot authorize runtime mutation."))
             XCTAssertFalse(result.standardOutput.contains(opaqueSecret))
-            let executedService = try XCTUnwrap(adapter.executedActions.first?.desiredService)
-            XCTAssertEqual(executedService.environment.first?.value, opaqueSecret)
+            XCTAssertTrue(adapter.executedActions.isEmpty)
 
             let store = SQLiteStateStore(path: databasePath)
-            let desired = try store.desiredStates.loadDesiredServices(projectID: "project-demo")
-            XCTAssertTrue(desired[0].environmentJSONRedacted.contains("[REDACTED]"))
-            XCTAssertFalse(desired[0].environmentJSONRedacted.contains(opaqueSecret))
-            XCTAssertFalse(desired[0].environmentJSONRedacted.contains("hostwright.api"))
+            XCTAssertTrue(try store.operations.loadAll().isEmpty)
             let events = try store.events.loadAll()
             XCTAssertFalse(events.map(\.message).joined(separator: "\n").contains(opaqueSecret))
         }
     }
 
-    func testApplyIdempotencyBlocksDuplicateSucceededPlan() throws {
+    func testApplyRepeatedPlanRemainsBlockedWithoutCommittedSchedulerAuthority() throws {
         try withTemporaryDatabase { databasePath in
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
             let adapter = ScriptedApplyRuntimeAdapter()
@@ -3351,22 +3732,30 @@ final class HostwrightCLITests: XCTestCase {
                 environment: environment(files: files, runtimeAdapter: adapter)
             )
 
-            XCTAssertEqual(first.exitCode, 0)
-            XCTAssertEqual(second.exitCode, CLIExitCode.commandUsage.rawValue)
-            XCTAssertTrue(second.standardError.contains("idempotency key"))
-            XCTAssertEqual(adapter.executedActions.count, 1)
-            XCTAssertEqual(try SQLiteStateStore(path: databasePath).operations.loadAll().map(\.status), [.recorded, .succeeded])
+            XCTAssertEqual(first.exitCode, CLIExitCode.unsafeOperation.rawValue)
+            XCTAssertEqual(second.exitCode, CLIExitCode.unsafeOperation.rawValue)
+            XCTAssertTrue(first.standardError.contains("Manifest-only admission cannot authorize runtime mutation."))
+            XCTAssertTrue(second.standardError.contains("Manifest-only admission cannot authorize runtime mutation."))
+            XCTAssertTrue(adapter.executedActions.isEmpty)
+            XCTAssertTrue(try SQLiteStateStore(path: databasePath).operations.loadAll().isEmpty)
         }
     }
 
-    func testApplyIdempotencyBlocksDuplicateSecretPlanBeforeSecretResolution() throws {
+    func testApplyRepeatedSecretPlanIsBlockedBeforeSecretResolutionWithoutSchedulerAuthority() throws {
         try withTemporaryDatabase { databasePath in
             let manifest = """
-            version: 2
+            version: 3
             project: demo
             services:
               api:
                 image: local/demo:latest
+                resources:
+                  requests:
+                    cpus: 1
+                    memory: 512MiB
+                  limits:
+                    cpus: 1
+                    memory: 512MiB
                 secretEnv:
                   API_TOKEN: keychain://hostwright.api/api-token
                 ports:
@@ -3387,22 +3776,30 @@ final class HostwrightCLITests: XCTestCase {
                 environment: environment(files: files, runtimeAdapter: adapter)
             )
 
-            XCTAssertEqual(first.exitCode, 0)
-            XCTAssertEqual(second.exitCode, CLIExitCode.commandUsage.rawValue)
-            XCTAssertTrue(second.standardError.contains("idempotency key"))
+            XCTAssertEqual(first.exitCode, CLIExitCode.unsafeOperation.rawValue)
+            XCTAssertEqual(second.exitCode, CLIExitCode.unsafeOperation.rawValue)
+            XCTAssertTrue(first.standardError.contains("Manifest-only admission cannot authorize runtime mutation."))
+            XCTAssertTrue(second.standardError.contains("Manifest-only admission cannot authorize runtime mutation."))
             XCTAssertFalse(second.standardError.contains("Secret reference resolution failed"))
-            XCTAssertEqual(adapter.executedActions.count, 1)
+            XCTAssertTrue(adapter.executedActions.isEmpty)
         }
     }
 
     func testApplyFailsClosedWhenSecretReferenceBackendIsUnavailable() throws {
         try withTemporaryDatabase { databasePath in
             let manifest = """
-            version: 2
+            version: 3
             project: demo
             services:
               api:
                 image: local/demo:latest
+                resources:
+                  requests:
+                    cpus: 1
+                    memory: 512MiB
+                  limits:
+                    cpus: 1
+                    memory: 512MiB
                 secretEnv:
                   API_TOKEN: keychain://hostwright.api/api-token
                 ports:
@@ -3419,15 +3816,15 @@ final class HostwrightCLITests: XCTestCase {
             )
 
             XCTAssertEqual(result.exitCode, CLIExitCode.unsafeOperation.rawValue)
-            XCTAssertTrue(result.standardError.contains(HostwrightErrorCode.unsafeExposure.rawValue))
-            XCTAssertTrue(result.standardError.contains("Secret reference resolution failed"))
+            XCTAssertTrue(result.standardError.contains("Manifest-only admission cannot authorize runtime mutation."))
+            XCTAssertFalse(result.standardError.contains("Secret reference resolution failed"))
             XCTAssertFalse(result.standardError.contains("hostwright.api"))
             XCTAssertFalse(result.standardError.contains("api-token"))
             XCTAssertTrue(adapter.executedActions.isEmpty)
         }
     }
 
-    func testApplyCanRetryAfterFailedOperationWithSamePlanHash() throws {
+    func testApplyRetryRemainsBlockedWithoutCommittedSchedulerAuthority() throws {
         try withTemporaryDatabase { databasePath in
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
             let failingAdapter = ScriptedApplyRuntimeAdapter(executeError: .commandFailed(exitStatus: 2, message: "failed", standardError: "token=\(fakeSecret)"))
@@ -3443,16 +3840,16 @@ final class HostwrightCLITests: XCTestCase {
                 environment: environment(files: files, runtimeAdapter: retryAdapter)
             )
 
-            XCTAssertEqual(first.exitCode, CLIExitCode.runtimeUnavailable.rawValue)
-            XCTAssertEqual(second.exitCode, 0)
-            XCTAssertEqual(failingAdapter.executedActions.count, 1)
-            XCTAssertEqual(retryAdapter.executedActions.count, 1)
+            XCTAssertEqual(first.exitCode, CLIExitCode.unsafeOperation.rawValue)
+            XCTAssertEqual(second.exitCode, CLIExitCode.unsafeOperation.rawValue)
+            XCTAssertTrue(first.standardError.contains("Manifest-only admission cannot authorize runtime mutation."))
+            XCTAssertTrue(second.standardError.contains("Manifest-only admission cannot authorize runtime mutation."))
+            XCTAssertTrue(failingAdapter.executedActions.isEmpty)
+            XCTAssertTrue(retryAdapter.executedActions.isEmpty)
 
             let store = SQLiteStateStore(path: databasePath)
             let operations = try store.operations.loadAll()
-            XCTAssertEqual(operations.map(\.status), [.recorded, .failed, .recorded, .succeeded])
-            let idempotencyKey = try XCTUnwrap(operations.first?.idempotencyKey)
-            XCTAssertEqual(try store.operations.latest(idempotencyKey: idempotencyKey)?.status, .succeeded)
+            XCTAssertTrue(operations.isEmpty)
         }
     }
 
@@ -3474,7 +3871,7 @@ final class HostwrightCLITests: XCTestCase {
         }
     }
 
-    func testApplyRuntimeFailureRemainsPrimaryWhenFailurePersistenceFails() throws {
+    func testApplyWithoutSchedulerAuthorityDoesNotReachRuntimeFailurePersistence() throws {
         try withTemporaryDatabase { databasePath in
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
             let adapter = ScriptedApplyRuntimeAdapter(
@@ -3491,15 +3888,16 @@ final class HostwrightCLITests: XCTestCase {
                 environment: environment(files: files, runtimeAdapter: adapter)
             )
 
-            XCTAssertEqual(result.exitCode, CLIExitCode.runtimeUnavailable.rawValue)
-            XCTAssertTrue(result.standardError.contains(HostwrightErrorCode.runtimeUnavailable.rawValue))
-            XCTAssertTrue(result.standardError.contains("Failure state persistence also failed"))
-            XCTAssertFalse(result.standardError.contains(HostwrightErrorCode.stateStoreUnavailable.rawValue))
+            XCTAssertEqual(result.exitCode, CLIExitCode.unsafeOperation.rawValue)
+            XCTAssertTrue(result.standardError.contains("Manifest-only admission cannot authorize runtime mutation."))
+            XCTAssertFalse(result.standardError.contains("Failure state persistence also failed"))
             XCTAssertFalse(result.standardError.contains(fakeSecret))
+            XCTAssertTrue(adapter.executedActions.isEmpty)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: databasePath))
         }
     }
 
-    func testApplyRuntimeFailurePersistenceErrorStillFinishesOperationGroup() throws {
+    func testApplyWithoutSchedulerAuthorityCreatesNoFailureOperationGroup() throws {
         try withTemporaryDatabase { databasePath in
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
             let store = SQLiteStateStore(path: databasePath)
@@ -3525,15 +3923,11 @@ final class HostwrightCLITests: XCTestCase {
                 environment: environment(files: files, runtimeAdapter: adapter)
             )
 
-            XCTAssertEqual(result.exitCode, CLIExitCode.runtimeUnavailable.rawValue)
-            XCTAssertTrue(result.standardError.contains("Failure state persistence also failed"))
-            let groups = try store.operationGroups.loadAll()
-            XCTAssertEqual(groups.map(\.status), [.failed])
-            XCTAssertEqual(groups[0].checkpoint, "runtime-failed")
-            let steps = try store.operationGroupSteps.load(groupID: groups[0].id)
-            XCTAssertEqual(steps.map(\.status), [.unsupported, .started, .failed])
-            XCTAssertFalse(groups[0].metadataJSONRedacted.contains(fakeSecret))
-            XCTAssertFalse(steps.map(\.lastErrorRedacted).compactMap { $0 }.joined().contains(fakeSecret))
+            XCTAssertEqual(result.exitCode, CLIExitCode.unsafeOperation.rawValue)
+            XCTAssertTrue(result.standardError.contains("Manifest-only admission cannot authorize runtime mutation."))
+            XCTAssertFalse(result.standardError.contains("Failure state persistence also failed"))
+            XCTAssertTrue(adapter.executedActions.isEmpty)
+            XCTAssertTrue(try store.operationGroups.loadAll().isEmpty)
         }
     }
 
@@ -3803,6 +4197,8 @@ final class HostwrightCLITests: XCTestCase {
 
     private final class FileBox {
         var files: [String: String]
+        var readCounts: [String: Int] = [:]
+        var writeCount = 0
 
         init(files: [String: String] = [:]) {
             self.files = files
@@ -3826,9 +4222,64 @@ final class HostwrightCLITests: XCTestCase {
         """
     }
 
+    private var composeExportManifest: String {
+        """
+        version: 3
+        project: compose-cli
+        services:
+          api:
+            image: ghcr.io/example/api:1
+            resources:
+              requests:
+                cpus: 1
+                memory: 512MiB
+              limits:
+                cpus: 2
+                memory: 1GiB
+
+        """
+    }
+
+    private var composeDesiredManifest: String {
+        """
+        version: 3
+        project: compose-cli
+        services:
+          api:
+            image: ghcr.io/example/api:2
+            resources:
+              requests:
+                cpus: 1
+                memory: 512MiB
+              limits:
+                cpus: 2
+                memory: 1GiB
+
+        """
+    }
+
+    private var composeUnrepresentableManifest: String {
+        """
+        version: 3
+        project: compose-cli
+        imagePolicy: require-digest
+        services:
+          api:
+            image: ghcr.io/example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+            resources:
+              requests:
+                cpus: 1
+                memory: 512MiB
+              limits:
+                cpus: 2
+                memory: 1GiB
+
+        """
+    }
+
     private var singleServiceManifest: String {
         """
-        version: 2
+        version: 3
         project: demo
         services:
           api:
@@ -3836,6 +4287,13 @@ final class HostwrightCLITests: XCTestCase {
             command: ["serve"]
             env:
               APP_ENV: development
+            resources:
+              requests:
+                cpus: 1
+                memory: 512MiB
+              limits:
+                cpus: 1
+                memory: 512MiB
             ports:
               - "8080:8080"
 
@@ -3844,11 +4302,18 @@ final class HostwrightCLITests: XCTestCase {
 
     private var restartableServiceManifest: String {
         """
-        version: 2
+        version: 3
         project: demo
         services:
           api:
             image: local/demo:latest
+            resources:
+              requests:
+                cpus: 1
+                memory: 512MiB
+              limits:
+                cpus: 1
+                memory: 512MiB
             ports:
               - "8080:8080"
             restart:
@@ -3859,11 +4324,18 @@ final class HostwrightCLITests: XCTestCase {
 
     private var managedRestartHealthManifest: String {
         """
-        version: 2
+        version: 3
         project: demo
         services:
           api:
             image: local/demo:latest
+            resources:
+              requests:
+                cpus: 1
+                memory: 512MiB
+              limits:
+                cpus: 1
+                memory: 512MiB
             ports:
               - "8080:8080"
             health:
@@ -3877,15 +4349,29 @@ final class HostwrightCLITests: XCTestCase {
 
     private var twoServiceManifest: String {
         """
-        version: 2
+        version: 3
         project: demo
         services:
           api:
             image: local/demo:latest
+            resources:
+              requests:
+                cpus: 1
+                memory: 512MiB
+              limits:
+                cpus: 1
+                memory: 512MiB
             ports:
               - "8080:8080"
           worker:
             image: local/worker:latest
+            resources:
+              requests:
+                cpus: 1
+                memory: 512MiB
+              limits:
+                cpus: 1
+                memory: 512MiB
             ports:
               - "8081:8080"
 
@@ -3918,18 +4404,21 @@ final class HostwrightCLITests: XCTestCase {
         CLIEnvironment(
             fileExists: { files.files[$0] != nil },
             readTextFile: { path in
+                files.readCounts[path, default: 0] += 1
                 guard let text = files.files[path] else {
                     throw CLIUsageError("missing file")
                 }
                 return text
             },
             writeTextFile: { path, text in
+                files.writeCount += 1
                 if let writeError {
                     throw writeError
                 }
                 files.files[path] = text
             },
             writeNewTextFile: { path, text in
+                files.writeCount += 1
                 if let writeError {
                     throw writeError
                 }
@@ -3958,6 +4447,23 @@ final class HostwrightCLITests: XCTestCase {
                 )
             }
         )
+    }
+
+    private func composeReadOnlyEnvironment(files: FileBox) -> CLIEnvironment {
+        var result = environment(files: files)
+        result.localPathResolution = { _ in
+            XCTFail("Compose source-only commands must not resolve or create state.")
+            throw CLIUsageError("unexpected state access")
+        }
+        result.runtimeAdapter = {
+            XCTFail("Compose source-only commands must not request a runtime adapter.")
+            return ScriptedApplyRuntimeAdapter()
+        }
+        result.runtimeAdapterForProvider = { _ in
+            XCTFail("Compose source-only commands must not request a runtime provider.")
+            return ScriptedApplyRuntimeAdapter()
+        }
+        return result
     }
 
     private func healthyDoctorSystemSnapshot(

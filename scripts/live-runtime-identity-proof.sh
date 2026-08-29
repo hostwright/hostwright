@@ -99,24 +99,38 @@ PY
 "$CONTAINER_BIN" list --all --format json > "$WORK_DIR/before.json"
 
 cat > "$MANIFEST_A" <<EOF
-version: 2
+version: 3
 project: $PROJECT_A
 
 services:
   $SERVICE_A:
     image: $IMAGE
+    resources:
+      requests:
+        cpus: 1
+        memory: 256MiB
+      limits:
+        cpus: 1
+        memory: 256MiB
     command: ["sleep", "20"]
     restart:
       policy: on-failure
 EOF
 
 cat > "$MANIFEST_B" <<EOF
-version: 2
+version: 3
 project: $PROJECT_B
 
 services:
   $SERVICE_B:
     image: $IMAGE
+    resources:
+      requests:
+        cpus: 1
+        memory: 256MiB
+      limits:
+        cpus: 1
+        memory: 256MiB
     command: ["sleep", "20"]
     restart:
       policy: on-failure

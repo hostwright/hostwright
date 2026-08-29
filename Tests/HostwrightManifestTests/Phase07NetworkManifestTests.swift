@@ -6,7 +6,7 @@ final class Phase07NetworkManifestTests: XCTestCase {
     func testNetworkDeclarationsAndAttachmentsRoundTripCanonically() throws {
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: network-demo
             networks:
               frontend: {}
@@ -17,6 +17,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 networks:
                   - network: backend
                     aliases: [z-api, api]
@@ -53,11 +56,14 @@ final class Phase07NetworkManifestTests: XCTestCase {
     func testLegacyManifestWithoutNetworksKeepsExistingMeaning() throws {
         let source =
             """
-            version: 2
+            version: 3
             project: legacy-network-default
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """
         let manifest = try ManifestValidator.validated(source)
 
@@ -72,7 +78,7 @@ final class Phase07NetworkManifestTests: XCTestCase {
     func testRejectsInvalidNetworkDriverAndUnknownFieldsStrictly() {
         assertFailure(
             """
-            version: 2
+            version: 3
             project: network-demo
             networks:
               backend:
@@ -80,13 +86,16 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "driver must be one of: nat, hostOnly",
             path: "$.networks.backend.driver"
         )
         assertFailure(
             """
-            version: 2
+            version: 3
             project: network-demo
             networks:
               backend:
@@ -94,6 +103,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             code: "HW-MANIFEST-003",
             contains: "Unsupported top-level network field 'mtu'",
@@ -101,12 +113,15 @@ final class Phase07NetworkManifestTests: XCTestCase {
         )
         assertFailure(
             """
-            version: 2
+            version: 3
             project: network-demo
             networks: []
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             code: "HW-MANIFEST-001",
             contains: "Expected a mapping",
@@ -135,7 +150,7 @@ final class Phase07NetworkManifestTests: XCTestCase {
     func testIPv4OnlyIPv6OnlyAndDualStackRoundTripCanonically() throws {
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: address-families
             networks:
               dual-stack:
@@ -150,6 +165,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 networks: [dual-stack, ipv4-only, ipv6-only]
             """
         )
@@ -179,7 +197,7 @@ final class Phase07NetworkManifestTests: XCTestCase {
         )
         assertFailure(
             """
-            version: 2
+            version: 3
             project: network-demo
             networks:
               backend:
@@ -191,6 +209,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 networks: [backend]
             """,
             contains: "overlaps network 'backend' IPv4 CIDR 10.42.0.0/24",
@@ -198,7 +219,7 @@ final class Phase07NetworkManifestTests: XCTestCase {
         )
         assertFailure(
             """
-            version: 2
+            version: 3
             project: network-demo
             networks:
               backend:
@@ -210,6 +231,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 networks: [backend]
             """,
             contains: "overlaps network 'backend' IPv6 CIDR fd42::/64",
@@ -220,13 +244,16 @@ final class Phase07NetworkManifestTests: XCTestCase {
     func testRejectsInvalidMissingAndDuplicateServiceAttachments() {
         assertFailure(
             """
-            version: 2
+            version: 3
             project: network-demo
             networks:
               backend: {}
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 networks:
                   - missing
             """,
@@ -235,13 +262,16 @@ final class Phase07NetworkManifestTests: XCTestCase {
         )
         assertFailure(
             """
-            version: 2
+            version: 3
             project: network-demo
             networks:
               backend: {}
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 networks:
                   - backend
                   - network: backend
@@ -252,13 +282,16 @@ final class Phase07NetworkManifestTests: XCTestCase {
         )
         assertFailure(
             """
-            version: 2
+            version: 3
             project: network-demo
             networks:
               backend: {}
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 networks:
                   - network: backend
                     aliases: ["Bad_Alias"]
@@ -271,13 +304,16 @@ final class Phase07NetworkManifestTests: XCTestCase {
             .joined(separator: ", ")
         assertFailure(
             """
-            version: 2
+            version: 3
             project: network-demo
             networks:
               backend: {}
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 networks:
                   - network: backend
                     aliases: [\(excessiveAliases)]
@@ -290,11 +326,14 @@ final class Phase07NetworkManifestTests: XCTestCase {
     func testUnixSocketPublicationsRoundTripCanonically() throws {
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: socket-demo
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - target: /run/api.sock
                     protocol: unix
@@ -334,11 +373,14 @@ final class Phase07NetworkManifestTests: XCTestCase {
     func testUnixSocketPublicationRejectsUnsafeShapeBeforeMutation() {
         assertFailure(
             """
-            version: 2
+            version: 3
             project: socket-demo
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - bind: 127.0.0.1
                     target: /run/api.sock
@@ -349,11 +391,14 @@ final class Phase07NetworkManifestTests: XCTestCase {
         )
         assertFailure(
             """
-            version: 2
+            version: 3
             project: socket-demo
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - target: /run/api.sock
                     protocol: unix
@@ -367,11 +412,14 @@ final class Phase07NetworkManifestTests: XCTestCase {
     func testUnixSocketPublicationRejectsUnsafePathsAndCollisions() throws {
         let manifest = try ManifestParser.parse(
             """
-            version: 2
+            version: 3
             project: socket-demo
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 replicas: 2
                 ports:
                   - host: shared.sock
@@ -382,6 +430,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
                     protocol: unix
               worker:
                 image: local/worker:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - host: shared.sock
                     target: /run/worker.sock
@@ -412,13 +463,16 @@ final class Phase07NetworkManifestTests: XCTestCase {
     func testGuardedHostAccessRoundTripsCanonically() throws {
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: host-access-demo
             networks:
               guarded: {}
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 networks: [guarded]
                 hostAccess:
                   - hostname: database.hostwright.internal
@@ -586,7 +640,7 @@ final class Phase07NetworkManifestTests: XCTestCase {
     {
         assertFailure(
             """
-            version: 2
+            version: 3
             project: host-access-demo
             networks:
               guarded:
@@ -595,6 +649,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 networks: [guarded]
                 hostAccess:
                   - hostname: api.hostwright.internal
@@ -611,11 +668,14 @@ final class Phase07NetworkManifestTests: XCTestCase {
     func testPublishedPortExposureParsesAndCanonicalizes() throws {
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: exposure-demo
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - bind: 192.168.1.10
                     host: 8443
@@ -644,11 +704,14 @@ final class Phase07NetworkManifestTests: XCTestCase {
     func testLocalhostBindAliasCanonicalizesWithoutChangingExposure() throws {
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: exposure-demo
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - bind: localhost
                     host: 8080
@@ -671,11 +734,14 @@ final class Phase07NetworkManifestTests: XCTestCase {
     func testRejectsInvalidPublishedPortExposure() {
         assertFailure(
             """
-            version: 2
+            version: 3
             project: exposure-demo
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - bind: 127.0.0.2
                     target: 8443
@@ -685,11 +751,14 @@ final class Phase07NetworkManifestTests: XCTestCase {
         )
         assertFailure(
             """
-            version: 2
+            version: 3
             project: exposure-demo
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - bind: 0.0.0.0
                     target: 8443
@@ -705,11 +774,14 @@ final class Phase07NetworkManifestTests: XCTestCase {
         )
         assertFailure(
             """
-            version: 2
+            version: 3
             project: exposure-demo
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - target: 8443
                     exposure:
@@ -722,11 +794,14 @@ final class Phase07NetworkManifestTests: XCTestCase {
         let interfaces = (0...8).map { "en\($0)" }.joined(separator: ", ")
         assertFailure(
             """
-            version: 2
+            version: 3
             project: exposure-demo
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - bind: 192.168.1.10
                     target: 8443
@@ -745,7 +820,7 @@ final class Phase07NetworkManifestTests: XCTestCase {
     func testIngressParsesDefaultsAndRoundTripsCanonically() throws {
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: ingress-demo
             networks:
               backend: {}
@@ -765,6 +840,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports: ["8080:8080"]
                 networks: [backend]
             """
@@ -790,7 +868,7 @@ final class Phase07NetworkManifestTests: XCTestCase {
     func testIngressRejectsUnknownFieldsAndConflictingRoutes() {
         assertFailure(
             """
-            version: 2
+            version: 3
             project: ingress-demo
             ingress:
               api:
@@ -803,6 +881,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports: ["8080:8080"]
             """,
             code: "HW-MANIFEST-003",
@@ -883,7 +964,7 @@ final class Phase07NetworkManifestTests: XCTestCase {
     func testIngressRejectsMissingServiceUndeclaredTargetPortAndMaxima() {
         assertFailure(
             """
-            version: 2
+            version: 3
             project: ingress-demo
             ingress:
               api:
@@ -895,6 +976,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports: ["8080:8080"]
             """,
             contains: "must attach to a declared Hostwright project network",
@@ -940,7 +1024,7 @@ final class Phase07NetworkManifestTests: XCTestCase {
 
     private func manifest(networks: String) -> String {
         """
-        version: 2
+        version: 3
         project: network-demo
         networks:
           backend:
@@ -948,19 +1032,25 @@ final class Phase07NetworkManifestTests: XCTestCase {
         services:
           api:
             image: local/api:latest
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
             networks: [backend]
         """
     }
 
     private func hostAccessManifest(_ endpoints: String) -> String {
         """
-        version: 2
+        version: 3
         project: host-access-demo
         networks:
           guarded: {}
         services:
           api:
             image: local/api:latest
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
             networks: [guarded]
             hostAccess:
         \(endpoints.split(separator: "\n", omittingEmptySubsequences: false)
@@ -972,7 +1062,7 @@ final class Phase07NetworkManifestTests: XCTestCase {
     func testCertificateDeclarationsRoundTripAndApplyDefaults() throws {
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: certificate-demo
             networks: { backend: {} }
             certificates:
@@ -995,7 +1085,7 @@ final class Phase07NetworkManifestTests: XCTestCase {
                 port: 8445
                 routes: [{ hostname: provider.example.test, targetService: api, targetPort: 8080 }]
             services:
-              api: { image: local/api:latest, ports: ["8080:8080"], networks: [backend] }
+              api: { image: local/api:latest, resources: { requests: {cpus: 1, memory: 512MiB}, limits: {cpus: 1, memory: 512MiB} }, ports: ["8080:8080"], networks: [backend] }
             """
         )
         XCTAssertEqual(manifest.certificates["local"]?.renewBeforeSeconds, 604_800)
@@ -1008,20 +1098,20 @@ final class Phase07NetworkManifestTests: XCTestCase {
 
     func testCertificatesRejectInvalidCombinationsAndMissingIngressReference() {
         assertFailure("""
-        version: 2
+        version: 3
         project: certificate-demo
         certificates: { imported: { source: imported } }
         services: { api: { image: local/api:latest } }
         """, contains: "requires a lowercase 64-hex", path: "$.certificates.imported.identitySHA256")
         assertFailure("""
-        version: 2
+        version: 3
         project: certificate-demo
         networks: { backend: {} }
         ingress: { api: { certificate: absent, port: 8080, routes: [{ hostname: api.example.test, targetService: api, targetPort: 8080 }] } }
         services: { api: { image: local/api:latest, ports: ["8080:8080"], networks: [backend] } }
         """, contains: "references missing certificate", path: "$.ingress.api.certificate")
         assertFailure("""
-        version: 2
+        version: 3
         project: certificate-demo
         certificates: { local: { source: localCA } }
         services: { api: { image: local/api:latest } }
@@ -1045,7 +1135,7 @@ final class Phase07NetworkManifestTests: XCTestCase {
     func testIngressMTLSPeersRequireCertificateAndCanonicalize() throws {
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: ingress-mtls
             networks: { backend: {} }
             certificates: { local: { source: localCA } }
@@ -1057,8 +1147,8 @@ final class Phase07NetworkManifestTests: XCTestCase {
                 peers: [{ service: worker, role: workload }]
                 routes: [{ hostname: api.example.test, targetService: api, targetPort: 8080 }]
             services:
-              api: { image: local/api:latest, ports: ["8080:8080"], networks: [backend] }
-              worker: { image: local/worker:latest, networks: [backend] }
+              api: { image: local/api:latest, resources: { requests: {cpus: 1, memory: 512MiB}, limits: {cpus: 1, memory: 512MiB} }, ports: ["8080:8080"], networks: [backend] }
+              worker: { image: local/worker:latest, resources: { requests: {cpus: 1, memory: 512MiB}, limits: {cpus: 1, memory: 512MiB} }, networks: [backend] }
             """
         )
         XCTAssertEqual(manifest.ingress["api"]?.peers, [HostwrightIngressPeerSelector(service: "worker", role: .workload)])
@@ -1066,7 +1156,7 @@ final class Phase07NetworkManifestTests: XCTestCase {
 
         assertFailure(
             """
-            version: 2
+            version: 3
             project: ingress-mtls
             networks: { backend: {} }
             certificates: { local: { source: localCA } }
@@ -1081,11 +1171,14 @@ final class Phase07NetworkManifestTests: XCTestCase {
     func testServiceNetworkPolicyRoundTripsCanonicalAndKeepsAbsentPolicyCompatible() throws {
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: policy-demo
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 networkPolicy:
                   ingress:
                     - service: worker
@@ -1114,20 +1207,20 @@ final class Phase07NetworkManifestTests: XCTestCase {
 
         let legacy = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: no-policy
             services:
-              api: { image: local/api:latest }
+              api: { image: local/api:latest, resources: {requests: {cpus: 1, memory: 512MiB}, limits: {cpus: 1, memory: 512MiB}} }
             """
         )
         XCTAssertNil(legacy.services[0].networkPolicy)
 
         let defaultDeny = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: default-deny
             services:
-              api: { image: local/api:latest, networkPolicy: {} }
+              api: { image: local/api:latest, resources: {requests: {cpus: 1, memory: 512MiB}, limits: {cpus: 1, memory: 512MiB}}, networkPolicy: {} }
             """
         )
         XCTAssertEqual(
@@ -1139,11 +1232,14 @@ final class Phase07NetworkManifestTests: XCTestCase {
     func testServiceNetworkPolicyRejectsBroadMalformedAndDuplicateRules() {
         assertFailure(
             """
-            version: 2
+            version: 3
             project: policy-demo
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 networkPolicy: { ingress: [{}] }
             """,
             contains: "must contain at least one exact selector",
@@ -1151,11 +1247,14 @@ final class Phase07NetworkManifestTests: XCTestCase {
         )
         assertFailure(
             """
-            version: 2
+            version: 3
             project: policy-demo
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 networkPolicy:
                   egress:
                     - address: 10.42.0.7/24
@@ -1165,11 +1264,14 @@ final class Phase07NetworkManifestTests: XCTestCase {
         )
         assertFailure(
             """
-            version: 2
+            version: 3
             project: policy-demo
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 networkPolicy:
                   ingress:
                     - service: worker
@@ -1180,11 +1282,14 @@ final class Phase07NetworkManifestTests: XCTestCase {
         )
         assertFailure(
             """
-            version: 2
+            version: 3
             project: policy-demo
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 networkPolicy:
                   ingress:
                     - service: worker
@@ -1198,7 +1303,7 @@ final class Phase07NetworkManifestTests: XCTestCase {
     func testTunnelDeclarationsRoundTripCanonically() throws {
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: tunnel-demo
             tunnels:
               peer-api:
@@ -1217,6 +1322,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - host: 8080
                     target: 8080
@@ -1240,7 +1348,7 @@ final class Phase07NetworkManifestTests: XCTestCase {
     func testTunnelDeclarationRequiresResolvablePortAndDiscoveryPath() {
         assertFailure(
             """
-            version: 2
+            version: 3
             project: tunnel-demo
             tunnels:
               peer-api:
@@ -1250,6 +1358,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - host: 8080
                     target: 8080
@@ -1262,7 +1373,7 @@ final class Phase07NetworkManifestTests: XCTestCase {
         )
         assertFailure(
             """
-            version: 2
+            version: 3
             project: tunnel-demo
             tunnels:
               peer-api:
@@ -1273,6 +1384,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - host: 8080
                     target: 8080
@@ -1288,7 +1402,7 @@ final class Phase07NetworkManifestTests: XCTestCase {
     func testTunnelDeclarationRejectsNonCanonicalPeerAndUnsafeEndpoint() {
         assertFailure(
             """
-            version: 2
+            version: 3
             project: tunnel-demo
             tunnels:
               peer-api:
@@ -1302,6 +1416,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - host: 8080
                     target: 8080
@@ -1314,7 +1431,7 @@ final class Phase07NetworkManifestTests: XCTestCase {
         )
         assertFailure(
             """
-            version: 2
+            version: 3
             project: tunnel-demo
             tunnels:
               peer-api:
@@ -1328,6 +1445,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - host: 8080
                     target: 8080
@@ -1344,7 +1464,7 @@ final class Phase07NetworkManifestTests: XCTestCase {
     func testTunnelDeclarationSupportsCanonicalIPv6Endpoint() throws {
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: tunnel-demo
             tunnels:
               peer-api:
@@ -1358,6 +1478,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - host: 8080
                     target: 8080
@@ -1376,7 +1499,7 @@ final class Phase07NetworkManifestTests: XCTestCase {
     func testTunnelDeclarationRejectsNonTunnelPortAndReplicas() {
         assertFailure(
             """
-            version: 2
+            version: 3
             project: tunnel-demo
             tunnels:
               peer-api:
@@ -1390,6 +1513,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports: ["8080:8080"]
             """,
             contains:
@@ -1398,7 +1524,7 @@ final class Phase07NetworkManifestTests: XCTestCase {
         )
         assertFailure(
             """
-            version: 2
+            version: 3
             project: tunnel-demo
             tunnels:
               peer-api:
@@ -1412,6 +1538,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 replicas: 2
                 ports:
                   - host: 8080
@@ -1428,7 +1557,7 @@ final class Phase07NetworkManifestTests: XCTestCase {
     func testRemoteListenerTrustRoundTripsCanonically() throws {
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: tunnel-listener
             tunnels:
               peer-api:
@@ -1450,6 +1579,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - host: 8080
                     target: 8080
@@ -1475,7 +1607,7 @@ final class Phase07NetworkManifestTests: XCTestCase {
     func testRemoteDialerTrustDoesNotRequireRemoteServiceLocally() throws {
         let manifest = try ManifestValidator.validated(
             """
-            version: 2
+            version: 3
             project: tunnel-dialer
             tunnels:
               peer-api:
@@ -1500,6 +1632,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               client:
                 image: local/client:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """
         )
 
@@ -1517,7 +1652,7 @@ final class Phase07NetworkManifestTests: XCTestCase {
     func testRemoteTunnelRolesRejectMissingOrAmbiguousTrust() {
         assertFailure(
             """
-            version: 2
+            version: 3
             project: tunnel-listener
             tunnels:
               peer-api:
@@ -1529,6 +1664,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - host: 8080
                     target: 8080
@@ -1541,7 +1679,7 @@ final class Phase07NetworkManifestTests: XCTestCase {
         )
         assertFailure(
             """
-            version: 2
+            version: 3
             project: tunnel-dialer
             tunnels:
               peer-api:
@@ -1562,6 +1700,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               client:
                 image: local/client:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
             """,
             contains: "canonical lowercase SHA-256",
             path: "$.tunnels.peer-api.trust"
@@ -1571,7 +1712,7 @@ final class Phase07NetworkManifestTests: XCTestCase {
     func testLocalLoopbackTunnelRejectsRemoteTrustFields() {
         assertFailure(
             """
-            version: 2
+            version: 3
             project: tunnel-local
             tunnels:
               peer-api:
@@ -1587,6 +1728,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - host: 8080
                     target: 8080
@@ -1602,7 +1746,7 @@ final class Phase07NetworkManifestTests: XCTestCase {
     func testTunnelTargetRequiresSingleTCPLoopbackMapping() {
         assertFailure(
             """
-            version: 2
+            version: 3
             project: tunnel-udp
             tunnels:
               peer-api:
@@ -1612,6 +1756,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports:
                   - host: 8080
                     target: 8080
@@ -1639,7 +1786,7 @@ final class Phase07NetworkManifestTests: XCTestCase {
             .joined(separator: "\n")
         return
             """
-            version: 2
+            version: 3
             project: ingress-demo
             networks:
               backend: {}
@@ -1651,6 +1798,9 @@ final class Phase07NetworkManifestTests: XCTestCase {
             services:
               api:
                 image: local/api:latest
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 ports: ["8080:8080"]
                 networks: [backend]
             """

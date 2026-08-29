@@ -1,0 +1,9 @@
+{
+  "protocolVersion": 1,
+  "requestID": "phase09-xpc-1",
+  "status": "error",
+  "error": {
+    "code": "service-unavailable",
+    "message": "XPC request rejected."
+  }
+}

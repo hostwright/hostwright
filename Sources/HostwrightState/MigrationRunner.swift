@@ -1,4 +1,6 @@
+import Foundation
 import HostwrightCore
+import HostwrightControlPlane
 import HostwrightRuntime
 
 public struct SchemaMigration: Equatable, Sendable {
@@ -72,6 +74,7 @@ public struct MigrationRunner: Sendable {
     public static let latestSchemaVersion =
         HostwrightContractVersions.stateSchema
     static let applicationID = 0x48575254
+    static let legacyV24AcceleratorChecksum = "fnv1a64:147eba7ebe350e07"
 
     public init() {}
 
@@ -140,6 +143,17 @@ public struct MigrationRunner: Sendable {
                             message: "Recorded checksum \(checksum) does not match expected checksum \(migration.checksum)."
                         )
                     }
+                    if migration.version == 24,
+                       checksum == Self.legacyV24AcceleratorChecksum {
+                        try upgradeLegacyV24AcceleratorTables(
+                            on: connection,
+                            migration: migration
+                        )
+                        try connection.run(
+                            "UPDATE schema_migrations SET checksum = ? WHERE version = 24",
+                            bindings: [.text(migration.checksum)]
+                        )
+                    }
                     if migration.version == 7, checksum != migration.checksum {
                         try backfillV7ProviderBindings(on: connection)
                         try connection.run(
@@ -156,6 +170,10 @@ public struct MigrationRunner: Sendable {
 
                 if migration.version == 7 {
                     try backfillV7IdentityAndFencing(on: connection)
+                }
+
+                if migration.version == 20 {
+                    try backfillV20RBACDefaults(on: connection)
                 }
 
                 for statement in migration.finalizationStatements {
@@ -392,6 +410,91 @@ public struct MigrationRunner: Sendable {
         }
     }
 
+    private func backfillV20RBACDefaults(on connection: SQLiteConnection) throws {
+        let candidates = try connection.query(
+            """
+            SELECT subject_id
+            FROM peer_identities
+            WHERE revoked_at IS NULL AND subject_id = declared_by_subject_id
+            ORDER BY julianday(declared_at), subject_id
+            """
+        ).compactMap { $0.first ?? nil }
+        guard candidates.count <= 1 else {
+            throw StateStoreError.migrationFailed(
+                version: 20,
+                message: "RBAC bootstrap found multiple active self-declared installing subjects."
+            )
+        }
+        let timestamp = try connection.query(
+            "SELECT strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
+        ).first?.first ?? nil
+        guard let timestamp else {
+            throw StateStoreError.migrationFailed(
+                version: 20,
+                message: "RBAC bootstrap could not obtain a canonical timestamp."
+            )
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        for role in DefaultRole.allCases {
+            let rules = Self.expandedDefaultRules(for: role)
+            let encoded = try encoder.encode(rules)
+            guard let canonicalRules = String(data: encoded, encoding: .utf8) else {
+                throw StateStoreError.migrationFailed(
+                    version: 20,
+                    message: "RBAC default role rules were not UTF-8."
+                )
+            }
+            try connection.run(
+                """
+                INSERT INTO rbac_roles (
+                    role_id, built_in, rules_json, generation, created_by_subject_id,
+                    created_at, updated_at
+                ) VALUES (?, 1, ?, 1, NULL, ?, ?)
+                """,
+                bindings: [
+                    .text(role.rawValue), .text(canonicalRules), .text(timestamp), .text(timestamp)
+                ]
+            )
+        }
+        if let installingSubject = candidates.first {
+            try connection.run(
+                """
+                INSERT INTO rbac_bindings (
+                    binding_id, subject_id, role_id, scope_kind, scope_identifier,
+                    created_by_subject_id, generation, created_at, updated_at
+                ) VALUES ('bootstrap-owner', ?, 'owner', 'global', NULL, ?, 1, ?, ?)
+                """,
+                bindings: [
+                    .text(installingSubject), .text(installingSubject), .text(timestamp),
+                    .text(timestamp)
+                ]
+            )
+        }
+    }
+
+    private static func expandedDefaultRules(for role: DefaultRole) -> [RBACRule] {
+        let order: [DefaultRole]
+        switch role {
+        case .viewer: order = [.viewer]
+        case .operator: order = [.viewer, .operator]
+        case .maintainer: order = [.viewer, .operator, .maintainer]
+        case .securityAdmin: order = [.securityAdmin]
+        case .owner: order = [.owner]
+        }
+        return order.compactMap { included in
+            guard let permission = DefaultRolePolicy.matrix.first(where: { $0.role == included })
+            else { return nil }
+            return RBACRule(
+                identifier: "builtin.\(role.rawValue).\(included.rawValue).allow",
+                effect: .allow,
+                resources: permission.resources.sorted { $0.rawValue < $1.rawValue },
+                verbs: permission.verbs.sorted { $0.rawValue < $1.rawValue },
+                scope: RBACScope(kind: .global)
+            )
+        }.sorted { $0.identifier < $1.identifier }
+    }
+
     func validateAppliedSchema(on connection: SQLiteConnection) throws {
         try validateApplicationIdentity(on: connection, allowUnclaimed: true)
         guard try migrationTableExists(on: connection) else {
@@ -413,6 +516,126 @@ public struct MigrationRunner: Sendable {
 
         let applied = try appliedMigrations(on: connection)
         try validateCompatibility(applied, requireLatest: true)
+        if applied[24] == Self.legacyV24AcceleratorChecksum {
+            throw StateStoreError.incompatibleSchema(
+                foundVersion: 24,
+                latestSupported: Self.latestSchemaVersion,
+                message: "Schema v24 predates the durable accelerator replay table upgrade; run the explicit migration path before reading or writing state."
+            )
+        }
+    }
+
+    private func upgradeLegacyV24AcceleratorTables(
+        on connection: SQLiteConnection,
+        migration: SchemaMigration
+    ) throws {
+        let legacyStatements = Self.legacyV24AcceleratorStatements()
+        guard legacyStatements.count == 6,
+              migration.statements.count == 6 else {
+            throw StateStoreError.migrationFailed(
+                version: 24,
+                message: "The v24 accelerator migration definition is incomplete."
+            )
+        }
+
+        for (table, expectedSQL) in [
+            ("accelerator_state_journal", legacyStatements[0]),
+            ("accelerator_state_current", legacyStatements[1])
+        ] {
+            let rows = try connection.query(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+                bindings: [.text(table)]
+            )
+            guard let actualSQL = rows.first?.first ?? nil,
+                  Self.normalizedSchemaSQL(actualSQL) == Self.normalizedSchemaSQL(expectedSQL) else {
+                throw StateStoreError.migrationFailed(
+                    version: 24,
+                    message: "The recorded v24 accelerator table \(table) is not the recognized pre-replay schema."
+                )
+            }
+        }
+
+        let indexNames = [
+            "accelerator_state_journal_type_id_idx",
+            "accelerator_state_current_record_scope_idx",
+            "accelerator_state_current_generation_idx",
+            "accelerator_state_current_record_idx"
+        ]
+        for indexName in indexNames {
+            try connection.execute("DROP INDEX IF EXISTS \(indexName)")
+        }
+
+        let legacyJournal = "accelerator_state_journal_v24_legacy"
+        let legacyCurrent = "accelerator_state_current_v24_legacy"
+        try connection.execute(
+            "ALTER TABLE accelerator_state_journal RENAME TO \(legacyJournal)"
+        )
+        try connection.execute(
+            "ALTER TABLE accelerator_state_current RENAME TO \(legacyCurrent)"
+        )
+        for statement in migration.statements {
+            try connection.execute(statement)
+        }
+
+        let journalColumns = "id, timestamp, severity, type, source, project_id, service_name, runtime_adapter, message, payload_json_redacted"
+        try connection.execute(
+            "INSERT INTO accelerator_state_journal (\(journalColumns)) SELECT \(journalColumns) FROM \(legacyJournal)"
+        )
+        let currentColumns = journalColumns + ", record_id, generation"
+        try connection.execute(
+            "INSERT INTO accelerator_state_current (\(currentColumns)) SELECT \(currentColumns) FROM \(legacyCurrent)"
+        )
+
+        func rowCount(_ sql: String) throws -> Int {
+            guard let value = try connection.query(sql).first?.first ?? nil,
+                  let count = Int(value) else {
+                return -1
+            }
+            return count
+        }
+        let oldJournalCount = try rowCount(
+            "SELECT COUNT(*) FROM \(legacyJournal)"
+        )
+        let newJournalCount = try rowCount(
+            "SELECT COUNT(*) FROM accelerator_state_journal"
+        )
+        let oldCurrentCount = try rowCount(
+            "SELECT COUNT(*) FROM \(legacyCurrent)"
+        )
+        let newCurrentCount = try rowCount(
+            "SELECT COUNT(*) FROM accelerator_state_current"
+        )
+        guard oldJournalCount >= 0,
+              oldJournalCount == newJournalCount,
+              oldCurrentCount >= 0,
+              oldCurrentCount == newCurrentCount else {
+            throw StateStoreError.migrationFailed(
+                version: 24,
+                message: "The v24 accelerator replay-table upgrade did not preserve row counts."
+            )
+        }
+
+        try connection.execute("DROP TABLE \(legacyJournal)")
+        try connection.execute("DROP TABLE \(legacyCurrent)")
+    }
+
+    static func legacyV24AcceleratorStatements() -> [String] {
+        guard let migration = migrations.first(where: { $0.version == 24 }) else {
+            return []
+        }
+        return migration.statements.map { statement in
+            statement.replacingOccurrences(
+                of: ",\n        'accelerator.state.xpc-replay'",
+                with: ""
+            )
+        }
+    }
+
+    private static func normalizedSchemaSQL(_ value: String) -> String {
+        value
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
+            .lowercased()
     }
 
     func applicationIdentity(on connection: SQLiteConnection) throws -> Int {
@@ -3206,6 +3429,1057 @@ public struct MigrationRunner: Sendable {
                 "CREATE INDEX restart_attempt_history_workload_idx ON restart_attempt_history(project_id, service_name, occurred_at, id)",
                 "CREATE INDEX restart_attempt_history_operation_idx ON restart_attempt_history(operation_id) WHERE operation_id IS NOT NULL"
             ]
-        )
+        ),
+        SchemaMigration(
+          version: 18,
+          description:
+            "Persistent local control identities, sessions, revocations, and request foundations",
+          statements: [
+            """
+            CREATE TABLE peer_identities (
+                subject_id TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL CHECK (user_id >= 0),
+                signing_identifier TEXT NOT NULL CHECK (length(signing_identifier) BETWEEN 1 AND 128 AND signing_identifier NOT GLOB '*[^ -~]*'),
+                team_identifier TEXT,
+                code_directory_hash TEXT NOT NULL CHECK (length(code_directory_hash) IN (40, 64) AND code_directory_hash NOT GLOB '*[^0-9a-f]*'),
+                validation_mode TEXT NOT NULL CHECK (validation_mode IN ('installedRequirement','pinnedAdHoc')),
+                generation INTEGER NOT NULL CHECK (generation >= 1),
+                credential_id TEXT,
+                credential_public_key_base64 TEXT,
+                declared_by_subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED,
+                declared_at TEXT NOT NULL CHECK (julianday(declared_at) IS NOT NULL),
+                credential_expires_at TEXT CHECK (credential_expires_at IS NULL OR julianday(credential_expires_at) IS NOT NULL),
+                revoked_at TEXT CHECK (revoked_at IS NULL OR julianday(revoked_at) IS NOT NULL),
+                updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL),
+                CHECK (length(subject_id) BETWEEN 1 AND 128 AND subject_id NOT GLOB '*[^ -~]*'),
+                CHECK (length(declared_by_subject_id) BETWEEN 1 AND 128 AND declared_by_subject_id NOT GLOB '*[^ -~]*'),
+                CHECK ((credential_id IS NULL AND credential_public_key_base64 IS NULL) OR (credential_id IS NOT NULL AND credential_public_key_base64 IS NOT NULL)),
+                CHECK (credential_id IS NULL OR (length(credential_id) BETWEEN 1 AND 128 AND credential_id NOT GLOB '*[^ -~]*')),
+                CHECK (credential_public_key_base64 IS NULL OR length(credential_public_key_base64) BETWEEN 1 AND 512),
+                CHECK ((validation_mode = 'installedRequirement' AND team_identifier IS NOT NULL AND length(team_identifier) = 10 AND team_identifier NOT GLOB '*[^A-Z0-9]*') OR (validation_mode = 'pinnedAdHoc' AND team_identifier IS NULL)),
+                CHECK (credential_expires_at IS NULL OR julianday(credential_expires_at) > julianday(declared_at))
+            )
+            """,
+            """
+            CREATE TABLE control_sessions (
+                session_id TEXT PRIMARY KEY,
+                subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                daemon_generation INTEGER NOT NULL CHECK (daemon_generation > 0),
+                server_nonce_sha256 TEXT NOT NULL CHECK (length(server_nonce_sha256) = 64 AND server_nonce_sha256 NOT GLOB '*[^0-9a-f]*'),
+                socket_device INTEGER NOT NULL CHECK (socket_device >= 0),
+                socket_inode INTEGER NOT NULL CHECK (socket_inode > 0),
+                euid INTEGER NOT NULL CHECK (euid >= 0),
+                egid INTEGER NOT NULL CHECK (egid >= 0),
+                pid INTEGER NOT NULL CHECK (pid > 0),
+                pid_version INTEGER NOT NULL CHECK (pid_version >= 0),
+                audit_session_id INTEGER NOT NULL CHECK (audit_session_id >= 0),
+                code_directory_hash TEXT NOT NULL CHECK (length(code_directory_hash) IN (40, 64) AND code_directory_hash NOT GLOB '*[^0-9a-f]*'),
+                credential_id TEXT,
+                created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL),
+                expires_at TEXT NOT NULL CHECK (julianday(expires_at) IS NOT NULL),
+                revoked_at TEXT CHECK (revoked_at IS NULL OR julianday(revoked_at) IS NOT NULL),
+                updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL),
+                CHECK (length(session_id) BETWEEN 1 AND 128 AND session_id NOT GLOB '*[^ -~]*'),
+                CHECK (credential_id IS NULL OR (length(credential_id) BETWEEN 1 AND 128 AND credential_id NOT GLOB '*[^ -~]*')),
+                CHECK (julianday(expires_at) > julianday(created_at))
+            )
+            """,
+            """
+            CREATE TABLE identity_revocations (
+                revocation_id TEXT PRIMARY KEY,
+                target_kind TEXT NOT NULL CHECK (target_kind IN ('subject','credential','codeHash','session')),
+                target_identifier TEXT NOT NULL,
+                reason TEXT NOT NULL CHECK (length(reason) BETWEEN 1 AND 512 AND reason NOT GLOB '*[^ -~]*'),
+                actor_subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                revoked_at TEXT NOT NULL CHECK (julianday(revoked_at) IS NOT NULL),
+                CHECK (length(revocation_id) BETWEEN 1 AND 128 AND revocation_id NOT GLOB '*[^ -~]*'),
+                CHECK (length(target_identifier) BETWEEN 1 AND 128 AND target_identifier NOT GLOB '*[^ -~]*'),
+                CHECK (target_kind != 'codeHash' OR (length(target_identifier) IN (40, 64) AND target_identifier NOT GLOB '*[^0-9a-f]*')),
+                UNIQUE (target_kind, target_identifier)
+            )
+            """,
+            """
+            CREATE TABLE control_requests (
+                request_id TEXT PRIMARY KEY,
+                subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                idempotency_key TEXT,
+                request_digest_sha256 TEXT NOT NULL CHECK (length(request_digest_sha256) = 64 AND request_digest_sha256 NOT GLOB '*[^0-9a-f]*'),
+                status TEXT NOT NULL CHECK (status IN ('accepted','completed','rejected','error')),
+                operation_reference TEXT,
+                response_json TEXT CHECK (response_json IS NULL OR (length(response_json) BETWEEN 2 AND 1048576 AND json_valid(response_json))),
+                created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL),
+                updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL),
+                CHECK (length(request_id) BETWEEN 1 AND 128 AND request_id NOT GLOB '*[^ -~]*'),
+                CHECK (idempotency_key IS NULL OR (length(idempotency_key) BETWEEN 1 AND 256 AND idempotency_key NOT GLOB '*[^ -~]*')),
+                CHECK (operation_reference IS NULL OR (length(operation_reference) BETWEEN 1 AND 128 AND operation_reference NOT GLOB '*[^ -~]*'))
+            )
+            """,
+            """
+            CREATE TABLE idempotency_records (
+                subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                idempotency_key TEXT NOT NULL,
+                request_id TEXT NOT NULL REFERENCES control_requests(request_id) ON DELETE RESTRICT,
+                request_digest_sha256 TEXT NOT NULL CHECK (length(request_digest_sha256) = 64 AND request_digest_sha256 NOT GLOB '*[^0-9a-f]*'),
+                status TEXT NOT NULL CHECK (status IN ('accepted','completed','rejected','error')),
+                created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL),
+                expires_at TEXT NOT NULL CHECK (julianday(expires_at) IS NOT NULL),
+                PRIMARY KEY (subject_id, idempotency_key),
+                CHECK (length(idempotency_key) BETWEEN 1 AND 256 AND idempotency_key NOT GLOB '*[^ -~]*'),
+                CHECK (julianday(expires_at) > julianday(created_at))
+            )
+            """,
+            "CREATE INDEX peer_identities_code_hash_idx ON peer_identities(code_directory_hash, revoked_at, subject_id)",
+            "CREATE UNIQUE INDEX peer_identities_active_code_idx ON peer_identities(user_id, code_directory_hash) WHERE revoked_at IS NULL",
+            "CREATE UNIQUE INDEX peer_identities_active_credential_idx ON peer_identities(credential_id) WHERE credential_id IS NOT NULL AND revoked_at IS NULL",
+            "CREATE INDEX control_sessions_subject_idx ON control_sessions(subject_id, revoked_at, expires_at, session_id)",
+            "CREATE INDEX control_sessions_code_hash_idx ON control_sessions(code_directory_hash, revoked_at, session_id)",
+            "CREATE INDEX identity_revocations_target_idx ON identity_revocations(target_kind, target_identifier, revoked_at)",
+            "CREATE UNIQUE INDEX control_requests_subject_idempotency_idx ON control_requests(subject_id, idempotency_key) WHERE idempotency_key IS NOT NULL",
+            "CREATE INDEX control_requests_subject_status_idx ON control_requests(subject_id, status, created_at, request_id)",
+            "CREATE INDEX idempotency_records_request_idx ON idempotency_records(request_id)",
+          ]
+        ),
+        SchemaMigration(
+          version: 19,
+          description: "Immutable tamper-evident audit segments, records, keys, and retention anchors",
+          statements: [
+            """
+            CREATE TABLE audit_key_metadata (
+                key_id TEXT PRIMARY KEY,
+                generation INTEGER NOT NULL UNIQUE CHECK (generation > 0),
+                algorithm TEXT NOT NULL CHECK (algorithm = 'p256-sha256'),
+                public_key_x963_base64 TEXT NOT NULL CHECK (length(public_key_x963_base64) BETWEEN 1 AND 256),
+                public_key_sha256 TEXT NOT NULL UNIQUE CHECK (length(public_key_sha256) = 64 AND public_key_sha256 NOT GLOB '*[^0-9a-f]*'),
+                status TEXT NOT NULL CHECK (status IN ('pending','active','retired','revoked')),
+                prior_key_id TEXT REFERENCES audit_key_metadata(key_id) ON DELETE RESTRICT,
+                transition_signature_der_base64 TEXT,
+                created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL),
+                retired_at TEXT CHECK (retired_at IS NULL OR julianday(retired_at) IS NOT NULL),
+                revoked_at TEXT CHECK (revoked_at IS NULL OR julianday(revoked_at) IS NOT NULL),
+                CHECK (length(key_id) BETWEEN 1 AND 128 AND key_id NOT GLOB '*[^ -~]*'),
+                CHECK ((generation = 1 AND prior_key_id IS NULL AND transition_signature_der_base64 IS NULL) OR (generation > 1 AND prior_key_id IS NOT NULL AND length(transition_signature_der_base64) BETWEEN 1 AND 256)),
+                CHECK ((status = 'retired' AND retired_at IS NOT NULL) OR status != 'retired'),
+                CHECK ((status = 'revoked' AND revoked_at IS NOT NULL) OR status != 'revoked')
+            )
+            """,
+            """
+            CREATE TABLE audit_segments (
+                segment_id TEXT PRIMARY KEY,
+                ordinal INTEGER NOT NULL UNIQUE CHECK (ordinal > 0),
+                first_sequence INTEGER NOT NULL UNIQUE CHECK (first_sequence > 0),
+                last_sequence INTEGER NOT NULL UNIQUE CHECK (last_sequence >= first_sequence),
+                record_count INTEGER NOT NULL CHECK (record_count > 0 AND record_count = last_sequence - first_sequence + 1),
+                prior_segment_digest TEXT,
+                first_record_digest TEXT NOT NULL CHECK (length(first_record_digest) = 71 AND first_record_digest GLOB 'sha256:*'),
+                last_record_digest TEXT NOT NULL CHECK (length(last_record_digest) = 71 AND last_record_digest GLOB 'sha256:*'),
+                segment_digest TEXT NOT NULL UNIQUE CHECK (length(segment_digest) = 71 AND segment_digest GLOB 'sha256:*'),
+                signature_der_base64 TEXT NOT NULL CHECK (length(signature_der_base64) BETWEEN 1 AND 256),
+                key_id TEXT NOT NULL REFERENCES audit_key_metadata(key_id) ON DELETE RESTRICT,
+                status TEXT NOT NULL CHECK (status = 'sealed'),
+                opened_at TEXT NOT NULL CHECK (julianday(opened_at) IS NOT NULL),
+                sealed_at TEXT NOT NULL CHECK (julianday(sealed_at) IS NOT NULL),
+                CHECK (length(segment_id) BETWEEN 1 AND 128 AND segment_id NOT GLOB '*[^ -~]*'),
+                CHECK (prior_segment_digest IS NULL OR (length(prior_segment_digest) = 71 AND prior_segment_digest GLOB 'sha256:*')),
+                CHECK (julianday(sealed_at) >= julianday(opened_at))
+            )
+            """,
+            """
+            CREATE TABLE audit_records (
+                record_id TEXT PRIMARY KEY,
+                segment_id TEXT NOT NULL REFERENCES audit_segments(segment_id) ON DELETE CASCADE,
+                sequence INTEGER NOT NULL UNIQUE CHECK (sequence > 0),
+                timestamp TEXT NOT NULL CHECK (julianday(timestamp) IS NOT NULL),
+                previous_digest TEXT,
+                subject_id TEXT NOT NULL,
+                request_id TEXT,
+                target TEXT,
+                action TEXT NOT NULL CHECK (action IN ('request','authentication','authorization','admission','operation','effect','recovery','plugin','admin','export','retention')),
+                outcome TEXT NOT NULL,
+                reason_code TEXT NOT NULL,
+                policy_ref TEXT,
+                plan_ref TEXT,
+                approval_ref TEXT,
+                operation_ref TEXT,
+                plugin_ref TEXT,
+                payload_digest TEXT NOT NULL CHECK (length(payload_digest) = 71 AND payload_digest GLOB 'sha256:*'),
+                record_digest TEXT NOT NULL UNIQUE CHECK (length(record_digest) = 71 AND record_digest GLOB 'sha256:*'),
+                signing_key_id TEXT NOT NULL REFERENCES audit_key_metadata(key_id) ON DELETE RESTRICT,
+                deduplication_key TEXT,
+                canonical_json TEXT NOT NULL CHECK (json_valid(canonical_json) AND json_type(canonical_json) = 'object'),
+                CHECK (length(record_id) BETWEEN 1 AND 128 AND record_id NOT GLOB '*[^ -~]*'),
+                CHECK (length(subject_id) BETWEEN 1 AND 128),
+                CHECK (request_id IS NULL OR length(request_id) BETWEEN 1 AND 128),
+                CHECK (target IS NULL OR length(target) BETWEEN 1 AND 512),
+                CHECK (length(outcome) BETWEEN 1 AND 128),
+                CHECK (length(reason_code) BETWEEN 1 AND 128),
+                CHECK (deduplication_key IS NULL OR (length(deduplication_key) BETWEEN 1 AND 256 AND deduplication_key NOT GLOB '*[^ -~]*')),
+                CHECK (previous_digest IS NULL OR (length(previous_digest) = 71 AND previous_digest GLOB 'sha256:*'))
+            )
+            """,
+            """
+            CREATE TABLE audit_retention_anchors (
+                checkpoint_id TEXT PRIMARY KEY,
+                removed_through_segment_id TEXT NOT NULL,
+                removed_through_ordinal INTEGER NOT NULL UNIQUE CHECK (removed_through_ordinal > 0),
+                prior_anchor_digest TEXT NOT NULL CHECK (length(prior_anchor_digest) = 71 AND prior_anchor_digest GLOB 'sha256:*'),
+                new_anchor_digest TEXT NOT NULL UNIQUE CHECK (length(new_anchor_digest) = 71 AND new_anchor_digest GLOB 'sha256:*'),
+                approver TEXT NOT NULL CHECK (length(approver) BETWEEN 1 AND 128),
+                reason TEXT NOT NULL CHECK (length(reason) BETWEEN 1 AND 512),
+                timestamp TEXT NOT NULL CHECK (julianday(timestamp) IS NOT NULL),
+                signature_der_base64 TEXT NOT NULL CHECK (length(signature_der_base64) BETWEEN 1 AND 256),
+                key_id TEXT NOT NULL REFERENCES audit_key_metadata(key_id) ON DELETE RESTRICT,
+                canonical_json TEXT NOT NULL CHECK (json_valid(canonical_json) AND json_type(canonical_json) = 'object'),
+                CHECK (length(checkpoint_id) BETWEEN 1 AND 128 AND checkpoint_id NOT GLOB '*[^ -~]*'),
+                CHECK (length(removed_through_segment_id) BETWEEN 1 AND 128 AND removed_through_segment_id NOT GLOB '*[^ -~]*')
+            )
+            """,
+            "CREATE UNIQUE INDEX audit_key_metadata_active_idx ON audit_key_metadata(status) WHERE status = 'active'",
+            "CREATE INDEX audit_segments_key_idx ON audit_segments(key_id, ordinal)",
+            "CREATE INDEX audit_segments_prior_digest_idx ON audit_segments(prior_segment_digest, ordinal)",
+            "CREATE INDEX audit_records_segment_idx ON audit_records(segment_id, sequence)",
+            "CREATE INDEX audit_records_subject_idx ON audit_records(subject_id, timestamp, sequence)",
+            "CREATE INDEX audit_records_request_idx ON audit_records(request_id, sequence) WHERE request_id IS NOT NULL",
+            "CREATE UNIQUE INDEX audit_records_deduplication_idx ON audit_records(deduplication_key) WHERE deduplication_key IS NOT NULL",
+            "CREATE INDEX audit_retention_key_idx ON audit_retention_anchors(key_id, removed_through_ordinal)",
+          ]
+        ),
+        SchemaMigration(
+          version: 20,
+          description: "Least-privilege RBAC, admission policy, and workload profile authority",
+          implementationRevision: "phase09-policy-profile-v1",
+          statements: [
+            """
+            CREATE TABLE rbac_roles (
+                role_id TEXT PRIMARY KEY,
+                built_in INTEGER NOT NULL CHECK (built_in IN (0, 1)),
+                rules_json TEXT NOT NULL CHECK (json_valid(rules_json) AND json_type(rules_json) = 'array' AND length(rules_json) BETWEEN 2 AND 262144),
+                generation INTEGER NOT NULL CHECK (generation >= 1),
+                created_by_subject_id TEXT REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL),
+                updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL),
+                CHECK (length(role_id) BETWEEN 1 AND 128 AND role_id NOT GLOB '*[^ -~]*'),
+                CHECK ((built_in = 1 AND created_by_subject_id IS NULL) OR (built_in = 0 AND created_by_subject_id IS NOT NULL)),
+                CHECK (julianday(updated_at) >= julianday(created_at))
+            )
+            """,
+            """
+            CREATE TABLE rbac_bindings (
+                binding_id TEXT PRIMARY KEY,
+                subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                role_id TEXT NOT NULL REFERENCES rbac_roles(role_id) ON DELETE RESTRICT,
+                scope_kind TEXT NOT NULL CHECK (scope_kind IN ('global','project','resource')),
+                scope_identifier TEXT,
+                created_by_subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                generation INTEGER NOT NULL CHECK (generation >= 1),
+                created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL),
+                updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL),
+                CHECK (length(binding_id) BETWEEN 1 AND 128 AND binding_id NOT GLOB '*[^ -~]*'),
+                CHECK ((scope_kind = 'global' AND scope_identifier IS NULL) OR (scope_kind != 'global' AND scope_identifier IS NOT NULL AND length(scope_identifier) BETWEEN 1 AND 128 AND scope_identifier NOT GLOB '*[^ -~]*')),
+                CHECK (julianday(updated_at) >= julianday(created_at)),
+                UNIQUE (subject_id, role_id, scope_kind, scope_identifier)
+            )
+            """,
+            """
+            CREATE TABLE rbac_delegations (
+                delegation_id TEXT PRIMARY KEY,
+                delegator_subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                delegate_subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                role_ids_json TEXT NOT NULL CHECK (json_valid(role_ids_json) AND json_type(role_ids_json) = 'array' AND length(role_ids_json) BETWEEN 2 AND 65536),
+                delegated_rules_json TEXT NOT NULL CHECK (json_valid(delegated_rules_json) AND json_type(delegated_rules_json) = 'array' AND length(delegated_rules_json) BETWEEN 2 AND 262144),
+                scope_kind TEXT NOT NULL CHECK (scope_kind IN ('global','project','resource')),
+                scope_identifier TEXT,
+                expires_at TEXT NOT NULL CHECK (julianday(expires_at) IS NOT NULL),
+                revoked_at TEXT CHECK (revoked_at IS NULL OR julianday(revoked_at) IS NOT NULL),
+                generation INTEGER NOT NULL CHECK (generation >= 1),
+                created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL),
+                updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL),
+                CHECK (length(delegation_id) BETWEEN 1 AND 128 AND delegation_id NOT GLOB '*[^ -~]*'),
+                CHECK (delegator_subject_id != delegate_subject_id),
+                CHECK (json_array_length(role_ids_json) > 0 OR json_array_length(delegated_rules_json) > 0),
+                CHECK ((scope_kind = 'global' AND scope_identifier IS NULL) OR (scope_kind != 'global' AND scope_identifier IS NOT NULL AND length(scope_identifier) BETWEEN 1 AND 128 AND scope_identifier NOT GLOB '*[^ -~]*')),
+                CHECK (julianday(expires_at) > julianday(created_at)),
+                CHECK (revoked_at IS NULL OR julianday(revoked_at) >= julianday(created_at)),
+                CHECK (julianday(updated_at) >= julianday(created_at))
+            )
+            """,
+            """
+            CREATE TABLE admission_policies (
+                policy_id TEXT PRIMARY KEY,
+                version INTEGER NOT NULL CHECK (version >= 1),
+                source_kind TEXT NOT NULL CHECK (source_kind IN ('built-in','extension')),
+                stage TEXT NOT NULL CHECK (stage IN ('builtInMutation','extensionMutation','builtInValidation','extensionValidation')),
+                failure_policy TEXT NOT NULL CHECK (failure_policy IN ('deny','ignore')),
+                advisory INTEGER NOT NULL CHECK (advisory IN (0, 1)),
+                mutating INTEGER NOT NULL CHECK (mutating IN (0, 1)),
+                document_json TEXT NOT NULL CHECK (json_valid(document_json) AND json_type(document_json) = 'object' AND length(document_json) BETWEEN 2 AND 1048576),
+                document_sha256 TEXT NOT NULL CHECK (length(document_sha256) = 64 AND document_sha256 NOT GLOB '*[^0-9a-f]*'),
+                enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+                generation INTEGER NOT NULL CHECK (generation >= 1),
+                created_by_subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL),
+                updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL),
+                CHECK (length(policy_id) BETWEEN 1 AND 128 AND policy_id NOT GLOB '*[^ -~]*'),
+                CHECK (failure_policy != 'ignore' OR (source_kind = 'extension' AND stage = 'extensionValidation' AND advisory = 1 AND mutating = 0)),
+                CHECK (julianday(updated_at) >= julianday(created_at))
+            )
+            """,
+            """
+            CREATE TABLE admission_exceptions (
+                exception_id TEXT PRIMARY KEY,
+                policy_id TEXT NOT NULL REFERENCES admission_policies(policy_id) ON DELETE RESTRICT,
+                subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                target TEXT NOT NULL CHECK (length(target) BETWEEN 1 AND 512 AND target NOT GLOB '*[^ -~]*'),
+                plan_hash TEXT NOT NULL CHECK (length(plan_hash) = 64 AND plan_hash NOT GLOB '*[^0-9a-f]*'),
+                approval_identity TEXT NOT NULL CHECK (length(approval_identity) BETWEEN 1 AND 128 AND approval_identity NOT GLOB '*[^ -~]*'),
+                expires_at TEXT NOT NULL CHECK (julianday(expires_at) IS NOT NULL),
+                created_by_subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                generation INTEGER NOT NULL CHECK (generation >= 1),
+                created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL),
+                updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL),
+                CHECK (length(exception_id) BETWEEN 1 AND 128 AND exception_id NOT GLOB '*[^ -~]*'),
+                CHECK (julianday(expires_at) > julianday(created_at)),
+                CHECK (julianday(updated_at) >= julianday(created_at)),
+                UNIQUE (policy_id, subject_id, target, plan_hash)
+            )
+            """,
+            """
+            CREATE TABLE workload_profiles (
+                profile_id TEXT PRIMARY KEY,
+                version INTEGER NOT NULL CHECK (version = 1),
+                parent_profile_id TEXT REFERENCES workload_profiles(profile_id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED,
+                profile_json TEXT NOT NULL CHECK (json_valid(profile_json) AND json_type(profile_json) = 'object' AND length(profile_json) BETWEEN 2 AND 1048576),
+                profile_sha256 TEXT NOT NULL CHECK (length(profile_sha256) = 64 AND profile_sha256 NOT GLOB '*[^0-9a-f]*'),
+                generation INTEGER NOT NULL CHECK (generation >= 1),
+                created_by_subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL),
+                updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL),
+                CHECK (length(profile_id) BETWEEN 1 AND 128 AND profile_id NOT GLOB '*[^ -~]*'),
+                CHECK (parent_profile_id IS NULL OR parent_profile_id != profile_id),
+                CHECK (julianday(updated_at) >= julianday(created_at))
+            )
+            """,
+            """
+            CREATE TRIGGER rbac_builtin_role_update
+            BEFORE UPDATE ON rbac_roles WHEN OLD.built_in = 1
+            BEGIN SELECT RAISE(ABORT, 'built-in RBAC roles are immutable'); END
+            """,
+            """
+            CREATE TRIGGER rbac_builtin_role_delete
+            BEFORE DELETE ON rbac_roles WHEN OLD.built_in = 1
+            BEGIN SELECT RAISE(ABORT, 'built-in RBAC roles are immutable'); END
+            """,
+            """
+            CREATE TRIGGER rbac_last_owner_delete
+            BEFORE DELETE ON rbac_bindings
+            WHEN OLD.role_id = 'owner' AND OLD.scope_kind = 'global'
+              AND (SELECT COUNT(*) FROM rbac_bindings WHERE role_id = 'owner' AND scope_kind = 'global') <= 1
+            BEGIN SELECT RAISE(ABORT, 'at least one global owner is required'); END
+            """,
+            """
+            CREATE TRIGGER rbac_delegation_owner_insert
+            BEFORE INSERT ON rbac_delegations
+            WHEN EXISTS (SELECT 1 FROM json_each(NEW.role_ids_json) WHERE value = 'owner')
+            BEGIN SELECT RAISE(ABORT, 'owner role cannot be delegated'); END
+            """,
+            """
+            CREATE TRIGGER rbac_delegation_owner_update
+            BEFORE UPDATE ON rbac_delegations
+            WHEN EXISTS (SELECT 1 FROM json_each(NEW.role_ids_json) WHERE value = 'owner')
+            BEGIN SELECT RAISE(ABORT, 'owner role cannot be delegated'); END
+            """,
+            """
+            CREATE TRIGGER rbac_owner_binding_update
+            BEFORE UPDATE ON rbac_bindings
+            WHEN OLD.role_id = 'owner' AND OLD.scope_kind = 'global'
+            BEGIN SELECT RAISE(ABORT, 'global owner bindings are replaced atomically, not updated'); END
+            """,
+            "CREATE INDEX rbac_roles_builtin_idx ON rbac_roles(built_in, role_id)",
+            "CREATE INDEX rbac_bindings_subject_idx ON rbac_bindings(subject_id, scope_kind, scope_identifier, role_id)",
+            "CREATE INDEX rbac_bindings_role_idx ON rbac_bindings(role_id, scope_kind, scope_identifier, subject_id)",
+            "CREATE UNIQUE INDEX rbac_bindings_identity_idx ON rbac_bindings(subject_id, role_id, scope_kind, IFNULL(scope_identifier, ''))",
+            "CREATE INDEX rbac_delegations_delegate_idx ON rbac_delegations(delegate_subject_id, revoked_at, expires_at, delegation_id)",
+            "CREATE INDEX rbac_delegations_delegator_idx ON rbac_delegations(delegator_subject_id, revoked_at, expires_at, delegation_id)",
+            "CREATE INDEX admission_policies_active_idx ON admission_policies(enabled, stage, policy_id)",
+            "CREATE INDEX admission_exceptions_lookup_idx ON admission_exceptions(policy_id, subject_id, target, expires_at)",
+            "CREATE INDEX workload_profiles_parent_idx ON workload_profiles(parent_profile_id, profile_id)",
+            "CREATE UNIQUE INDEX workload_profiles_digest_idx ON workload_profiles(profile_sha256)",
+          ]
+        ),
+        SchemaMigration(
+          version: 21,
+          description: "Immutable plugin packages, provenance, grants, activation, revocation, quarantine, and rollback authority",
+          implementationRevision: "phase09-plugin-lifecycle-v1",
+          statements: [
+            """
+            CREATE TABLE plugin_packages (
+                package_digest TEXT PRIMARY KEY CHECK (length(package_digest) = 71 AND package_digest GLOB 'sha256:*' AND substr(package_digest, 8) NOT GLOB '*[^0-9a-f]*'),
+                plugin_identifier TEXT NOT NULL CHECK (length(plugin_identifier) BETWEEN 1 AND 128 AND plugin_identifier NOT GLOB '*[^A-Za-z0-9._-]*'),
+                package_version TEXT NOT NULL CHECK (length(package_version) BETWEEN 1 AND 64 AND package_version NOT GLOB '*[^A-Za-z0-9.+-]*'),
+                hostwright_compatibility TEXT NOT NULL CHECK (length(hostwright_compatibility) BETWEEN 1 AND 256 AND hostwright_compatibility NOT GLOB '*[^ -~]*'),
+                provider_kind TEXT NOT NULL CHECK (provider_kind IN ('wasi','xpc')),
+                entrypoint TEXT NOT NULL CHECK (length(entrypoint) BETWEEN 1 AND 512 AND entrypoint NOT LIKE '/%' AND entrypoint != '..' AND entrypoint NOT LIKE '../%' AND entrypoint NOT LIKE '%/../%' AND entrypoint NOT LIKE '%/..'),
+                artifact_digest TEXT NOT NULL CHECK (length(artifact_digest) = 71 AND artifact_digest GLOB 'sha256:*' AND substr(artifact_digest, 8) NOT GLOB '*[^0-9a-f]*'),
+                manifest_json TEXT NOT NULL CHECK (json_valid(manifest_json) AND json_type(manifest_json) = 'object' AND length(manifest_json) BETWEEN 2 AND 1048576),
+                manifest_digest TEXT NOT NULL UNIQUE CHECK (length(manifest_digest) = 71 AND manifest_digest GLOB 'sha256:*' AND substr(manifest_digest, 8) NOT GLOB '*[^0-9a-f]*'),
+                cms_signature TEXT NOT NULL CHECK (length(cms_signature) BETWEEN 1 AND 1048576),
+                signer_identifier TEXT NOT NULL CHECK (length(signer_identifier) BETWEEN 1 AND 256 AND signer_identifier NOT GLOB '*[^ -~]*'),
+                storage_path TEXT NOT NULL CHECK (length(storage_path) BETWEEN 1 AND 4096 AND storage_path LIKE '/%' AND storage_path NOT LIKE '%/../%' AND storage_path NOT LIKE '%/..'),
+                ownership_ledger_json TEXT NOT NULL CHECK (json_valid(ownership_ledger_json) AND json_type(ownership_ledger_json) = 'array' AND length(ownership_ledger_json) BETWEEN 2 AND 1048576),
+                lifecycle_state TEXT NOT NULL CHECK (lifecycle_state IN ('discovered','verified','staged','active','rollback','quarantined','revoked','uninstalled')),
+                generation INTEGER NOT NULL CHECK (generation >= 1),
+                created_by_subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL),
+                updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL),
+                CHECK (julianday(updated_at) >= julianday(created_at)),
+                UNIQUE (plugin_identifier, package_version)
+            )
+            """,
+            """
+            CREATE TABLE plugin_provenance (
+                package_digest TEXT PRIMARY KEY REFERENCES plugin_packages(package_digest) ON DELETE RESTRICT,
+                checksum TEXT NOT NULL CHECK (length(checksum) = 71 AND checksum GLOB 'sha256:*' AND substr(checksum, 8) NOT GLOB '*[^0-9a-f]*'),
+                signature TEXT NOT NULL CHECK (length(signature) BETWEEN 1 AND 1048576),
+                signer_identifier TEXT NOT NULL CHECK (length(signer_identifier) BETWEEN 1 AND 256 AND signer_identifier NOT GLOB '*[^ -~]*'),
+                source_kind TEXT NOT NULL CHECK (source_kind IN ('localDirectory','httpsRegistry')),
+                source_locator TEXT NOT NULL CHECK (length(source_locator) BETWEEN 1 AND 4096 AND source_locator NOT GLOB '*[^ -~]*'),
+                canonical_json TEXT NOT NULL CHECK (json_valid(canonical_json) AND json_type(canonical_json) = 'object' AND length(canonical_json) BETWEEN 2 AND 1048576),
+                verified_at TEXT NOT NULL CHECK (julianday(verified_at) IS NOT NULL),
+                CHECK ((source_kind = 'localDirectory' AND source_locator LIKE '/%' AND source_locator NOT LIKE '%/../%' AND source_locator NOT LIKE '%/..') OR (source_kind = 'httpsRegistry' AND source_locator LIKE 'https://%'))
+            )
+            """,
+            """
+            CREATE TABLE plugin_grants (
+                package_digest TEXT NOT NULL REFERENCES plugin_packages(package_digest) ON DELETE RESTRICT,
+                capability TEXT NOT NULL CHECK (capability IN ('policy','observation','storage','network','diagnostics','scheduler','secret-metadata')),
+                scope TEXT NOT NULL CHECK (length(scope) BETWEEN 1 AND 512 AND scope NOT GLOB '*[^ -~]*'),
+                approved_by_subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                approval_ref TEXT NOT NULL CHECK (length(approval_ref) BETWEEN 1 AND 128 AND approval_ref NOT GLOB '*[^ -~]*'),
+                granted_at TEXT NOT NULL CHECK (julianday(granted_at) IS NOT NULL),
+                revoked_at TEXT CHECK (revoked_at IS NULL OR julianday(revoked_at) IS NOT NULL),
+                CHECK (revoked_at IS NULL OR julianday(revoked_at) >= julianday(granted_at)),
+                PRIMARY KEY (package_digest, capability, scope)
+            )
+            """,
+            """
+            CREATE TABLE plugin_activations (
+                plugin_identifier TEXT PRIMARY KEY CHECK (length(plugin_identifier) BETWEEN 1 AND 128 AND plugin_identifier NOT GLOB '*[^A-Za-z0-9._-]*'),
+                active_package_digest TEXT NOT NULL REFERENCES plugin_packages(package_digest) ON DELETE RESTRICT,
+                prior_package_digest TEXT REFERENCES plugin_packages(package_digest) ON DELETE RESTRICT,
+                health_status TEXT NOT NULL CHECK (health_status IN ('pending','healthy','degraded','unhealthy','revoked')),
+                health_detail_digest TEXT CHECK (health_detail_digest IS NULL OR (length(health_detail_digest) = 71 AND health_detail_digest GLOB 'sha256:*' AND substr(health_detail_digest, 8) NOT GLOB '*[^0-9a-f]*')),
+                generation INTEGER NOT NULL CHECK (generation >= 1),
+                activated_by_subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                activated_at TEXT NOT NULL CHECK (julianday(activated_at) IS NOT NULL),
+                updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL),
+                CHECK (prior_package_digest IS NULL OR prior_package_digest != active_package_digest),
+                CHECK (julianday(updated_at) >= julianday(activated_at))
+            )
+            """,
+            """
+            CREATE TABLE plugin_revocations (
+                revocation_id TEXT PRIMARY KEY CHECK (length(revocation_id) BETWEEN 1 AND 128 AND revocation_id NOT GLOB '*[^ -~]*'),
+                target_kind TEXT NOT NULL CHECK (target_kind IN ('package','signer')),
+                target_identifier TEXT NOT NULL CHECK (length(target_identifier) BETWEEN 1 AND 256 AND target_identifier NOT GLOB '*[^ -~]*'),
+                reason TEXT NOT NULL CHECK (length(reason) BETWEEN 1 AND 1024),
+                revoked_by_subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                revoked_at TEXT NOT NULL CHECK (julianday(revoked_at) IS NOT NULL),
+                UNIQUE (target_kind, target_identifier)
+            )
+            """,
+            """
+            CREATE TABLE plugin_quarantine (
+                quarantine_id TEXT PRIMARY KEY CHECK (length(quarantine_id) BETWEEN 1 AND 128 AND quarantine_id NOT GLOB '*[^ -~]*'),
+                package_digest TEXT NOT NULL REFERENCES plugin_packages(package_digest) ON DELETE RESTRICT,
+                reason_code TEXT NOT NULL CHECK (length(reason_code) BETWEEN 1 AND 128 AND reason_code NOT GLOB '*[^ -~]*'),
+                detail_digest TEXT NOT NULL CHECK (length(detail_digest) = 71 AND detail_digest GLOB 'sha256:*' AND substr(detail_digest, 8) NOT GLOB '*[^0-9a-f]*'),
+                quarantined_by_subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                quarantined_at TEXT NOT NULL CHECK (julianday(quarantined_at) IS NOT NULL),
+                resolved_at TEXT CHECK (resolved_at IS NULL OR julianday(resolved_at) IS NOT NULL),
+                CHECK (resolved_at IS NULL OR julianday(resolved_at) >= julianday(quarantined_at))
+            )
+            """,
+            """
+            CREATE TABLE plugin_rollback_state (
+                operation_id TEXT PRIMARY KEY CHECK (length(operation_id) BETWEEN 1 AND 128 AND operation_id NOT GLOB '*[^ -~]*'),
+                plugin_identifier TEXT NOT NULL CHECK (length(plugin_identifier) BETWEEN 1 AND 128 AND plugin_identifier NOT GLOB '*[^A-Za-z0-9._-]*'),
+                from_package_digest TEXT REFERENCES plugin_packages(package_digest) ON DELETE RESTRICT,
+                to_package_digest TEXT NOT NULL CHECK (length(to_package_digest) = 71 AND to_package_digest GLOB 'sha256:*' AND substr(to_package_digest, 8) NOT GLOB '*[^0-9a-f]*'),
+                stage TEXT NOT NULL CHECK (stage IN ('intent','install-intent','rollback-intent','uninstall-intent','staged','health-check','activation','cleanup','recovery-success-audit','recovery-failure-audit','complete','failed','cancelled')),
+                status TEXT NOT NULL CHECK (status IN ('pending','running','succeeded','failed','cancelled')),
+                idempotency_key TEXT NOT NULL UNIQUE CHECK (length(idempotency_key) BETWEEN 1 AND 256 AND idempotency_key NOT GLOB '*[^ -~]*'),
+                ownership_effects_json TEXT NOT NULL CHECK (json_valid(ownership_effects_json) AND json_type(ownership_effects_json) = 'array' AND length(ownership_effects_json) BETWEEN 2 AND 1048576),
+                failure_reason_code TEXT CHECK (failure_reason_code IS NULL OR (length(failure_reason_code) BETWEEN 1 AND 128 AND failure_reason_code NOT GLOB '*[^ -~]*')),
+                requested_by_subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                generation INTEGER NOT NULL CHECK (generation >= 1),
+                created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL),
+                updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL),
+                CHECK (from_package_digest IS NULL OR from_package_digest != to_package_digest),
+                CHECK (julianday(updated_at) >= julianday(created_at))
+            )
+            """,
+            """
+            CREATE TRIGGER plugin_package_immutable_content
+            BEFORE UPDATE OF plugin_identifier, package_version, hostwright_compatibility, provider_kind, entrypoint, artifact_digest, manifest_json, manifest_digest, cms_signature, signer_identifier, storage_path, ownership_ledger_json, created_by_subject_id, created_at ON plugin_packages
+            BEGIN SELECT RAISE(ABORT, 'plugin package content and ownership are immutable'); END
+            """,
+            """
+            CREATE TRIGGER plugin_provenance_immutable
+            BEFORE UPDATE ON plugin_provenance
+            BEGIN SELECT RAISE(ABORT, 'plugin provenance is immutable'); END
+            """,
+            """
+            CREATE TRIGGER plugin_provenance_delete
+            BEFORE DELETE ON plugin_provenance
+            BEGIN SELECT RAISE(ABORT, 'plugin provenance is retained'); END
+            """,
+            """
+            CREATE TRIGGER plugin_grant_delete
+            BEFORE DELETE ON plugin_grants
+            BEGIN SELECT RAISE(ABORT, 'plugin grants are revoked, not deleted'); END
+            """,
+            """
+            CREATE TRIGGER plugin_active_package_match_insert
+            BEFORE INSERT ON plugin_activations
+            WHEN (SELECT plugin_identifier FROM plugin_packages WHERE package_digest = NEW.active_package_digest) != NEW.plugin_identifier
+            BEGIN SELECT RAISE(ABORT, 'active plugin identifier does not match package'); END
+            """,
+            """
+            CREATE TRIGGER plugin_active_package_match_update
+            BEFORE UPDATE OF plugin_identifier, active_package_digest ON plugin_activations
+            WHEN (SELECT plugin_identifier FROM plugin_packages WHERE package_digest = NEW.active_package_digest) != NEW.plugin_identifier
+            BEGIN SELECT RAISE(ABORT, 'active plugin identifier does not match package'); END
+            """,
+            "CREATE INDEX plugin_packages_identifier_idx ON plugin_packages(plugin_identifier, package_version, package_digest)",
+            "CREATE INDEX plugin_packages_state_idx ON plugin_packages(lifecycle_state, plugin_identifier, package_digest)",
+            "CREATE INDEX plugin_provenance_signer_idx ON plugin_provenance(signer_identifier, package_digest)",
+            "CREATE INDEX plugin_grants_capability_idx ON plugin_grants(capability, scope, package_digest)",
+            "CREATE INDEX plugin_activations_digest_idx ON plugin_activations(active_package_digest, plugin_identifier)",
+            "CREATE INDEX plugin_revocations_target_idx ON plugin_revocations(target_kind, target_identifier, revoked_at)",
+            "CREATE INDEX plugin_quarantine_package_idx ON plugin_quarantine(package_digest, resolved_at, quarantined_at)",
+            "CREATE INDEX plugin_rollback_operation_idx ON plugin_rollback_state(plugin_identifier, status, updated_at, operation_id)",
+          ]
+        ),
+        SchemaMigration(
+          version: 22,
+          description:
+            "One active installed control identity per user, team, and signing identifier",
+          implementationRevision: "phase09-installed-identity-rotation-v1",
+          statements: [
+            """
+            CREATE UNIQUE INDEX peer_identities_active_installed_bucket_idx
+            ON peer_identities(user_id, team_identifier, signing_identifier)
+            WHERE validation_mode = 'installedRequirement' AND revoked_at IS NULL
+            """
+          ]
+        ),
+        SchemaMigration(
+          version: 23,
+          description: "Durable scheduler node capacity, admission decisions, reservations, and fencing authority",
+          implementationRevision: "phase10-scheduler-admission-v2",
+          statements: [
+            """
+            CREATE TABLE scheduler_node_capacity_snapshots (
+                node_uuid TEXT NOT NULL CHECK (
+                    length(node_uuid) = 36
+                    AND substr(node_uuid, 9, 1) = '-'
+                    AND substr(node_uuid, 14, 1) = '-'
+                    AND substr(node_uuid, 19, 1) = '-'
+                    AND substr(node_uuid, 24, 1) = '-'
+                    AND replace(lower(node_uuid), '-', '') NOT GLOB '*[^0-9a-f]*'
+                ),
+                capacity_json TEXT NOT NULL CHECK (
+                    json_valid(capacity_json)
+                    AND json_type(capacity_json) = 'object'
+                    AND length(capacity_json) BETWEEN 2 AND 1048576
+                ),
+                capacity_digest TEXT NOT NULL CHECK (
+                    length(capacity_digest) = 64
+                    AND capacity_digest NOT GLOB '*[^0-9a-f]*'
+                ),
+                generation INTEGER NOT NULL CHECK (generation >= 1),
+                observed_at TEXT NOT NULL CHECK (julianday(observed_at) IS NOT NULL),
+                updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL),
+                PRIMARY KEY (node_uuid, generation),
+                CHECK (julianday(updated_at) >= julianday(observed_at))
+            )
+            """,
+            """
+            CREATE TABLE scheduler_fence_state (
+                node_uuid TEXT PRIMARY KEY,
+                node_epoch INTEGER NOT NULL CHECK (node_epoch >= 1),
+                next_reservation_sequence INTEGER NOT NULL CHECK (
+                    next_reservation_sequence >= 1
+                ),
+                updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL),
+                recovery_evidence_digest TEXT CHECK (
+                    recovery_evidence_digest IS NULL
+                    OR (
+                        length(recovery_evidence_digest) = 64
+                        AND recovery_evidence_digest NOT GLOB '*[^0-9a-f]*'
+                    )
+                ),
+                recovery_evidence_at TEXT CHECK (
+                    recovery_evidence_at IS NULL
+                    OR julianday(recovery_evidence_at) IS NOT NULL
+                ),
+                CHECK (
+                    (recovery_evidence_digest IS NULL
+                        AND recovery_evidence_at IS NULL)
+                    OR (recovery_evidence_digest IS NOT NULL
+                        AND recovery_evidence_at IS NOT NULL
+                        AND julianday(recovery_evidence_at)
+                            >= julianday(updated_at))
+                )
+            )
+            """,
+            """
+            CREATE TABLE scheduler_decisions (
+                decision_id TEXT PRIMARY KEY CHECK (
+                    length(decision_id) = 36
+                    AND substr(decision_id, 9, 1) = '-'
+                    AND substr(decision_id, 14, 1) = '-'
+                    AND substr(decision_id, 19, 1) = '-'
+                    AND substr(decision_id, 24, 1) = '-'
+                    AND replace(lower(decision_id), '-', '') NOT GLOB '*[^0-9a-f]*'
+                ),
+                project_uuid TEXT NOT NULL REFERENCES projects(resource_uuid) ON DELETE RESTRICT,
+                input_digest TEXT NOT NULL CHECK (
+                    length(input_digest) = 64
+                    AND input_digest NOT GLOB '*[^0-9a-f]*'
+                ),
+                config_digest TEXT NOT NULL CHECK (
+                    length(config_digest) = 64
+                    AND config_digest NOT GLOB '*[^0-9a-f]*'
+                ),
+                profile_digest TEXT NOT NULL CHECK (
+                    length(profile_digest) = 64
+                    AND profile_digest NOT GLOB '*[^0-9a-f]*'
+                ),
+                lifecycle_plan_digest TEXT NOT NULL CHECK (
+                    length(lifecycle_plan_digest) = 64
+                    AND lifecycle_plan_digest NOT GLOB '*[^0-9a-f]*'
+                ),
+                decision_json TEXT NOT NULL CHECK (
+                    json_valid(decision_json)
+                    AND json_type(decision_json) = 'object'
+                    AND length(decision_json) BETWEEN 2 AND 1048576
+                ),
+                workload_ids_json TEXT NOT NULL CHECK (
+                    json_valid(workload_ids_json)
+                    AND json_type(workload_ids_json) = 'array'
+                    AND length(workload_ids_json) BETWEEN 2 AND 1048576
+                ),
+                workload_bindings_json TEXT NOT NULL CHECK (
+                    json_valid(workload_bindings_json)
+                    AND json_type(workload_bindings_json) = 'array'
+                    AND length(workload_bindings_json) BETWEEN 2 AND 1048576
+                ),
+                created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL),
+                updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL),
+                artifact_digest TEXT NOT NULL CHECK (
+                    length(artifact_digest) = 64
+                    AND artifact_digest NOT GLOB '*[^0-9a-f]*'
+                ),
+                CHECK (julianday(updated_at) >= julianday(created_at))
+            )
+            """,
+            """
+            CREATE TABLE scheduler_reservations (
+                reservation_id TEXT PRIMARY KEY CHECK (
+                    length(reservation_id) = 36
+                    AND substr(reservation_id, 9, 1) = '-'
+                    AND substr(reservation_id, 14, 1) = '-'
+                    AND substr(reservation_id, 19, 1) = '-'
+                    AND substr(reservation_id, 24, 1) = '-'
+                    AND replace(lower(reservation_id), '-', '') NOT GLOB '*[^0-9a-f]*'
+                ),
+                decision_id TEXT NOT NULL REFERENCES scheduler_decisions(decision_id) ON DELETE RESTRICT,
+                workload_uuid TEXT NOT NULL CHECK (
+                    length(workload_uuid) = 36
+                    AND substr(workload_uuid, 9, 1) = '-'
+                    AND substr(workload_uuid, 14, 1) = '-'
+                    AND substr(workload_uuid, 19, 1) = '-'
+                    AND substr(workload_uuid, 24, 1) = '-'
+                    AND replace(lower(workload_uuid), '-', '') NOT GLOB '*[^0-9a-f]*'
+                ),
+                node_uuid TEXT NOT NULL CHECK (
+                    length(node_uuid) = 36
+                    AND substr(node_uuid, 9, 1) = '-'
+                    AND substr(node_uuid, 14, 1) = '-'
+                    AND substr(node_uuid, 19, 1) = '-'
+                    AND substr(node_uuid, 24, 1) = '-'
+                    AND replace(lower(node_uuid), '-', '') NOT GLOB '*[^0-9a-f]*'
+                ),
+                resource_vector_json TEXT NOT NULL CHECK (
+                    json_valid(resource_vector_json)
+                    AND json_type(resource_vector_json) = 'object'
+                    AND length(resource_vector_json) BETWEEN 2 AND 1048576
+                ),
+                capacity_digest TEXT NOT NULL CHECK (
+                    length(capacity_digest) = 64
+                    AND capacity_digest NOT GLOB '*[^0-9a-f]*'
+                ),
+                capacity_generation INTEGER NOT NULL CHECK (capacity_generation >= 1),
+                input_digest TEXT NOT NULL CHECK (
+                    length(input_digest) = 64 AND input_digest NOT GLOB '*[^0-9a-f]*'
+                ),
+                config_digest TEXT NOT NULL CHECK (
+                    length(config_digest) = 64 AND config_digest NOT GLOB '*[^0-9a-f]*'
+                ),
+                profile_digest TEXT NOT NULL CHECK (
+                    length(profile_digest) = 64 AND profile_digest NOT GLOB '*[^0-9a-f]*'
+                ),
+                lifecycle_plan_digest TEXT NOT NULL CHECK (
+                    length(lifecycle_plan_digest) = 64
+                    AND lifecycle_plan_digest NOT GLOB '*[^0-9a-f]*'
+                ),
+                owner_subject_id TEXT NOT NULL REFERENCES peer_identities(subject_id) ON DELETE RESTRICT,
+                project_uuid TEXT NOT NULL REFERENCES projects(resource_uuid) ON DELETE RESTRICT,
+                status TEXT NOT NULL CHECK (
+                    status IN ('pending', 'committed', 'release-pending', 'fenced', 'released')
+                ),
+                created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL),
+                updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL),
+                expires_at TEXT NOT NULL CHECK (julianday(expires_at) IS NOT NULL),
+                fencing_node_epoch INTEGER NOT NULL CHECK (fencing_node_epoch >= 1),
+                fencing_reservation_sequence INTEGER NOT NULL CHECK (
+                    fencing_reservation_sequence >= 1
+                ),
+                fence_evidence_digest TEXT CHECK (
+                    fence_evidence_digest IS NULL
+                    OR (length(fence_evidence_digest) = 64 AND fence_evidence_digest NOT GLOB '*[^0-9a-f]*')
+                ),
+                fence_evidence_at TEXT CHECK (
+                    fence_evidence_at IS NULL OR julianday(fence_evidence_at) IS NOT NULL
+                ),
+                fence_evidence_node_epoch INTEGER CHECK (
+                    fence_evidence_node_epoch IS NULL
+                    OR fence_evidence_node_epoch >= 1
+                ),
+                fence_evidence_reservation_sequence INTEGER CHECK (
+                    fence_evidence_reservation_sequence IS NULL
+                    OR fence_evidence_reservation_sequence >= 1
+                ),
+                fence_evidence_reservation_id TEXT,
+                fence_evidence_workload_uuid TEXT,
+                release_evidence_kind TEXT CHECK (
+                    release_evidence_kind IS NULL
+                    OR release_evidence_kind IN ('runtime-absence', 'authoritative-fence')
+                ),
+                release_evidence_digest TEXT CHECK (
+                    release_evidence_digest IS NULL
+                    OR (length(release_evidence_digest) = 64 AND release_evidence_digest NOT GLOB '*[^0-9a-f]*')
+                ),
+                release_evidence_at TEXT CHECK (
+                    release_evidence_at IS NULL OR julianday(release_evidence_at) IS NOT NULL
+                ),
+                release_evidence_node_epoch INTEGER CHECK (
+                    release_evidence_node_epoch IS NULL
+                    OR release_evidence_node_epoch >= 1
+                ),
+                release_evidence_reservation_sequence INTEGER CHECK (
+                    release_evidence_reservation_sequence IS NULL
+                    OR release_evidence_reservation_sequence >= 1
+                ),
+                release_evidence_reservation_id TEXT,
+                release_evidence_workload_uuid TEXT,
+                UNIQUE (decision_id, workload_uuid),
+                UNIQUE (node_uuid, fencing_reservation_sequence),
+                CHECK (julianday(updated_at) >= julianday(created_at)),
+                CHECK (julianday(expires_at) > julianday(created_at)),
+                CHECK ((fence_evidence_digest IS NULL
+                    AND fence_evidence_at IS NULL
+                    AND fence_evidence_node_epoch IS NULL
+                    AND fence_evidence_reservation_sequence IS NULL
+                    AND fence_evidence_reservation_id IS NULL
+                    AND fence_evidence_workload_uuid IS NULL)
+                   OR (fence_evidence_digest IS NOT NULL
+                    AND fence_evidence_at IS NOT NULL
+                    AND fence_evidence_node_epoch IS NOT NULL
+                    AND fence_evidence_reservation_sequence IS NOT NULL
+                    AND fence_evidence_reservation_id IS NOT NULL
+                    AND fence_evidence_workload_uuid IS NOT NULL)),
+                CHECK (fence_evidence_at IS NULL OR (
+                    julianday(fence_evidence_at) >= julianday(created_at)
+                    AND (
+                        (status = 'fenced'
+                            AND julianday(fence_evidence_at)
+                                = julianday(updated_at))
+                        OR (status = 'released'
+                            AND julianday(fence_evidence_at)
+                                <= julianday(updated_at))
+                    )
+                )),
+                CHECK (fence_evidence_at IS NULL
+                    OR fence_evidence_reservation_sequence = fencing_reservation_sequence),
+                CHECK (fence_evidence_at IS NULL
+                    OR fence_evidence_node_epoch > fencing_node_epoch),
+                CHECK (fence_evidence_at IS NULL
+                    OR fence_evidence_reservation_id = reservation_id),
+                CHECK (fence_evidence_at IS NULL
+                    OR fence_evidence_workload_uuid = workload_uuid),
+                CHECK ((release_evidence_kind IS NULL
+                    AND release_evidence_digest IS NULL
+                    AND release_evidence_at IS NULL
+                    AND release_evidence_node_epoch IS NULL
+                    AND release_evidence_reservation_sequence IS NULL
+                    AND release_evidence_reservation_id IS NULL
+                    AND release_evidence_workload_uuid IS NULL)
+                   OR (release_evidence_kind = 'runtime-absence'
+                    AND release_evidence_digest IS NOT NULL
+                    AND release_evidence_at IS NOT NULL
+                    AND release_evidence_node_epoch IS NULL
+                    AND release_evidence_reservation_sequence IS NULL
+                    AND release_evidence_reservation_id IS NULL
+                    AND release_evidence_workload_uuid IS NULL)
+                   OR (release_evidence_kind = 'authoritative-fence'
+                    AND release_evidence_digest IS NOT NULL
+                    AND release_evidence_at IS NOT NULL
+                    AND release_evidence_node_epoch IS NOT NULL
+                    AND release_evidence_reservation_sequence IS NOT NULL
+                    AND release_evidence_reservation_id IS NOT NULL
+                    AND release_evidence_workload_uuid IS NOT NULL)),
+                CHECK (release_evidence_at IS NULL OR (
+                    status = 'released'
+                    AND julianday(release_evidence_at)
+                        >= julianday(created_at)
+                    AND julianday(release_evidence_at)
+                        = julianday(updated_at)
+                )),
+                CHECK (fence_evidence_at IS NULL OR release_evidence_at IS NULL
+                    OR julianday(fence_evidence_at) <= julianday(release_evidence_at)),
+                CHECK (release_evidence_kind != 'authoritative-fence'
+                    OR release_evidence_reservation_sequence = fencing_reservation_sequence),
+                CHECK (release_evidence_kind != 'authoritative-fence'
+                    OR release_evidence_node_epoch > fencing_node_epoch),
+                CHECK (release_evidence_kind != 'authoritative-fence'
+                    OR release_evidence_reservation_id = reservation_id),
+                CHECK (release_evidence_kind != 'authoritative-fence'
+                    OR release_evidence_workload_uuid = workload_uuid),
+                CHECK (fence_evidence_at IS NULL OR release_evidence_kind != 'authoritative-fence'
+                    OR (release_evidence_reservation_sequence = fence_evidence_reservation_sequence
+                        AND release_evidence_reservation_id = fence_evidence_reservation_id
+                        AND release_evidence_workload_uuid = fence_evidence_workload_uuid
+                        AND release_evidence_node_epoch >= fence_evidence_node_epoch)),
+                CHECK ((status = 'released' AND release_evidence_kind IS NOT NULL) OR (status != 'released' AND release_evidence_kind IS NULL)),
+                FOREIGN KEY (node_uuid, capacity_generation)
+                    REFERENCES scheduler_node_capacity_snapshots(node_uuid, generation)
+                    ON DELETE RESTRICT
+            )
+            """,
+            """
+            CREATE TABLE scheduler_fairness_accounting (
+                subject_id TEXT NOT NULL CHECK (length(subject_id) BETWEEN 1 AND 128),
+                project_id TEXT NOT NULL CHECK (length(project_id) BETWEEN 1 AND 128),
+                state_json TEXT NOT NULL CHECK (
+                    json_valid(state_json)
+                    AND json_type(state_json) = 'object'
+                    AND length(state_json) BETWEEN 2 AND 1048576
+                ),
+                generation INTEGER NOT NULL CHECK (generation >= 1),
+                updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL),
+                accounting_digest TEXT NOT NULL CHECK (
+                    length(accounting_digest) = 64
+                    AND accounting_digest NOT GLOB '*[^0-9a-f]*'
+                ),
+                PRIMARY KEY (subject_id, project_id)
+            )
+            """,
+            """
+            CREATE TABLE scheduler_disruption_budgets (
+                budget_id TEXT NOT NULL CHECK (length(budget_id) BETWEEN 1 AND 128),
+                project_id TEXT NOT NULL CHECK (length(project_id) BETWEEN 1 AND 128),
+                remaining_victim_count INTEGER NOT NULL CHECK (remaining_victim_count >= 0),
+                remaining_disruption_cost_basis_points INTEGER NOT NULL CHECK (
+                    remaining_disruption_cost_basis_points >= 0
+                ),
+                generation INTEGER NOT NULL CHECK (generation >= 1),
+                updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL),
+                budget_digest TEXT NOT NULL CHECK (
+                    length(budget_digest) = 64
+                    AND budget_digest NOT GLOB '*[^0-9a-f]*'
+                ),
+                PRIMARY KEY (budget_id, project_id)
+            )
+            """,
+            """
+            CREATE TABLE scheduler_preemption_intents (
+                intent_id TEXT PRIMARY KEY CHECK (
+                    length(intent_id) = 36
+                    AND substr(intent_id, 9, 1) = '-'
+                    AND substr(intent_id, 14, 1) = '-'
+                    AND substr(intent_id, 19, 1) = '-'
+                    AND substr(intent_id, 24, 1) = '-'
+                    AND replace(lower(intent_id), '-', '') NOT GLOB '*[^0-9a-f]*'
+                ),
+                project_id TEXT NOT NULL CHECK (length(project_id) BETWEEN 1 AND 128),
+                proposal_json TEXT NOT NULL CHECK (
+                    json_valid(proposal_json)
+                    AND json_type(proposal_json) = 'object'
+                    AND length(proposal_json) BETWEEN 2 AND 1048576
+                ),
+                intent_digest TEXT NOT NULL CHECK (
+                    length(intent_digest) = 64
+                    AND intent_digest NOT GLOB '*[^0-9a-f]*'
+                ),
+                status TEXT NOT NULL CHECK (
+                    status IN ('proposed', 'fence-pending', 'fenced', 'applied', 'recovered', 'rejected')
+                ),
+                created_at TEXT NOT NULL CHECK (julianday(created_at) IS NOT NULL),
+                updated_at TEXT NOT NULL CHECK (julianday(updated_at) IS NOT NULL),
+                record_digest TEXT NOT NULL CHECK (
+                    length(record_digest) = 64
+                    AND record_digest NOT GLOB '*[^0-9a-f]*'
+                ),
+                CHECK (julianday(updated_at) >= julianday(created_at))
+            )
+            """,
+            """
+            CREATE TABLE scheduler_host_pressure (
+                node_uuid TEXT PRIMARY KEY CHECK (
+                    length(node_uuid) = 36
+                    AND substr(node_uuid, 9, 1) = '-'
+                    AND substr(node_uuid, 14, 1) = '-'
+                    AND substr(node_uuid, 19, 1) = '-'
+                    AND substr(node_uuid, 24, 1) = '-'
+                    AND replace(lower(node_uuid), '-', '') NOT GLOB '*[^0-9a-f]*'
+                ),
+                pressure TEXT NOT NULL CHECK (
+                    pressure IN ('nominal', 'elevated', 'critical', 'unknown', 'unavailable')
+                ),
+                energy TEXT NOT NULL CHECK (
+                    energy IN ('efficient', 'balanced', 'performance', 'constrained', 'unknown')
+                ),
+                generation INTEGER NOT NULL CHECK (generation >= 1),
+                observed_at TEXT NOT NULL CHECK (julianday(observed_at) IS NOT NULL),
+                evidence_digest TEXT NOT NULL CHECK (
+                    length(evidence_digest) = 64
+                    AND evidence_digest NOT GLOB '*[^0-9a-f]*'
+                ),
+                policy_state_json TEXT NOT NULL CHECK (
+                    json_valid(policy_state_json)
+                    AND json_type(policy_state_json) = 'object'
+                    AND length(policy_state_json) BETWEEN 2 AND 16384
+                    AND json_extract(policy_state_json, '$.version') = 1
+                    AND json_type(json_extract(policy_state_json, '$.reasonCodes')) = 'array'
+                    AND json_array_length(json_extract(policy_state_json, '$.reasonCodes')) BETWEEN 1 AND 64
+                    AND json_type(json_extract(policy_state_json, '$.nextHysteresisState')) = 'object'
+                ),
+                record_digest TEXT NOT NULL CHECK (
+                    length(record_digest) = 64
+                    AND record_digest NOT GLOB '*[^0-9a-f]*'
+                )
+            )
+            """,
+            "CREATE INDEX scheduler_fairness_project_idx ON scheduler_fairness_accounting(project_id, subject_id)",
+            "CREATE INDEX scheduler_disruption_budgets_project_idx ON scheduler_disruption_budgets(project_id, budget_id)",
+            "CREATE INDEX scheduler_preemption_intents_project_idx ON scheduler_preemption_intents(project_id, intent_id)",
+            "CREATE INDEX scheduler_host_pressure_generation_idx ON scheduler_host_pressure(generation, node_uuid)",
+            "CREATE INDEX scheduler_node_capacity_generation_idx ON scheduler_node_capacity_snapshots(node_uuid, generation)",
+            "CREATE INDEX scheduler_decisions_node_idx ON scheduler_decisions(project_uuid, decision_id)",
+            "CREATE INDEX scheduler_decisions_workload_idx ON scheduler_decisions(project_uuid, input_digest, decision_id)",
+            "CREATE UNIQUE INDEX scheduler_reservations_active_workload_idx ON scheduler_reservations(workload_uuid) WHERE status IN ('pending', 'committed', 'release-pending', 'fenced')",
+            "CREATE INDEX scheduler_reservations_decision_idx ON scheduler_reservations(decision_id, reservation_id)",
+            "CREATE INDEX scheduler_reservations_node_idx ON scheduler_reservations(node_uuid, reservation_id)",
+            "CREATE INDEX scheduler_reservations_workload_idx ON scheduler_reservations(workload_uuid, reservation_id)",
+          ]
+        ),
+        SchemaMigration(
+            version: 24,
+            description: "Dedicated accelerator authority journal and current indexes",
+            legacyChecksums: [legacyV24AcceleratorChecksum],
+            implementationRevision: "phase10-accelerator-authority-v1",
+            statements: [
+                """
+                CREATE TABLE accelerator_state_journal (
+                    id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 255),
+                    timestamp TEXT NOT NULL CHECK (julianday(timestamp) IS NOT NULL),
+                    severity TEXT NOT NULL CHECK (severity = 'info'),
+                    type TEXT NOT NULL CHECK (type IN (
+                        'accelerator.state.inventory',
+                        'accelerator.state.claim',
+                        'accelerator.state.reservation',
+                        'accelerator.state.grant',
+                        'accelerator.state.execution-request',
+                        'accelerator.state.execution-result',
+                        'accelerator.state.usage',
+                        'accelerator.state.provenance',
+                        'accelerator.state.cancellation',
+                        'accelerator.state.revocation',
+                        'accelerator.state.xpc-replay'
+                    )),
+                    source TEXT NOT NULL CHECK (source = 'accelerator-state-journal'),
+                    project_id TEXT CHECK (
+                        project_id IS NULL
+                        OR (
+                            length(project_id) BETWEEN 1 AND 256
+                            AND project_id <> '__global__'
+                            AND project_id NOT GLOB '*[^ -~]*'
+                            AND instr(project_id, char(34)) = 0
+                            AND instr(project_id, char(92)) = 0
+                        )
+                    ),
+                    service_name TEXT,
+                    runtime_adapter TEXT,
+                    message TEXT NOT NULL CHECK (message = 'durable accelerator state append'),
+                    payload_json_redacted TEXT NOT NULL CHECK (
+                        json_valid(payload_json_redacted)
+                        AND json_type(payload_json_redacted) = 'object'
+                        AND length(payload_json_redacted) BETWEEN 2 AND 4194304
+                        AND json_extract(payload_json_redacted, '$.envelopeVersion') = 1
+                    )
+                )
+                """,
+                """
+                CREATE TABLE accelerator_state_current (
+                    id TEXT PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 255),
+                    timestamp TEXT NOT NULL CHECK (julianday(timestamp) IS NOT NULL),
+                    severity TEXT NOT NULL CHECK (severity = 'info'),
+                    type TEXT NOT NULL CHECK (type IN (
+                        'accelerator.state.inventory',
+                        'accelerator.state.claim',
+                        'accelerator.state.reservation',
+                        'accelerator.state.grant',
+                        'accelerator.state.execution-request',
+                        'accelerator.state.execution-result',
+                        'accelerator.state.usage',
+                        'accelerator.state.provenance',
+                        'accelerator.state.cancellation',
+                        'accelerator.state.revocation',
+                        'accelerator.state.xpc-replay'
+                    )),
+                    source TEXT NOT NULL CHECK (source = 'accelerator-state-journal'),
+                    project_id TEXT CHECK (
+                        project_id IS NULL
+                        OR (
+                            length(project_id) BETWEEN 1 AND 256
+                            AND project_id <> '__global__'
+                            AND project_id NOT GLOB '*[^ -~]*'
+                            AND instr(project_id, char(34)) = 0
+                            AND instr(project_id, char(92)) = 0
+                        )
+                    ),
+                    service_name TEXT,
+                    runtime_adapter TEXT,
+                    message TEXT NOT NULL CHECK (message = 'durable accelerator state append'),
+                    payload_json_redacted TEXT NOT NULL CHECK (
+                        json_valid(payload_json_redacted)
+                        AND json_type(payload_json_redacted) = 'object'
+                        AND length(payload_json_redacted) BETWEEN 2 AND 4194304
+                        AND json_extract(payload_json_redacted, '$.envelopeVersion') = 1
+                    ),
+                    record_id TEXT NOT NULL CHECK (length(record_id) BETWEEN 1 AND 128),
+                    generation INTEGER NOT NULL CHECK (generation >= 1)
+                )
+                """,
+                "CREATE INDEX accelerator_state_journal_type_id_idx ON accelerator_state_journal(type, id)",
+                "CREATE UNIQUE INDEX accelerator_state_current_record_scope_idx "
+                    + "ON accelerator_state_current(type, record_id, COALESCE(project_id, '__global__'))",
+                "CREATE INDEX accelerator_state_current_generation_idx "
+                    + "ON accelerator_state_current(type, project_id, generation, record_id)",
+                "CREATE INDEX accelerator_state_current_record_idx "
+                    + "ON accelerator_state_current(type, project_id, record_id)"
+            ]
+        ),
     ]
 }

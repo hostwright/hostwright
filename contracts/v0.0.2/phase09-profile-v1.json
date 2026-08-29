@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "identifier": "restricted",
+  "filesystem": { "readOnlyRoot": true, "allowReadPaths": ["/app"], "allowWritePaths": [], "denyHostRoot": true },
+  "network": { "mode": "isolated", "allowedOrigins": [] },
+  "resources": { "memoryMiB": 256 },
+  "identity": { "allowRoot": false },
+  "secrets": { "allowedReferences": [] },
+  "images": { "requireDigest": true, "requireSignature": true },
+  "runtime": { "allowedProviders": ["default"], "deniedOptions": [] },
+  "hostAccess": { "allowed": false },
+  "observability": { "logs": true, "metrics": true, "traces": true },
+  "accelerators": { "allowed": [] },
+  "syscalls": { "defaultDeny": true, "allowed": [], "denied": [] },
+  "extensionGrants": []
+}

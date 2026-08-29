@@ -76,7 +76,7 @@ struct StatusCommandRunner {
             try store.desiredStates.saveManifestSnapshot(
                 projectID: projectID,
                 manifestPath: manifestPath,
-                manifestHash: hostwrightStableHash(manifestText),
+                manifestHash: hostwrightContentSHA256(manifestText),
                 desiredGeneration: 1,
                 manifest: manifest,
                 timestamp: timestamp

@@ -25,7 +25,7 @@ Policy decisions include:
 - Cleanup deletes only resources classified as exact Hostwright-owned non-running eligible containers after dry-run token confirmation.
 - Unsupported manifest fields, secure exposure, broad lifecycle actions, and accelerator requests fail closed.
 - Stack-file import uses local policy reason codes when unsupported fields map to untrusted manifest, secure exposure, lifecycle, or mount-safety blockers.
-- Advisory scheduling consumes local policy decisions for placement explanations and scores without changing the underlying policy gates.
+- Experimental Phase 10 scheduler admission consumes these policy decisions as hard profile and manifest gates; policy itself does not place workloads or reserve capacity.
 - Extension declarations can be evaluated as local data. Built-in or reviewed-local non-mutating declarations can receive allow decisions only when required RuntimeAdapter, HostwrightState, local policy, redaction, audit, explicit-state-path, local-only, ownership, confirmation, and no-runtime-mutation boundaries are declared.
 - Third-party, untrusted, unsupported-version, empty, missing-boundary, runtime-mutation, state-write, networking-provider, tunnel-provider, secret-resolution, and accelerator extension declarations fail closed.
 - `hostwright extension check` consumes these decisions from a separate module and starts the fixed handshake only after one reviewed-local read-only declaration receives an explicit allow. Policy itself still never starts a process or grants capability authority.

@@ -5,6 +5,7 @@ import HostwrightDaemonCore
 struct DaemonLifecycleCommandRunner {
     let options: DaemonCLIOptions
     let controller: DaemonLifecycleController
+    var controlIdentityBootstrap: () throws -> Void = {}
 
     func run() throws -> CLIRunResult {
         do {
@@ -19,6 +20,9 @@ struct DaemonLifecycleCommandRunner {
                     status: status
                 )
             case .lifecycle(let operation):
+                if operation == .install {
+                    try controlIdentityBootstrap()
+                }
                 result = try controller.perform(
                     operation,
                     daemonExecutablePath: options.daemonExecutablePath,

@@ -691,12 +691,15 @@ private func withLiveFixture(
     let manifestPath = directory.appendingPathComponent("hostwright.yaml").path
     let databasePath = directory.appendingPathComponent("state.sqlite").path
     let manifestText = """
-    version: 2
+    version: 3
     project: demo
     imagePolicy: allow-tags
     services:
       api:
         image: local/api:latest
+        resources:
+          requests: {cpus: 1, memory: 512MiB}
+          limits: {cpus: 1, memory: 512MiB}
     """
     let manifest = try ManifestValidator.validated(manifestText)
     let resolution = try HostwrightLocalPathResolver.resolve(

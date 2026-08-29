@@ -1,5 +1,7 @@
 # Acceptance Matrix
 
+> **Phase-numbering notice:** the Phase 10 gate below is a superseded legacy matrix entry. Current Phase 10 is the `v0.0.2` epic #219 qualification program (G0–G15); preserve this historical row for traceability and use the active roadmap/evidence gates for current truth.
+
 > **Historical acceptance catalog:** these gates preserve earlier evidence. The active closure constitution and phase ownership are in the [v0.0.2 implementation plan](../roadmap/v0.0.2/IMPLEMENTATION_PLAN.md), evidence schema, and GitHub issue manifest. A former docs/research gate does not satisfy a v0.0.2 implementation issue.
 
 This matrix defines verification gates for the near-term requirements that control future implementation. It also records future gates that must exist before runtime mutation or public release.
@@ -94,6 +96,8 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 | HW-REL-002 | Build and XCTest gates still pass after operability changes. | Automated | `swift build`, `swift test list`, `swift test`, `scripts/test.sh`. |
 
 ## Phase 10 Gate: First Supported Release
+
+> **Legacy gate:** retained for historical numbering only; it does not establish current Phase 10 accelerator, scheduler, hardware, signing, or release evidence.
 
 | Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
 | --- | --- | --- | --- |
@@ -331,9 +335,11 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 
 ## Phase 28 Gate: Stack-File Import And Migration Tooling
 
+> **Current Manifest v3 boundary:** this retained Phase 28 target does not permit inferred or translated resource capacity. An input without a complete manually authored v3 request/limit mapping fails closed with diagnostics and no `hostwright.yaml` text.
+
 | Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
 | --- | --- | --- | --- |
-| HW-CLI-010, HW-COMPAT-008 | `hostwright import-stack` converts only the reviewed safe subset into deterministic `hostwright.yaml` text and does not write files, observe runtime, touch state, contact registries, or mutate resources. | Automated + manual | CLI import text/JSON tests, import golden-output tests, and diff review. |
+| HW-CLI-010, HW-COMPAT-008 | `hostwright import-stack` assesses only the reviewed safe subset and emits deterministic `hostwright.yaml` text only after current manifest validation; it does not write files, observe runtime, touch state, contact registries, or mutate resources. | Automated + manual | CLI import text/JSON tests, import validation-gate tests, and diff review. |
 | HW-COMPAT-005, HW-COMPAT-008, HW-SAFE-008 | Unsupported networking, discovery, build, deploy, secret, config, named-volume, shell-healthcheck, lifecycle, cloud, and tunnel semantics fail closed with stable diagnostics and policy reason codes where applicable. | Automated | Import unsupported-field XCTest cases and CLI JSON error tests. |
 | HW-VALID-001, HW-VALID-002, HW-VALID-003, HW-VALID-004, HW-VALID-005 | Converted output still passes through normal Hostwright manifest validation before success is reported. | Automated | Import validation-gate XCTest cases and `ManifestValidator.validated` golden-output assertion. |
 | HW-DOCS-002, HW-COMPAT-005 | Docs describe import as conversion-only and do not claim Docker Compose parity, runtime compatibility, scheduler compatibility, DNS/tunnel/cloud behavior, or current external orchestrator support. | Automated + manual | Core docs XCTest plus CLI, manifest, limitations, policy, import guide, requirements, and acceptance docs review. |
@@ -355,14 +361,14 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 | HW-DOCS-002 | Core repository docs still state that Hostwright does not currently implement multi-host orchestration, remote host agents, membership service, peer discovery, state replication, remote mutation, remote placement, cloud control plane, or scheduler APIs. | Automated + manual | Core docs XCTest; limitations, requirements, implementation-plan, and build-status review. |
 | HW-RUNTIME-001, HW-RUNTIME-002, HW-STATE-001, HW-SAFE-008 | Research does not add runtime mutation, RuntimeAdapter calls, direct Apple container shell-out, SQLite access outside `HostwrightState`, state writes, remote policy, dependencies, network calls, image pulls, release tags, or GitHub Releases. | Manual | Diff review plus full local gate and targeted boundary scans. |
 
-## Phase 31 Gate: Scheduler And Placement Engine
+## Superseded Phase 31 / Phase 10 Scheduler And Admission Gate
 
 | Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
 | --- | --- | --- | --- |
-| HW-COMPAT-010, HW-SAFE-008, HW-RECON-002 | Scheduler reports are deterministic, explainable, local, advisory-only, and derived from declared inputs plus local policy decisions. | Automated | Reconciler XCTest cases for deterministic recommendations, policy/port blockers, scores, and stable reason codes. |
-| HW-COMPAT-006, HW-COMPAT-010 | Memory and overcommit behavior uses explicit declared memory requests and resource-report host facts without capacity guarantees or inferred workload memory pressure. | Automated + manual | Reconciler overcommit/missing-memory XCTest cases and advisory-scheduler docs review. |
-| HW-COMPAT-007, HW-COMPAT-009, HW-DOCS-002 | Accelerator and remote-placement dimensions block with explanations; docs still state no accelerator-aware scheduling, scheduler API, remote placement, multi-host scheduling, or automatic placement exists. | Automated + manual | Reconciler accelerator/remote-placement XCTest cases plus core docs guard. |
-| HW-RUNTIME-001, HW-RUNTIME-002, HW-STATE-001 | Scheduler work does not add RuntimeAdapter methods, direct Apple container shell-out, SQLite access outside `HostwrightState`, state writes, daemon scheduling, network calls, registry calls, image pulls, dependencies, release tags, or GitHub Releases. | Automated + manual | Full local gate plus targeted boundary scans and diff review. |
+| HW-COMPAT-010, HW-SAFE-008, HW-RECON-002 | The experimental scheduler boundary is deterministic and explainable; manifest requests map to placement demand and limits map to runtime enforcement without a second advisory scheduler. | Automated | HostwrightScheduler, manifest bridge, and lifecycle admission tests; aggregate qualification remains pending. |
+| HW-COMPAT-006, HW-COMPAT-010 | Capacity accounting uses durable node snapshots and explicit canonical requests; caller assertions and diagnostic resource reports cannot inflate authority. | Automated + manual | Scheduler state repository/migration tests and static boundary review. |
+| HW-COMPAT-007, HW-COMPAT-009, HW-DOCS-002 | Provider/accelerator claims and unsupported hard limits fail closed with stable reasons; accelerator execution and remote placement remain unavailable. | Automated + manual | Manifest bridge/policy tests plus conservative capability/docs guard. |
+| HW-RUNTIME-001, HW-RUNTIME-002, HW-STATE-001 | Scheduler work keeps pure decision logic separate from runtime mutation and confines durable admission state to `HostwrightState`; runtime calls remain outside database transactions. | Automated + manual | Focused target checks, boundary scans, and diff review. |
 
 ## Phase 32 Gate: Policy Engine
 

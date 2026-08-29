@@ -8,14 +8,14 @@ Reconciliation is the loop that compares desired state with observed state and p
 2. Observe runtime state through `RuntimeAdapter`.
 3. Bind the immutable provider capability digest and compute drift.
 4. Compile a canonical dependency DAG with preconditions, postconditions, timeouts, idempotency keys, and compensation.
-5. Persist complete schema-v17 intent, including immutable image locks, exact supply-chain policy bindings, content leases, storage authority, network authority, and restart-budget state, before the first external effect.
+5. Persist complete schema-v23 intent, including immutable image locks, exact supply-chain policy bindings, content leases, storage authority, network authority, restart-budget state, and scheduler admission/reservation bindings, before the first external effect.
 6. Execute ready nodes with deterministic bounded parallelism.
 7. Re-observe and persist verification after each mutation wave.
 8. Complete, compensate, resume, or enter a precise safe hold.
 
 ## Current State
 
-Hostwright maps strict Manifest v2 into executable desired state and compiles `up`, `down`, `run`, `start`, `stop`, `restart`, `rm`, and `update` into `LifecyclePlan v1`. Plans bind manifest, observation, capability, provider, project generation, resource UUID, and fence digests and have a stable topological order.
+Hostwright maps strict Manifest v3 into a candidate desired state and compiles `up`, `down`, `run`, `start`, `stop`, `restart`, `rm`, and `update` into `LifecyclePlan v1`. Plans bind manifest, observation, capability, provider, project generation, resource UUID, and fence digests and have a stable topological order. Mutating placement still requires a persisted Control 2.2 scheduler decision and fenced reservation; absent that authority, lifecycle execution fails closed before runtime mutation.
 
 `hostwright plan` still does not perform live runtime observation by default. It renders desired-state and policy diagnostics and states that runtime observation is not connected in the CLI path.
 

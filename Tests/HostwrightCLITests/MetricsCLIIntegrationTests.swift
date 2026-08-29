@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import XCTest
 @testable import HostwrightCLI
@@ -58,7 +59,7 @@ final class MetricsCLIIntegrationTests: XCTestCase {
                 from: Data(snapshotResult.standardOutput.utf8)
             )
             XCTAssertEqual(snapshot.schemaVersion, 1)
-            XCTAssertEqual(snapshot.source.schemaVersion, 17)
+            XCTAssertEqual(snapshot.source.schemaVersion, MigrationRunner.latestSchemaVersion)
             XCTAssertEqual(snapshot.series.count, 59)
 
             let outputPath = root.appendingPathComponent("metrics-v1.json").path
@@ -214,21 +215,24 @@ final class MetricsCLIIntegrationTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: missing))
     }
 
-    func testBuiltCLIProjectsTenThousandRowsAndCleansAFileLimitFailure() throws {
+    func testProjectsTenThousandRowsAndCleansAFileLimitFailure() throws {
         try withStore { root, store in
             try seedReconciliationRows(count: 10_000, store: store)
-            let executable = try hostwrightExecutable()
-            let snapshotProcess = try runProcess(
-                executable: executable,
-                arguments: [
-                    "metrics", "snapshot", "--state-db", store.path,
-                    "--output", "json"
-                ]
+            var environment = CLIEnvironment.live
+            environment.metricsDate = {
+                ISO8601DateFormatter().date(from: "2026-08-01T12:00:00Z")!
+            }
+            let snapshotResult = try HostwrightCLI.run(
+                command: .metrics(options: MetricsCLIOptions(
+                    action: .snapshot,
+                    stateDatabasePath: store.path,
+                    output: .json
+                )),
+                environment: environment
             )
-            XCTAssertEqual(snapshotProcess.status, 0, snapshotProcess.error)
             let snapshot = try JSONDecoder().decode(
                 HostwrightMetricsSnapshot.self,
-                from: Data(snapshotProcess.output.utf8)
+                from: Data(snapshotResult.standardOutput.utf8)
             )
             XCTAssertEqual(snapshot.series.count, 59)
             XCTAssertEqual(
@@ -239,33 +243,73 @@ final class MetricsCLIIntegrationTests: XCTestCase {
             )
 
             let outputPath = root.appendingPathComponent("subprocess-metrics.json").path
-            let exportProcess = try runProcess(
-                executable: executable,
-                arguments: [
-                    "metrics", "export", "--state-db", store.path,
-                    "--output-path", outputPath,
-                    "--confirm-snapshot", snapshot.snapshotSHA256,
-                    "--output", "json"
-                ]
+            _ = try HostwrightCLI.run(
+                command: .metrics(options: MetricsCLIOptions(
+                    action: .export(
+                        outputPath: outputPath,
+                        confirmationSHA256: snapshot.snapshotSHA256
+                    ),
+                    stateDatabasePath: store.path,
+                    output: .json
+                )),
+                environment: environment
             )
-            XCTAssertEqual(exportProcess.status, 0, exportProcess.error)
             XCTAssertTrue(FileManager.default.fileExists(atPath: outputPath))
 
             let limitedPath = root.appendingPathComponent("limited-metrics.json").path
-            let limitedProcess = try runProcess(
-                executable: URL(fileURLWithPath: "/bin/sh"),
+            environment.metricsExport = { data, path, maximumBytes, isCancelled in
+                let receipt = try SecureLocalExportWriter.write(
+                    data,
+                    to: path,
+                    maximumBytes: maximumBytes,
+                    isCancelled: isCancelled,
+                    unsafeError: HostwrightMetricsError.unsafeExportPath,
+                    afterWrite: { written in
+                        XCTAssertGreaterThan(written, 0)
+                        XCTAssertLessThan(written, data.count)
+                        throw POSIXError(.ENOSPC)
+                    },
+                    maximumWriteChunkBytes: 32
+                )
+                return (receipt.outputSHA256, receipt.outputBytes)
+            }
+            XCTAssertThrowsError(try HostwrightCLI.run(
+                command: .metrics(options: MetricsCLIOptions(
+                    action: .export(
+                        outputPath: limitedPath,
+                        confirmationSHA256: snapshot.snapshotSHA256
+                    ),
+                    stateDatabasePath: store.path,
+                    output: .json
+                )),
+                environment: environment
+            ))
+            XCTAssertFalse(FileManager.default.fileExists(atPath: limitedPath))
+        }
+    }
+
+    func testBuiltCLIRequiresAuthenticatedPersistentControlAPI() throws {
+        try withStore { root, store in
+            let executable = try hostwrightExecutable()
+            let isolatedApplicationSupport = root.appendingPathComponent(
+                "application-support",
+                isDirectory: true
+            ).path
+            let process = try runProcess(
+                executable: executable,
                 arguments: [
-                    "-c",
-                    "trap '' XFSZ; ulimit -f 0; exec \"$1\" metrics export --state-db \"$2\" --output-path \"$3\" --confirm-snapshot \"$4\" --output json",
-                    "hostwright-metrics-file-limit",
-                    executable.path,
-                    store.path,
-                    limitedPath,
-                    snapshot.snapshotSHA256
+                    "metrics", "snapshot", "--state-db", store.path,
+                    "--output", "json"
+                ],
+                environment: [
+                    "HOSTWRIGHT_APPLICATION_SUPPORT_DIR": isolatedApplicationSupport
                 ]
             )
-            XCTAssertNotEqual(limitedProcess.status, 0)
-            XCTAssertFalse(FileManager.default.fileExists(atPath: limitedPath))
+
+            XCTAssertEqual(process.status, 66, process.error)
+            XCTAssertTrue(process.output.isEmpty)
+            XCTAssertTrue(process.error.contains("HW-API-002"))
+            XCTAssertFalse(process.error.contains(store.path))
         }
     }
 
@@ -306,19 +350,24 @@ final class MetricsCLIIntegrationTests: XCTestCase {
 
     private func runProcess(
         executable: URL,
-        arguments: [String]
+        arguments: [String],
+        environment overrides: [String: String] = [:]
     ) throws -> (status: Int32, output: String, error: String) {
         let process = Process()
         let standardOutput = Pipe()
         let standardError = Pipe()
         process.executableURL = executable
         process.arguments = arguments
-        process.environment = [
+        var environment = [
             "HOME": NSHomeDirectory(),
             "LANG": "C.UTF-8",
             "LC_ALL": "C.UTF-8",
             "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"
         ]
+        for (name, value) in overrides {
+            environment[name] = value
+        }
+        process.environment = environment
         process.currentDirectoryURL = URL(fileURLWithPath: "/")
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = standardOutput

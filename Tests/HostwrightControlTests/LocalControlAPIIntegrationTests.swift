@@ -405,11 +405,14 @@ final class LocalControlAPIIntegrationTests: XCTestCase {
 
     private var validManifest: String {
         """
-        version: 2
+        version: 3
         project: demo
         services:
           api:
             image: local/demo:latest
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
             command: ["serve"]
 
         """

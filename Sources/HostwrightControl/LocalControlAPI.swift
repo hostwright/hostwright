@@ -130,6 +130,11 @@ public struct LocalControlAPI: Sendable {
             if let parallelism = request.parallelism {
                 arguments += ["--parallelism", String(parallelism)]
             }
+            if let profileID = request.workloadProfileID,
+               let profileHash = request.profileHash {
+                arguments += ["--workload-profile-id", profileID]
+                arguments += ["--workload-profile-hash", profileHash]
+            }
             arguments += ["--output", "json"]
             return arguments
         case .image:

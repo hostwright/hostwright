@@ -62,6 +62,7 @@ public struct RegistryTransportRequest:
     public let authorization: RegistryTransportAuthorization?
     public let body: Data?
     public let timeoutMilliseconds: Int
+    public let maximumResponseBodyBytes: Int?
 
     public init(
         url: URL,
@@ -69,7 +70,8 @@ public struct RegistryTransportRequest:
         headers: [String: String] = [:],
         authorization: RegistryTransportAuthorization? = nil,
         body: Data? = nil,
-        timeoutMilliseconds: Int = 30_000
+        timeoutMilliseconds: Int = 30_000,
+        maximumResponseBodyBytes: Int? = nil
     ) {
         self.url = url
         self.method = method
@@ -77,6 +79,7 @@ public struct RegistryTransportRequest:
         self.authorization = authorization
         self.body = body
         self.timeoutMilliseconds = timeoutMilliseconds
+        self.maximumResponseBodyBytes = maximumResponseBodyBytes
     }
 
     public var description: String {
@@ -304,8 +307,10 @@ public struct URLSessionRegistryTransport: RegistryHTTPTransporting {
         configuration.timeoutIntervalForResource = TimeInterval(request.timeoutMilliseconds) / 1_000
         configuration.waitsForConnectivity = false
 
+        let effectiveMaximumResponseBodyBytes = request.maximumResponseBodyBytes
+            ?? maximumResponseBodyBytes
         let delegate = RegistryURLSessionDelegate(
-            maximumResponseBodyBytes: maximumResponseBodyBytes,
+            maximumResponseBodyBytes: effectiveMaximumResponseBodyBytes,
             maximumHeaderBytes: Self.maximumHeaderBytes,
             maximumHeaderCount: Self.maximumHeaderCount,
             maximumRedirects: Self.maximumRedirects
@@ -354,8 +359,14 @@ public struct URLSessionRegistryTransport: RegistryHTTPTransporting {
         maximumRequestBodyBytes: Int,
         maximumResponseBodyBytes: Int
     ) throws {
-        guard maximumRequestBodyBytes > 0, maximumResponseBodyBytes > 0 else {
+        guard maximumRequestBodyBytes > 0 else {
             throw RegistryTransportError.requestBodyTooLarge
+        }
+        guard maximumResponseBodyBytes > 0,
+              request.maximumResponseBodyBytes.map({
+                  $0 > 0 && $0 <= maximumResponseBodyBytes
+              }) ?? true else {
+            throw RegistryTransportError.responseBodyTooLarge
         }
         guard request.timeoutMilliseconds > 0, request.timeoutMilliseconds <= 120_000 else {
             throw RegistryTransportError.invalidTimeout

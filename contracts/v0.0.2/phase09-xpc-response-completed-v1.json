@@ -1,0 +1,13 @@
+{
+  "protocolVersion": 1,
+  "requestID": "phase09-xpc-1",
+  "status": "completed",
+  "proof": {
+    "teamIdentifier": "993YC3JY4Q",
+    "signingIdentifier": "dev.hostwright.xpc-provider",
+    "codeDirectoryHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "entitlementProjection": {
+      "com.apple.security.app-sandbox": true
+    }
+  }
+}

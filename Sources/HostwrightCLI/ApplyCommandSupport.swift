@@ -5,7 +5,7 @@ func waitForAsync<T: Sendable>(_ operation: @escaping @Sendable () async throws 
     let semaphore = DispatchSemaphore(value: 0)
     let box = AsyncResultBox<T>()
 
-    Task.detached {
+    Task {
         do {
             box.result = Result.success(try await operation())
         } catch {

@@ -1396,7 +1396,14 @@ final class LifecycleSagaExecutorTests: XCTestCase {
                 version: HostwrightManifest.currentVersion,
                 project: "demo",
                 services: [
-                    HostwrightService(name: "web", image: "local/web@sha256:abc")
+                    HostwrightService(
+                        name: "web",
+                        image: "local/web@sha256:abc",
+                        resources: HostwrightResources(
+                            requests: HostwrightResourceSet(cpus: 1, memory: "512MiB"),
+                            limits: HostwrightResourceSet(cpus: 1, memory: "512MiB")
+                        )
+                    )
                 ]
             ),
             timestamp: "2026-07-23T00:00:00Z",
@@ -1521,7 +1528,14 @@ final class LifecycleSagaExecutorTests: XCTestCase {
                     version: HostwrightManifest.currentVersion,
                     project: "demo",
                     services: [
-                        HostwrightService(name: "web", image: "local/web@sha256:abc")
+                        HostwrightService(
+                            name: "web",
+                            image: "local/web@sha256:abc",
+                            resources: HostwrightResources(
+                                requests: HostwrightResourceSet(cpus: 1, memory: "512MiB"),
+                                limits: HostwrightResourceSet(cpus: 1, memory: "512MiB")
+                            )
+                        )
                     ]
                 ),
                 timestamp: "2026-07-23T00:00:00Z",

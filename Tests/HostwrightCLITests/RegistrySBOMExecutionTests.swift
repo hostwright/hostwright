@@ -598,7 +598,7 @@ final class RegistrySBOMExecutionTests: XCTestCase {
         subject: OCIContentDigest
     ) -> String {
         """
-        version: 2
+        version: 3
         project: demo
         imagePolicy: require-digest
         imageSBOM:
@@ -609,6 +609,9 @@ final class RegistrySBOMExecutionTests: XCTestCase {
         services:
           api:
             image: registry.example.test/team/image@\(subject.canonicalValue)
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
         """
     }
 

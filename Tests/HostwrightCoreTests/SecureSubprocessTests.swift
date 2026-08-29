@@ -429,6 +429,60 @@ final class SecureSubprocessTests: XCTestCase {
         }
     }
 
+    func testPinnedExecutableIdentityCannotDriftBetweenTrustCheckAndSuspendedSpawn() throws {
+        let root = try makePrivateTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let executable = root.appendingPathComponent("pinned-executable")
+        try FileManager.default.copyItem(at: URL(fileURLWithPath: "/usr/bin/printf"), to: executable)
+        try setMode(0o700, at: executable)
+        let identity = try SecureExecutableResolver.verify(path: executable.path)
+
+        let handle = try FileHandle(forWritingTo: executable)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data([0]))
+        try handle.close()
+
+        XCTAssertThrowsError(
+            try SecureSubprocessRunner().run(
+                SecureSubprocessRequest(executablePath: executable.path),
+                expectedExecutable: identity
+            )
+        ) { error in
+            XCTAssertEqual(error as? SecureSubprocessError, .executableChanged)
+        }
+        XCTAssertThrowsError(
+            try SecureSubprocessRunner().run(
+                SecureSubprocessRequest(executablePath: "/usr/bin/true"),
+                expectedExecutable: identity
+            )
+        ) { error in
+            XCTAssertEqual(error as? SecureSubprocessError, .executableChanged)
+        }
+    }
+
+    func testSuspendedProcessValidatorRejectsAndReapsBeforeExecution() throws {
+        let executable = "/usr/bin/true"
+        let identity = try SecureExecutableResolver.verify(path: executable)
+        let observedPID = SecureSubprocessPIDBox()
+
+        XCTAssertThrowsError(
+            try SecureSubprocessRunner().run(
+                SecureSubprocessRequest(
+                    executablePath: executable
+                ),
+                expectedExecutable: identity,
+                suspendedProcessValidator: { processID in
+                    observedPID.store(processID)
+                    throw SecureExecutableValidationError.metadataChanged
+                }
+            )
+        ) { error in
+            XCTAssertEqual(error as? SecureSubprocessError, .executableChanged)
+        }
+        let processID = try XCTUnwrap(observedPID.value)
+        XCTAssertFalse(processExists(processID))
+    }
+
     func testWorkingDirectoryAndLexicalTraversalValidationFailClosed() throws {
         let root = try makePrivateTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -571,5 +625,22 @@ final class SecureSubprocessTests: XCTestCase {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: root.path)
         return root
+    }
+}
+
+private final class SecureSubprocessPIDBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: pid_t?
+
+    var value: pid_t? {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+
+    func store(_ processID: pid_t) {
+        lock.lock()
+        storage = processID
+        lock.unlock()
     }
 }

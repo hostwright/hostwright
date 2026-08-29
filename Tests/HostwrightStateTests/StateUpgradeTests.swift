@@ -29,18 +29,34 @@ final class StateUpgradeTests: XCTestCase {
                 )
             }
 
-            try store.migrate()
-
+            try MigrationRunner().apply(to: store, throughVersion: 17)
             XCTAssertEqual(try store.schemaVersion(), 17)
-            let state = try XCTUnwrap(
-                store.restartPolicies.load(projectID: "project-demo", serviceName: "api")
+            try store.withConnection(createIfNeeded: false, readOnly: true) { connection in
+                let row = try XCTUnwrap(
+                    connection.query(
+                        """
+                        SELECT reason_class, window_started_at, window_seconds,
+                               project_max_attempts, release_generation, policy_sha256
+                        FROM restart_policy_state WHERE id = 'restart-api'
+                        """
+                    ).first)
+                XCTAssertEqual(
+                    row.compactMap { $0 },
+                    [
+                        "unknown", "2026-08-01T12:00:00Z", "300", "10", "0",
+                        String(repeating: "0", count: 64),
+                    ]
+                )
+                XCTAssertEqual(
+                    try connection.query("SELECT id FROM restart_attempt_history"),
+                    []
+                )
+            }
+            try store.migrate()
+            XCTAssertEqual(
+                try store.schemaVersion(),
+                HostwrightContractVersions.stateSchema
             )
-            XCTAssertEqual(state.reasonClass, .unknown)
-            XCTAssertEqual(state.windowStartedAt, "2026-08-01T12:00:00Z")
-            XCTAssertEqual(state.windowSeconds, 300)
-            XCTAssertEqual(state.projectMaxAttempts, 10)
-            XCTAssertEqual(state.releaseGeneration, 0)
-            XCTAssertEqual(state.policySHA256, String(repeating: "0", count: 64))
             XCTAssertEqual(try store.restartAttempts.loadProject("project-demo"), [])
         }
     }
@@ -226,6 +242,342 @@ final class StateUpgradeTests: XCTestCase {
         }
     }
 
+    func testSynchronousExclusiveLifecycleFenceAuthorityPropagatesToInheritingTask() throws {
+        try withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) { store, _ in
+            let outcome = TaskOutcome()
+
+            try StateUpgradeService(store: store).withExclusiveLifecycleFence {
+                Task { [store, outcome] in
+                    do {
+                        let version = try store.schemaVersion()
+                        outcome.record(
+                            version == MigrationRunner.latestSchemaVersion
+                                ? "success" : "unexpected-schema-version"
+                        )
+                    } catch {
+                        outcome.record(String(describing: error))
+                    }
+                    outcome.finish()
+                }
+                XCTAssertEqual(outcome.wait(timeout: .now() + 2), .success)
+            }
+
+            XCTAssertEqual(outcome.value, "success")
+        }
+    }
+
+    func testInheritedLifecycleFenceAuthorityIsRevokedWhenTheFenceReturns() async throws {
+        try await withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) {
+            store, _ in
+            try store.configuration.prepareStateAccessFoundation()
+            let lockPath = try store.configuration.maintenancePaths().accessLockPath
+
+            let escaped = try StateUpgradeService(store: store).withExclusiveLifecycleFence {
+                Task { [store] in
+                    try? await Task.sleep(for: .milliseconds(100))
+                    do {
+                        _ = try store.schemaVersion()
+                        return "unexpected-success"
+                    } catch {
+                        return String(describing: error)
+                    }
+                }
+            }
+
+            let descriptor = open(lockPath, O_RDWR | O_NOFOLLOW | O_CLOEXEC)
+            XCTAssertGreaterThanOrEqual(descriptor, 0)
+            XCTAssertEqual(flock(descriptor, LOCK_EX | LOCK_NB), 0)
+            let outcome = await escaped.value
+            _ = flock(descriptor, LOCK_UN)
+            close(descriptor)
+
+            XCTAssertNotEqual(outcome, "unexpected-success")
+            XCTAssertTrue(outcome.contains("state-access fence"), outcome)
+        }
+    }
+
+    func testAsyncLifecycleFenceAllowsNestedAccessAcrossAwaitAndExcludesCompetingAccessor()
+        async throws
+    {
+        try await withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) {
+            store, _ in
+            let service = StateUpgradeService(store: store)
+
+            try await service.withExclusiveLifecycleFence {
+                try await Task.sleep(for: .milliseconds(10))
+                XCTAssertEqual(
+                    try store.schemaVersion(),
+                    MigrationRunner.latestSchemaVersion
+                )
+
+                let competing = Task.detached { () -> String in
+                    do {
+                        try store.migrate()
+                        return "unexpected-success"
+                    } catch {
+                        return String(describing: error)
+                    }
+                }
+                let outcome = await competing.value
+                XCTAssertNotEqual(outcome, "unexpected-success")
+                XCTAssertTrue(outcome.contains("state-access fence"), outcome)
+            }
+
+            XCTAssertNoThrow(try store.migrate())
+        }
+    }
+
+    func testSerializedLifecycleMutationDoesNotBlockOrdinarySharedStateAccess() throws {
+        try withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) { store, _ in
+            let readerFinished = expectation(description: "ordinary state reader completes")
+            let readerOutcome = Mutex<String?>(nil)
+
+            try StateUpgradeService(store: store).withSerializedLifecycleMutation {
+                DispatchQueue.global(qos: .userInitiated).async {
+                    do {
+                        let version = try store.schemaVersion()
+                        readerOutcome.withLock {
+                            $0 = version == MigrationRunner.latestSchemaVersion
+                                ? "success" : "unexpected-schema-version"
+                        }
+                    } catch {
+                        readerOutcome.withLock { $0 = String(describing: error) }
+                    }
+                    readerFinished.fulfill()
+                }
+                wait(for: [readerFinished], timeout: 2)
+            }
+
+            XCTAssertEqual(readerOutcome.withLock { $0 }, "success")
+        }
+    }
+
+    func testSerializedLifecycleMutationsFailClosedAtTheirWaitBound() throws {
+        try withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) { store, _ in
+            let service = StateUpgradeService(store: store)
+            let enteredFirstMutation = DispatchSemaphore(value: 0)
+            let releaseFirstMutation = DispatchSemaphore(value: 0)
+            let firstOutcome = TaskOutcome()
+
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    try service.withSerializedLifecycleMutation(lockWaitMilliseconds: 1_000) {
+                        enteredFirstMutation.signal()
+                        guard releaseFirstMutation.wait(timeout: .now() + 2) == .success else {
+                            firstOutcome.record("release-timeout")
+                            return
+                        }
+                    }
+                    if firstOutcome.value == nil {
+                        firstOutcome.record("success")
+                    }
+                } catch {
+                    firstOutcome.record(String(describing: error))
+                }
+                firstOutcome.finish()
+            }
+
+            XCTAssertEqual(enteredFirstMutation.wait(timeout: .now() + 2), .success)
+            XCTAssertThrowsError(
+                try service.withSerializedLifecycleMutation(lockWaitMilliseconds: 50) {}
+            ) { error in
+                guard case let StateStoreError.databaseLocked(_, message) = error else {
+                    return XCTFail("Expected databaseLocked, received \(error).")
+                }
+                XCTAssertTrue(message.contains("lifecycle-mutation fence"), message)
+            }
+
+            releaseFirstMutation.signal()
+            XCTAssertEqual(firstOutcome.wait(timeout: .now() + 2), .success)
+            XCTAssertEqual(firstOutcome.value, "success")
+        }
+    }
+
+    func testEscapedInheritedSerializedLifecycleMutationAuthorityIsRevoked()
+        async throws
+    {
+        try await withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) {
+            store, _ in
+            let service = StateUpgradeService(store: store)
+            let permitEscapedAttempt = LifecycleMutationGate()
+            let holderEntered = LifecycleMutationGate()
+            let releaseHolder = LifecycleMutationGate()
+
+            let escaped = try await service.withSerializedLifecycleMutation {
+                await Task.yield()
+                return Task { [service, permitEscapedAttempt] in
+                    await permitEscapedAttempt.wait()
+                    do {
+                        return try await service.withSerializedLifecycleMutation(
+                            lockWaitMilliseconds: 50
+                        ) {
+                            await Task.yield()
+                            return "unexpected-success"
+                        }
+                    } catch {
+                        return String(describing: error)
+                    }
+                }
+            }
+
+            let holder = Task { () -> String in
+                do {
+                    return try await service.withSerializedLifecycleMutation(
+                        lockWaitMilliseconds: 1_000
+                    ) {
+                        await holderEntered.release()
+                        await releaseHolder.wait()
+                        return "holder-success"
+                    }
+                } catch {
+                    return String(describing: error)
+                }
+            }
+            await holderEntered.wait()
+            await permitEscapedAttempt.release()
+
+            let escapedOutcome = await escaped.value
+            XCTAssertNotEqual(escapedOutcome, "unexpected-success")
+            XCTAssertTrue(escapedOutcome.contains("lifecycle-mutation fence"), escapedOutcome)
+
+            await releaseHolder.release()
+            let holderOutcome = await holder.value
+            XCTAssertEqual(holderOutcome, "holder-success")
+        }
+    }
+
+    func testAsyncExclusiveLifecycleFenceWaitsBehindMutationAndIsNestedReentrant()
+        async throws
+    {
+        try await withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) {
+            store, _ in
+            let service = StateUpgradeService(store: store)
+            let mutationEntered = DispatchSemaphore(value: 0)
+            let releaseMutation = LifecycleMutationGate()
+            let state = LifecycleMutationTestState()
+
+            let mutation = Task { () throws -> Int in
+                try await service.withSerializedLifecycleMutation {
+                    state.setMutationActive(true)
+                    defer { state.setMutationActive(false) }
+                    mutationEntered.signal()
+                    let version = try await service.withExclusiveLifecycleFence {
+                        try await Task.sleep(for: .milliseconds(10))
+                        return try store.schemaVersion()
+                    }
+                    await releaseMutation.wait()
+                    return version
+                }
+            }
+
+            XCTAssertEqual(mutationEntered.wait(timeout: .now() + 2), .success)
+            let delayedRelease = Task.detached {
+                try? await Task.sleep(for: .milliseconds(100))
+                await releaseMutation.release()
+            }
+            try await service.withExclusiveLifecycleFence(lockWaitMilliseconds: 1_000) {
+                await Task.yield()
+                state.recordExclusiveEntry()
+            }
+            await delayedRelease.value
+
+            switch await mutation.result {
+            case .success(let version):
+                XCTAssertEqual(version, MigrationRunner.latestSchemaVersion)
+            case .failure(let error):
+                XCTFail("Nested lifecycle fence failed: \(error)")
+            }
+            XCTAssertFalse(state.exclusiveEnteredWhileMutationActive)
+        }
+    }
+
+    func testBoundedStateAccessWaitPropagatesAcrossAwaitWithoutBypassingTheFence()
+        async throws
+    {
+        try await withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) {
+            store, _ in
+            try store.configuration.prepareStateAccessFoundation()
+            let lockPath = try store.configuration.maintenancePaths().accessLockPath
+            let descriptor = open(lockPath, O_RDWR | O_NOFOLLOW | O_CLOEXEC)
+            XCTAssertGreaterThanOrEqual(descriptor, 0)
+            XCTAssertEqual(flock(descriptor, LOCK_EX | LOCK_NB), 0)
+            let release = Task.detached {
+                try? await Task.sleep(for: .milliseconds(400))
+                _ = flock(descriptor, LOCK_UN)
+                close(descriptor)
+            }
+
+            let version = try await StateUpgradeService(store: store)
+                .withBoundedStateAccessWait(lockWaitMilliseconds: 1_000) {
+                    try await StateUpgradeService(store: store)
+                        .withBoundedStateAccessWait(lockWaitMilliseconds: 100) {
+                            try await Task.sleep(for: .milliseconds(10))
+                            return try store.schemaVersion()
+                        }
+                }
+            await release.value
+            XCTAssertEqual(version, MigrationRunner.latestSchemaVersion)
+        }
+    }
+
+    func testBoundedStateAccessWaitRejectsUnboundedWaits() throws {
+        try withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) {
+            store, _ in
+            for timeout in [0, 30_001] {
+                do {
+                    try StateUpgradeService(store: store)
+                        .withBoundedStateAccessWait(lockWaitMilliseconds: timeout) {}
+                    XCTFail("Expected invalidRecord for \(timeout) milliseconds.")
+                } catch {
+                    guard case StateStoreError.invalidRecord = error else {
+                        return XCTFail("Expected invalidRecord, received \(error).")
+                    }
+                }
+            }
+        }
+    }
+
+    func testExclusiveLifecycleFenceSupportsBoundedControlPlaneWait() throws {
+        try withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) { store, _ in
+            try store.configuration.prepareStateAccessFoundation()
+            let lockPath = try store.configuration.maintenancePaths().accessLockPath
+            let descriptor = open(lockPath, O_RDWR | O_NOFOLLOW | O_CLOEXEC)
+            XCTAssertGreaterThanOrEqual(descriptor, 0)
+            XCTAssertEqual(flock(descriptor, LOCK_EX | LOCK_NB), 0)
+            let released = expectation(description: "competing writer released")
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.4) {
+                _ = flock(descriptor, LOCK_UN)
+                close(descriptor)
+                released.fulfill()
+            }
+
+            XCTAssertNoThrow(
+                try StateUpgradeService(store: store).withExclusiveLifecycleFence(
+                    lockWaitMilliseconds: 1_000
+                ) {
+                    XCTAssertEqual(try store.schemaVersion(), MigrationRunner.latestSchemaVersion)
+                }
+            )
+            wait(for: [released], timeout: 1)
+        }
+    }
+
+    func testExclusiveLifecycleFenceRejectsUnboundedWaits() throws {
+        try withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) { store, _ in
+            for timeout in [0, 30_001] {
+                XCTAssertThrowsError(
+                    try StateUpgradeService(store: store).withExclusiveLifecycleFence(
+                        lockWaitMilliseconds: timeout
+                    ) {}
+                ) { error in
+                    guard case StateStoreError.invalidRecord = error else {
+                        return XCTFail("Expected invalidRecord, received \(error).")
+                    }
+                }
+            }
+        }
+    }
+
     func testVerifiedStateRemovalDeletesOnlyTheManagedSQLiteFileSet() throws {
         try withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) { store, _ in
             let result = try StateDatabaseRemovalService(store: store).removeVerifiedDatabase()
@@ -360,6 +712,118 @@ final class StateUpgradeTests: XCTestCase {
         }
     }
 
+    func testV17SnapshotMigratesToLatestAndRestoresExactV17() throws {
+        try withTemporaryStore(throughVersion: 17) { store, directory in
+            let rollback = directory.appendingPathComponent("rollback", isDirectory: true)
+            try FileManager.default.createDirectory(
+                at: rollback,
+                withIntermediateDirectories: false,
+                attributes: [.posixPermissions: 0o700]
+            )
+            let service = StateUpgradeService(store: store)
+            let snapshot = try service.createVerifiedSnapshot(
+                at: rollback.appendingPathComponent("state.sqlite").path
+            )
+            XCTAssertEqual(snapshot.stateSchemaVersion, 17)
+            XCTAssertEqual(
+                try service.migrateToLatest().toSchemaVersion,
+                MigrationRunner.latestSchemaVersion
+            )
+            XCTAssertEqual(try store.schemaVersion(), MigrationRunner.latestSchemaVersion)
+
+            XCTAssertEqual(
+                try service.restoreVerifiedSnapshot(
+                    snapshot,
+                    operationID: "00000000-0000-0000-0000-000000000018"
+                ),
+                17
+            )
+            XCTAssertEqual(try store.schemaVersion(), 17)
+            XCTAssertEqual(
+                try StateMaintenanceFileSupport.fingerprint(store.path).sha256,
+                snapshot.databaseSHA256
+            )
+        }
+    }
+
+    func testV17MigrationCreatesVerifiedRollbackPackageAndReachesLatestSchema() throws {
+        try withTemporaryStore(throughVersion: 17) { store, directory in
+            let service = StateUpgradeService(store: store)
+
+            let result = try service.migrateToLatestWithVerifiedBackup()
+
+            XCTAssertEqual(result.kind, "stateUpgradePreparedMigrationResult")
+            XCTAssertEqual(result.migration.fromSchemaVersion, 17)
+            XCTAssertEqual(
+                result.migration.toSchemaVersion,
+                MigrationRunner.latestSchemaVersion
+            )
+            XCTAssertEqual(try store.schemaVersion(), MigrationRunner.latestSchemaVersion)
+
+            let snapshot = try XCTUnwrap(result.rollbackSnapshot)
+            XCTAssertEqual(snapshot.databasePath, store.path)
+            XCTAssertEqual(snapshot.stateSchemaVersion, 17)
+            XCTAssertGreaterThan(snapshot.databaseBytes, 0)
+            XCTAssertEqual(snapshot.databaseSHA256.count, 64)
+            XCTAssertNoThrow(try service.verify(snapshot))
+
+            let rollbackDirectory = URL(fileURLWithPath: snapshot.snapshotPath)
+                .deletingLastPathComponent()
+            let rollbackRoot = directory.appendingPathComponent(
+                ".hostwright-state-upgrades",
+                isDirectory: true
+            )
+            let manifestURL = rollbackDirectory.appendingPathComponent("snapshot-v1.json")
+            XCTAssertEqual(rollbackDirectory.deletingLastPathComponent(), rollbackRoot)
+            XCTAssertEqual(permissions(rollbackRoot.path), 0o700)
+            XCTAssertEqual(permissions(rollbackDirectory.path), 0o700)
+            XCTAssertEqual(permissions(snapshot.snapshotPath), 0o600)
+            XCTAssertEqual(permissions(manifestURL.path), 0o600)
+            XCTAssertEqual(
+                try JSONDecoder().decode(
+                    StateUpgradeSnapshot.self,
+                    from: Data(contentsOf: manifestURL)
+                ),
+                snapshot
+            )
+        }
+    }
+
+    func testAbsentDatabaseInitializesLatestWithoutRollbackSnapshot() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hostwright-state-upgrade-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700]
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let store = SQLiteStateStore(path: directory.appendingPathComponent("state.sqlite").path)
+        let rollbackRoot = directory.appendingPathComponent(
+            ".hostwright-state-upgrades",
+            isDirectory: true
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: rollbackRoot.path))
+
+        let result = try StateUpgradeService(store: store).migrateToLatestWithVerifiedBackup()
+
+        XCTAssertEqual(result.kind, "stateUpgradePreparedMigrationResult")
+        XCTAssertEqual(
+            result.migration.fromSchemaVersion,
+            MigrationRunner.latestSchemaVersion
+        )
+        XCTAssertEqual(
+            result.migration.toSchemaVersion,
+            MigrationRunner.latestSchemaVersion
+        )
+        XCTAssertNil(result.rollbackSnapshot)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: store.path))
+        XCTAssertEqual(try store.schemaVersion(), MigrationRunner.latestSchemaVersion)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: rollbackRoot.path))
+    }
+
     private func withTemporaryStore(
         throughVersion: Int,
         _ body: (SQLiteStateStore, URL) throws -> Void
@@ -377,8 +841,97 @@ final class StateUpgradeTests: XCTestCase {
         try body(store, directory)
     }
 
+    private func withTemporaryStore(
+        throughVersion: Int,
+        _ body: (SQLiteStateStore, URL) async throws -> Void
+    ) async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hostwright-state-upgrade-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700]
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = SQLiteStateStore(path: directory.appendingPathComponent("state.sqlite").path)
+        try MigrationRunner().apply(to: store, throughVersion: throughVersion)
+        try await body(store, directory)
+    }
+
     private func permissions(_ path: String) -> Int {
         let attributes = try? FileManager.default.attributesOfItem(atPath: path)
         return (attributes?[.posixPermissions] as? NSNumber)?.intValue ?? -1
+    }
+}
+
+private final class TaskOutcome: @unchecked Sendable {
+    private let lock = NSLock()
+    private let completion = DispatchSemaphore(value: 0)
+    private var storedValue: String?
+
+    func record(_ value: String) {
+        lock.lock()
+        storedValue = value
+        lock.unlock()
+    }
+
+    func finish() {
+        completion.signal()
+    }
+
+    func wait(timeout: DispatchTime) -> DispatchTimeoutResult {
+        completion.wait(timeout: timeout)
+    }
+
+    var value: String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedValue
+    }
+}
+
+private final class LifecycleMutationTestState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var mutationActive = false
+    private var exclusiveEntrySawActiveMutation = false
+
+    func setMutationActive(_ active: Bool) {
+        lock.lock()
+        mutationActive = active
+        lock.unlock()
+    }
+
+    func recordExclusiveEntry() {
+        lock.lock()
+        exclusiveEntrySawActiveMutation = mutationActive
+        lock.unlock()
+    }
+
+    var exclusiveEnteredWhileMutationActive: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return exclusiveEntrySawActiveMutation
+    }
+}
+
+private actor LifecycleMutationGate {
+    private var released = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        guard !released else { return }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func release() {
+        guard !released else { return }
+        released = true
+        let pending = waiters
+        waiters.removeAll()
+        for waiter in pending {
+            waiter.resume()
+        }
     }
 }

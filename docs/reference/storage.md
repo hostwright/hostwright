@@ -1,6 +1,6 @@
 # Storage
 
-Hostwright manages persistent storage on one Mac through Storage Provider API v1 and current schema-v17 state. The shipped provider ID is `hostwright-local`. It stores only Hostwright-owned data below:
+Hostwright manages persistent storage on one Mac through Storage Provider API v1 and current schema-v23 state, retaining the historical schema-v17 storage rows. The shipped provider ID is `hostwright-local`. It stores only Hostwright-owned data below:
 
 ```text
 ~/Library/Application Support/Hostwright/storage/providers/hostwright-local
@@ -13,7 +13,7 @@ The provider root, state records, project/resource UUIDs, generations, fencing t
 Top-level `volumes` declare capacity, access, and reclaim behavior. A service attaches a declaration with a `volume` mount:
 
 ```yaml
-version: 2
+version: 3
 project: stateful-demo
 imagePolicy: require-digest
 
@@ -29,6 +29,9 @@ volumes:
 services:
   database:
     image: example.invalid/database@sha256:<digest>
+    resources:
+      requests: {cpus: 1, memory: 512MiB}
+      limits: {cpus: 1, memory: 512MiB}
     volumes:
       - type: volume
         source: data

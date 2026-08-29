@@ -1,0 +1,8 @@
+{
+  "identifier": "read-projects",
+  "effect": "allow",
+  "resources": ["project", "secret-metadata"],
+  "verbs": ["get", "list", "watch"],
+  "scope": { "kind": "project", "identifier": "demo" },
+  "conditions": [{ "kind": "project", "value": "demo" }]
+}

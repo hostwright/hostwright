@@ -15,6 +15,8 @@ final class AppleContainerInventoryParserTests: XCTestCase {
             )
 
             XCTAssertEqual(first, reordered)
+            XCTAssertEqual(first.authority, .incomplete)
+            XCTAssertFalse(first.isAuthoritative)
             XCTAssertEqual(first.semanticSHA256.count, 64)
             XCTAssertEqual(first.containers.count, 2)
 

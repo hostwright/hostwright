@@ -36,6 +36,42 @@ Disable state is changed only through `launchctl enable|disable` for the exact m
 
 New runtime resources use collision-resistant v2 identifiers and exact labels for managed state, identity version, project, service, optional instance, and resource identifier. Mutation plans retain the exact observed identifier. State-backed legacy identifiers remain readable for upgrade continuity, but labels or ownership records may not be inferred from a Hostwright-looking name.
 
+## Local Control Authorization Boundary
+
+The persistent Control API authorizes the kernel- and code-bound local subject
+after session revalidation and before a mutation can enter idempotency or
+accepted state. Unknown operations require `daemon/admin`; an unbound subject
+has no permissions. Every healthy authorization decision is appended to the
+tamper-evident audit trail. An audit append failure blocks mutation before
+durable acceptance, while read-only handling retains the Gate 4 degraded-audit
+behavior.
+
+Schema v20 stores five immutable default roles, custom roles, scoped bindings,
+and expiring delegations. The fixed resources, verbs, global/project/resource
+scopes, and AND-only conditions are defined by the Phase 09 golden contracts.
+Explicit deny rules override every allow. Authorization explanations return
+stable reason codes and sorted matching rule identifiers. The in-process cache
+is keyed by a digest of the complete persisted RBAC snapshot, so a role,
+binding, delegation, revocation, or expiry change takes effect without a daemon
+restart.
+
+Bootstrap creates one global owner binding only for the installing declared
+subject. SQLite and repository guards preserve at least one global owner and
+make built-in roles immutable. `security-admin` may grant only permissions it
+already holds; custom role, binding, and delegation paths compare each allowed
+resource/verb pair against the actor's current authority. Owner cannot be
+delegated, delegations must expire in the future, conditional grants by a
+non-owner are refused, stale generations fail, and only a delegator or global
+owner may revoke a delegation.
+
+The implemented Control API management operations are `rbac.preview`, the
+`rbac.role.*`, `rbac.binding.*`, and `rbac.delegation.*` families. Their typed
+payloads compose the frozen `RoleDefinition`, `RBACBinding`, `RBACDelegation`,
+`ControlRequestEnvelope`, and scalar generation fields; request-supplied actor
+or creation timestamps are not authoritative. Mutation responses and errors
+are bounded and sanitized. Gate 9 still owns normal CLI parity, so these
+operations do not yet claim a complete CLI surface.
+
 Schema-v17 ownership authority binds exact resource/project UUIDs, resource/project/provider generations, controller, provider, fencing token, and a deterministic ownership proof. A delete or cleanup records versioned deletion intent and ordered finalizers before provider mutation, then requires fresh exact runtime absence and released dependent port/tunnel finalizers before removing the ownership row. Missing, legacy, forged, stale, live-leased, or ambiguous authority fails closed. Cleanup never searches by a Hostwright-looking name, deletes an unmanaged resource, or treats provider acceptance as proof of absence.
 
 `hostwright ownership handoff` is a local recovery compare-and-swap, not authentication or general lease takeover. It accepts only an expired exact `lifecycle-v1` group/plan/fence/controller/expiry tuple, targets the bounded `resume` or `rollback` controller, and atomically advances the group lease plus every bound ownership record. An in-flight effect holds a private per-group OS fence, so handoff cannot overtake it. Lifecycle recovery replaces the fixed controller with one UUID-qualified process owner through a second single-winner compare-and-swap; the former controller and losing recovery processes cannot mutate, append evidence, finalize, clean up, or terminalize the group. Other mutation kinds retain their existing native recovery contracts and are refused by this command. A live or changed lease, unsupported operation kind, malformed authority, or stale proof changes nothing.
@@ -114,9 +150,71 @@ Current public Hostwright releases nevertheless remain source-only. Local unsign
 
 ## Control Surface Boundary
 
-Future GUI or local control surfaces must use Hostwright command contracts or the explicit `hostwright-control` subset while preserving the same validation, redaction, ownership, selected-state-path, and RuntimeAdapter boundaries. The one-shot API exposes strict image lifecycle parity only through the same durable coordinator; first use may create its launch-selected image state database through that shared secure path boundary. It does not expose generic mutation, apply compatibility, or cleanup-token authority.
+Daemon-ready local control uses the authenticated, user-private Unix-socket
+Control API v2.1. It has no TCP listener. Kernel peer credentials, audit token,
+live code identity, the persisted subject, RBAC, admission, effective-intent
+reauthorization, durable idempotency, and tamper-evident audit all run before a
+mutation handler. The one-shot `hostwright-control` companion remains only the
+bounded bootstrap path for daemon installation, repair, and uninstall. Neither surface
+permits request-selected state paths or direct calls around the shared
+validation, ownership, provider, migration, and audit boundaries.
 
-They must not call Apple container, SQLite, `RuntimeAdapter`, state migrations, cleanup deletion, health execution, or diagnostics upload directly. `hostwright-control` delegates its admitted operations, including `image`, to existing CLI contracts, requires launch-fixed paths, rejects request-selected paths and arbitrary mutation names, bounds one stdin request and one stdout response, and then exits. It adds no GUI code, daemon API, listener, web dashboard, hosted diagnostics, telemetry upload, or remote control.
+The bootstrap client validates the companion as an owned, non-symlink regular
+executable, pins its filesystem identity across spawn, and validates the live
+child code identity before it runs. Installed artifacts require the exact
+Hostwright Team ID and `hostwright-control` identifier. A fresh ad-hoc source
+installation is allowed only for the default companion adjacent to a running
+ad-hoc `hostwright` CLI and only while the identity state is absent or empty.
+SwiftPM's deterministic ad-hoc `hostwright-<40-hex>` and
+`hostwright-control-<40-hex>` identifiers are accepted only on this source-build
+path; Developer ID artifacts still require the unsuffixed release identifiers.
+The companion then derives the installer identity from its live parent process,
+bootstraps that installer as the sole owner, and records its own exact native
+CDHash as a separate non-owner identity. Later ad-hoc replacement remains
+fail-closed until explicitly declared; this first-install trust-on-first-use
+boundary does not protect against an attacker already controlling the invoking
+user account or its build directory.
+
+Admission policies are bounded declarative documents, not arbitrary native
+code. Conflicting writes, malformed policy state, stale plan hashes, expired or
+ambiguous exceptions, effective-authority escalation, and audit failure deny a
+mutation before effects. Only an explicit advisory non-mutating extension may
+ignore its own execution failure. Dry-run admission has no durable request or
+runtime effect.
+
+Workload Profile v1 is canonical schema-v20 authority, not a client assertion.
+Admission resolves `workloadProfileID`, binds the effective inheritance hash
+into the plan and second RBAC pass, and rejects a conflicting supplied hash. A
+child may widen a parent/current constraint only with an exact actor, base,
+candidate, and expiry approval authorized for `profile.weaken`. Lifecycle
+preflight re-resolves the hash and reports sorted provider/workload gaps before
+effects; unsupported enforcement never falls back permissively. See
+[Secure Workload Profiles](workload-profiles.md).
+
+Phase 09 schema v18 adds the persistent identity foundation without yet opening a Control API listener. Authentication cross-checks `getpeereid`, `LOCAL_PEERPID`, and `LOCAL_PEERTOKEN`; binds the audit-token UID, GID, PID, PID version, audit session, daemon generation, socket device/inode, and nonce; and validates live code through `SecTaskCreateWithAuditToken` plus strict `SecCode` requirements. Installed peers are restricted to the frozen Hostwright team and identifier set. Ad-hoc peers require an explicit native CDHash pin. Optional P-256 proof refines but never replaces kernel and code identity. Sessions are persisted before use and are invalidated immediately by subject, credential, native CDHash, session, credential rotation, expiry, or daemon-generation change.
+
+The Phase 09 native-provider boundary is narrower than general plugin
+execution. It accepts only XPC protocol v1 `codeIdentityProof` requests through
+the per-user `dev.hostwright.xpc-provider` Mach service. The client requires
+team `993YC3JY4Q`, the exact service identifier, and the App Sandbox entitlement;
+the service reciprocally requires the exact Hostwright daemon team and signing
+identifier. The service's entitlement set is exactly
+`com.apple.security.app-sandbox=true`; file, network, device, Keychain, and
+temporary-exception entitlements are absent. The client inspects the connected
+service's live code-signing information, rejects an absent or additional
+entitlement, and matches a completed response to that independently derived
+identity. The response contains only the validated team, identifier, CDHash,
+and exact sandbox projection. It cannot resolve a
+secret, inspect Hostwright state, or mutate a runtime.
+
+Requests use exact-key, exact-type bounded XPC dictionaries, protocol version
+1, a bounded request ID, a 1–5000 millisecond deadline, and explicit request or
+cancel kinds. Unknown or malformed messages fail closed. The client cancels
+connections on timeout, task cancellation, provider revocation, invalid reply,
+or peer failure. Signed live qualification covers reciprocal requirement
+failures, malformed and oversized replies, crash and restart behavior, and
+owned-only cleanup. Notarization credentials are supplied only by Keychain
+profile name at qualification time and never enter repository files or logs.
 
 Configured files must be existing regular non-symlink files with safe ownership, no group/world write permission, and no set-ID bits. This check reduces accidental or cross-account substitution; it is not an operating-system sandbox or a guarantee against the invoking account replacing its own files. State-backed status can perform compatible path/schema migration, observation snapshot, and audit writes to the launch-configured database or the secure default when no state override is configured. An image mutation can affect only the exact versioned image request accepted by the shared coordinator. Source-consuming and destructive requests are bound to structured pre-observation digests before provider effects. Load verifies the complete inventory delta, and interrupted creation recovery requires durable reference-to-digest proof before adoption or exact rollback.
 

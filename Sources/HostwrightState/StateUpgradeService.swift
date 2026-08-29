@@ -64,6 +64,23 @@ public struct StateUpgradeMigrationResult: Codable, Equatable, Sendable {
     }
 }
 
+public struct StateUpgradePreparedMigrationResult: Codable, Equatable, Sendable {
+    public let schemaVersion: Int
+    public let kind: String
+    public let migration: StateUpgradeMigrationResult
+    public let rollbackSnapshot: StateUpgradeSnapshot?
+
+    public init(
+        migration: StateUpgradeMigrationResult,
+        rollbackSnapshot: StateUpgradeSnapshot?
+    ) {
+        self.schemaVersion = 1
+        self.kind = "stateUpgradePreparedMigrationResult"
+        self.migration = migration
+        self.rollbackSnapshot = rollbackSnapshot
+    }
+}
+
 public struct StateUpgradeRevision: Codable, Equatable, Sendable {
     public let databaseSHA256: String
     public let databaseBytes: UInt64
@@ -96,12 +113,104 @@ public struct StateUpgradeService: Sendable {
 
     public func withExclusiveLifecycleFence<T>(
         allowPendingMaintenance: Bool = false,
+        lockWaitMilliseconds: Int = 250,
         _ body: () throws -> T
     ) throws -> T {
+        guard (1...30_000).contains(lockWaitMilliseconds) else {
+            throw StateStoreError.invalidRecord(
+                "exclusive lifecycle fence wait must be between 1 and 30000 milliseconds"
+            )
+        }
         try store.configuration.prepareStateAccessFoundation()
         return try StateAccessCoordinator(configuration: store.configuration)
             .withExclusiveLifecycleFence(
                 allowPendingMaintenance: allowPendingMaintenance,
+                waitTimeoutNanoseconds: UInt64(lockWaitMilliseconds) * 1_000_000,
+                body
+            )
+    }
+
+    public func withBoundedStateAccessWait<T>(
+        lockWaitMilliseconds: Int,
+        _ body: () throws -> T
+    ) throws -> T {
+        guard (1...30_000).contains(lockWaitMilliseconds) else {
+            throw StateStoreError.invalidRecord(
+                "state-access wait must be between 1 and 30000 milliseconds"
+            )
+        }
+        return try StateAccessCoordinator(configuration: store.configuration)
+            .withBoundedStateAccessWait(
+                waitTimeoutNanoseconds: UInt64(lockWaitMilliseconds) * 1_000_000,
+                body
+            )
+    }
+
+    public func withSerializedLifecycleMutation<T>(
+        lockWaitMilliseconds: Int = 250,
+        _ body: () throws -> T
+    ) throws -> T {
+        guard (1...30_000).contains(lockWaitMilliseconds) else {
+            throw StateStoreError.invalidRecord(
+                "serialized lifecycle mutation wait must be between 1 and 30000 milliseconds"
+            )
+        }
+        try store.configuration.prepareStateAccessFoundation()
+        return try StateAccessCoordinator(configuration: store.configuration)
+            .withSerializedLifecycleMutation(
+                waitTimeoutNanoseconds: UInt64(lockWaitMilliseconds) * 1_000_000,
+                body
+            )
+    }
+
+    public func withBoundedStateAccessWait<T>(
+        lockWaitMilliseconds: Int,
+        _ body: () async throws -> T
+    ) async throws -> T {
+        guard (1...30_000).contains(lockWaitMilliseconds) else {
+            throw StateStoreError.invalidRecord(
+                "state-access wait must be between 1 and 30000 milliseconds"
+            )
+        }
+        return try await StateAccessCoordinator(configuration: store.configuration)
+            .withBoundedStateAccessWait(
+                waitTimeoutNanoseconds: UInt64(lockWaitMilliseconds) * 1_000_000,
+                body
+            )
+    }
+
+    public func withExclusiveLifecycleFence<T>(
+        allowPendingMaintenance: Bool = false,
+        lockWaitMilliseconds: Int = 250,
+        _ body: () async throws -> T
+    ) async throws -> T {
+        guard (1...30_000).contains(lockWaitMilliseconds) else {
+            throw StateStoreError.invalidRecord(
+                "exclusive lifecycle fence wait must be between 1 and 30000 milliseconds"
+            )
+        }
+        try store.configuration.prepareStateAccessFoundation()
+        return try await StateAccessCoordinator(configuration: store.configuration)
+            .withExclusiveLifecycleFence(
+                allowPendingMaintenance: allowPendingMaintenance,
+                waitTimeoutNanoseconds: UInt64(lockWaitMilliseconds) * 1_000_000,
+                body
+            )
+    }
+
+    public func withSerializedLifecycleMutation<T>(
+        lockWaitMilliseconds: Int = 250,
+        _ body: () async throws -> T
+    ) async throws -> T {
+        guard (1...30_000).contains(lockWaitMilliseconds) else {
+            throw StateStoreError.invalidRecord(
+                "serialized lifecycle mutation wait must be between 1 and 30000 milliseconds"
+            )
+        }
+        try store.configuration.prepareStateAccessFoundation()
+        return try await StateAccessCoordinator(configuration: store.configuration)
+            .withSerializedLifecycleMutation(
+                waitTimeoutNanoseconds: UInt64(lockWaitMilliseconds) * 1_000_000,
                 body
             )
     }
@@ -187,6 +296,58 @@ public struct StateUpgradeService: Sendable {
             fromSchemaVersion: before,
             toSchemaVersion: MigrationRunner.latestSchemaVersion
         )
+    }
+
+    public func migrateToLatestWithVerifiedBackup() throws -> StateUpgradePreparedMigrationResult {
+        try withExclusiveLifecycleFence {
+            guard let revision = try verifiedRevision() else {
+                try store.migrate()
+                try store.validateSchema()
+                return StateUpgradePreparedMigrationResult(
+                    migration: StateUpgradeMigrationResult(
+                        fromSchemaVersion: MigrationRunner.latestSchemaVersion,
+                        toSchemaVersion: MigrationRunner.latestSchemaVersion
+                    ),
+                    rollbackSnapshot: nil
+                )
+            }
+            if revision.stateSchemaVersion == MigrationRunner.latestSchemaVersion {
+                try store.validateSchema()
+                return StateUpgradePreparedMigrationResult(
+                    migration: StateUpgradeMigrationResult(
+                        fromSchemaVersion: revision.stateSchemaVersion,
+                        toSchemaVersion: revision.stateSchemaVersion
+                    ),
+                    rollbackSnapshot: nil
+                )
+            }
+
+            let databaseParent = (store.path as NSString).deletingLastPathComponent
+            let rollbackRoot = URL(fileURLWithPath: databaseParent, isDirectory: true)
+                .appendingPathComponent(".hostwright-state-upgrades", isDirectory: true)
+            let operationID = UUID().uuidString.lowercased()
+            let rollbackDirectory = rollbackRoot.appendingPathComponent(
+                operationID,
+                isDirectory: true
+            )
+            let pathManager = SecureStatePathManager()
+            try pathManager.ensurePrivateMaintenanceDirectory(rollbackRoot.path)
+            try pathManager.ensurePrivateMaintenanceDirectory(rollbackDirectory.path)
+            let snapshot = try createVerifiedSnapshot(
+                at: rollbackDirectory.appendingPathComponent("state.sqlite").path
+            )
+            try pathManager.writePrivateJSON(
+                snapshot,
+                to: rollbackDirectory.appendingPathComponent("snapshot-v1.json").path
+            )
+            try verify(snapshot)
+            let migration = try migrateToLatest()
+            try verify(snapshot)
+            return StateUpgradePreparedMigrationResult(
+                migration: migration,
+                rollbackSnapshot: snapshot
+            )
+        }
     }
 
     @discardableResult

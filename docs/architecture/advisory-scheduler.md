@@ -1,63 +1,34 @@
-# Advisory Scheduler And Placement Model
+# Scheduler Placement And Durable Admission Boundary
 
-> **Current partial behavior with an implementation owner:** the advisory model remains useful but is not the v0.0.2 scheduler. Phase 10 owns requests/limits, hard filters, fair packing, topology, disruption, hysteresis, pressure/energy, accelerators, and exact-oracle qualification.
+> The historical Phase 31 local recommendation experiment is superseded by the direct Phase 10 scheduler and admission contracts. Current-source G3-G8 scheduler qualification is sealed, but aggregate G13-G15 qualification remains evidence-gated.
 
-Status: Phase 31 local advisory model.
+Status: Phase 10 / issue #207 implementation boundary; not a stable aggregate qualification claim.
 
-Phase 31 adds a deterministic in-memory advisory scheduler for one local Mac. It filters, scores, and explains local recommendations from explicit desired runtime state, optional observed runtime state, local policy decisions, fixture or local resource reports, and declared workload resource requests.
+Phase 10 has one scheduler boundary. `HostwrightScheduler` is the pure placement contract and `HostwrightState` is the durable admission authority. The reconciler bridge translates the manifest contract into those boundaries; it does not provide a second local scheduler.
 
-The scheduler does not mutate runtime state, write SQLite, reserve capacity, preempt workloads, create placements, contact registries, pull images, upload telemetry, call Apple container commands, provide a scheduler API, or perform multi-host placement.
+## Direct Boundary
 
-## Implemented Boundary
+- `Sources/HostwrightScheduler/` owns canonical resource vectors, workload and node snapshots, deterministic hard placement filters, scoring/explanation ordering, and `plan`/`simulate` operations.
+- `Sources/HostwrightReconciler/ManifestSchedulerAdmissionBridge.swift` maps manifest resource requests into scheduler placement demand and maps declared limits into the runtime hard-enforcement input. It validates profile ceilings and permissions before admission and rejects unsupported runtime claims.
+- `Sources/HostwrightState/SchedulerAdmissionRepository.swift` durably records node-capacity history, decision/reservation bindings, active-capacity accounting, idempotent replay, and fencing/release evidence.
+- The persisted capacity generation and digest are authoritative. A caller cannot inflate capacity or replay a decision with changed resource, input, configuration, profile, lifecycle-plan, owner, or project bindings.
+- Database transactions contain only state work. Runtime observation and mutation are performed at the surrounding lifecycle boundary after the durable decision or release evidence is verified.
 
-- Scope: local single-host advisory recommendations only.
-- Inputs: `DesiredRuntimeState`, optional `ObservedRuntimeState`, `ResourceIntelligenceReport`, explicit `AdvisoryResourceRequest` values, and `LocalPolicyEvaluator`.
-- Output: `AdvisorySchedulingReport` with sorted recommendations, stable reason codes, scores, blockers, warnings, remediations, and `advisoryOnly = true`.
-- Memory: declared memory requests are compared with local host physical memory and an advisory budget percentage. Missing memory facts block recommendations; missing service memory requests warn.
-- Ports and policy: existing local policy decisions for duplicate desired host ports, observed host-port conflicts, broad bind addresses, privileged ports, unsafe mounts, invalid identities, and secret redaction are carried into scheduler explanations.
-- Fairness: workload class counts can lower advisory scores when a declared class exceeds the configured local threshold. This is not operating-system QoS, preemption, or fair-share enforcement.
-- Workload classes: `interactiveService`, `backgroundWorker`, `batchJob`, `localAI`, and `unknown` are scoring/explanation inputs only.
-- Accelerators: requested accelerator dimensions are blockers. They are not scored or reserved.
-- Remote placement: any remote placement requirement is blocked.
+## Admission And Enforcement
 
-## Determinism
+Requests drive placement and capacity accounting. Limits are the runtime enforcement values, so a runtime adapter that supports only CPU and memory must receive the declared limits. Unsupported hard limits, provider claims, accelerator claims, and scheduler constraints fail before runtime mutation with stable structured reasons.
 
-Scheduler output is stable for the same inputs:
+Profile permissions and ceilings are authoritative admission constraints. A manifest may narrow a resolved profile but cannot enlarge its CPU, memory, process, provider, or accelerator permissions. The default overcommit policy remains explicit scheduler input and is never an implicit manifest relaxation.
 
-- policy decisions are sorted by the existing policy ordering;
-- reasons sort by severity, category, reason code, policy reason code, stable detail key, and message;
-- recommendations sort by status, score, service identity, and instance name;
-- scores are pure functions of declared inputs.
+## Durable Safety Invariants
 
-## Evidence Boundary
+- A reservation binds workload/node UUIDs, the canonical resource vector, capacity generation/digest, decision input/config/profile/lifecycle digests, owner subject, project, expiry metadata, and a structured fencing token.
+- Identical replay returns the stored decision and reservation only after comparing the complete authoritative binding. Conflicting replay, stale capacity/input, duplicate active workload, insufficient capacity, and stale fencing evidence fail closed.
+- Expiration does not release capacity. Release requires verified runtime absence or authoritative fencing evidence, with lineage, token, digest, timestamp, and monotonic-epoch checks.
+- Node-capacity snapshots are immutable history. New reservations require the latest generation; an existing exact replay may validate its originally bound historical generation.
 
-The resource report consumed by the scheduler records coarse host facts such as physical memory, active processor count, and thermal state. The separate Phase 36 benchmark report is not scheduler capacity input. Runtime density, VM overhead, sustained workload pressure, and production capacity remain unmeasured, so recommendations remain advisory and manual-review-only.
+## Qualification Boundary
 
-Kubernetes scheduler references inform the general filter-then-score shape, but Hostwright does not implement Kubernetes scheduling semantics, node behavior, topology, taints, tolerations, cluster state, or compatibility.
+The pure scheduler, manifest bridge, policy checks, migration/repository behavior, and focused tests are independently verifiable contracts. Current-source G3-G8 qualification is sealed with zero safety mismatches and 382 retained intentional optimization-gap fixtures. Lifecycle/control integration, hardware/runtime evidence, remaining G13-G15 closure, and public capability claims remain pending until their assigned evidence gates pass. `scheduler.optimization` and `accelerators.host-native` remain unavailable.
 
-## Rejected Claims
-
-The advisory scheduler is not:
-
-- automatic placement;
-- resource reservation;
-- production capacity planning;
-- runtime mutation;
-- daemon-enforced scheduling;
-- multi-host scheduling;
-- remote placement;
-- external scheduler API compatibility;
-- Kubernetes scheduler compatibility;
-- accelerator-aware scheduling;
-- GPU, ANE, Metal, Core ML, MLX, PyTorch MPS, or host-native accelerator support.
-
-## Sources
-
-- Kubernetes scheduler overview: <https://kubernetes.io/docs/concepts/scheduling-eviction/kube-scheduler/>
-- Kubernetes resource requests: <https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/>
-- Kubernetes scheduling framework configuration: <https://kubernetes.io/docs/reference/scheduling/config/>
-- Kubernetes node assignment model: <https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/>
-- Kubernetes topology spread constraints: <https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/>
-- Kubernetes taints and tolerations: <https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/>
-- Apple `ProcessInfo.physicalMemory`: <https://developer.apple.com/documentation/foundation/processinfo/physicalmemory>
-- Apple `ProcessInfo` thermal-state guidance: <https://developer.apple.com/documentation/foundation/processinfo>
+The retained filename is an ADR traceability path; it does not authorize an advisory implementation or compatibility execution path.

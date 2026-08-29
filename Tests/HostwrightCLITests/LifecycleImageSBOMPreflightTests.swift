@@ -99,7 +99,7 @@ final class LifecycleImageSBOMPreflightTests: XCTestCase {
 
     func testSBOMPolicyChangesConfirmationManifestHash() throws {
         try withFixture { fixture in
-            let source = "version: 2\nproject: demo\n"
+            let source = "version: 3\nproject: demo\n"
             let first = try lifecycleManifestSHA256(
                 text: source,
                 manifest: fixture.manifest
@@ -207,7 +207,7 @@ final class LifecycleImageSBOMPreflightTests: XCTestCase {
         let reference =
             "registry.example.test/team/api@\(digest)"
         let manifest = HostwrightManifest(
-            version: 2,
+            version: 3,
             project: "demo",
             imagePolicy: .requireDigest,
             imageTrust: nil,
@@ -220,7 +220,7 @@ final class LifecycleImageSBOMPreflightTests: XCTestCase {
             ]
         )
         let manifestText = """
-        version: 2
+        version: 3
         project: demo
         imagePolicy: require-digest
         imageSBOM:
@@ -231,6 +231,9 @@ final class LifecycleImageSBOMPreflightTests: XCTestCase {
         services:
           api:
             image: \(reference)
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
         """
         try manifestText.write(
             toFile: manifestPath,

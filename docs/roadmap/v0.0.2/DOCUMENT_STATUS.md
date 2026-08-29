@@ -44,7 +44,7 @@ Historical files can still contain valuable implementation detail and tests may 
 
 ## Enforcement
 
-- `scripts/check-current-truth.py` verifies release/contract values, Manifest v2 examples/schema, state schema v7, active docs, and immutable historical hashes.
+- `scripts/check-current-truth.py` verifies release/contract values, Manifest v3 examples/schema, state schema v23, active docs, and immutable historical hashes.
 - `scripts/roadmap-governance.py` validates the 183-issue ledger and clean evidence closure rules.
 - `scripts/check-docs.sh` validates current repository links and executes each checked-in quickstart manifest.
 - `.github/workflows/docs-site.yml` validates both repositories together.

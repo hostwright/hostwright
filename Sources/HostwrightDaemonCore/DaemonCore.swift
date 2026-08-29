@@ -19,6 +19,11 @@ public enum DaemonWakeReason: String, Equatable, Sendable {
     case shutdownRequested
 }
 
+public protocol DaemonControlServing: Sendable {
+    func start() throws
+    func stop()
+}
+
 public struct DaemonConfiguration: Equatable, Sendable {
     public let mode: DaemonMode
     public let configPath: String
@@ -201,6 +206,7 @@ public struct DaemonLoopRunner {
     ) throws -> DaemonConfigurationSnapshot
     public var idGenerator: (String) -> String
     public var jitterProvider: (Int, Int) -> Int
+    var schedulerAuthorityValidationHook: (() throws -> Void)?
 
     private let configuration: DaemonConfiguration
     private let runtimeAdapter: any RuntimeAdapter
@@ -210,6 +216,7 @@ public struct DaemonLoopRunner {
     private let instanceLock: any DaemonInstanceLock
     private let shutdownToken: DaemonShutdownToken
     private let configurationMonitor: DaemonConfigurationChangeMonitor?
+    private let controlService: (any DaemonControlServing)?
 
     public init(
         configuration: DaemonConfiguration,
@@ -220,6 +227,7 @@ public struct DaemonLoopRunner {
         instanceLock: any DaemonInstanceLock,
         shutdownToken: DaemonShutdownToken = DaemonShutdownToken(),
         configurationMonitor: DaemonConfigurationChangeMonitor? = nil,
+        controlService: (any DaemonControlServing)? = nil,
         readConfig: @escaping (String) throws -> String,
         readConfiguration: ((
             String,
@@ -237,6 +245,7 @@ public struct DaemonLoopRunner {
         self.instanceLock = instanceLock
         self.shutdownToken = shutdownToken
         self.configurationMonitor = configurationMonitor
+        self.controlService = controlService
         self.readConfig = readConfig
         self.readConfiguration = readConfiguration ?? { path, kind, expected in
             let text = try readConfig(path)
@@ -262,6 +271,7 @@ public struct DaemonLoopRunner {
         }
         self.idGenerator = idGenerator
         self.jitterProvider = jitterProvider
+        self.schedulerAuthorityValidationHook = nil
     }
 
     public func run() async throws -> DaemonRunSummary {
@@ -274,7 +284,17 @@ public struct DaemonLoopRunner {
         defer { configurationMonitor?.stop() }
 
         let store = SQLiteStateStore(configuration: configuration.stateStoreConfiguration)
-        try store.migrate()
+        _ = try StateUpgradeService(store: store)
+            .withBoundedStateAccessWait(lockWaitMilliseconds: 30_000) {
+                try StateUpgradeService(store: store)
+                    .migrateToLatestWithVerifiedBackup()
+            }
+        return try await runStatefulLoop(store: store)
+    }
+
+    private func runStatefulLoop(store: SQLiteStateStore) async throws -> DaemonRunSummary {
+        try controlService?.start()
+        defer { controlService?.stop() }
         try recordLifecycleEvent(
             store: store,
             type: "daemon.started",
@@ -459,8 +479,19 @@ public struct DaemonLoopRunner {
             let configurationSetSHA256 = DaemonConfigurationSetDigest.sha256(configurationTargets)
             try configurationMonitor?.replace(paths: configurationTargets.map(\.path))
             configurationValidated = true
-            let mapping = ManifestRuntimeMapper.map(manifest)
-            let projectID = "project-\(mapping.desiredState.projectName)"
+            let projectName = manifest.project ?? ""
+            let projectID = "project-\(projectName)"
+            let authorizedMapping = try StateUpgradeService(store: store)
+                .withBoundedStateAccessWait(lockWaitMilliseconds: 30_000) {
+                    try schedulerAuthorizedRuntimeMapping(
+                        manifest: manifest,
+                        manifestSHA256: manifestSnapshot.target.contentSHA256,
+                        projectID: projectID,
+                        store: store
+                    )
+                }
+            try schedulerAuthorityValidationHook?()
+            let mapping = authorizedMapping.mapping
             currentProjectID = projectID
             let observationDesiredState = DesiredRuntimeState(
                 projectName: mapping.desiredState.projectName,
@@ -511,11 +542,14 @@ public struct DaemonLoopRunner {
                 uniquingKeysWith: { first, _ in first }
             )
             let plan = HostwrightTraceContext.withSpan(.planCompile) {
-                ReconciliationPlanner().plan(
-                    manifest: manifest,
-                    observedState: observedWithHealth,
-                    restartPolicyStates: restartPolicyStateMap,
-                    currentTimestamp: startedAt
+                ReconciliationPlanner().reconcile(
+                    PlanningInput(
+                        desiredState: mapping.desiredState,
+                        observedState: observedWithHealth,
+                        additionalIssues: mapping.issues,
+                        restartPolicyStates: restartPolicyStateMap,
+                        currentTimestamp: startedAt
+                    )
                 )
             }
             currentPlanHash = plan.planHash
@@ -549,21 +583,28 @@ public struct DaemonLoopRunner {
             } else {
                 enteredLifecycleDriver = true
                 do {
-                    reconciliation = try await reconciliationDriver.reconcile(
-                        request: try DaemonReconciliationRequest(
-                            manifestPath: manifestPath,
-                            manifestSHA256: manifestSnapshot.target.contentSHA256,
-                            configurationSetSHA256: configurationSetSHA256,
-                            configurationTargets: configurationTargets,
-                            stateDatabasePath: configuration.stateDatabasePath,
-                            projectID: projectID,
-                            maximumParallelism: configuration.maximumParallelism,
-                            selectedServiceNames: selectedServiceNames,
-                            operationIdempotencyKeySHA256:
-                                operationIdempotencyKeySHA256,
-                            maintenanceAdmission: maintenance.binding
-                        )
+                    let request = try DaemonReconciliationRequest(
+                        manifestPath: manifestPath,
+                        manifestSHA256: manifestSnapshot.target.contentSHA256,
+                        configurationSetSHA256: configurationSetSHA256,
+                        configurationTargets: configurationTargets,
+                        stateDatabasePath: configuration.stateDatabasePath,
+                        projectID: projectID,
+                        maximumParallelism: configuration.maximumParallelism,
+                        selectedServiceNames: selectedServiceNames,
+                        operationIdempotencyKeySHA256:
+                            operationIdempotencyKeySHA256,
+                        maintenanceAdmission: maintenance.binding,
+                        schedulerAuthorityBinding:
+                            authorizedMapping.schedulerAuthority
                     )
+                    reconciliation = try await StateUpgradeService(store: store)
+                        .withSerializedLifecycleMutation(lockWaitMilliseconds: 30_000) {
+                            try await reconciliationDriver.reconcileAuthorized(
+                                request: request,
+                                schedulerAuthorityBinding: authorizedMapping.schedulerAuthority
+                            )
+                        }
                 } catch {
                     try recordMaintenanceCompletion(
                         maintenance,
@@ -770,6 +811,80 @@ public struct DaemonLoopRunner {
             return .failure
         }
     }
+
+    private struct AuthorizedRuntimeMapping {
+        let mapping: ManifestRuntimeMappingResult
+        let schedulerAuthority: DaemonSchedulerAuthorityBinding
+    }
+
+    private func schedulerAuthorizedRuntimeMapping(
+        manifest: HostwrightManifest,
+        manifestSHA256: String,
+        projectID: String,
+        store: SQLiteStateStore
+    ) throws -> AuthorizedRuntimeMapping {
+        let admissions: [ManifestSchedulerAdmission]
+        do {
+            admissions = try ManifestSchedulerAdmissionBridge.admit(
+                manifest: manifest,
+                subjectID: "owner"
+            )
+        } catch {
+            throw Self.schedulerAuthorityUnavailableDiagnostic
+        }
+
+        guard !admissions.isEmpty,
+              Set(admissions.map(\.workloadID)).count == admissions.count,
+              let project = try store.schedulerAdmissions.projectAuthority(
+                forProjectID: projectID
+              ),
+              project.projectName == manifest.project,
+              project.manifestDigest == manifestSHA256 else {
+            throw Self.schedulerAuthorityUnavailableDiagnostic
+        }
+
+        var reservations: [SchedulerReservationRecord] = []
+        for admission in admissions {
+            guard let reservation = try store.schedulerAdmissions.activeReservation(
+                workloadID: admission.workloadID,
+                projectUUID: project.resourceUUID
+            ),
+                  reservation.status == .committed,
+                  reservation.projectUUID == project.resourceUUID,
+                  reservation.configDigest == manifestSHA256,
+                  reservation.lifecyclePlanDigest == project.manifestDigest,
+                  !reservation.ownerSubjectID.isEmpty else {
+                throw Self.schedulerAuthorityUnavailableDiagnostic
+            }
+            let fence = try store.schedulerAdmissions.fencingState(
+                nodeID: reservation.nodeID
+            )
+            guard reservation.fencingToken.nodeEpoch == fence.nodeEpoch else {
+                throw Self.schedulerAuthorityUnavailableDiagnostic
+            }
+            reservations.append(reservation)
+        }
+
+        let schedulerAuthority = try DaemonSchedulerAuthorityBinding(
+            projectResourceUUID: project.resourceUUID,
+            reservations: reservations.sorted {
+                $0.workloadID.uuidString.lowercased() <
+                    $1.workloadID.uuidString.lowercased()
+            }
+        )
+        return AuthorizedRuntimeMapping(
+            mapping: ManifestRuntimeMapper.map(
+                manifest,
+                schedulerAdmissionValidated: true
+            ),
+            schedulerAuthority: schedulerAuthority
+        )
+    }
+
+    private static let schedulerAuthorityUnavailableDiagnostic = HostwrightDiagnostic(
+        code: .unsafeExposure,
+        message: "scheduler-authority-unavailable: daemon reconciliation requires a current committed Control 2.2 scheduler decision and fenced reservation for every workload. Manifest-only admission cannot authorize runtime mutation. No runtime mutation was attempted."
+    )
 
     private func recordConfigurationAccepted(
         store: SQLiteStateStore,

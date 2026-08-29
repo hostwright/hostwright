@@ -306,7 +306,7 @@ final class StateMaintenanceCLITests: XCTestCase {
 
     private var retentionManifest: String {
         """
-        version: 2
+        version: 3
         project: demo
         retention:
           recoveryHorizon: 60s
@@ -326,6 +326,9 @@ final class StateMaintenanceCLITests: XCTestCase {
         services:
           api:
             image: local/api:latest
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
         """
     }
 }

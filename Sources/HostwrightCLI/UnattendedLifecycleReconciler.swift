@@ -4,7 +4,132 @@ import HostwrightCore
 import HostwrightDaemonCore
 import HostwrightManifest
 import HostwrightReconciler
+import HostwrightRuntime
 import HostwrightState
+
+public struct SchedulerLifecycleReservationHandoff: Sendable {
+    public let reservation: SchedulerReservationRecord
+    public let preemptionIntent: SchedulerPreemptionIntentRecord?
+
+    public init(
+        reservation: SchedulerReservationRecord,
+        preemptionIntent: SchedulerPreemptionIntentRecord? = nil
+    ) throws {
+        guard reservation.status == .pending,
+              reservation.fencingToken.nodeEpoch >= 1,
+              reservation.fencingToken.reservationSequence >= 1 else {
+            throw SchedulerAdmissionError.invalidBinding(
+                field: "lifecycle-reservation-status"
+            )
+        }
+        if let preemptionIntent {
+            guard preemptionIntent.proposal.targetWorkloadID ==
+                    reservation.workloadID,
+                  preemptionIntent.projectID == reservation.projectUUID else {
+                throw SchedulerAdmissionError.invalidBinding(
+                    field: "lifecycle-preemption-binding"
+                )
+            }
+        }
+        self.reservation = reservation
+        self.preemptionIntent = preemptionIntent
+    }
+
+    fileprivate func validate(
+        manifest: HostwrightManifest,
+        compiled: LifecycleCompiledCommand,
+        preparation: LifecycleCommandPreparation,
+        options: LifecycleCLIOptions
+    ) throws {
+        guard !options.dryRun,
+              options.command == .up,
+              preparation.projectResourceUUID == reservation.projectUUID,
+              preparation.manifestSHA256 == reservation.lifecyclePlanDigest,
+              compiled.plan.nodes.isEmpty == false else {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                "A scheduler reservation was not bound to the prepared lifecycle plan."
+            )
+        }
+        guard let manifestProject = manifest.project,
+              "project-\(manifestProject)" == preparation.projectID else {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                "The scheduler reservation no longer matches the authoritative project lifecycle snapshot."
+            )
+        }
+    }
+}
+
+public struct SchedulerLifecycleVictimHandoff: Sendable {
+    public let intent: SchedulerPreemptionIntentRecord
+    public let reservations: [SchedulerReservationRecord]
+
+    public init(
+        intent: SchedulerPreemptionIntentRecord,
+        reservations: [SchedulerReservationRecord]
+    ) throws {
+        let ordered = reservations.sorted {
+            $0.workloadID.uuidString.lowercased() <
+                $1.workloadID.uuidString.lowercased()
+        }
+        guard !ordered.isEmpty,
+              ordered.count == intent.proposal.victims.count,
+              Set(ordered.map(\.workloadID)).count == ordered.count,
+              Set(ordered.map(\.workloadID)) ==
+                  Set(intent.proposal.victims.map(\.workloadID)),
+              ordered.allSatisfy({
+                  $0.status.reservesCapacity &&
+                      $0.projectUUID == intent.projectID
+              }),
+              intent.proposal.victims.allSatisfy({ victim in
+                  ordered.contains {
+                      $0.workloadID == victim.workloadID &&
+                          $0.nodeID == victim.nodeID &&
+                          $0.resources == victim.allocation &&
+                          $0.ownerSubjectID == victim.subjectID &&
+                          $0.projectUUID == victim.projectID
+                  }
+              }) else {
+            throw SchedulerAdmissionError.invalidBinding(
+                field: "lifecycle-victim-binding"
+            )
+        }
+        self.intent = intent
+        self.reservations = ordered
+    }
+
+    fileprivate func validate(
+        manifest: HostwrightManifest,
+        compiled: LifecycleCompiledCommand,
+        preparation: LifecycleCommandPreparation,
+        options: LifecycleCLIOptions
+    ) throws {
+        guard !options.dryRun,
+              options.command == .down,
+              preparation.projectResourceUUID == intent.projectID,
+              preparation.manifestSHA256 == reservations[0].lifecyclePlanDigest,
+              compiled.plan.nodes.isEmpty == false else {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                "Preemption victims were not bound to the prepared lifecycle plan."
+            )
+        }
+        guard let manifestProject = manifest.project,
+              reservations.allSatisfy({
+                  $0.lifecyclePlanDigest == reservations[0].lifecyclePlanDigest
+              }),
+              "project-\(manifestProject)" == preparation.projectID else {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                "Preemption victims no longer match the authoritative project lifecycle snapshot."
+            )
+        }
+    }
+}
+
+typealias SchedulerLifecycleAuthorityCheck = @Sendable (
+    HostwrightManifest,
+    LifecycleCompiledCommand,
+    LifecycleCommandPreparation,
+    LifecycleCLIOptions
+) throws -> Void
 
 public struct UnattendedLifecycleReconciler: DaemonReconciliationDriving {
     private let readManifest: @Sendable (String) throws -> String
@@ -16,6 +141,10 @@ public struct UnattendedLifecycleReconciler: DaemonReconciliationDriving {
     private let makeDriver: @Sendable (
         LifecycleCLIOptions
     ) -> any LifecycleCommandDriving
+    private let makeAuthorizedDriver: (@Sendable (
+        LifecycleCLIOptions,
+        @escaping SchedulerLifecycleAuthorityCheck
+    ) -> any LifecycleCommandDriving)?
     private let now: @Sendable () -> Date
 
     public init(environment: CLIEnvironment = .live) {
@@ -25,6 +154,13 @@ public struct UnattendedLifecycleReconciler: DaemonReconciliationDriving {
         self.readConfiguration = SecureDaemonConfigurationReader.read
         self.makeDriver = { options in
             LifecycleLiveDriver(environment: environment, options: options)
+        }
+        self.makeAuthorizedDriver = { options, check in
+            LifecycleLiveDriver(
+                environment: environment,
+                options: options,
+                schedulerAuthorityValidator: check
+            )
         }
         self.now = Date.init
     }
@@ -39,6 +175,10 @@ public struct UnattendedLifecycleReconciler: DaemonReconciliationDriving {
         makeDriver: @escaping @Sendable (
             LifecycleCLIOptions
         ) -> any LifecycleCommandDriving,
+        makeAuthorizedDriver: (@Sendable (
+            LifecycleCLIOptions,
+            @escaping SchedulerLifecycleAuthorityCheck
+        ) -> any LifecycleCommandDriving)? = nil,
         now: @escaping @Sendable () -> Date = Date.init
     ) {
         self.readManifest = readManifest
@@ -65,17 +205,202 @@ public struct UnattendedLifecycleReconciler: DaemonReconciliationDriving {
             return DaemonConfigurationSnapshot(target: target, text: text)
         }
         self.makeDriver = makeDriver
+        self.makeAuthorizedDriver = makeAuthorizedDriver
         self.now = now
     }
 
     public func reconcile(
         request: DaemonReconciliationRequest
     ) async throws -> DaemonReconciliationResult {
+        try await reconcile(
+            request: request,
+            command: .up,
+            authorityCheck: request.schedulerAuthorityBinding.map {
+                makeDaemonSchedulerAuthorityCheck(
+                    $0,
+                    stateDatabasePath: request.stateDatabasePath
+                )
+            }
+        )
+    }
+
+    public func reconcileAuthorized(
+        request: DaemonReconciliationRequest,
+        schedulerAuthorityBinding: DaemonSchedulerAuthorityBinding
+    ) async throws -> DaemonReconciliationResult {
+        guard request.schedulerAuthorityBinding == schedulerAuthorityBinding else {
+            throw HostwrightDiagnostic(
+                code: .unsafeExposure,
+                message: "scheduler-authority-unavailable: the reconciliation request does not carry the exact validated daemon scheduler authority binding. No runtime mutation was attempted."
+            )
+        }
+        return try await reconcile(
+            request: request,
+            command: .up,
+            authorityCheck: makeDaemonSchedulerAuthorityCheck(
+                schedulerAuthorityBinding,
+                stateDatabasePath: request.stateDatabasePath
+            )
+        )
+    }
+
+    public func executeAuthorizedSchedulerReservation(
+        manifestPath: String,
+        stateDatabasePath: String,
+        reservation: SchedulerReservationRecord,
+        preemptionIntent: SchedulerPreemptionIntentRecord?,
+        maximumParallelism: Int
+    ) async throws -> DaemonReconciliationResult {
+        let handoff = try SchedulerLifecycleReservationHandoff(
+            reservation: reservation,
+            preemptionIntent: preemptionIntent
+        )
+        let request = try makeSchedulerRequest(
+            manifestPath: manifestPath,
+            stateDatabasePath: stateDatabasePath,
+            workloadIDs: [reservation.workloadID],
+            subjectID: reservation.ownerSubjectID,
+            operationSeed: [
+                "scheduler-up",
+                reservation.decisionID.uuidString.lowercased(),
+                reservation.reservationID.uuidString.lowercased(),
+                reservation.fencingToken.stableKey,
+            ].joined(separator: "|"),
+            maximumParallelism: maximumParallelism
+        )
+        return try await reconcile(
+            request: request,
+            command: .up,
+            authorityCheck: handoff.validate
+        )
+    }
+
+    public func executeAuthorizedSchedulerVictims(
+        manifestPath: String,
+        stateDatabasePath: String,
+        intent: SchedulerPreemptionIntentRecord,
+        reservations: [SchedulerReservationRecord],
+        maximumParallelism: Int
+    ) async throws -> DaemonReconciliationResult {
+        let handoff = try SchedulerLifecycleVictimHandoff(
+            intent: intent,
+            reservations: reservations
+        )
+        let request = try makeSchedulerRequest(
+            manifestPath: manifestPath,
+            stateDatabasePath: stateDatabasePath,
+            workloadIDs: handoff.reservations.map(\.workloadID),
+            subjectID: handoff.reservations[0].ownerSubjectID,
+            operationSeed: [
+                "scheduler-down",
+                intent.intentID.uuidString.lowercased(),
+                handoff.reservations.map {
+                    "\($0.reservationID.uuidString.lowercased()):\($0.fencingToken.stableKey)"
+                }.joined(separator: ","),
+            ].joined(separator: "|"),
+            maximumParallelism: maximumParallelism
+        )
+        return try await reconcile(
+            request: request,
+            command: .down,
+            authorityCheck: handoff.validate
+        )
+    }
+
+    private func makeDaemonSchedulerAuthorityCheck(
+        _ binding: DaemonSchedulerAuthorityBinding,
+        stateDatabasePath: String
+    ) -> SchedulerLifecycleAuthorityCheck {
+        { manifest, compiled, preparation, options in
+            guard !options.dryRun,
+                  options.command == .up,
+                  options.stateDatabasePath == stateDatabasePath,
+                  preparation.projectResourceUUID == binding.projectResourceUUID,
+                  compiled.plan.nodes.isEmpty == false else {
+                throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                    "The daemon scheduler authority binding was not attached to the prepared lifecycle plan."
+                )
+            }
+            guard let lifecyclePlanDigest = binding.reservations.first?.lifecyclePlanDigest,
+                  binding.reservations.allSatisfy({
+                      $0.projectUUID == binding.projectResourceUUID &&
+                          $0.lifecyclePlanDigest == lifecyclePlanDigest &&
+                          $0.status == .committed &&
+                          !$0.ownerSubjectID.isEmpty &&
+                          $0.fencingToken.nodeEpoch >= 1 &&
+                          $0.fencingToken.reservationSequence >= 1
+                  }),
+                  preparation.manifestSHA256 == lifecyclePlanDigest else {
+                throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                    "The daemon scheduler authority binding no longer matches the authoritative lifecycle snapshot."
+                )
+            }
+            guard let manifestProject = manifest.project,
+                  "project-\(manifestProject)" == preparation.projectID else {
+                throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                    "The daemon scheduler authority binding no longer matches the authoritative project lifecycle snapshot."
+                )
+            }
+
+            do {
+                let store = SQLiteStateStore(path: stateDatabasePath)
+                let repository = store.schedulerAdmissions
+                guard let project = try repository.projectAuthority(
+                    forResourceUUID: binding.projectResourceUUID
+                ),
+                      project.projectID == preparation.projectID,
+                      project.projectName == manifestProject,
+                      project.manifestDigest == lifecyclePlanDigest else {
+                    throw SchedulerAdmissionError.stateInvariant(
+                        "daemon-project-authority-changed"
+                    )
+                }
+
+                for expected in binding.reservations {
+                    guard let current = try repository.reservation(
+                        id: expected.reservationID
+                    ),
+                          current == expected,
+                          current.status == .committed,
+                          current.projectUUID == project.resourceUUID,
+                          current.lifecyclePlanDigest == project.manifestDigest,
+                          let active = try repository.activeReservation(
+                              workloadID: expected.workloadID,
+                              projectUUID: expected.projectUUID
+                          ),
+                          active == current else {
+                        throw SchedulerAdmissionError.stateInvariant(
+                            "daemon-reservation-authority-changed"
+                        )
+                    }
+                    let fence = try repository.fencingState(
+                        nodeID: expected.nodeID
+                    )
+                    guard fence.nodeID == expected.nodeID,
+                          fence.nodeEpoch == expected.fencingToken.nodeEpoch else {
+                        throw SchedulerAdmissionError.stateInvariant(
+                            "daemon-reservation-fence-changed"
+                        )
+                    }
+                }
+            } catch {
+                throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                    "scheduler-authority-unavailable: the exact committed daemon reservation or node fence changed before lifecycle execution. No runtime mutation was attempted."
+                )
+            }
+        }
+    }
+
+    private func reconcile(
+        request: DaemonReconciliationRequest,
+        command: LifecycleCommandKind,
+        authorityCheck: SchedulerLifecycleAuthorityCheck?
+    ) async throws -> DaemonReconciliationResult {
         try Task.checkCancellation()
         try requireExpectedConfiguration(request)
 
         let planningOptions = LifecycleCLIOptions(
-            command: .up,
+            command: command,
             manifestPath: request.manifestPath,
             serviceNames: request.selectedServiceNames ?? [],
             stateDatabasePath: request.stateDatabasePath,
@@ -84,7 +409,18 @@ public struct UnattendedLifecycleReconciler: DaemonReconciliationDriving {
             parallelism: request.maximumParallelism,
             output: .json
         )
-        let planningDriver = makeDriver(planningOptions)
+        let planningDriver: any LifecycleCommandDriving
+        if let authorityCheck {
+            guard let makeAuthorizedDriver else {
+                throw HostwrightDiagnostic(
+                    code: .unsafeExposure,
+                    message: "scheduler-authority-unavailable: unattended reconciliation has no validator-aware lifecycle driver. No runtime mutation was attempted."
+                )
+            }
+            planningDriver = makeAuthorizedDriver(planningOptions, authorityCheck)
+        } else {
+            planningDriver = makeDriver(planningOptions)
+        }
         let compiler = LifecycleCommandPlanCompiler()
         let initialPreparation = try planningDriver.prepare(
             options: planningOptions
@@ -138,7 +474,7 @@ public struct UnattendedLifecycleReconciler: DaemonReconciliationDriving {
         }
 
         let executionOptions = LifecycleCLIOptions(
-            command: .up,
+            command: command,
             manifestPath: request.manifestPath,
             serviceNames: request.selectedServiceNames ?? [],
             stateDatabasePath: request.stateDatabasePath,
@@ -149,7 +485,18 @@ public struct UnattendedLifecycleReconciler: DaemonReconciliationDriving {
             operationIdempotencyKeySHA256:
                 request.operationIdempotencyKeySHA256
         )
-        let executionDriver = makeDriver(executionOptions)
+        let executionDriver: any LifecycleCommandDriving
+        if let authorityCheck {
+            guard let makeAuthorizedDriver else {
+                throw HostwrightDiagnostic(
+                    code: .unsafeExposure,
+                    message: "scheduler-authority-unavailable: unattended reconciliation has no validator-aware lifecycle driver. No runtime mutation was attempted."
+                )
+            }
+            executionDriver = makeAuthorizedDriver(executionOptions, authorityCheck)
+        } else {
+            executionDriver = makeDriver(executionOptions)
+        }
         try Task.checkCancellation()
         try requireExpectedConfiguration(request)
         try executionDriver.revalidate(
@@ -247,6 +594,77 @@ public struct UnattendedLifecycleReconciler: DaemonReconciliationDriving {
             groupID: result.groupID,
             checkpoint: result.checkpoint,
             recoveryHintRedacted: result.recoveryHintRedacted
+        )
+    }
+
+    private func makeSchedulerRequest(
+        manifestPath: String,
+        stateDatabasePath: String,
+        workloadIDs: [UUID],
+        subjectID: String,
+        operationSeed: String,
+        maximumParallelism: Int
+    ) throws -> DaemonReconciliationRequest {
+        let normalizedManifestPath = URL(
+            fileURLWithPath: manifestPath
+        ).standardizedFileURL.path
+        let manifestSnapshot = try readConfiguration(
+            normalizedManifestPath,
+            .manifest,
+            nil
+        )
+        let manifest = try ManifestValidator.validated(manifestSnapshot.text)
+        guard let projectName = manifest.project,
+              !projectName.isEmpty else {
+            throw HostwrightDiagnostic(
+                code: .confirmationMismatch,
+                message: "Scheduler lifecycle execution requires one authoritative manifest project."
+            )
+        }
+        let projectID = "project-\(projectName)"
+        let admissions = try ManifestSchedulerAdmissionBridge.map(
+            manifest: manifest,
+            subjectID: subjectID
+        )
+        let selected = admissions.filter {
+            workloadIDs.contains($0.workloadID)
+        }
+        guard selected.count == workloadIDs.count,
+              Set(selected.map(\.workloadID)) == Set(workloadIDs) else {
+            throw HostwrightDiagnostic(
+                code: .confirmationMismatch,
+                message: "The scheduler workload is not present in the current manifest; no runtime mutation was attempted."
+            )
+        }
+        let configurationTargets = try DaemonConfigurationTargetResolver.paths(
+            manifestPath: normalizedManifestPath,
+            manifest: manifest
+        ).map { kind, path in
+            if kind == .manifest && path == manifestSnapshot.target.path {
+                return manifestSnapshot.target
+            }
+            return try readConfiguration(path, kind, nil).target
+        }.sorted {
+            ($0.kind.rawValue, $0.path) < ($1.kind.rawValue, $1.path)
+        }
+        let operationKey = SHA256.hash(data: Data(operationSeed.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        return try DaemonReconciliationRequest(
+            manifestPath: normalizedManifestPath,
+            manifestSHA256: try lifecycleManifestSHA256(
+                text: manifestSnapshot.text,
+                manifest: manifest
+            ),
+            configurationSetSHA256: DaemonConfigurationSetDigest.sha256(
+                configurationTargets
+            ),
+            configurationTargets: configurationTargets,
+            stateDatabasePath: stateDatabasePath,
+            projectID: projectID,
+            maximumParallelism: min(max(maximumParallelism, 1), 32),
+            selectedServiceNames: selected.map(\.serviceName).sorted(),
+            operationIdempotencyKeySHA256: operationKey
         )
     }
 

@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+@testable import HostwrightCore
 @testable import HostwrightObservability
 @testable import HostwrightState
 
@@ -50,7 +51,10 @@ final class StateSupportBundleTests: XCTestCase {
             date: { ISO8601DateFormatter().date(from: "2026-08-01T12:00:00Z")! }
         ).collect(projectID: nil)
         XCTAssertEqual(snapshot.integrity.health, "healthy")
-        XCTAssertEqual(snapshot.integrity.stateSchemaVersion, 17)
+        XCTAssertEqual(
+            snapshot.integrity.stateSchemaVersion,
+            HostwrightContractVersions.stateSchema
+        )
         XCTAssertEqual(snapshot.events.count, 1)
     }
 
@@ -67,7 +71,10 @@ final class StateSupportBundleTests: XCTestCase {
 
         try store.migrate()
         let snapshot = try StateSupportBundleSnapshotService(store: store, date: date).collect(projectID: nil)
-        XCTAssertEqual(snapshot.integrity.stateSchemaVersion, 17)
+        XCTAssertEqual(
+            snapshot.integrity.stateSchemaVersion,
+            HostwrightContractVersions.stateSchema
+        )
         XCTAssertEqual(snapshot.metrics.series.count, 59)
         XCTAssertTrue(snapshot.traces.isEmpty)
 
@@ -75,7 +82,7 @@ final class StateSupportBundleTests: XCTestCase {
             try connection.transaction {
                 try connection.run(
                     "INSERT INTO schema_migrations(version, description, checksum, applied_at) " +
-                        "VALUES (18, 'future', 'future', '2026-08-01T12:00:00Z')"
+                        "VALUES (\(HostwrightContractVersions.stateSchema + 1), 'future', 'future', '2026-08-01T12:00:00Z')"
                 )
             }
         }
@@ -153,8 +160,8 @@ final class StateSupportBundleTests: XCTestCase {
         )
         let policy = StateRetentionPolicy(
             recoveryHorizonSeconds: 60,
-            maximumDatabaseBytes: 1_048_576,
-            targetDatabaseBytes: 1_048_576,
+            maximumDatabaseBytes: 1_099_511_627_776,
+            targetDatabaseBytes: 1_099_511_627_776,
             classes: classes
         )
         let date = ISO8601DateFormatter().date(from: "2026-08-01T12:00:00Z")!

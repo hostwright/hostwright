@@ -225,7 +225,8 @@ public enum HostwrightDaemonMain {
         arguments: [String],
         runtimeAdapter: any RuntimeAdapter,
         reconciliationDriver: any DaemonReconciliationDriving,
-        shutdownToken: DaemonShutdownToken = DaemonShutdownToken()
+        shutdownToken: DaemonShutdownToken = DaemonShutdownToken(),
+        controlServiceFactory: (@Sendable (DaemonConfiguration) throws -> any DaemonControlServing)? = nil
     ) async -> DaemonProcessResult {
         do {
             let isManagedService = arguments.contains("--service")
@@ -245,6 +246,7 @@ public enum HostwrightDaemonMain {
             case .version:
                 return DaemonProcessResult(standardOutput: "\(HostwrightIdentity.version)\n")
             case .run(let configuration):
+                let controlService = try controlServiceFactory?(configuration)
                 let configurationMonitor = DaemonConfigurationChangeMonitor()
                 let clock = SystemDaemonClock(
                     shutdownToken: shutdownToken,
@@ -258,6 +260,7 @@ public enum HostwrightDaemonMain {
                     instanceLock: FileDaemonInstanceLock(path: configuration.lockFilePath),
                     shutdownToken: shutdownToken,
                     configurationMonitor: configurationMonitor,
+                    controlService: controlService,
                     readConfig: { try String(contentsOfFile: $0, encoding: .utf8) },
                     readConfiguration: SecureDaemonConfigurationReader.read
                 )

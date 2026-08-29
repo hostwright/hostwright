@@ -4,6 +4,7 @@ import HostwrightCore
 public enum ManifestMigrationChange: Equatable, Sendable {
     case insertVersion(Int)
     case replaceVersion(from: Int, to: Int)
+    case migrateLegacyResources
     case migrateLegacyHealth
 
     public var description: String {
@@ -12,6 +13,8 @@ public enum ManifestMigrationChange: Equatable, Sendable {
             return "Declare manifest version \(version)."
         case .replaceVersion(let source, let target):
             return "Replace manifest version \(source) with \(target)."
+        case .migrateLegacyResources:
+            return "Replace legacy flat resource fields with explicit requests and limits."
         case .migrateLegacyHealth:
             return "Replace legacy health checks with typed liveness probes."
         }
@@ -38,8 +41,9 @@ public struct ManifestMigrationPreview: Equatable, Sendable {
 }
 
 public enum ManifestMigrator {
-    public static func previewV2(_ source: String) throws -> ManifestMigrationPreview {
-        let parsed = try ManifestParser.parse(source)
+    public static func previewV3(_ source: String) throws -> ManifestMigrationPreview {
+        let parsedResult = try ManifestParser.parseForMigrationPreview(source)
+        let parsed = parsedResult.manifest
         let sourceVersion = parsed.version ?? HostwrightManifest.legacyVersion
         let targetVersion = HostwrightManifest.currentVersion
 
@@ -51,11 +55,29 @@ public enum ManifestMigrator {
                 )
             ])
         }
-        guard sourceVersion == HostwrightManifest.legacyVersion || sourceVersion == targetVersion else {
+        guard [HostwrightManifest.legacyVersion, 2, targetVersion].contains(sourceVersion) else {
             throw ManifestParseError.failed([
                 ManifestIssue(
                     code: .manifestUnsupportedFeature,
-                    message: "Manifest version \(sourceVersion) has no supported migration path. Only legacy version \(HostwrightManifest.legacyVersion) can be previewed for version \(targetVersion)."
+                    message: "Manifest version \(sourceVersion) has no supported migration path. Only versions 1 and 2 can be previewed for version \(targetVersion)."
+                )
+            ])
+        }
+        if sourceVersion == targetVersion && parsedResult.usedLegacyFlatResources {
+            throw ManifestParseError.failed([
+                ManifestIssue(
+                    code: .manifestUnsupportedFeature,
+                    message: "Manifest version \(targetVersion) must use nested resources.requests and resources.limits; flat resources are legacy input only.",
+                    path: parsedResult.legacyFlatResourcePaths.first
+                )
+            ])
+        }
+        if let service = parsed.services.first(where: { $0.resources == nil }) {
+            throw ManifestParseError.failed([
+                ManifestIssue(
+                    code: .manifestValidationFailed,
+                    message: "Service '\(service.name)' requires an explicit CPU and memory requests/limits contract; migration cannot infer capacity. Add resources.requests and resources.limits manually before retrying.",
+                    path: "$.services.\(service.name).resources"
                 )
             ])
         }
@@ -75,11 +97,18 @@ public enum ManifestMigrator {
             changes = [.replaceVersion(from: version, to: targetVersion)]
         }
 
-        if containsLegacyHealth(source) {
+        let needsResourceConversion = sourceVersion < targetVersion && parsedResult.usedLegacyFlatResources
+        let needsHealthConversion = containsLegacyHealth(source)
+        if needsResourceConversion || needsHealthConversion {
             var migrated = parsed
             migrated.version = targetVersion
             migratedManifest = try ManifestCanonicalEncoder.encode(migrated)
-            changes.append(.migrateLegacyHealth)
+            if needsResourceConversion {
+                changes.append(.migrateLegacyResources)
+            }
+            if needsHealthConversion {
+                changes.append(.migrateLegacyHealth)
+            }
         }
 
         _ = try ManifestValidator.validated(migratedManifest)

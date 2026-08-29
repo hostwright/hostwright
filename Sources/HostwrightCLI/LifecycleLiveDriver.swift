@@ -4,12 +4,44 @@ import HostwrightCore
 import HostwrightManifest
 import HostwrightNetworking
 import HostwrightObservability
+import HostwrightPolicy
 import HostwrightReconciler
 import HostwrightRegistry
 import HostwrightRuntime
 import HostwrightSecrets
 import HostwrightState
 import HostwrightStorage
+
+private let lifecycleSchedulerAuthorityUnavailableMessage =
+    "scheduler-authority-unavailable: lifecycle mutation requires a persisted Control 2.2 scheduler placement decision and fenced reservation; manifest-only admission is not executable. No runtime mutation was attempted."
+
+private func requireLifecycleSchedulerAuthority(
+    for options: LifecycleCLIOptions
+) throws {
+    guard !options.dryRun,
+          [.up, .run, .start, .restart, .update].contains(options.command) else {
+        return
+    }
+    throw RuntimeAdapterError.mutationUnavailableByPolicy(
+        lifecycleSchedulerAuthorityUnavailableMessage
+    )
+}
+
+typealias LifecycleSchedulerAuthorityValidator = @Sendable (
+    HostwrightManifest,
+    LifecycleCompiledCommand,
+    LifecycleCommandPreparation,
+    LifecycleCLIOptions
+) throws -> Void
+
+func defaultLifecycleSchedulerAuthorityValidator(
+    _: HostwrightManifest,
+    _: LifecycleCompiledCommand,
+    _: LifecycleCommandPreparation,
+    options: LifecycleCLIOptions
+) throws {
+    try requireLifecycleSchedulerAuthority(for: options)
+}
 
 func lifecycleStorageQuiescenceProof(
     inventory: RuntimeInventory,
@@ -60,10 +92,16 @@ func lifecycleStorageQuiescenceProof(
 struct LifecycleLiveDriver: LifecycleCommandDriving {
     let environment: CLIEnvironment
     let options: LifecycleCLIOptions
+    let schedulerAuthorityValidator: LifecycleSchedulerAuthorityValidator
 
-    init(environment: CLIEnvironment, options: LifecycleCLIOptions) {
+    init(
+        environment: CLIEnvironment,
+        options: LifecycleCLIOptions,
+        schedulerAuthorityValidator: @escaping LifecycleSchedulerAuthorityValidator = defaultLifecycleSchedulerAuthorityValidator
+    ) {
         self.environment = environment
         self.options = options
+        self.schedulerAuthorityValidator = schedulerAuthorityValidator
     }
 
     func prepare(options: LifecycleCLIOptions) throws -> LifecycleCommandPreparation {
@@ -97,6 +135,12 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             projectID: projectID,
             fallbackBindings: []
         )
+        // Placement semantics are admitted by the canonical scheduler bridge;
+        // this mapper only translates the already-admitted runtime boundary.
+        _ = try ManifestSchedulerAdmissionBridge.map(
+            manifest: manifest,
+            subjectID: "owner"
+        )
         var mapping = ManifestRuntimeMapper.map(
             manifest,
             projectResourceUUID: initialProjectResourceUUID,
@@ -107,7 +151,8 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
                     manifest: manifest,
                     projectResourceUUID: initialProjectResourceUUID,
                     providerRootURL: environment.storageProviderRootURL()
-                )
+                ),
+            schedulerAdmissionValidated: true
         )
         try ServiceTunnelLifecycleCoordinator
             .validateLiveCredentialPrerequisites(
@@ -149,7 +194,8 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
                         projectResourceUUID: projectResourceUUID,
                         providerRootURL:
                             environment.storageProviderRootURL()
-                    )
+                    ),
+                schedulerAdmissionValidated: true
             )
             resourceBindings = try lifecycleBindings(
                 store: store,
@@ -195,7 +241,12 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
         let desiredState = DesiredRuntimeState(
             projectName: plannedDesiredState.projectName,
             networks: plannedDesiredState.networks,
-            services: plannedDesiredState.services,
+            services: try lifecycleProfiledServices(
+                plannedDesiredState.services,
+                previous: previousDesiredState?.services ?? [],
+                options: options,
+                store: store
+            ),
             ownedResourceHints: resourceBindings.map {
                 RuntimeOwnedResourceHint(
                     resourceIdentifier: $0.resourceIdentifier,
@@ -343,6 +394,12 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             adapter: adapter,
             store: store,
             manifest: validated.manifest
+        )
+        try schedulerAuthorityValidator(
+            validated.manifest,
+            compiled,
+            preparation,
+            options
         )
         let recoverySnapshot: DesiredStateRecoverySnapshot?
         if compiled.plan.command == .update {
@@ -6964,6 +7021,64 @@ private func lifecyclePreflightDesiredExecution(
             "Runtime capability changed before lifecycle preflight. No runtime mutation was attempted."
         )
     }
+    if let profileID = options.workloadProfileID,
+       let expectedSHA256 = options.workloadProfileSHA256 {
+        let profileEngine = WorkloadProfilePolicyEngine(repository: store.workloadProfiles)
+        let resolution: WorkloadProfileResolution
+        do {
+            resolution = try profileEngine.resolve(id: profileID)
+            guard resolution.profileSHA256 == expectedSHA256 else {
+                throw WorkloadProfilePolicyError.workloadViolation(["profileHash"])
+            }
+            for service in manifest.services {
+                try profileEngine.validateManifestAdmission(
+                    resources: service.resources,
+                    scheduling: service.scheduling,
+                    resolution: resolution
+                )
+            }
+            for service in preparation.desiredState.services {
+                try profileEngine.validateWorkload(
+                    service, resolution: resolution, snapshot: capability)
+            }
+            try ManifestSchedulerAdmissionBridge.admit(
+                manifest: manifest,
+                subjectID: "owner",
+                profileResolution: resolution
+            )
+        } catch let error as ManifestSchedulerAdmissionError {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                "Scheduler admission failed: \(error.stableKey). No runtime mutation was attempted."
+            )
+        } catch WorkloadProfilePolicyError.providerMismatch(let provider) {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                "Workload profile provider mismatch: \(provider). No runtime mutation was attempted."
+            )
+        } catch WorkloadProfilePolicyError.unsupportedCapabilities(let reasons) {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                "Workload profile provider capability gaps: \(reasons.joined(separator: ",")). No runtime mutation was attempted."
+            )
+        } catch WorkloadProfilePolicyError.workloadViolation(let reasons) {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                "Workload profile violations: \(reasons.joined(separator: ",")). No runtime mutation was attempted."
+            )
+        } catch {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                "The selected workload profile cannot be enforced exactly by the desired workload and runtime provider. No runtime mutation was attempted."
+            )
+        }
+    } else {
+        do {
+            try ManifestSchedulerAdmissionBridge.admit(
+                manifest: manifest,
+                subjectID: "owner"
+            )
+        } catch let error as ManifestSchedulerAdmissionError {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                "Scheduler admission failed: \(error.stableKey). No runtime mutation was attempted."
+            )
+        }
+    }
     if preparation.desiredState.services.contains(where: {
         !$0.hostAccess.isEmpty
     }) {
@@ -8447,9 +8562,85 @@ private func lifecycleProbeCapabilities(
     return .qualified(for: snapshot.descriptor.providerID, actions)
 }
 
+let lifecycleWorkloadProfileIDLabel = "dev.hostwright.workload-profile-id"
+let lifecycleWorkloadProfileHashLabel = "dev.hostwright.workload-profile-sha256"
+
+func lifecycleProfiledServices(
+    _ services: [DesiredRuntimeService],
+    previous: [DesiredRuntimeService],
+    options: LifecycleCLIOptions,
+    store: SQLiteStateStore
+) throws -> [DesiredRuntimeService] {
+    let reserved = [lifecycleWorkloadProfileIDLabel, lifecycleWorkloadProfileHashLabel]
+    guard services.allSatisfy({ service in reserved.allSatisfy { service.labels[$0] == nil } }) else {
+        throw RuntimeAdapterError.mutationUnavailableByPolicy(
+            "Manifest labels cannot use Hostwright workload-profile binding keys. No runtime mutation was attempted."
+        )
+    }
+    let activeMutation = ![LifecycleCommandKind.down, .stop, .rm].contains(options.command)
+    guard previous.allSatisfy({ service in
+        (service.labels[lifecycleWorkloadProfileIDLabel] == nil)
+            == (service.labels[lifecycleWorkloadProfileHashLabel] == nil)
+    }) else {
+        throw RuntimeAdapterError.mutationUnavailableByPolicy(
+            "The previously applied workload has an incomplete profile binding. No runtime mutation was attempted."
+        )
+    }
+    let previousBindings = previous.compactMap { service -> (String, String)? in
+        guard let identifier = service.labels[lifecycleWorkloadProfileIDLabel],
+              let digest = service.labels[lifecycleWorkloadProfileHashLabel] else { return nil }
+        return (identifier, digest)
+    }
+    guard previousBindings.isEmpty || previousBindings.count == previous.count,
+          Set(previousBindings.map { "\($0.0)\u{0}\($0.1)" }).count <= 1 else {
+        throw RuntimeAdapterError.mutationUnavailableByPolicy(
+            "The previously applied workload has mixed profile authority. No runtime mutation was attempted."
+        )
+    }
+    guard let profileID = options.workloadProfileID,
+          let suppliedSHA256 = options.workloadProfileSHA256 else {
+        if activeMutation && !previousBindings.isEmpty {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                "A previously profiled workload cannot be restarted or updated without its exact workload profile. No runtime mutation was attempted."
+            )
+        }
+        return services
+    }
+    let engine = WorkloadProfilePolicyEngine(repository: store.workloadProfiles)
+    let selected = try engine.resolve(id: profileID)
+    guard selected.profileSHA256 == suppliedSHA256 else {
+        throw RuntimeAdapterError.mutationUnavailableByPolicy(
+            "The workload profile changed after admission. No runtime mutation was attempted."
+        )
+    }
+    for (priorID, priorSHA256) in previousBindings where priorSHA256 != selected.profileSHA256 {
+        let prior = try engine.resolve(id: priorID)
+        guard prior.profileSHA256 == priorSHA256 else {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                "The previously applied workload profile has drifted from canonical state. No runtime mutation was attempted."
+            )
+        }
+        let weakening = WorkloadProfilePolicyEngine.weakeningReasons(
+            candidate: selected.profile, base: prior.profile)
+        guard weakening.isEmpty else {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                "The selected workload profile would weaken the applied profile at: \(weakening.joined(separator: ",")). No runtime mutation was attempted."
+            )
+        }
+    }
+    return services.map { service in
+        var labels = service.labels
+        labels[lifecycleWorkloadProfileIDLabel] = profileID
+        labels[lifecycleWorkloadProfileHashLabel] = selected.profileSHA256
+        return lifecycleReplacingEnvironment(
+            in: service, with: service.environment, labels: labels)
+    }
+}
+
 private func lifecycleReplacingEnvironment(
     in service: DesiredRuntimeService,
-    with environment: [RuntimeEnvironmentValue]
+    with environment: [RuntimeEnvironmentValue],
+    labels: [String: String]? = nil
 ) -> DesiredRuntimeService {
     DesiredRuntimeService(
         identity: service.identity,
@@ -8469,7 +8660,7 @@ private func lifecycleReplacingEnvironment(
         initProcess: service.initProcess,
         dependencies: service.dependencies,
         environment: environment,
-        labels: service.labels,
+        labels: labels ?? service.labels,
         ports: service.ports,
         publishedSockets: service.publishedSockets,
         hostAccess: service.hostAccess,

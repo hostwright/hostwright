@@ -1,14 +1,76 @@
 import Foundation
 import HostwrightCore
+import HostwrightControlPlane
 import HostwrightManifest
 import HostwrightReconciler
 import HostwrightRuntime
 import HostwrightSecrets
+import HostwrightScheduler
 import HostwrightState
 import XCTest
 @testable import HostwrightCLI
 
 final class LifecycleLiveDriverTests: XCTestCase {
+    func testConfirmedMutationFailsClosedWithoutPersistedSchedulerAuthority()
+        throws
+    {
+        let image = "registry.example/api@sha256:\(String(repeating: "a", count: 64))"
+        let manifest = """
+        version: 3
+        project: demo
+        imagePolicy: require-digest
+        services:
+          api:
+            image: \(image)
+            resources:
+              requests:
+                cpus: 1
+                memory: 512MiB
+              limits:
+                cpus: 1
+                memory: 512MiB
+
+        """
+
+        try withFixture(manifestOverride: manifest) { fixture in
+            let dryOptions = fixture.options(command: .up, dryRun: true)
+            let dryDriver = LifecycleLiveDriver(
+                environment: fixture.environment,
+                options: dryOptions
+            )
+            let preparation = try dryDriver.prepare(options: dryOptions)
+            let compiled = try LifecycleCommandPlanCompiler().compile(
+                options: dryOptions,
+                preparation: preparation
+            )
+            let confirmed = fixture.options(
+                command: .up,
+                dryRun: false,
+                confirmation: compiled.plan.planSHA256
+            )
+
+            XCTAssertThrowsError(
+                try LifecycleLiveDriver(
+                    environment: fixture.environment,
+                    options: confirmed
+                ).execute(
+                    compiled: compiled,
+                    preparation: preparation,
+                    options: confirmed
+                )
+            ) { error in
+                XCTAssertTrue(
+                    String(describing: error).contains(
+                        "scheduler-authority-unavailable"
+                    )
+                )
+            }
+            XCTAssertEqual(try fixture.adapterSnapshot().mutations, [])
+            XCTAssertTrue(try fixture.store.operationGroups.loadAll().isEmpty)
+            XCTAssertTrue(try fixture.store.ownership.loadAll().isEmpty)
+        }
+    }
+
     func testCompletedDependencyUsesZeroExitStartBeforeDependentStart() throws {
         try withFixture(manifestOverride: completedDependencyManifest) { fixture in
             let result = try runConfirmedUp(fixture)
@@ -62,10 +124,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
     func testDryRunPreparationIsDeterministicAndMutationFree() throws {
         try withFixture { fixture in
             let options = fixture.options(command: .up, dryRun: true)
-            let driver = LifecycleLiveDriver(
-                environment: fixture.environment,
-                options: options
-            )
+            let driver = fixture.driver(options: options)
 
             let first = try driver.prepare(options: options)
             let second = try driver.prepare(options: options)
@@ -89,12 +148,15 @@ final class LifecycleLiveDriverTests: XCTestCase {
         throws
     {
         let manifest = """
-        version: 2
+        version: 3
         project: demo
         imagePolicy: require-digest
         services:
           api:
             image: registry.example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
             ports:
               - target: 8080
                 protocol: tcp
@@ -146,10 +208,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
             )
             let removeResult = LifecycleCommandRunner(
                 options: removeOptions,
-                driver: LifecycleLiveDriver(
-                    environment: fixture.environment,
-                    options: removeOptions
-                )
+                driver: fixture.driver(options: removeOptions)
             ).run()
 
             XCTAssertEqual(
@@ -173,10 +232,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
     func testRevalidationRejectsChangedCapabilityAndObservationBeforeMutation() throws {
         try withFixture { fixture in
             let options = fixture.options(command: .up, dryRun: true)
-            let driver = LifecycleLiveDriver(
-                environment: fixture.environment,
-                options: options
-            )
+            let driver = fixture.driver(options: options)
             let preparation = try driver.prepare(options: options)
             let compiled = try LifecycleCommandPlanCompiler().compile(
                 options: options,
@@ -208,10 +264,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
     func testExecuteRejectsManifestChangedAfterConfirmationBeforePersistenceOrMutation() throws {
         try withFixture { fixture in
             let dryOptions = fixture.options(command: .up, dryRun: true)
-            let driver = LifecycleLiveDriver(
-                environment: fixture.environment,
-                options: dryOptions
-            )
+            let driver = fixture.driver(options: dryOptions)
             let preparation = try driver.prepare(options: dryOptions)
             let compiled = try LifecycleCommandPlanCompiler().compile(
                 options: dryOptions,
@@ -230,10 +283,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
             )
 
             XCTAssertThrowsError(
-                try LifecycleLiveDriver(
-                    environment: fixture.environment,
-                    options: confirmed
-                ).execute(
+                try fixture.driver(options: confirmed).execute(
                     compiled: compiled,
                     preparation: preparation,
                     options: confirmed
@@ -256,24 +306,30 @@ final class LifecycleLiveDriverTests: XCTestCase {
             .joined(separator: ", ")
         let manifests = [
             """
-            version: 2
+            version: 3
             project: demo
             imagePolicy: require-digest
             services:
               api:
                 image: \(image)
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 hooks:
                   postStart:
                     exec: [\(hookArguments)]
 
             """,
             """
-            version: 2
+            version: 3
             project: demo
             imagePolicy: require-digest
             services:
               api:
                 image: \(image)
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 probes:
                   startup:
                     exec: ["/bin/true"]
@@ -285,10 +341,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
         for manifest in manifests {
             try withFixture(manifestOverride: manifest) { fixture in
                 let dryOptions = fixture.options(command: .up, dryRun: true)
-                let dryDriver = LifecycleLiveDriver(
-                    environment: fixture.environment,
-                    options: dryOptions
-                )
+                let dryDriver = fixture.driver(options: dryOptions)
                 let preparation = try dryDriver.prepare(options: dryOptions)
                 let compiled = try LifecycleCommandPlanCompiler().compile(
                     options: dryOptions,
@@ -301,10 +354,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
                 )
                 let result = LifecycleCommandRunner(
                     options: confirmed,
-                    driver: LifecycleLiveDriver(
-                        environment: fixture.environment,
-                        options: confirmed
-                    )
+                    driver: fixture.driver(options: confirmed)
                 ).run()
 
                 XCTAssertNotEqual(result.exitCode, 0)
@@ -347,10 +397,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
             )
             let result = LifecycleCommandRunner(
                 options: confirmedOptions,
-                driver: LifecycleLiveDriver(
-                    environment: fixture.environment,
-                    options: confirmedOptions
-                )
+                driver: fixture.driver(options: confirmedOptions)
             ).run()
 
             XCTAssertEqual(result.exitCode, 0, result.standardError)
@@ -439,7 +486,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
         throws
     {
         let manifest = """
-        version: 2
+        version: 3
         project: demo
         imagePolicy: require-digest
         networks:
@@ -447,6 +494,9 @@ final class LifecycleLiveDriverTests: XCTestCase {
         services:
           api:
             image: registry.example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
 
         """
         try withFixture(manifestOverride: manifest) { fixture in
@@ -480,7 +530,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
         throws
     {
         let manifest = """
-        version: 2
+        version: 3
         project: demo
         imagePolicy: require-digest
         networks:
@@ -488,6 +538,9 @@ final class LifecycleLiveDriverTests: XCTestCase {
         services:
           api:
             image: registry.example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
             replicas: 2
             networks:
               - backend
@@ -495,10 +548,8 @@ final class LifecycleLiveDriverTests: XCTestCase {
         """
         try withFixture(manifestOverride: manifest) { fixture in
             let options = fixture.options(command: .up, dryRun: true)
-            let preparation = try LifecycleLiveDriver(
-                environment: fixture.environment,
-                options: options
-            ).prepare(options: options)
+            let preparation = try fixture.driver(options: options)
+                .prepare(options: options)
             XCTAssertTrue(preparation.resourceBindings.isEmpty)
             XCTAssertTrue(
                 preparation.desiredState.ownedResourceHints.isEmpty
@@ -594,10 +645,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
             )
             let result = LifecycleCommandRunner(
                 options: confirmed,
-                driver: LifecycleLiveDriver(
-                    environment: fixture.environment,
-                    options: confirmed
-                )
+                driver: fixture.driver(options: confirmed)
             ).run()
 
             XCTAssertEqual(result.exitCode, 0, result.standardError)
@@ -631,10 +679,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
             }
 
             let dryOptions = fixture.options(command: .up, dryRun: true)
-            let dryDriver = LifecycleLiveDriver(
-                environment: fixture.environment,
-                options: dryOptions
-            )
+            let dryDriver = fixture.driver(options: dryOptions)
             let preparation = try dryDriver.prepare(options: dryOptions)
             let compiled = try LifecycleCommandPlanCompiler().compile(
                 options: dryOptions,
@@ -648,10 +693,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
                 dryRun: false,
                 confirmation: compiled.plan.planSHA256
             )
-            let first = try LifecycleLiveDriver(
-                environment: fixture.environment,
-                options: confirmed
-            ).execute(
+            let first = try fixture.driver(options: confirmed).execute(
                 compiled: compiled,
                 preparation: preparation,
                 options: confirmed
@@ -720,10 +762,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
             )
 
             let dryOptions = fixture.options(command: .update, dryRun: true)
-            let dryDriver = LifecycleLiveDriver(
-                environment: fixture.environment,
-                options: dryOptions
-            )
+            let dryDriver = fixture.driver(options: dryOptions)
             let preparation = try dryDriver.prepare(options: dryOptions)
             let compiled = try LifecycleCommandPlanCompiler().compile(
                 options: dryOptions,
@@ -742,10 +781,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
                 confirmation: compiled.plan.planSHA256
             )
 
-            let result = try LifecycleLiveDriver(
-                environment: fixture.environment,
-                options: confirmed
-            ).execute(
+            let result = try fixture.driver(options: confirmed).execute(
                 compiled: compiled,
                 preparation: preparation,
                 options: confirmed
@@ -788,14 +824,20 @@ final class LifecycleLiveDriverTests: XCTestCase {
         )
         let image = "registry.example/api@sha256:\(String(repeating: "a", count: 64))"
         let manifest = """
-        version: 2
+        version: 3
         project: demo
         imagePolicy: require-digest
         services:
           first:
             image: \(image)
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
           later:
             image: \(image)
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
             secretEnv:
               API_TOKEN: keychain://hostwright.tests/missing-token
 
@@ -812,10 +854,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
             )
             let result = LifecycleCommandRunner(
                 options: confirmedOptions,
-                driver: LifecycleLiveDriver(
-                    environment: fixture.environment,
-                    options: confirmedOptions
-                )
+                driver: fixture.driver(options: confirmedOptions)
             ).run()
 
             XCTAssertNotEqual(result.exitCode, 0)
@@ -830,14 +869,20 @@ final class LifecycleLiveDriverTests: XCTestCase {
     func testInvalidLaterServiceFailsBeforeAnyProjectMutation() throws {
         let image = "registry.example/api@sha256:\(String(repeating: "a", count: 64))"
         let manifest = """
-        version: 2
+        version: 3
         project: demo
         imagePolicy: require-digest
         services:
           first:
             image: \(image)
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
           later:
             image: \(image)
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
             ports:
               - "80:8080"
 
@@ -849,10 +894,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
             )
             let result = LifecycleCommandRunner(
                 options: options,
-                driver: LifecycleLiveDriver(
-                    environment: fixture.environment,
-                    options: options
-                )
+                driver: fixture.driver(options: options)
             ).run()
 
             XCTAssertNotEqual(result.exitCode, 0)
@@ -870,10 +912,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
             let options = fixture.options(command: .up, dryRun: true)
             let result = LifecycleCommandRunner(
                 options: options,
-                driver: LifecycleLiveDriver(
-                    environment: fixture.environment,
-                    options: options
-                )
+                driver: fixture.driver(options: options)
             ).run()
 
             XCTAssertNotEqual(result.exitCode, 0)
@@ -900,10 +939,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
                 }
             )
             let dryOptions = fixture.options(command: .rm, dryRun: true)
-            let dryDriver = LifecycleLiveDriver(
-                environment: fixture.environment,
-                options: dryOptions
-            )
+            let dryDriver = fixture.driver(options: dryOptions)
             let dryPreparation = try dryDriver.prepare(options: dryOptions)
             let compiled = try LifecycleCommandPlanCompiler().compile(
                 options: dryOptions,
@@ -916,10 +952,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
             )
             let result = LifecycleCommandRunner(
                 options: confirmedOptions,
-                driver: LifecycleLiveDriver(
-                    environment: fixture.environment,
-                    options: confirmedOptions
-                )
+                driver: fixture.driver(options: confirmedOptions)
             ).run()
 
             XCTAssertEqual(result.exitCode, 0, result.standardError)
@@ -970,10 +1003,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
 
             let result = LifecycleCommandRunner(
                 options: confirmed,
-                driver: LifecycleLiveDriver(
-                    environment: fixture.environment,
-                    options: confirmed
-                )
+                driver: fixture.driver(options: confirmed)
             ).run()
 
             XCTAssertEqual(result.exitCode, 0, result.standardError)
@@ -1009,10 +1039,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
             )
             let result = LifecycleCommandRunner(
                 options: confirmed,
-                driver: LifecycleLiveDriver(
-                    environment: fixture.environment,
-                    options: confirmed
-                )
+                driver: fixture.driver(options: confirmed)
             ).run()
 
             XCTAssertEqual(result.exitCode, 0, result.standardError)
@@ -1036,10 +1063,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
                 }
             )
             let dryOptions = fixture.options(command: .rm, dryRun: true)
-            let dryDriver = LifecycleLiveDriver(
-                environment: fixture.environment,
-                options: dryOptions
-            )
+            let dryDriver = fixture.driver(options: dryOptions)
             let dryPreparation = try dryDriver.prepare(options: dryOptions)
             let compiled = try LifecycleCommandPlanCompiler().compile(
                 options: dryOptions,
@@ -1059,10 +1083,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
             )
             let result = LifecycleCommandRunner(
                 options: confirmedOptions,
-                driver: LifecycleLiveDriver(
-                    environment: fixture.environment,
-                    options: confirmedOptions
-                )
+                driver: fixture.driver(options: confirmedOptions)
             ).run()
 
             XCTAssertNotEqual(result.exitCode, 0)
@@ -1080,10 +1101,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
     func testRunPersistsEphemeralOwnershipForExactNormalRemove() throws {
         try withFixture { fixture in
             let runDryOptions = fixture.options(command: .run, dryRun: true)
-            let runDryDriver = LifecycleLiveDriver(
-                environment: fixture.environment,
-                options: runDryOptions
-            )
+            let runDryDriver = fixture.driver(options: runDryOptions)
             let runPreparation = try runDryDriver.prepare(options: runDryOptions)
             let runCompiled = try LifecycleCommandPlanCompiler().compile(
                 options: runDryOptions,
@@ -1096,10 +1114,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
             )
             let runResult = LifecycleCommandRunner(
                 options: runConfirmedOptions,
-                driver: LifecycleLiveDriver(
-                    environment: fixture.environment,
-                    options: runConfirmedOptions
-                )
+                driver: fixture.driver(options: runConfirmedOptions)
             ).run()
 
             XCTAssertEqual(runResult.exitCode, 0, runResult.standardError)
@@ -1119,10 +1134,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
             )
 
             let removeDryOptions = fixture.options(command: .rm, dryRun: true)
-            let removeDryDriver = LifecycleLiveDriver(
-                environment: fixture.environment,
-                options: removeDryOptions
-            )
+            let removeDryDriver = fixture.driver(options: removeDryOptions)
             let removePreparation = try removeDryDriver.prepare(
                 options: removeDryOptions
             )
@@ -1150,10 +1162,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
             )
             let removeResult = LifecycleCommandRunner(
                 options: removeConfirmedOptions,
-                driver: LifecycleLiveDriver(
-                    environment: fixture.environment,
-                    options: removeConfirmedOptions
-                )
+                driver: fixture.driver(options: removeConfirmedOptions)
             ).run()
 
             XCTAssertEqual(removeResult.exitCode, 0, removeResult.standardError)
@@ -1169,10 +1178,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
     func testPersistedRecoveryRefusesUnknownCheckpointBeforeMutation() throws {
         try withFixture { fixture in
             let dryOptions = fixture.options(command: .up, dryRun: true)
-            let liveDriver = LifecycleLiveDriver(
-                environment: fixture.environment,
-                options: dryOptions
-            )
+            let liveDriver = fixture.driver(options: dryOptions)
             let preparation = try liveDriver.prepare(options: dryOptions)
             let compiled = try LifecycleCommandPlanCompiler().compile(
                 options: dryOptions,
@@ -1221,10 +1227,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
     func testPersistedRecoveryResumeUsesExactInterruptedSaga() throws {
         try withFixture { fixture in
             let dryOptions = fixture.options(command: .up, dryRun: true)
-            let liveDriver = LifecycleLiveDriver(
-                environment: fixture.environment,
-                options: dryOptions
-            )
+            let liveDriver = fixture.driver(options: dryOptions)
             let preparation = try liveDriver.prepare(options: dryOptions)
             let compiled = try LifecycleCommandPlanCompiler().compile(
                 options: dryOptions,
@@ -1277,10 +1280,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
     func testPersistedRecoveryClaimsExactHandoffAfterReobservation() throws {
         try withFixture { fixture in
             let dryOptions = fixture.options(command: .up, dryRun: true)
-            let liveDriver = LifecycleLiveDriver(
-                environment: fixture.environment,
-                options: dryOptions
-            )
+            let liveDriver = fixture.driver(options: dryOptions)
             let preparation = try liveDriver.prepare(options: dryOptions)
             let compiled = try LifecycleCommandPlanCompiler().compile(
                 options: dryOptions,
@@ -1418,10 +1418,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
     {
         try withFixture { fixture in
             let dryOptions = fixture.options(command: .up, dryRun: true)
-            let liveDriver = LifecycleLiveDriver(
-                environment: fixture.environment,
-                options: dryOptions
-            )
+            let liveDriver = fixture.driver(options: dryOptions)
             let preparation = try liveDriver.prepare(options: dryOptions)
             let compiled = try LifecycleCommandPlanCompiler().compile(
                 options: dryOptions,
@@ -1601,10 +1598,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
     func testPersistedRecoveryRejectsConfirmationGroupAndStatusBeforeMutation() throws {
         try withFixture { fixture in
             let dryOptions = fixture.options(command: .up, dryRun: true)
-            let liveDriver = LifecycleLiveDriver(
-                environment: fixture.environment,
-                options: dryOptions
-            )
+            let liveDriver = fixture.driver(options: dryOptions)
             let preparation = try liveDriver.prepare(options: dryOptions)
             let compiled = try LifecycleCommandPlanCompiler().compile(
                 options: dryOptions,
@@ -3547,6 +3541,223 @@ private enum FailingLifecycleSecretError: Error {
     case unavailable(String)
 }
 
+private final class LifecycleSchedulerAuthorityFixture: @unchecked Sendable {
+    private let store: SQLiteStateStore
+    private let repository: SchedulerAdmissionRepository
+    private let nodeID: UUID
+    private let capacity: SchedulerNodeCapacitySnapshot
+    private let lock = NSLock()
+    private var reservations: [UUID: SchedulerReservationRecord] = [:]
+
+    init(store: SQLiteStateStore, projectID: String) throws {
+        self.store = store
+        repository = SchedulerAdmissionRepository(store: store)
+        nodeID = UUID(
+            uuidString: HostwrightResourceUUID.legacy(
+                kind: "scheduler-test-node",
+                identifier: projectID
+            )
+        )!
+        capacity = try SchedulerNodeCapacitySnapshot(
+            nodeID: nodeID,
+            capacity: ResourceVector([
+                "cpu": 64,
+                "memory": 64 * 1_024 * 1_024 * 1_024,
+                "disk": 1_024 * 1_024 * 1_024 * 1_024,
+                "io": 1_024 * 1_024 * 1_024,
+                "network": 1_024 * 1_024 * 1_024,
+                "process": 4_096
+            ]),
+            generation: 1,
+            observedAt: "2026-08-05T00:00:00Z"
+        )
+        try repository.recordNodeCapacity(snapshot: capacity)
+    }
+
+    var validator: LifecycleSchedulerAuthorityValidator {
+        { [self] manifest, compiled, preparation, _ in
+            try validate(
+                manifest: manifest,
+                compiled: compiled,
+                preparation: preparation
+            )
+        }
+    }
+
+    private func validate(
+        manifest: HostwrightManifest,
+        compiled: LifecycleCompiledCommand,
+        preparation: LifecycleCommandPreparation
+    ) throws {
+        let admissions = try ManifestSchedulerAdmissionBridge.map(
+            manifest: manifest,
+            subjectID: "owner"
+        )
+        guard !admissions.isEmpty,
+              Set(admissions.map(\.workloadID)).count == admissions.count else {
+            throw SchedulerAdmissionError.stateInvariant(
+                "test-authority-workload-id-collision"
+            )
+        }
+        let configDigest = preparation.capabilitySHA256
+        let profileDigest = String(repeating: "0", count: 64)
+        let lifecyclePlanDigest = compiled.plan.planSHA256
+        let projectUUID = preparation.projectResourceUUID
+
+        // The durable scheduler decision has a foreign-key binding to the
+        // project's resource identity.  Lifecycle preparation may legitimately
+        // run before the first desired-state snapshot exists, so seed only that
+        // missing parent here; existing lifecycle history remains authoritative.
+        if (try? store.desiredStates.loadProject(id: preparation.projectID)) == nil {
+            try store.desiredStates.saveManifestSnapshot(
+                projectID: preparation.projectID,
+                manifestPath: nil,
+                manifestHash: preparation.manifestSHA256,
+                desiredGeneration: max(preparation.providerGeneration, 1),
+                manifest: manifest,
+                timestamp: "2026-08-05T00:00:00Z",
+                mutationProvider: preparation.providerID.rawValue,
+                projectResourceUUID: projectUUID
+            )
+        }
+
+        lock.lock()
+        defer { lock.unlock() }
+        for previous in reservations.values
+            where previous.status.reservesCapacity &&
+                previous.lifecyclePlanDigest != lifecyclePlanDigest {
+            _ = try repository.release(
+                reservationID: previous.reservationID,
+                expectedToken: previous.fencingToken,
+                evidence: .verifiedRuntimeAbsence(
+                    evidenceDigest: String(repeating: "e", count: 64),
+                    verifiedAt: "2026-08-05T00:00:10Z"
+                )
+            )
+        }
+
+        let architecture = admissions.first?.workload.requirements
+            .requiredArchitectures.first ?? "arm64"
+        let node = try SchedulerNode(
+            snapshot: try NodePlacementSnapshot(
+                nodeID: nodeID,
+                capacity: capacity.capacity,
+                allocation: .zero,
+                architecture: architecture,
+                runtime: "linux-vm",
+                provider: "provider-a"
+            )
+        )
+        let engineDecision = try SchedulerEngine().plan(
+            try SchedulerEngineInput(
+                pendingWorkloads: admissions.map(\.workload),
+                nodes: [node]
+            )
+        )
+        // The pure engine ID is scoped to placement inputs.  Durable lifecycle
+        // admission also binds the lifecycle-plan digest, so derive the
+        // persisted decision lineage from both and keep exact replay stable
+        // without conflating incompatible lifecycle plans.
+        let decisionID = UUID(
+            uuidString: HostwrightResourceUUID.legacy(
+                kind: "scheduler-decision",
+                identifier: "\(engineDecision.decisionID.uuidString):\(lifecyclePlanDigest)"
+            )
+        )!
+        let decision = try SchedulerDecision(
+            decisionID: decisionID,
+            inputDigest: engineDecision.inputDigest,
+            orderedWorkloadIDs: engineDecision.orderedWorkloadIDs,
+            workloadDecisions: engineDecision.workloadDecisions,
+            snapshotQuality: engineDecision.snapshotQuality
+        )
+        let inputDigest = decision.inputDigest
+        let decisionBindings = try admissions.map { admission in
+            guard let workloadDecision = decision.workloadDecisions.first(
+                where: { $0.workloadID == admission.workloadID }
+            ), let chosenNodeID = workloadDecision.chosenNodeID else {
+                throw SchedulerAdmissionError.stateInvariant(
+                    "test-authority-no-placement"
+                )
+            }
+            return try SchedulerDecisionWorkloadBinding(
+                workloadID: admission.workloadID,
+                nodeID: chosenNodeID,
+                resources: admission.workload.request,
+                capacityDigest: capacity.capacityDigest,
+                capacityGeneration: capacity.generation,
+                ownerSubjectID: "owner",
+                projectUUID: projectUUID
+            )
+        }
+        _ = try repository.recordDecisionArtifact(
+            decision: decision,
+            workloadBindings: decisionBindings,
+            projectUUID: projectUUID,
+            configDigest: configDigest,
+            profileDigest: profileDigest,
+            lifecyclePlanDigest: lifecyclePlanDigest,
+            createdAt: "2026-08-05T00:00:00Z",
+            updatedAt: "2026-08-05T00:00:00Z"
+        )
+        let authority = try SchedulerAdmissionAuthority(
+            nodeCapacityDigest: capacity.capacityDigest,
+            nodeCapacityGeneration: capacity.generation,
+            inputDigest: inputDigest,
+            configDigest: configDigest,
+            profileDigest: profileDigest,
+            lifecyclePlanDigest: lifecyclePlanDigest,
+            expectedNodeEpoch: 1
+        )
+        for admission in admissions {
+            let workloadID = admission.workloadID
+            let binding = try SchedulerAdmissionBinding(
+                decisionID: decisionID,
+                workloadID: workloadID,
+                nodeID: nodeID,
+                resources: admission.workload.request,
+                nodeCapacityDigest: capacity.capacityDigest,
+                nodeCapacityGeneration: capacity.generation,
+                inputDigest: inputDigest,
+                configDigest: configDigest,
+                profileDigest: profileDigest,
+                lifecyclePlanDigest: lifecyclePlanDigest,
+                ownerSubjectID: "owner",
+                projectUUID: projectUUID,
+                createdAt: "2026-08-05T00:00:00Z",
+                expiresAt: "2026-08-05T00:04:00Z"
+            )
+            let reservation = try repository.reserve(
+                binding: binding,
+                authority: authority
+            )
+            let committed = try repository.commit(
+                reservationID: reservation.reservationID,
+                expectedToken: reservation.fencingToken,
+                updatedAt: "2026-08-05T00:00:01Z"
+            )
+            guard committed.status == .committed,
+                  committed.decisionID == decisionID,
+                  committed.workloadID == workloadID,
+                  committed.nodeID == nodeID,
+                  committed.resources == admission.workload.request,
+                  committed.capacityDigest == capacity.capacityDigest,
+                  committed.capacityGeneration == capacity.generation,
+                  committed.inputDigest == inputDigest,
+                  committed.configDigest == configDigest,
+                  committed.profileDigest == profileDigest,
+                  committed.lifecyclePlanDigest == lifecyclePlanDigest,
+                  committed.ownerSubjectID == "owner",
+                  committed.projectUUID == projectUUID else {
+                throw SchedulerAdmissionError.stateInvariant(
+                    "test-authority-binding-mismatch"
+                )
+            }
+            reservations[workloadID] = committed
+        }
+    }
+}
+
 private struct LifecycleLiveDriverFixture {
     let directory: URL
     let manifestPath: String
@@ -3556,6 +3767,7 @@ private struct LifecycleLiveDriverFixture {
     let adapter: LifecycleLiveTestAdapter
     let environment: CLIEnvironment
     let manifestSource: LifecycleMutableManifestSource
+    let schedulerAuthority: LifecycleSchedulerAuthorityFixture
 
     init(
         directory: URL,
@@ -3570,6 +3782,25 @@ private struct LifecycleLiveDriverFixture {
         databasePath = directory.appendingPathComponent("state.sqlite").path
         store = SQLiteStateStore(path: databasePath)
         try store.migrate()
+        try store.controlIdentities.bootstrap(
+            ControlPeerIdentityRecord(
+                subjectID: "owner",
+                userID: 501,
+                codeIdentity: CodeIdentity(
+                    teamIdentifier: "993YC3JY4Q",
+                    signingIdentifier: "hostwright.lifecycle.tests",
+                    codeDirectoryHash: String(repeating: "a", count: 40),
+                    validationMode: .installedRequirement
+                ),
+                declaredBySubjectID: "owner",
+                declaredAt: "2026-08-05T00:00:00Z",
+                updatedAt: "2026-08-05T00:00:00Z"
+            )
+        )
+        schedulerAuthority = try LifecycleSchedulerAuthorityFixture(
+            store: store,
+            projectID: projectID
+        )
 
         let image = "registry.example/api@sha256:\(String(repeating: "a", count: 64))"
         let manifest: String
@@ -3577,24 +3808,30 @@ private struct LifecycleLiveDriverFixture {
             manifest = manifestOverride
         } else if includesSecret {
             manifest = """
-            version: 2
+            version: 3
             project: demo
             imagePolicy: require-digest
             services:
               api:
                 image: \(image)
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
                 secretEnv:
                   API_TOKEN: keychain://hostwright.tests/api-token
 
             """
         } else {
             manifest = """
-            version: 2
+            version: 3
             project: demo
             imagePolicy: require-digest
             services:
               api:
                 image: \(image)
+                resources:
+                  requests: {cpus: 1, memory: 512MiB}
+                  limits: {cpus: 1, memory: 512MiB}
 
             """
         }
@@ -3773,6 +4010,14 @@ private struct LifecycleLiveDriverFixture {
         )
     }
 
+    func driver(options: LifecycleCLIOptions) -> LifecycleLiveDriver {
+        LifecycleLiveDriver(
+            environment: environment,
+            options: options,
+            schedulerAuthorityValidator: schedulerAuthority.validator
+        )
+    }
+
     func adapterSnapshot() throws -> LifecycleLiveAdapterSnapshot {
         try wait { await adapter.snapshot() }
     }
@@ -3814,15 +4059,21 @@ private final class LifecycleMutableManifestSource: @unchecked Sendable {
 }
 
 private let completedDependencyManifest = """
-version: 2
+version: 3
 project: demo
 imagePolicy: require-digest
 services:
   prepare:
     image: registry.example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    resources:
+      requests: {cpus: 1, memory: 512MiB}
+      limits: {cpus: 1, memory: 512MiB}
     command: ["/bin/true"]
   worker:
     image: registry.example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    resources:
+      requests: {cpus: 1, memory: 512MiB}
+      limits: {cpus: 1, memory: 512MiB}
     dependsOn:
       prepare: completed
 
@@ -3842,10 +4093,7 @@ private func runConfirmedUp(
     )
     return LifecycleCommandRunner(
         options: confirmed,
-        driver: LifecycleLiveDriver(
-            environment: fixture.environment,
-            options: confirmed
-        )
+        driver: fixture.driver(options: confirmed)
     ).run()
 }
 
@@ -3856,10 +4104,7 @@ private func reviewedPlan(
     let options = fixture.options(command: command, dryRun: true)
     let result = LifecycleCommandRunner(
         options: options,
-        driver: LifecycleLiveDriver(
-            environment: fixture.environment,
-            options: options
-        )
+        driver: fixture.driver(options: options)
     ).run()
     guard result.exitCode == 0 else {
         throw LifecycleCommandRunnerError.invalidInput(

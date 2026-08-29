@@ -296,9 +296,13 @@ public struct AppleContainerReadOnlyAdapter: RuntimeAdapter {
                 currentSnapshot: finalSnapshot
             )
             try Task.checkCancellation()
+            let authoritativeInventory = try RuntimeInventoryBuilder.markRuntimeListAuthoritative(
+                inventory,
+                source: .appleContainerCLIRuntimeList
+            )
             return InventoryEvidence(
                 capabilitySnapshot: finalSnapshot,
-                inventory: inventory
+                inventory: authoritativeInventory
             )
         } catch is CancellationError {
             throw CancellationError()

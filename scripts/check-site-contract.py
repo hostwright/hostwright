@@ -15,7 +15,7 @@ def main() -> int:
     root = arguments.site_root
     required = {
         "docs/src/content/docs/index.mdx": ["0.0.2-dev", "v0.0.2", "not production ready"],
-        "docs/src/content/docs/reference/manifest.mdx": ["version: 2", "migrate preview"],
+        "docs/src/content/docs/reference/manifest.mdx": ["version: 3", "migrate preview"],
         "docs/src/content/docs/reference/compatibility.mdx": ["0.0.2-dev", "v0.0.2"],
         "docs/src/content/docs/reference/limitations.mdx": ["v0.0.2", "15 phases"],
         "docs/src/content/docs/getting-started/install-from-source.mdx": ["0.0.2-dev", "brew install hostwright", "does not exist"],

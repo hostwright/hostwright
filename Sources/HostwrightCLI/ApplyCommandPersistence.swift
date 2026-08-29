@@ -23,7 +23,7 @@ extension ApplyCommandRunner {
         try store.desiredStates.saveManifestSnapshot(
             projectID: projectID,
             manifestPath: manifestPath,
-            manifestHash: stableHash(manifestText),
+            manifestHash: hostwrightContentSHA256(manifestText),
             desiredGeneration: 1,
             manifest: manifest,
             timestamp: timestamp,

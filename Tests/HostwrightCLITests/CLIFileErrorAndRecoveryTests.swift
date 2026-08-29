@@ -110,7 +110,7 @@ final class CLIFileErrorAndRecoveryTests: XCTestCase {
                 manifest: manifest,
                 timestamp: "2026-07-12T12:00:00Z"
             )
-            _ = try store.operationGroups.acquire(
+            let leasedGroup = try store.operationGroups.acquire(
                 activeGroup(
                     idempotencyKey: idempotencyKey,
                     planHash: plan.planHash,
@@ -129,14 +129,18 @@ final class CLIFileErrorAndRecoveryTests: XCTestCase {
                 environment: environment(files: files, runtimeAdapter: adapter)
             )
 
-            XCTAssertEqual(result.exitCode, CLIExitCode.commandUsage.rawValue)
+            XCTAssertEqual(result.exitCode, CLIExitCode.unsafeOperation.rawValue)
             XCTAssertEqual(adapter.executionCount, 0)
-            XCTAssertTrue(result.standardError.contains("checkpoint prepared"))
-            XCTAssertTrue(result.standardError.contains("owner hostwright-cli:token=[REDACTED]"))
-            XCTAssertTrue(result.standardError.contains(lockExpiresAt))
-            XCTAssertTrue(result.standardError.contains("lease expires"))
-            XCTAssertTrue(result.standardError.contains("No mutation was attempted"))
+            XCTAssertTrue(result.standardError.contains("Manifest-only admission cannot authorize runtime mutation."))
             XCTAssertFalse(result.standardError.contains("plain-secret-token"))
+            XCTAssertEqual(try store.operations.loadAll().isEmpty, true)
+            let groups = try store.operationGroups.loadAll()
+            XCTAssertEqual(groups.count, 1)
+            XCTAssertEqual(groups.first?.status, .active)
+            XCTAssertEqual(groups.first?.id, leasedGroup.acquired?.id)
+            XCTAssertEqual(groups.first?.checkpoint, leasedGroup.acquired?.checkpoint)
+            XCTAssertEqual(groups.first?.lockExpiresAt, lockExpiresAt)
+            XCTAssertEqual(groups.first?.lockOwner, "hostwright-cli:token=[REDACTED]")
         }
     }
 
@@ -159,7 +163,7 @@ final class CLIFileErrorAndRecoveryTests: XCTestCase {
                 manifest: manifest,
                 timestamp: "2026-07-12T12:00:00Z"
             )
-            _ = try store.operationGroups.acquire(
+            let leasedGroup = try store.operationGroups.acquire(
                 activeGroup(
                     idempotencyKey: idempotencyKey,
                     planHash: plan.planHash,
@@ -192,14 +196,19 @@ final class CLIFileErrorAndRecoveryTests: XCTestCase {
                 environment: environment(files: files, runtimeAdapter: adapter)
             )
 
-            XCTAssertEqual(result.exitCode, CLIExitCode.commandUsage.rawValue)
+            XCTAssertEqual(result.exitCode, CLIExitCode.unsafeOperation.rawValue)
             XCTAssertEqual(adapter.executionCount, 0)
-            XCTAssertTrue(result.standardError.contains("checkpoint prepared"))
-            XCTAssertTrue(result.standardError.contains("owner hostwright-cli:token=[REDACTED]"))
-            XCTAssertTrue(result.standardError.contains(lockExpiresAt))
-            XCTAssertTrue(result.standardError.contains("operation intent is recorded"))
-            XCTAssertTrue(result.standardError.contains("automatic retry remains blocked"))
+            XCTAssertTrue(result.standardError.contains("Manifest-only admission cannot authorize runtime mutation."))
             XCTAssertFalse(result.standardError.contains("plain-secret-token"))
+            let operations = try store.operations.loadAll()
+            XCTAssertEqual(operations.map(\.status), [.recorded])
+            XCTAssertEqual(operations.first?.id, "operation-active-recorded")
+            let groups = try store.operationGroups.loadAll()
+            XCTAssertEqual(groups.count, 1)
+            XCTAssertEqual(groups.first?.status, .active)
+            XCTAssertEqual(groups.first?.id, leasedGroup.acquired?.id)
+            XCTAssertEqual(groups.first?.checkpoint, leasedGroup.acquired?.checkpoint)
+            XCTAssertEqual(groups.first?.lockExpiresAt, lockExpiresAt)
         }
     }
 
@@ -211,16 +220,6 @@ final class CLIFileErrorAndRecoveryTests: XCTestCase {
             let plan = ReconciliationPlanner().plan(manifest: manifest, observedState: adapter.observedState)
             let store = SQLiteStateStore(path: databasePath)
             try store.migrate()
-            let connection = try SQLiteConnection(path: databasePath)
-            try connection.execute(
-                """
-                CREATE TRIGGER fail_apply_started_event
-                BEFORE INSERT ON event_ledger
-                BEGIN
-                  SELECT RAISE(FAIL, 'blocked pre-runtime event persistence');
-                END
-                """
-            )
             let files = FileBox(files: [HostwrightIdentity.manifestFileName: manifestText])
             let arguments = [
                 "apply",
@@ -233,22 +232,11 @@ final class CLIFileErrorAndRecoveryTests: XCTestCase {
                 environment: environment(files: files, runtimeAdapter: adapter)
             )
 
-            XCTAssertEqual(first.exitCode, CLIExitCode.stateUnavailable.rawValue)
+            XCTAssertEqual(first.exitCode, CLIExitCode.unsafeOperation.rawValue)
             XCTAssertEqual(adapter.executionCount, 0)
-            XCTAssertEqual(try store.operations.loadAll().map(\.status), [.recorded])
-            XCTAssertEqual(try store.operationGroups.loadAll().map(\.status), [.interrupted])
-            XCTAssertEqual(try store.operationGroups.loadAll().first?.checkpoint, "pre-runtime-state-incomplete")
-
-            try connection.execute("DROP TRIGGER fail_apply_started_event")
-            let retry = HostwrightCLI.run(
-                arguments: arguments,
-                environment: environment(files: files, runtimeAdapter: adapter)
-            )
-
-            XCTAssertEqual(retry.exitCode, 0)
-            XCTAssertEqual(adapter.executionCount, 1)
-            XCTAssertEqual(try store.operations.loadAll().map(\.status), [.recorded, .recorded, .succeeded])
-            XCTAssertEqual(try store.operationGroups.loadAll().map(\.status), [.interrupted, .succeeded])
+            XCTAssertTrue(first.standardError.contains("Manifest-only admission cannot authorize runtime mutation."))
+            XCTAssertTrue(try store.operations.loadAll().isEmpty)
+            XCTAssertTrue(try store.operationGroups.loadAll().isEmpty)
         }
     }
 
@@ -357,11 +345,18 @@ final class CLIFileErrorAndRecoveryTests: XCTestCase {
 
     private var singleServiceManifest: String {
         """
-        version: 2
+        version: 3
         project: demo
         services:
           api:
             image: local/demo:latest
+            resources:
+              requests:
+                cpus: 1
+                memory: 512MiB
+              limits:
+                cpus: 1
+                memory: 512MiB
 
         """
     }

@@ -1,0 +1,16 @@
+{
+  "invocationID": "invoke-1",
+  "pluginIdentifier": "dev.hostwright.policy.example",
+  "capability": "policy",
+  "timestamp": "2026-08-02T16:00:00Z",
+  "seed": 42,
+  "input": { "operation": "project.plan" },
+  "limits": {
+    "moduleBytes": 16777216,
+    "inputBytes": 1048576,
+    "outputBytes": 1048576,
+    "memoryBytes": 67108864,
+    "normalExecutionMilliseconds": 5000,
+    "absoluteExecutionMilliseconds": 30000
+  }
+}

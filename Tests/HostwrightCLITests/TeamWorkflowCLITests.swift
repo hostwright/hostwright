@@ -175,7 +175,7 @@ final class TeamWorkflowCLITests: XCTestCase {
         }
     }
 
-    func testApplyBindsApprovalToRuntimeConfirmationAndRealSQLiteAudit() throws {
+    func testApprovalCannotBypassMissingSchedulerAuthority() throws {
         try withTemporaryDirectory { directory in
             let manifestURL = directory.appendingPathComponent("hostwright.yaml")
             let profileURL = directory.appendingPathComponent("team.json")
@@ -201,8 +201,6 @@ final class TeamWorkflowCLITests: XCTestCase {
                 planHash: planHash
             )
             try writeJSON(approval, to: approvalURL)
-            let approvalArtifact = try TeamWorkflowDocumentParser.parseApproval(String(contentsOf: approvalURL, encoding: .utf8))
-
             let result = HostwrightCLI.run(
                 arguments: [
                     "apply", manifestURL.path, "--state-db", databaseURL.path, "--confirm-plan", planHash,
@@ -211,25 +209,16 @@ final class TeamWorkflowCLITests: XCTestCase {
                 environment: environment(adapter: adapter)
             )
 
-            XCTAssertEqual(result.exitCode, 0, result.standardError)
-            XCTAssertEqual(adapter.executedActions.count, 1)
-            let confirmation = try XCTUnwrap(adapter.confirmations.first)
-            XCTAssertEqual(confirmation.planHash, planHash)
-            XCTAssertEqual(confirmation.profileHash, profileArtifact.profileHash)
-            XCTAssertEqual(confirmation.manifestHash, manifestHash)
-            XCTAssertEqual(confirmation.approvalHash, approvalArtifact.approvalHash)
+            XCTAssertEqual(result.exitCode, CLIExitCode.unsafeOperation.rawValue)
+            XCTAssertTrue(result.standardError.contains("Manifest-only admission cannot authorize runtime mutation."))
+            XCTAssertTrue(adapter.executedActions.isEmpty)
+            XCTAssertTrue(adapter.confirmations.isEmpty)
 
             let store = SQLiteStateStore(path: databaseURL.path)
             try store.migrate()
-            let operations = try store.operations.loadAll()
-            XCTAssertTrue(operations.contains { $0.payloadJSONRedacted.contains(approvalArtifact.approvalHash) })
-            let audit = try XCTUnwrap(try store.events.loadAll().first { $0.type == "team.approval.recorded" })
-            XCTAssertTrue(audit.payloadJSONRedacted.contains(profileArtifact.profileHash))
-            XCTAssertTrue(audit.payloadJSONRedacted.contains(manifestHash))
-            XCTAssertTrue(audit.payloadJSONRedacted.contains(planHash))
-            XCTAssertTrue(audit.payloadJSONRedacted.contains(approvalArtifact.approvalHash))
-            XCTAssertFalse(audit.payloadJSONRedacted.contains(reviewerSecret))
-            XCTAssertTrue(audit.payloadJSONRedacted.contains("[REDACTED]"))
+            XCTAssertTrue(try store.operations.loadAll().isEmpty)
+            XCTAssertFalse(try store.events.loadAll().contains { $0.type == "team.approval.recorded" })
+            XCTAssertFalse(result.standardError.contains(reviewerSecret))
         }
     }
 
@@ -267,8 +256,8 @@ final class TeamWorkflowCLITests: XCTestCase {
                 environment: environment(adapter: adapter)
             )
 
-            XCTAssertEqual(result.exitCode, CLIExitCode.confirmationMismatch.rawValue)
-            XCTAssertTrue(result.standardError.contains(HostwrightErrorCode.teamBindingMismatch.rawValue))
+            XCTAssertEqual(result.exitCode, CLIExitCode.unsafeOperation.rawValue)
+            XCTAssertTrue(result.standardError.contains("Manifest-only admission cannot authorize runtime mutation."))
             XCTAssertTrue(adapter.executedActions.isEmpty)
             let store = SQLiteStateStore(path: databaseURL.path)
             try store.migrate()
@@ -466,7 +455,7 @@ final class TeamWorkflowCLITests: XCTestCase {
             )
 
             XCTAssertEqual(result.exitCode, CLIExitCode.unsafeOperation.rawValue)
-            XCTAssertTrue(result.standardError.contains("Hostwright ownership record"))
+            XCTAssertTrue(result.standardError.contains("Manifest-only admission cannot authorize runtime mutation."))
             XCTAssertTrue(adapter.executedActions.isEmpty)
             let store = SQLiteStateStore(path: databaseURL.path)
             try store.migrate()
@@ -480,11 +469,14 @@ final class TeamWorkflowCLITests: XCTestCase {
 
     private var digestManifest: String {
         """
-        version: 2
+        version: 3
         project: demo
         services:
           api:
             image: \(digestImage)
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
             command: ["serve"]
             ports:
               - "8080:8080"
@@ -494,22 +486,28 @@ final class TeamWorkflowCLITests: XCTestCase {
 
     private var taggedManifest: String {
         """
-        version: 2
+        version: 3
         project: demo
         services:
           api:
             image: local/demo:latest
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
 
         """
     }
 
     private var digestRestartManifest: String {
         """
-        version: 2
+        version: 3
         project: demo
         services:
           api:
             image: \(digestImage)
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
             restart:
               policy: on-failure
 
@@ -523,6 +521,14 @@ final class TeamWorkflowCLITests: XCTestCase {
           api:
             image: \(digestImage)
             command: ["serve"]
+            deploy:
+              resources:
+                reservations:
+                  cpus: "1"
+                  memory: 512m
+                limits:
+                  cpus: "1"
+                  memory: 512m
             ports:
               - "8080:8080"
 

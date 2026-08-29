@@ -1,0 +1,14 @@
+{
+  "abiVersion": 1,
+  "identifier": "dev.hostwright.policy.example",
+  "packageVersion": "1.0.0",
+  "hostwrightCompatibility": ">=0.0.2 <0.1.0",
+  "providerKind": "wasi",
+  "entrypoint": "plugin.wasm",
+  "grants": [{ "capability": "policy", "scope": "project" }],
+  "artifactDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "contentDigests": [{ "path": "plugin.wasm", "digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" }],
+  "provenance": { "checksum": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "signature": "signature", "signerIdentifier": "dev.hostwright.plugin-signer", "source": { "kind": "localDirectory", "locator": "/private/tmp/hostwright-phase09-plugin-source" } },
+  "cmsSignature": "cms-signature",
+  "signerIdentifier": "dev.hostwright.plugin-signer"
+}

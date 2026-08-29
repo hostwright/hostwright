@@ -1,0 +1,7 @@
+{
+  "apiVersion": 2,
+  "protocolRevision": "2.1",
+  "kind": "authentication-response",
+  "credentialID": "device-key",
+  "signatureDERBase64": "MEUCIQCJEZNLJFhnUeauqx63oJcbAK7DvW/1J3E/S3vGBpgMsgIgFX5SLGa03gkrRzSSf6R4IUj2P8u5TTohLGdBhvsUQT4="
+}

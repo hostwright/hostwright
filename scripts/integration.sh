@@ -7,12 +7,18 @@ cd "$root"
 swift build --product hostwright
 swift build --product hostwright-control
 swift build --product hostwright-dist
+swift build --product HostwrightLocalIntegrationTool
 bin_dir="$(swift build --show-bin-path)"
-hostwright="$bin_dir/hostwright"
+hostwright_cli="$bin_dir/hostwright"
+hostwright="$bin_dir/HostwrightLocalIntegrationTool"
 hostwright_control="$bin_dir/hostwright-control"
 hostwright_dist="$bin_dir/hostwright-dist"
+if [[ ! -x "$hostwright_cli" ]]; then
+  echo "built hostwright executable not found at $hostwright_cli" >&2
+  exit 1
+fi
 if [[ ! -x "$hostwright" ]]; then
-  echo "built hostwright executable not found at $hostwright" >&2
+  echo "built local integration executable not found at $hostwright" >&2
   exit 1
 fi
 if [[ ! -x "$hostwright_dist" ]]; then
@@ -94,7 +100,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-version="$("$hostwright" --version)"
+version="$("$hostwright_cli" --version)"
 golden_version="$(plutil -extract productVersion raw contracts/v0.0.2/versions.json)"
 [[ "$version" == "$golden_version" ]]
 [[ "$version" == "0.0.2-dev.14" ]]
@@ -102,6 +108,16 @@ golden_version="$(plutil -extract productVersion raw contracts/v0.0.2/versions.j
 export HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$application_support"
 export HOSTWRIGHT_CACHE_DIR="$cache_directory"
 export HOSTWRIGHT_LOG_DIR="$log_directory"
+
+set +e
+env -u HOSTWRIGHT_STATE_DB "$hostwright_cli" paths --json >"$missing_stdout" 2>"$missing_stderr"
+daemonless_paths_exit=$?
+set -e
+[[ "$daemonless_paths_exit" -eq 66 ]]
+[[ ! -s "$missing_stdout" ]]
+plutil -convert json -o /dev/null "$missing_stderr"
+grep -q '"code":"HW-API-002"' "$missing_stderr"
+[[ ! -e "$application_support" ]]
 
 env -u HOSTWRIGHT_STATE_DB "$hostwright" paths --json >"$default_paths_json"
 plutil -convert json -o /dev/null "$default_paths_json"
@@ -266,7 +282,15 @@ printf '%s\n' \
   'services:' \
   '  api:' \
   '    image: local/integration:latest' \
-  '    command: ["serve"]' >"$stack_file"
+  '    command: ["serve"]' \
+  '    deploy:' \
+  '      resources:' \
+  '        reservations:' \
+  '          cpus: 1' \
+  '          memory: 512M' \
+  '        limits:' \
+  '          cpus: 1' \
+  '          memory: 512M' >"$stack_file"
 
 "$hostwright" validate "$manifest" --team-profile "$team_profile" >/dev/null
 "$hostwright" plan "$manifest" --team-profile "$team_profile" --output json >"$team_plan_json"
@@ -466,4 +490,4 @@ while IFS= read -r sqlite_path; do
 done < <(find "$workdir" -name '*.sqlite*' -print)
 [[ ! -e "$state_database-journal" ]]
 
-echo "local-integration passed: built CLI, isolated path resolution, private state creation, verified online backup/restore/recovery, one-shot control API, and distribution tool; reviewed-local extension subprocess handshake, team-profile/benchmark/distribution gates, JSON output/errors, real file failures, overwrite refusal, rejected control mutation, and no unexpected state writes"
+echo "local-integration passed: production CLI daemonless refusal, isolated direct-core qualification, private state creation, verified online backup/restore/recovery, one-shot control API, and distribution tool; reviewed-local extension subprocess handshake, team-profile/benchmark/distribution gates, JSON output/errors, real file failures, overwrite refusal, rejected control mutation, and no unexpected state writes"

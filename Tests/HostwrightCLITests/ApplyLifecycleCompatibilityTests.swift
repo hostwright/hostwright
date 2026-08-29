@@ -286,11 +286,14 @@ private struct ApplyCompatibilityFixture {
 
     func writeInputs() throws {
         try """
-        version: 2
+        version: 3
         project: demo
         services:
           api:
             image: example.invalid/api@sha256:\(String(repeating: "1", count: 64))
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
 
         """.write(to: manifest, atomically: true, encoding: .utf8)
         try writeJSON(

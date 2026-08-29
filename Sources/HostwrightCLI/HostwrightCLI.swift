@@ -16,12 +16,19 @@ import HostwrightStorage
 
 public enum HostwrightCLI {
     public static let starterManifest = """
-    version: 2
+    version: 3
     project: api-local
 
     services:
       api:
         image: ghcr.io/example/api:latest
+        resources:
+          requests:
+            cpus: 1
+            memory: 512MiB
+          limits:
+            cpus: 1
+            memory: 512MiB
         ports:
           - "8080:8080"
         env:
@@ -33,6 +40,13 @@ public enum HostwrightCLI {
           policy: on-failure
       redis:
         image: redis:7
+        resources:
+          requests:
+            cpus: 1
+            memory: 256MiB
+          limits:
+            cpus: 1
+            memory: 256MiB
         ports:
           - "6379:6379"
 
@@ -53,6 +67,46 @@ public enum HostwrightCLI {
         ) {
             runTraced(arguments: arguments, environment: environment, correlationID: correlationID)
         }
+    }
+
+    public static func usageFailure(
+        _ error: CLIUsageError,
+        output: CLIOutputFormat = .text
+    ) -> CLIRunResult {
+        failure(
+            code: .commandUsage,
+            message: "\(error.message)\n\n\(helpText)",
+            output: output
+        )
+    }
+
+    public static func diagnosticFailure(
+        _ diagnostic: HostwrightDiagnostic,
+        output: CLIOutputFormat = .text
+    ) -> CLIRunResult {
+        failure(code: diagnostic.code, message: diagnostic.message, output: output)
+    }
+
+    public static func renderControlEventStream(
+        stateDatabasePath: String,
+        projectName: String?,
+        filters: EventFilters,
+        stream: EventStreamCLIOptions,
+        output: CLIOutputFormat,
+        page: HostwrightEventStreamPage
+    ) -> CLIRunResult {
+        EventsCommandRunner(
+            stateStoreConfiguration: StateStoreConfiguration(
+                explicitDatabasePath: stateDatabasePath
+            ),
+            projectName: projectName,
+            filters: filters,
+            stream: stream,
+            output: output
+        ).renderStream(
+            page,
+            pageSize: filters.limit ?? HostwrightEventStreamPage.defaultPageSize
+        )
     }
 
     private static func runTraced(
@@ -158,9 +212,9 @@ public enum HostwrightCLI {
     private static func observabilityCommand(_ arguments: [String]) -> String {
         let supported = Set([
             "apply", "benchmark", "capabilities", "cleanup", "daemon", "diagnostics", "down",
-            "doctor", "events", "extension", "help", "image", "init", "interactive",
-            "lifecycle", "logs", "metrics", "network", "paths", "plan", "recovery", "registry",
-            "observability", "restart", "rm", "run", "runtime", "secret", "start", "state", "status",
+            "doctor", "events", "export-stack", "extension", "help", "image", "init", "interactive",
+            "lifecycle", "logs", "metrics", "network", "paths", "plan", "recovery", "registry", "scheduler",
+            "observability", "plan-stack-update", "restart", "rm", "run", "runtime", "secret", "start", "state", "status",
             "stop", "storage", "traces", "up", "update", "validate", "version"
         ])
         guard let first = arguments.first else { return "help" }
@@ -314,7 +368,8 @@ public enum HostwrightCLI {
         case .daemon(let options):
             return try DaemonLifecycleCommandRunner(
                 options: options,
-                controller: environment.daemonLifecycleController()
+                controller: environment.daemonLifecycleController(),
+                controlIdentityBootstrap: environment.controlIdentityBootstrap
             ).run()
         case .restartBudget(let options):
             return try RestartBudgetCommandRunner(
@@ -370,7 +425,7 @@ public enum HostwrightCLI {
             ).run()
         case .migrateManifestPreview(let path, let output):
             let source = try hostwrightReadManifestText(path: path, environment: environment)
-            let preview = try ManifestMigrator.previewV2(source)
+            let preview = try ManifestMigrator.previewV3(source)
             return CLIRunResult(
                 standardOutput: output == .json
                     ? CLIJSON.manifestMigrationPreview(preview)
@@ -382,6 +437,15 @@ public enum HostwrightCLI {
             return try initManifest(environment: environment)
         case .importStack(let path, let output, let teamProfilePath):
             return try importStack(path: path, output: output, teamProfilePath: teamProfilePath, environment: environment)
+        case .exportStack(let path, let output):
+            return try exportStack(path: path, output: output, environment: environment)
+        case .planStackUpdate(let currentPath, let desiredPath, let output):
+            return try planStackUpdate(
+                currentPath: currentPath,
+                desiredPath: desiredPath,
+                output: output,
+                environment: environment
+            )
         case .validate(let path, let teamProfilePath):
             let validated = try loadValidManifest(path: path, teamProfilePath: teamProfilePath, environment: environment)
             let standardOutput = "Valid hostwright manifest: \(path)\nProject: \(validated.manifest.project ?? "<missing>")\nServices: \(validated.manifest.services.count)\n" + hostwrightTeamProfileText(validated)
@@ -499,11 +563,27 @@ public enum HostwrightCLI {
                 executablePath: executablePath,
                 output: output
             )
+        case .plugin(let options):
+            return diagnosticFailure(
+                HostwrightDiagnostic(
+                    code: .controlAPIUnavailable,
+                    message: "Plugin lifecycle commands require the authenticated persistent Control API."
+                ),
+                output: options.output
+            )
         case .doctor(let stateDatabasePath, let output):
             return doctor(
                 stateDatabasePath: stateDatabasePath,
                 environment: environment,
                 output: output
+            )
+        case .scheduler(let options):
+            return diagnosticFailure(
+                HostwrightDiagnostic(
+                    code: .controlAPIUnavailable,
+                    message: "Scheduler commands require the authenticated persistent Control API; local scheduler execution is unavailable."
+                ),
+                output: options.output
             )
         }
     }
@@ -601,10 +681,13 @@ public enum HostwrightCLI {
       hostwright migrate preview <path> [--json|--output text|json]
       hostwright init
       hostwright import-stack <path> [--output text|json] [--team-profile <path>]
+      hostwright export-stack <manifest> [--output text|json]
+      hostwright plan-stack-update <current> <desired> [--output text|json]
       hostwright validate [path] [--team-profile <path>]
       hostwright plan [path] [--output text|json] [--team-profile <path>]
       hostwright status [path] [--state-db <path>] [--output text|json] [--runtime-provider auto|apple-cli|containerization]
       hostwright apply [path] [--state-db <path>] --confirm-plan <hash> [--runtime-provider auto|apple-cli|containerization] [--team-profile <path> --approval-record <path>]
+      hostwright scheduler status|plan|simulate|explain|apply (--request <path>|--stdin) [--json|--output text|json]
       hostwright up [path] [--service <name>] [--state-db <path>] (--dry-run|--confirm-plan <hash>) [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--parallelism <1-32>] [--json|--output text|json]
       hostwright down [path] [--service <name>] [--state-db <path>] (--dry-run|--confirm-plan <hash>) [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--parallelism <1-32>] [--json|--output text|json]
       hostwright run [path] --service <name> [--state-db <path>] (--dry-run|--confirm-plan <hash>) [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--parallelism <1-32>] [--json|--output text|json]
@@ -634,6 +717,14 @@ public enum HostwrightCLI {
       hostwright diagnostics support recover [--state-db <path>] [--output text|json]
       hostwright benchmark --image <local-image> --samples <3-10> --report <path> --source-commit <40-hex> --source-dirty <true|false> --expected-container-version <version> [--attended-sleep-wake-seconds <15-300>] --confirm-live
       hostwright extension check --declaration <absolute-path> --executable <absolute-path> [--output text|json]
+      hostwright extension list [--identifier <id>] [--output text|json]
+      hostwright extension status (--identifier <id>|--digest <sha256>) [--output text|json]
+      hostwright extension (discover|install|update) --source <absolute-directory|https-url> --signer <configured-id> [--output text|json]
+      hostwright extension activate --digest <sha256> [--expected-activation-generation <n>] [--output text|json]
+      hostwright extension rollback --identifier <id> [--expected-activation-generation <n>] [--output text|json]
+      hostwright extension revoke --revocation-id <id> --target-kind package|signer --target <digest|signer> --reason <reason> [--output text|json]
+      hostwright extension quarantine --quarantine-id <id> --digest <sha256> --reason-code <code> --detail-digest <sha256> [--output text|json]
+      hostwright extension uninstall --digest <sha256> --expected-generation <n> [--output text|json]
       hostwright doctor [--state-db <path>] [--json|--output text|json]
 
     Most commands are read-only. capabilities reports tested maturity without probing or mutating the host.
@@ -655,23 +746,27 @@ public enum HostwrightCLI {
     registry provenance generates and verifies exact-image DSSE-wrapped in-toto/SLSA v1 build attestations, persists immutable Gate 6 graph evidence, and resolves signing keys only through typed secret-provider references.
     image mutations use the Apple CLI provider, durable intent, structured post-operation digest verification, exact ownership, and exact rollback/cleanup. Containerization image mutations report unavailable before effects.
     recovery inspects durable lifecycle groups; resume and rollback require the exact group UUID and persisted plan hash.
-    migrate preview validates and prints an in-memory v1-to-v2 conversion; it never writes the source file.
+    migrate preview validates and prints an in-memory v1/v2-to-v3 conversion; it never writes the source file.
     init writes hostwright.yaml only when absent.
     import-stack reads a narrow safe stack-file subset and prints converted hostwright.yaml; it does not write files, observe runtime, or imply Compose parity.
+    export-stack prints canonical Compose for the exact representable Hostwright subset. plan-stack-update compares two manifests and prints a deterministic read-only Compose update plan. Neither command writes files, resolves state, or observes or mutates runtime.
     CLI plan output is deterministic but does not perform live runtime observation.
     Apply is a compatibility entry point for an exact confirmed up lifecycle plan. Generate its hash with up --dry-run; execution uses the same durable DAG and saga as up.
     Lifecycle dry-runs emit deterministic plans; confirmed up, down, run, start, stop, restart, rm, and update executions emit deterministic per-resource outcomes. Every lifecycle command supports --json or --output json.
     Cleanup deletes only exact cleanup-eligible Hostwright-owned stopped/created/exited containers after dry-run token confirmation.
     Diagnostics-v1 remains a local redacted JSON export. Support bundles add bounded preview, confirmation-bound local creation, optional Keychain CMS encryption, durable recovery, and exact receipt-proven deletion. Neither workflow uploads telemetry.
-    JSON output is supported for capabilities, paths, migrate preview, restart-budget, maintenance, ownership, metrics, traces, support bundles, every state, secret, registry, and image subcommand, import-stack, plan, status, every lifecycle command, events, recovery, extension check, doctor, and errors when --json or --output json is present.
+    JSON output is supported for capabilities, paths, migrate preview, restart-budget, maintenance, ownership, metrics, traces, support bundles, every state, secret, registry, image, and extension subcommand, import-stack, export-stack, plan-stack-update, plan, status, every lifecycle command, events, recovery, doctor, and errors when --json or --output json is present.
     Team profiles and approvals are loaded only from explicit local paths. Profile-aware mutations require an approval bound to the exact profile, manifest, and plan or cleanup token.
     Benchmark runs are explicit local hardware evidence. They refuse image pulls and broad cleanup, use bounded disposable Hostwright-owned resources, and write only the requested non-existing report path.
     Extension check executes one reviewed-local protocol handshake from explicit absolute paths. The protocol grants no Hostwright capability, but the reviewed executable still has the invoking macOS account's ambient privileges; it is not sandboxed.
+    Extension lifecycle commands use only the authenticated persistent Control API. Signed packages are explicit-source, compatibility-checked, immutable and digest-addressed; activation health-checks the WASI or XPC provider, and cleanup is ownership-ledger limited.
 
     Examples:
       hostwright plan --output json
       hostwright runtime providers --json
       hostwright import-stack compose.yaml --output json
+      hostwright export-stack hostwright.yaml --output json
+      hostwright plan-stack-update current.yaml desired.yaml --output json
       hostwright paths --json
       hostwright state integrity --json
       hostwright state backup --json
@@ -784,6 +879,30 @@ public enum HostwrightCLI {
         environment: CLIEnvironment
     ) throws -> CLIRunResult {
         let text = try hostwrightReadLocalText(path: path, role: "stack file", environment: environment)
+
+        if output == .json {
+            let result = HostwrightCompose.importDocument(text)
+            let exitCode: CLIExitCode = result.succeeded ? .success : .validation
+            let validatedManifest: TeamValidatedManifest?
+            if result.succeeded, let manifestText = result.manifestText {
+                validatedManifest = try hostwrightValidatedManifest(
+                    text: manifestText,
+                    teamProfilePath: teamProfilePath,
+                    environment: environment
+                )
+            } else {
+                validatedManifest = nil
+            }
+            let envelope = CLIJSON.composeImport(
+                path: path,
+                result: result,
+                validatedManifest: validatedManifest
+            )
+            return result.succeeded
+                ? CLIRunResult(standardOutput: envelope, exitCode: exitCode.rawValue)
+                : CLIRunResult(standardError: envelope, exitCode: exitCode.rawValue)
+        }
+
         let result = StackFileImporter.convert(text)
         let exitCode: CLIExitCode = result.succeeded ? .success : .validation
         var validatedManifest: TeamValidatedManifest?
@@ -793,16 +912,6 @@ public enum HostwrightCLI {
                 teamProfilePath: teamProfilePath,
                 environment: environment
             )
-        }
-
-        if output == .json {
-            if result.succeeded {
-                return CLIRunResult(
-                    standardOutput: CLIJSON.stackImport(path: path, result: result, validatedManifest: validatedManifest),
-                    exitCode: exitCode.rawValue
-                )
-            }
-            return CLIRunResult(standardError: CLIJSON.stackImportError(path: path, result: result, exitCode: exitCode), exitCode: exitCode.rawValue)
         }
 
         if result.succeeded, let manifestText = result.manifestText {
@@ -815,6 +924,208 @@ public enum HostwrightCLI {
             standardError: result.errors.map(\.rendered).joined(separator: "\n") + "\n",
             exitCode: exitCode.rawValue
         )
+    }
+
+    private static func exportStack(
+        path: String,
+        output: CLIOutputFormat,
+        environment: CLIEnvironment
+    ) throws -> CLIRunResult {
+        let manifest: HostwrightManifest
+        do {
+            let text = try hostwrightReadBoundedManifestText(
+                path: path,
+                maximumBytes: ManifestParser.maximumUTF8Bytes,
+                environment: environment
+            )
+            manifest = try ManifestParser.parse(text)
+        } catch let error as ManifestParseError where output == .json {
+            let result = ComposeExportResult(
+                succeeded: false,
+                composeText: nil,
+                lossReport: composeManifestLossReport(
+                    operation: .exporting,
+                    issues: error.issues
+                )
+            )
+            return CLIRunResult(
+                standardError: CLIJSON.composeExport(path: path, result: result),
+                exitCode: CLIExitCode.validation.rawValue
+            )
+        }
+        let result = HostwrightCompose.exportDocument(manifest)
+        let exitCode: CLIExitCode = result.succeeded ? .success : .validation
+        if output == .json {
+            let envelope = CLIJSON.composeExport(path: path, result: result)
+            return result.succeeded
+                ? CLIRunResult(standardOutput: envelope, exitCode: exitCode.rawValue)
+                : CLIRunResult(standardError: envelope, exitCode: exitCode.rawValue)
+        }
+        guard result.succeeded, let composeText = result.composeText else {
+            return CLIRunResult(
+                standardError: renderComposeLosses(result.lossReport),
+                exitCode: exitCode.rawValue
+            )
+        }
+        return CLIRunResult(
+            standardOutput: composeText,
+            standardError: renderComposeLosses(result.lossReport),
+            exitCode: exitCode.rawValue
+        )
+    }
+
+    private static func planStackUpdate(
+        currentPath: String,
+        desiredPath: String,
+        output: CLIOutputFormat,
+        environment: CLIEnvironment
+    ) throws -> CLIRunResult {
+        var snapshots: [String: String] = [:]
+        func snapshot(_ path: String) throws -> String {
+            let identity = canonicalComposeInputIdentity(path)
+            if let text = snapshots[identity] { return text }
+            let text = try hostwrightReadBoundedManifestText(
+                path: path,
+                maximumBytes: ManifestParser.maximumUTF8Bytes,
+                environment: environment
+            )
+            guard text.utf8.count <= ManifestParser.maximumUTF8Bytes else {
+                throw ManifestParseError.failed([
+                    ManifestIssue(
+                        code: .manifestUnsupportedFeature,
+                        message: "Manifest exceeds the 1 MiB UTF-8 limit.",
+                        path: "$"
+                    )
+                ])
+            }
+            snapshots[identity] = text
+            return text
+        }
+        let current: HostwrightManifest
+        do {
+            current = try ManifestParser.parse(snapshot(currentPath))
+        } catch let error as ManifestParseError where output == .json {
+            return composeUpdateParseFailure(
+                currentPath: currentPath,
+                desiredPath: desiredPath,
+                issues: error.issues,
+                prefix: "current"
+            )
+        }
+        let desired: HostwrightManifest
+        do {
+            desired = try ManifestParser.parse(snapshot(desiredPath))
+        } catch let error as ManifestParseError where output == .json {
+            return composeUpdateParseFailure(
+                currentPath: currentPath,
+                desiredPath: desiredPath,
+                issues: error.issues,
+                prefix: "desired"
+            )
+        }
+        let plan = HostwrightCompose.planUpdate(current: current, desired: desired)
+        let exitCode: CLIExitCode = plan.accepted ? .success : .validation
+        if output == .json {
+            let envelope = CLIJSON.composeUpdatePlan(
+                currentPath: currentPath,
+                desiredPath: desiredPath,
+                plan: plan
+            )
+            return plan.accepted
+                ? CLIRunResult(standardOutput: envelope, exitCode: exitCode.rawValue)
+                : CLIRunResult(standardError: envelope, exitCode: exitCode.rawValue)
+        }
+        guard plan.accepted else {
+            return CLIRunResult(
+                standardError: renderComposeLosses(plan.lossReport),
+                exitCode: exitCode.rawValue
+            )
+        }
+        let changes = plan.changes.isEmpty
+            ? ["- none"]
+            : plan.changes.map {
+                "- \($0.kind.rawValue) \($0.serviceName): \($0.fields.joined(separator: ", "))"
+            }
+        let rendered = ([
+            "Compose update plan",
+            "Accepted: true",
+            "Mutates runtime: false",
+            "Changes:",
+        ] + changes).joined(separator: "\n") + "\n"
+        return CLIRunResult(
+            standardOutput: rendered,
+            standardError: renderComposeLosses(plan.lossReport),
+            exitCode: exitCode.rawValue
+        )
+    }
+
+    private static func canonicalComposeInputIdentity(_ path: String) -> String {
+        URL(fileURLWithPath: path).standardizedFileURL.path
+    }
+
+    private static func composeUpdateParseFailure(
+        currentPath: String,
+        desiredPath: String,
+        issues: [ManifestIssue],
+        prefix: String
+    ) -> CLIRunResult {
+        let plan = ComposeUpdatePlan(
+            accepted: false,
+            changes: [],
+            lossReport: composeManifestLossReport(
+                operation: .updatePlanning,
+                issues: issues,
+                prefix: prefix
+            )
+        )
+        return CLIRunResult(
+            standardError: CLIJSON.composeUpdatePlan(
+                currentPath: currentPath,
+                desiredPath: desiredPath,
+                plan: plan
+            ),
+            exitCode: CLIExitCode.validation.rawValue
+        )
+    }
+
+    private static func composeManifestLossReport(
+        operation: ComposeOperation,
+        issues: [ManifestIssue],
+        prefix: String? = nil
+    ) -> ComposeLossReport {
+        ComposeLossReport(
+            operation: operation,
+            losses: issues.map { issue in
+                let path: String
+                if let prefix {
+                    if let issuePath = issue.path {
+                        path = issuePath == "$"
+                            ? "$.\(prefix)"
+                            : "$.\(prefix)" + String(issuePath.dropFirst())
+                    } else {
+                        path = "$.\(prefix)"
+                    }
+                } else {
+                    path = issue.path ?? "$.document"
+                }
+                return ComposeLoss(
+                    code: .invalidManifest,
+                    severity: .error,
+                    path: path,
+                    message: RuntimeRedactionPolicy.default.redact(issue.message),
+                    line: issue.line
+                )
+            }
+        )
+    }
+
+    private static func renderComposeLosses(_ report: ComposeLossReport) -> String {
+        guard !report.losses.isEmpty else { return "" }
+        return report.losses.map { loss in
+            let line = loss.line.map { " line \($0)" } ?? ""
+            let policy = loss.policyReasonCode.map { " [\($0)]" } ?? ""
+            return "\(loss.code.rawValue) \(loss.path)\(line): \(loss.message)\(policy)"
+        }.joined(separator: "\n") + "\n"
     }
 
     private static func doctor(

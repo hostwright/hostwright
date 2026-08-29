@@ -84,6 +84,8 @@ public struct StateBackupRecord: Codable, Equatable, Sendable {
     public let databaseSHA256: String?
     public let databaseBytes: UInt64?
     public let stateSchemaVersion: Int?
+    public let auditHead: AuditChainHeadAnchor?
+    public let auditActiveKeyID: String?
     public let restorable: Bool
     public let verificationMessage: String
 
@@ -94,6 +96,8 @@ public struct StateBackupRecord: Codable, Equatable, Sendable {
         databaseSHA256: String?,
         databaseBytes: UInt64?,
         stateSchemaVersion: Int?,
+        auditHead: AuditChainHeadAnchor? = nil,
+        auditActiveKeyID: String? = nil,
         restorable: Bool,
         verificationMessage: String
     ) {
@@ -104,6 +108,8 @@ public struct StateBackupRecord: Codable, Equatable, Sendable {
         self.databaseSHA256 = databaseSHA256
         self.databaseBytes = databaseBytes
         self.stateSchemaVersion = stateSchemaVersion
+        self.auditHead = auditHead
+        self.auditActiveKeyID = auditActiveKeyID
         self.restorable = restorable
         self.verificationMessage = verificationMessage
     }

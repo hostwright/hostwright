@@ -332,7 +332,7 @@ final class SecretRecoveryCommandTests: XCTestCase {
             let intendedDeleteID = UUID()
             let replacementDeleteID = fixture.manager.seed(
                 reference: fixture.reference,
-                version: 2
+                version: 3
             )
             let deleteJournal = try fixture.persistInterrupted(
                 operation: "delete",

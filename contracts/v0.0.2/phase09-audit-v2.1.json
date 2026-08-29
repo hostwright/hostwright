@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "identifier": "audit-1",
+  "segmentID": "segment-1",
+  "sequence": 1,
+  "timestamp": "2026-08-02T16:00:00Z",
+  "subjectID": "uid:501",
+  "action": "request",
+  "outcome": "accepted",
+  "reasonCode": "received",
+  "payloadDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "recordDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "signingKeyID": "audit-key-1"
+}

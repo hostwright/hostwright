@@ -1,0 +1,9 @@
+{
+  "apiVersion": 2,
+  "protocolRevision": "2.1",
+  "requestID": "phase09-request-1",
+  "operation": "project.plan",
+  "timeoutMilliseconds": 300000,
+  "idempotencyKey": "phase09-request-1",
+  "body": { "project": "demo", "generation": 2 }
+}

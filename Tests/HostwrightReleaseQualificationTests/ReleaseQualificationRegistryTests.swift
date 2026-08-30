@@ -276,6 +276,12 @@ func makeLicensePolicySnapshotFixture() throws -> (
             "89fbc3714264cce8db8e4ec51b64e01c3e28c6c5"
         ),
         (
+            "swift-crypto",
+            "3.15.1",
+            "https://github.com/apple/swift-crypto.git",
+            "95ba0316a9b733e92bb6b071255ff46263bbe7dc"
+        ),
+        (
             "wasmkit",
             "0.3.1",
             "https://github.com/swiftwasm/WasmKit.git",
@@ -632,7 +638,7 @@ final class ReleaseQualificationRegistryTests: XCTestCase {
         XCTAssertEqual(
             plans[0].blockers[0].detail,
             "committed license-policy receipts are missing for identities: " +
-                "containerization, swift-certificates, wasmkit, yams"
+                "containerization, swift-certificates, swift-crypto, wasmkit, yams"
         )
         XCTAssertEqual(plans[1].status, .blocked)
         XCTAssertEqual(plans[1].blockers.map(\.reason), [.licenseMetadataUnavailable])
@@ -1070,7 +1076,7 @@ final class ReleaseQualificationRegistryTests: XCTestCase {
         XCTAssertEqual(execution.status, .failed)
         XCTAssertEqual(
             execution.failures,
-            ["Package.swift direct dependencies are not exactly the canonical four exact pins"]
+            ["Package.swift direct dependencies are not exactly the canonical five exact pins"]
         )
         XCTAssertTrue(execution.blockers.isEmpty)
     }
@@ -1100,7 +1106,7 @@ final class ReleaseQualificationRegistryTests: XCTestCase {
         XCTAssertEqual(execution.status, .failed)
         XCTAssertEqual(
             execution.failures,
-            ["Package.swift direct dependencies are not exactly the canonical four exact pins"]
+            ["Package.swift direct dependencies are not exactly the canonical five exact pins"]
         )
     }
 
@@ -1126,7 +1132,7 @@ final class ReleaseQualificationRegistryTests: XCTestCase {
         XCTAssertEqual(execution.status, .failed)
         XCTAssertEqual(
             execution.failures,
-            ["Package.swift direct dependencies are not exactly the canonical four exact pins"]
+            ["Package.swift direct dependencies are not exactly the canonical five exact pins"]
         )
     }
 
@@ -1280,7 +1286,7 @@ final class ReleaseQualificationRegistryTests: XCTestCase {
         XCTAssertEqual(
             execution.blockers[0].detail,
             "committed license-policy receipts are missing for identities: " +
-                "containerization, swift-certificates, wasmkit, yams"
+                "containerization, swift-certificates, swift-crypto, wasmkit, yams"
         )
         XCTAssertTrue(execution.failures.isEmpty)
     }

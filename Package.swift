@@ -174,6 +174,10 @@ let package = Package(
             exact: "1.19.3"
         ),
         .package(
+            url: "https://github.com/apple/swift-crypto.git",
+            exact: "3.15.1"
+        ),
+        .package(
             url: "https://github.com/swiftwasm/WasmKit.git",
             exact: "0.3.1"
         )
@@ -434,7 +438,8 @@ let package = Package(
                 "HostwrightRuntime",
                 "HostwrightScheduler",
                 "HostwrightStorage",
-                "HostwrightSQLiteSupport"
+                "HostwrightSQLiteSupport",
+                .product(name: "Crypto", package: "swift-crypto")
             ],
             linkerSettings: [
                 .linkedLibrary("sqlite3"),
@@ -716,7 +721,8 @@ let package = Package(
                 "HostwrightReconciler",
                 "HostwrightRuntime",
                 "HostwrightScheduler",
-                "HostwrightState"
+                "HostwrightState",
+                .product(name: "Crypto", package: "swift-crypto")
             ]
         ),
         .testTarget(

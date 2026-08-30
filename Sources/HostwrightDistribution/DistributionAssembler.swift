@@ -779,6 +779,7 @@ public struct DistributionCleanBuilder: Sendable {
             "-Xswiftc", "-num-threads",
             "-Xswiftc", "1",
             "-Xswiftc", "-no-whole-module-optimization",
+            "-Xswiftc", "-disable-cmo",
             "-Xswiftc", "-file-prefix-map",
             "-Xswiftc", prefixMap,
             "-Xcc", "-ffile-prefix-map=\(prefixMap)",

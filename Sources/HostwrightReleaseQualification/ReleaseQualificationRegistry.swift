@@ -155,7 +155,7 @@ struct ReleaseQualificationLicensePolicy:
     static let maximumPolicyBytes = 256 * 1_024
     static let maximumLicenseTextBytes = 1 * 1_024 * 1_024
     static let directDependencyIdentities: Set<String> = [
-        "containerization", "swift-certificates", "wasmkit", "yams",
+        "containerization", "swift-certificates", "swift-crypto", "wasmkit", "yams",
     ]
     static let allowedLicenseExpressions: Set<String> = [
         "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "MIT",
@@ -2043,7 +2043,7 @@ public struct ReleaseQualificationSafeCheckRunner: Sendable {
         var failures: [String] = []
         guard hasCanonicalDirectDependencies(packageText, directPins: directPins) else {
             failures.append(
-                "Package.swift direct dependencies are not exactly the canonical four exact pins"
+                "Package.swift direct dependencies are not exactly the canonical five exact pins"
             )
             return dependencyResolutionFailures(
                 resolvedData: resolvedData,
@@ -2084,6 +2084,12 @@ public struct ReleaseQualificationSafeCheckRunner: Sendable {
                 "1.19.3",
                 "https://github.com/apple/swift-certificates.git",
                 "89fbc3714264cce8db8e4ec51b64e01c3e28c6c5"
+            ),
+            (
+                "swift-crypto",
+                "3.15.1",
+                "https://github.com/apple/swift-crypto.git",
+                "95ba0316a9b733e92bb6b071255ff46263bbe7dc"
             ),
             (
                 "wasmkit",

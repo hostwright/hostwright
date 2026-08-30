@@ -348,6 +348,7 @@ final class TrustedReleaseTests: XCTestCase {
                 "-Xswiftc", "-num-threads",
                 "-Xswiftc", "1",
                 "-Xswiftc", "-no-whole-module-optimization",
+                "-Xswiftc", "-disable-cmo",
                 "-Xswiftc", "-file-prefix-map",
                 "-Xswiftc", prefixMap,
                 "-Xcc", "-ffile-prefix-map=\(prefixMap)",
@@ -392,7 +393,8 @@ final class TrustedReleaseTests: XCTestCase {
                 "--scratch-path '/private/tmp/scratch with space' -c release " +
                 "--jobs 1 -debug-info-format none -Xlinker -reproducible " +
                 "-Xswiftc -num-threads -Xswiftc 1 " +
-                "-Xswiftc -no-whole-module-optimization -Xswiftc -file-prefix-map " +
+                "-Xswiftc -no-whole-module-optimization -Xswiftc -disable-cmo " +
+                "-Xswiftc -file-prefix-map " +
                 "-Xswiftc '/private/tmp/scratch with space=/hostwright-build' " +
                 "-Xcc '-ffile-prefix-map=/private/tmp/scratch with space=/hostwright-build' " +
                 "-Xcc '-fmacro-prefix-map=/private/tmp/scratch with space=/hostwright-build' " +

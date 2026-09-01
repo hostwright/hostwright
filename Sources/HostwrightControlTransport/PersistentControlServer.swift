@@ -552,8 +552,10 @@ public struct PersistentControlConnectionServer: Sendable {
           _ = try SchedulerControlWireContract.scopedInputData(from: originalRequest.body)
         case .status, .explain:
           _ = try SchedulerControlWireContract.decisionReference(from: originalRequest.body)
-        case .apply:
-          _ = try SchedulerControlWireContract.applyData(from: originalRequest.body)
+        case .apply, .release:
+          _ = try SchedulerControlWireContract.workloadMutationData(
+            from: originalRequest.body
+          )
         case nil:
           throw ContractValidationError.invalid("scheduler operation")
         }

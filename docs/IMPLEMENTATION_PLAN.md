@@ -410,7 +410,7 @@ Phase 31's local recommendation experiment is historical. Its in-memory implemen
 - `ManifestSchedulerAdmissionBridge` maps canonical manifest requests into `SchedulerWorkload` placement demand, maps declared limits into runtime hard-enforcement inputs, and rejects profile or unsupported-runtime claims before mutation.
 - `HostwrightState` owns durable node-capacity snapshots, decision/reservation bindings, active-capacity accounting, idempotent replay, and fencing/release evidence. Runtime calls remain outside database transactions.
 - Capacity is authoritative state, not an ephemeral caller assertion; a reservation binds the persisted capacity generation/digest and all decision/profile/config/lifecycle inputs.
-- There is no second advisory or compatibility scheduler in the reconciler. Current-source G3-G8 scheduler qualification is sealed with zero safety mismatches and 382 retained intentional optimization-gap fixtures; lifecycle/control integration and the remaining aggregate G13-G15 checks remain evidence-gated.
+- There is no second advisory or compatibility scheduler in the reconciler. Current-source G3-G8 scheduler qualification is sealed with zero safety mismatches and 382 retained intentional optimization-gap fixtures. The bounded single-host Control 2.2 admission/apply/release handoff is implemented; remaining aggregate G13-G15 optimization, pressure, accelerator, and promotion checks remain evidence-gated.
 
 ## Phase 32 Outputs
 

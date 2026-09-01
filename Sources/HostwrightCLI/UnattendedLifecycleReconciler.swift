@@ -59,6 +59,73 @@ public struct SchedulerLifecycleReservationHandoff: Sendable {
     }
 }
 
+public struct SchedulerLifecycleReleaseHandoff: Sendable {
+    public let reservation: SchedulerReservationRecord
+
+    public init(reservation: SchedulerReservationRecord) throws {
+        guard reservation.status == .releasePending,
+              reservation.fencingToken.nodeEpoch >= 1,
+              reservation.fencingToken.reservationSequence >= 1 else {
+            throw SchedulerAdmissionError.invalidBinding(
+                field: "lifecycle-release-reservation-status"
+            )
+        }
+        self.reservation = reservation
+    }
+
+    func validate(
+        manifest: HostwrightManifest,
+        compiled: LifecycleCompiledCommand,
+        preparation: LifecycleCommandPreparation,
+        options: LifecycleCLIOptions,
+        stateDatabasePath: String
+    ) throws {
+        guard !options.dryRun,
+              options.command == .rm,
+              options.stateDatabasePath == stateDatabasePath,
+              preparation.projectResourceUUID == reservation.projectUUID,
+              preparation.manifestSHA256 == reservation.lifecyclePlanDigest,
+              compiled.plan.nodes.isEmpty == false else {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                "A scheduler release was not bound to the prepared lifecycle plan."
+            )
+        }
+        guard let manifestProject = manifest.project,
+              "project-\(manifestProject)" == preparation.projectID else {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                "The scheduler release no longer matches the authoritative project lifecycle snapshot."
+            )
+        }
+        do {
+            let repository = SQLiteStateStore(path: stateDatabasePath)
+                .schedulerAdmissions
+            guard let current = try repository.reservation(
+                id: reservation.reservationID
+            ), current == reservation,
+                  current.status == .releasePending,
+                  let active = try repository.activeReservation(
+                    workloadID: reservation.workloadID,
+                    projectUUID: reservation.projectUUID
+                  ), active == current else {
+                throw SchedulerAdmissionError.stateInvariant(
+                    "scheduler-release-authority-changed"
+                )
+            }
+            let fence = try repository.fencingState(nodeID: reservation.nodeID)
+            guard fence.nodeID == reservation.nodeID,
+                  fence.nodeEpoch == reservation.fencingToken.nodeEpoch else {
+                throw SchedulerAdmissionError.stateInvariant(
+                    "scheduler-release-fence-changed"
+                )
+            }
+        } catch {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                "scheduler-release-authority-unavailable: the exact release-pending reservation or node fence changed before lifecycle execution. No runtime mutation was attempted."
+            )
+        }
+    }
+}
+
 public struct SchedulerLifecycleVictimHandoff: Sendable {
     public let intent: SchedulerPreemptionIntentRecord
     public let reservations: [SchedulerReservationRecord]
@@ -304,6 +371,43 @@ public struct UnattendedLifecycleReconciler: DaemonReconciliationDriving {
             request: request,
             command: .down,
             authorityCheck: handoff.validate
+        )
+    }
+
+    public func executeAuthorizedSchedulerRelease(
+        manifestPath: String,
+        stateDatabasePath: String,
+        reservation: SchedulerReservationRecord,
+        maximumParallelism: Int
+    ) async throws -> DaemonReconciliationResult {
+        let handoff = try SchedulerLifecycleReleaseHandoff(
+            reservation: reservation
+        )
+        let request = try makeSchedulerRequest(
+            manifestPath: manifestPath,
+            stateDatabasePath: stateDatabasePath,
+            workloadIDs: [reservation.workloadID],
+            subjectID: reservation.ownerSubjectID,
+            operationSeed: [
+                "scheduler-release",
+                reservation.decisionID.uuidString.lowercased(),
+                reservation.reservationID.uuidString.lowercased(),
+                reservation.fencingToken.stableKey,
+            ].joined(separator: "|"),
+            maximumParallelism: maximumParallelism
+        )
+        return try await reconcile(
+            request: request,
+            command: .rm,
+            authorityCheck: { manifest, compiled, preparation, options in
+                try handoff.validate(
+                    manifest: manifest,
+                    compiled: compiled,
+                    preparation: preparation,
+                    options: options,
+                    stateDatabasePath: stateDatabasePath
+                )
+            }
         )
     }
 

@@ -39,6 +39,7 @@ final class SchedulerControlOperationsTests: XCTestCase {
     XCTAssertFalse(SchedulerControlOperations.mutatingOperations.isEmpty)
     XCTAssertTrue(SchedulerControlOperations.mutatingOperations.contains("scheduler.plan"))
     XCTAssertTrue(SchedulerControlOperations.mutatingOperations.contains("scheduler.apply"))
+    XCTAssertTrue(SchedulerControlOperations.mutatingOperations.contains("scheduler.release"))
 
     // The read path has no state repository or runtime dependency. The
     // sentinel state remains empty before and after both pure operations.
@@ -94,6 +95,221 @@ final class SchedulerControlOperationsTests: XCTestCase {
     let missingProjectResponse = try XCTUnwrap(
       SchedulerControlOperations.handle(request: missingProject))
     assertSafeScopeRejection(missingProjectResponse)
+  }
+
+  func testReleasePersistsIntentRequiresAbsenceEvidenceAndReplays() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+      "hostwright-scheduler-release-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(
+      at: root, withIntermediateDirectories: false,
+      attributes: [.posixPermissions: 0o700])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = SQLiteStateStore(path: root.appendingPathComponent("state.sqlite").path)
+    try store.migrate()
+    let projectUUID = "00000000-0000-0000-0000-0000000000a1"
+    let createdAt = "2026-08-31T12:00:00Z"
+    try store.controlIdentities.bootstrap(
+      ControlPeerIdentityRecord(
+        subjectID: "subject",
+        userID: 501,
+        codeIdentity: CodeIdentity(
+          teamIdentifier: "993YC3JY4Q",
+          signingIdentifier: "hostwright-scheduler-release-tests",
+          codeDirectoryHash: String(repeating: "a", count: 40),
+          validationMode: .installedRequirement
+        ),
+        declaredBySubjectID: "subject",
+        declaredAt: createdAt,
+        updatedAt: createdAt
+      )
+    )
+    try store.withValidatedConnection { connection in
+      try connection.run(
+        """
+        INSERT INTO projects (
+          id, name, manifest_path, manifest_hash, created_at, updated_at,
+          resource_uuid, manifest_version, mutation_provider, provider_generation
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        bindings: [
+          .text("project-a"), .text("project-a"), .null,
+          .text(String(repeating: "a", count: 64)), .text(createdAt),
+          .text(createdAt), .text(projectUUID), .int(1), .null, .int(0),
+        ]
+      )
+    }
+    let repository = store.schedulerAdmissions
+    let nodeID = UUID(uuidString: "00000000-0000-0000-0000-000000000010")!
+    let workloadID = UUID(uuidString: "00000000-0000-0000-0000-000000000011")!
+    let decisionID = UUID(uuidString: "00000000-0000-0000-0000-000000000012")!
+    let inputDigest = String(repeating: "1", count: 64)
+    let capacity = try SchedulerNodeCapacitySnapshot(
+      nodeID: nodeID,
+      capacity: try ResourceVector(["cpu": 2]),
+      generation: 1,
+      observedAt: createdAt
+    )
+    _ = try repository.recordNodeCapacity(snapshot: capacity)
+    let decision = try SchedulerDecision(
+      decisionID: decisionID,
+      inputDigest: inputDigest,
+      orderedWorkloadIDs: [workloadID],
+      workloadDecisions: [
+        try SchedulerWorkloadDecision(
+          workloadID: workloadID,
+          outcome: .placed,
+          chosenNodeID: nodeID,
+          scoreComponents: .zero,
+          feasibleAlternatives: [],
+          filterFailures: [],
+          preemption: nil,
+          explanation: try SchedulerDecisionExplanation(
+            code: .placed,
+            summary: "release qualification placement"
+          )
+        ),
+      ]
+    )
+    let artifactBinding = try SchedulerDecisionWorkloadBinding(
+      workloadID: workloadID,
+      nodeID: nodeID,
+      resources: try ResourceVector(["cpu": 1]),
+      capacityDigest: capacity.capacityDigest,
+      capacityGeneration: capacity.generation,
+      ownerSubjectID: "subject",
+      projectUUID: projectUUID
+    )
+    _ = try repository.recordDecisionArtifact(
+      decision: decision,
+      workloadBindings: [artifactBinding],
+      projectUUID: projectUUID,
+      configDigest: String(repeating: "2", count: 64),
+      profileDigest: String(repeating: "3", count: 64),
+      lifecyclePlanDigest: String(repeating: "4", count: 64),
+      createdAt: createdAt,
+      updatedAt: createdAt
+    )
+    let reservation = try repository.reserve(
+      binding: try SchedulerAdmissionBinding(
+        decisionID: decisionID,
+        workloadID: workloadID,
+        nodeID: nodeID,
+        resources: artifactBinding.resources,
+        nodeCapacityDigest: capacity.capacityDigest,
+        nodeCapacityGeneration: capacity.generation,
+        inputDigest: inputDigest,
+        configDigest: String(repeating: "2", count: 64),
+        profileDigest: String(repeating: "3", count: 64),
+        lifecyclePlanDigest: String(repeating: "4", count: 64),
+        ownerSubjectID: "subject",
+        projectUUID: projectUUID,
+        createdAt: createdAt,
+        expiresAt: "2026-08-31T12:05:00Z"
+      ),
+      authority: try SchedulerAdmissionAuthority(
+        nodeCapacityDigest: capacity.capacityDigest,
+        nodeCapacityGeneration: capacity.generation,
+        inputDigest: inputDigest,
+        configDigest: String(repeating: "2", count: 64),
+        profileDigest: String(repeating: "3", count: 64),
+        lifecyclePlanDigest: String(repeating: "4", count: 64),
+        expectedNodeEpoch: 1
+      )
+    )
+    _ = try repository.commit(
+      reservationID: reservation.reservationID,
+      expectedToken: reservation.fencingToken,
+      updatedAt: "2026-08-31T12:01:00Z"
+    )
+    let request = ControlRequestEnvelope(
+      protocolRevision: .current,
+      requestID: "scheduler-release-request",
+      operation: SchedulerControlOperation.release.rawValue,
+      timeoutMilliseconds: 1_000,
+      body: .object([
+        "projectID": .string("project-a"),
+        "decisionID": .string(decisionID.uuidString.lowercased()),
+        "workloadID": .string(workloadID.uuidString.lowercased()),
+        "expectedInputDigest": .string(inputDigest),
+      ])
+    )
+    let unauthorized = try XCTUnwrap(SchedulerControlOperations.handle(
+      request: request,
+      repository: repository,
+      subjectID: "other-subject",
+      now: { "2026-08-31T12:01:30Z" },
+      runtimeRelease: { _ in
+        XCTFail("An unauthorized release reached the runtime boundary.")
+        return SchedulerControlOperations.ReleaseExecutionResult(
+          mutation: .null,
+          evidenceDigest: String(repeating: "6", count: 64),
+          verifiedAt: "2026-08-31T12:01:31Z"
+        )
+      }
+    ))
+    XCTAssertEqual(unauthorized.status, .rejected)
+    XCTAssertEqual(unauthorized.reasonCode, .invalidRequest)
+    XCTAssertEqual(unauthorized.error?.code, "schedulerDecisionStale")
+    XCTAssertEqual(
+      try repository.reservation(id: reservation.reservationID)?.status,
+      .committed
+    )
+
+    let failed = try XCTUnwrap(SchedulerControlOperations.handle(
+      request: request,
+      repository: repository,
+      subjectID: "subject",
+      now: { "2026-08-31T12:02:00Z" },
+      runtimeRelease: { _ in
+        throw SchedulerControlOperationError.runtimeMutationFailed
+      }
+    ))
+    XCTAssertEqual(failed.status, .rejected)
+    XCTAssertEqual(failed.reasonCode, .internalError)
+    XCTAssertEqual(failed.error?.code, "schedulerRuntimeMutationFailed")
+    XCTAssertEqual(
+      try repository.reservation(id: reservation.reservationID)?.status,
+      .releasePending
+    )
+    XCTAssertEqual(try repository.availableCapacity(nodeID: nodeID).values, ["cpu": 1])
+
+    let completed = try XCTUnwrap(SchedulerControlOperations.handle(
+      request: request,
+      repository: repository,
+      subjectID: "subject",
+      now: { "2026-08-31T12:03:00Z" },
+      runtimeRelease: { releasing in
+        guard releasing.status == .releasePending else {
+          throw SchedulerAdmissionError.invalidBinding(field: "release-status")
+        }
+        return SchedulerControlOperations.ReleaseExecutionResult(
+          mutation: .object(["status": .string("absent")]),
+          evidenceDigest: String(repeating: "5", count: 64),
+          verifiedAt: "2026-08-31T12:04:00Z"
+        )
+      }
+    ))
+    XCTAssertEqual(completed.status, .completed)
+    XCTAssertEqual(
+      try repository.reservation(id: reservation.reservationID)?.status,
+      .released
+    )
+    XCTAssertEqual(try repository.availableCapacity(nodeID: nodeID).values, ["cpu": 2])
+
+    let replay = try XCTUnwrap(SchedulerControlOperations.handle(
+      request: request,
+      repository: repository,
+      subjectID: "subject",
+      now: { "2026-08-31T12:05:00Z" },
+      runtimeRelease: { _ in
+        throw SchedulerControlOperationError.runtimeMutationFailed
+      }
+    ))
+    XCTAssertEqual(replay.status, .completed)
+    XCTAssertEqual(
+      try repository.reservation(id: reservation.reservationID)?.status,
+      .released
+    )
   }
 
   private func schedulerRequest(

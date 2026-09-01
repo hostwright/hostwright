@@ -687,7 +687,7 @@ public enum HostwrightCLI {
       hostwright plan [path] [--output text|json] [--team-profile <path>]
       hostwright status [path] [--state-db <path>] [--output text|json] [--runtime-provider auto|apple-cli|containerization]
       hostwright apply [path] [--state-db <path>] --confirm-plan <hash> [--runtime-provider auto|apple-cli|containerization] [--team-profile <path> --approval-record <path>]
-      hostwright scheduler status|plan|simulate|explain|apply (--request <path>|--stdin) [--json|--output text|json]
+      hostwright scheduler status|plan|simulate|explain|apply|release (--request <path>|--stdin) [--json|--output text|json]
       hostwright up [path] [--service <name>] [--state-db <path>] (--dry-run|--confirm-plan <hash>) [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--parallelism <1-32>] [--json|--output text|json]
       hostwright down [path] [--service <name>] [--state-db <path>] (--dry-run|--confirm-plan <hash>) [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--parallelism <1-32>] [--json|--output text|json]
       hostwright run [path] --service <name> [--state-db <path>] (--dry-run|--confirm-plan <hash>) [--runtime-provider auto|apple-cli|containerization] [--timeout <seconds>] [--parallelism <1-32>] [--json|--output text|json]

@@ -11,15 +11,16 @@ not newly accepted. The connection authentication exchange remains the exact
 frozen `hostwright-control-credential-proof-v2.1` 2.1 shape; there is no
 wire-level hello that can safely negotiate a different authentication label.
 
-All five scheduler operations require revision 2.2 and are gated before
+All six scheduler operations require revision 2.2 and are gated before
 authorization or handler dispatch when requested at 2.1. Their strict bodies
 are `{"projectID": ..., "input": ...}` for `scheduler.plan` and
 `scheduler.simulate`, `{"projectID": ..., "decisionID": ...}` for
 `scheduler.status` and `scheduler.explain`, and
 `{"projectID": ..., "decisionID": ..., "workloadID": ...,` plus
-`"expectedInputDigest": ...}` for `scheduler.apply`. RBAC maps status and
-explain to project reads, plan and simulate to project planning, and apply to
-project update. The daemon verifies that pending workloads, fairness records,
+`"expectedInputDigest": ...}` for `scheduler.apply` and `scheduler.release`.
+RBAC maps status and explain to project reads, plan and simulate to project
+planning, and apply and release to project update. The daemon verifies that
+pending workloads, fairness records,
 existing placements, victim allocations, and disruption budgets remain in the
 top-level project. Victim allocations require immutable subject and project
 identities, budgets require an immutable project identity, and each victim
@@ -48,6 +49,15 @@ authority; no live-runtime capability is implied by this control wiring.
 Preemption intent is proposed until the authorized victim-fencing transition
 returns exact fence evidence; a proposed intent is never fence evidence.
 
+`scheduler.release` reloads the same exact project/decision/workload/input
+binding used by apply. It first persists `release-pending`, which continues to
+consume capacity, and then runs the selected workload through the owned-only
+`rm` lifecycle path. Capacity is returned only after fresh authoritative
+runtime inventory proves the exact ownership-bound resource absent. Runtime
+failure or ambiguous observation leaves the durable `release-pending` record
+for an idempotent retry; an already released binding replays without another
+runtime mutation.
+
 The production daemon wires the public host-pressure probe through
 `SchedulerPressureAuthorityCoordinator` and persists the versioned pressure
 policy envelope through the scheduler repository. Unknown/unavailable and
@@ -60,9 +70,10 @@ The reconciler boundary intentionally continues to block manifest-only
 placement: `ReconciliationPlanner` requires a persisted Control 2.2 decision
 and fenced reservation before runtime mutation. The daemon's authorized
 scheduler handoff is consumed by `UnattendedLifecycleReconciler`; no separate
-manifest-only or compatibility scheduler path is exposed. Actual Apple
-runtime execution and its live recovery/cleanup evidence remain qualification
-dependencies.
+manifest-only or compatibility scheduler path is exposed. The admission slice
+does not authorize remote placement, an external scheduler, optimization
+promotion, or accelerator execution; those remain separate Phase 10
+qualification boundaries.
 
 ## Consequences
 

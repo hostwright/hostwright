@@ -59,6 +59,44 @@ public struct SchedulerLifecycleReservationHandoff: Sendable {
     }
 }
 
+public struct SchedulerLifecycleReleaseHandoff: Sendable {
+    public let reservation: SchedulerReservationRecord
+
+    public init(reservation: SchedulerReservationRecord) throws {
+        guard reservation.status == .releasePending,
+              reservation.fencingToken.nodeEpoch >= 1,
+              reservation.fencingToken.reservationSequence >= 1 else {
+            throw SchedulerAdmissionError.invalidBinding(
+                field: "lifecycle-release-reservation-status"
+            )
+        }
+        self.reservation = reservation
+    }
+
+    fileprivate func validate(
+        manifest: HostwrightManifest,
+        compiled: LifecycleCompiledCommand,
+        preparation: LifecycleCommandPreparation,
+        options: LifecycleCLIOptions
+    ) throws {
+        guard !options.dryRun,
+              options.command == .rm,
+              preparation.projectResourceUUID == reservation.projectUUID,
+              preparation.manifestSHA256 == reservation.lifecyclePlanDigest,
+              compiled.plan.nodes.isEmpty == false else {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                "A scheduler release was not bound to the prepared lifecycle plan."
+            )
+        }
+        guard let manifestProject = manifest.project,
+              "project-\(manifestProject)" == preparation.projectID else {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                "The scheduler release no longer matches the authoritative project lifecycle snapshot."
+            )
+        }
+    }
+}
+
 public struct SchedulerLifecycleVictimHandoff: Sendable {
     public let intent: SchedulerPreemptionIntentRecord
     public let reservations: [SchedulerReservationRecord]
@@ -303,6 +341,35 @@ public struct UnattendedLifecycleReconciler: DaemonReconciliationDriving {
         return try await reconcile(
             request: request,
             command: .down,
+            authorityCheck: handoff.validate
+        )
+    }
+
+    public func executeAuthorizedSchedulerRelease(
+        manifestPath: String,
+        stateDatabasePath: String,
+        reservation: SchedulerReservationRecord,
+        maximumParallelism: Int
+    ) async throws -> DaemonReconciliationResult {
+        let handoff = try SchedulerLifecycleReleaseHandoff(
+            reservation: reservation
+        )
+        let request = try makeSchedulerRequest(
+            manifestPath: manifestPath,
+            stateDatabasePath: stateDatabasePath,
+            workloadIDs: [reservation.workloadID],
+            subjectID: reservation.ownerSubjectID,
+            operationSeed: [
+                "scheduler-release",
+                reservation.decisionID.uuidString.lowercased(),
+                reservation.reservationID.uuidString.lowercased(),
+                reservation.fencingToken.stableKey,
+            ].joined(separator: "|"),
+            maximumParallelism: maximumParallelism
+        )
+        return try await reconcile(
+            request: request,
+            command: .rm,
             authorityCheck: handoff.validate
         )
     }

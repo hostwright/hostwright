@@ -400,6 +400,103 @@ struct LifecycleCommandRunnerTests {
     }
 
     @Test
+    func schedulerReleaseUsesOwnedRemovalRatherThanStop() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-p10-scheduler-release-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700]
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let manifest = """
+        version: 3
+        project: demo
+        services:
+          api:
+            image: example.invalid/api@sha256:\(String(repeating: "1", count: 64))
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
+        """
+        let manifestDigest = SHA256.hash(data: Data(manifest.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        let databasePath = directory.appendingPathComponent("state.sqlite").path
+        let manifestPath = directory.appendingPathComponent("hostwright.yaml").path
+        let desired = service()
+        let observed = ObservedRuntimeService(
+            identity: desired.identity,
+            resourceIdentifier: desired.identity.managedResourceIdentifier,
+            image: desired.image,
+            lifecycleState: .running,
+            healthState: .healthy
+        )
+        let prepared = try preparation(
+            desired: [desired],
+            observed: [observed],
+            bindings: [try resourceBinding(for: observed)],
+            manifestSHA256: manifestDigest
+        )
+        let seeded = try seedCommittedDaemonSchedulerAuthority(
+            databasePath: databasePath,
+            manifestPath: manifestPath,
+            manifestText: manifest,
+            manifestSHA256: manifestDigest,
+            projectResourceUUID: prepared.projectResourceUUID
+        )
+        let committed = try #require(seeded.binding.reservations.first)
+        let releasePending = try SQLiteStateStore(path: databasePath)
+            .schedulerAdmissions.requestRelease(
+                reservationID: committed.reservationID,
+                expectedToken: committed.fencingToken,
+                updatedAt: "2026-08-13T08:00:02Z"
+            )
+        #expect(releasePending.status == .releasePending)
+        #expect(prepared.projectResourceUUID == releasePending.projectUUID)
+        #expect(prepared.manifestSHA256 == releasePending.lifecyclePlanDigest)
+        let reviewedRemoval = try reviewedPlan(
+            preparation: prepared,
+            command: .rm
+        )
+        #expect(reviewedRemoval.nodes.contains { $0.action == .delete })
+        let driver = ScriptedLifecycleCommandDriver(
+            preparation: prepared,
+            executionHook: { compiled, options in
+                #expect(options.command == .rm)
+                #expect(compiled.plan.nodes.contains { $0.action == .delete })
+            }
+        )
+        let validatedManifest = try ManifestValidator.validated(manifest)
+        let reconciler = UnattendedLifecycleReconciler(
+            readManifest: { _ in manifest },
+            makeDriver: { _ in driver },
+            makeAuthorizedDriver: { _, authorityCheck in
+                SchedulerAuthorityBoundaryDriver(
+                    base: driver,
+                    manifest: validatedManifest,
+                    authorityCheck: authorityCheck,
+                    beforeAuthorityCheck: {}
+                )
+            }
+        )
+
+        let result = try await reconciler.executeAuthorizedSchedulerRelease(
+            manifestPath: manifestPath,
+            stateDatabasePath: databasePath,
+            reservation: releasePending,
+            maximumParallelism: 4
+        )
+
+        #expect(result.status == .mutated)
+        #expect(result.runtimeMutationAttempted)
+        #expect(driver.snapshot().executions == 1)
+    }
+
+    @Test
     func unattendedMaintenanceWindowClosingBeforeEffectFailsClosed() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
             "hostwright-p08-maintenance-close-\(UUID().uuidString)",

@@ -209,6 +209,7 @@ final class RBACControlOperationsTests: XCTestCase {
         ("scheduler.status", .get),
         ("scheduler.explain", .get),
         ("scheduler.apply", .update),
+        ("scheduler.release", .update),
       ]
       for (operation, verb) in operationVerbs {
         let scoped = ControlRequestEnvelope(

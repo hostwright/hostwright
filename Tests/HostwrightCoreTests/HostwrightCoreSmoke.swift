@@ -615,11 +615,12 @@ final class HostwrightCoreTests: XCTestCase {
             implementationPlan
         ].joined(separator: "\n")
 
-        XCTAssertTrue(architecture.contains("Status: Phase 10 / issue #207 implementation boundary"))
+        XCTAssertTrue(architecture.contains("Status: Phase 10 / issue #207 single-host admission boundary"))
         XCTAssertTrue(architecture.contains("one scheduler boundary"))
         XCTAssertTrue(architecture.contains("Requests drive placement and capacity accounting."))
-        XCTAssertTrue(limitations.contains("Experimental Phase 10 scheduler/admission contracts"))
-        XCTAssertTrue(limitations.contains("Phase 10 scheduler admission is experimental and evidence-gated."))
+        XCTAssertTrue(limitations.contains("Experimental bounded single-host Phase 10 scheduler/admission"))
+        XCTAssertTrue(limitations.contains("Phase 10 scheduler admission remains an experimental bounded single-host capability."))
+        XCTAssertTrue(architecture.contains("The public release operation persists intent before effects"))
         XCTAssertTrue(policy.contains("Experimental Phase 10 scheduler admission consumes these policy decisions"))
         XCTAssertTrue(resourceIntelligence.contains("Resource intelligence is not scheduler capacity authority."))
         XCTAssertTrue(requirements.contains("HW-COMPAT-010"))
@@ -632,7 +633,6 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Advisory scheduling is local and diagnostic."))
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("AdvisoryScheduler"))
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("automatic placement is implemented"))
-        XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("resource reservation is implemented"))
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("accelerator-aware scheduling is implemented"))
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("accelerator-aware scheduling is implemented"))
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Kubernetes scheduler behavior is implemented"))

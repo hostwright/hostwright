@@ -18,6 +18,14 @@ enum SchedulerControlOperations {
     SchedulerReservationRecord,
     SchedulerPreemptionIntentRecord?
   ) throws -> ControlPlaneJSONValue
+  struct ReleaseExecutionResult: Sendable {
+    let mutation: ControlPlaneJSONValue
+    let evidenceDigest: String
+    let verifiedAt: String
+  }
+  typealias RuntimeRelease = @Sendable (
+    SchedulerReservationRecord
+  ) throws -> ReleaseExecutionResult
   struct PreemptionExecutionResult: Sendable {
     let fenceEvidence: [SchedulerFenceEvidence]
     let mutation: ControlPlaneJSONValue
@@ -39,6 +47,7 @@ enum SchedulerControlOperations {
   static let mutatingOperations: Set<String> = [
     SchedulerControlOperation.plan.rawValue,
     SchedulerControlOperation.apply.rawValue,
+    SchedulerControlOperation.release.rawValue,
   ]
 
   static func isReadOnly(operation: String) -> Bool {
@@ -78,6 +87,7 @@ enum SchedulerControlOperations {
     authorityProvider: AuthorityProvider? = nil,
     projectResolver: ProjectResolver? = nil,
     runtimeMutation: RuntimeMutation? = nil,
+    runtimeRelease: RuntimeRelease? = nil,
     pressureRefresher: PressureRefresher? = nil,
     preemptionMutation: PreemptionMutation? = nil
   ) -> ControlResponseEnvelope? {
@@ -196,6 +206,44 @@ enum SchedulerControlOperations {
           requestID: request.requestID,
           protocolRevision: request.protocolRevision,
           code: "schedulerApplyRejected",
+          reason: .invalidRequest
+        )
+      }
+    case .release:
+      guard let runtimeRelease else {
+        return failure(
+          requestID: request.requestID,
+          protocolRevision: request.protocolRevision,
+          code: "schedulerAuthorityUnavailable",
+          reason: .internalError
+        )
+      }
+      do {
+        let released = try release(
+          request: request,
+          repository: repository,
+          subjectID: subjectID,
+          now: now,
+          projectResolver: resolver,
+          runtimeRelease: runtimeRelease
+        )
+        return completed(
+          requestID: request.requestID,
+          protocolRevision: request.protocolRevision,
+          result: released
+        )
+      } catch let error as SchedulerControlOperationError {
+        return failure(
+          requestID: request.requestID,
+          protocolRevision: request.protocolRevision,
+          code: error.code,
+          reason: error.reason
+        )
+      } catch {
+        return failure(
+          requestID: request.requestID,
+          protocolRevision: request.protocolRevision,
+          code: "schedulerReleaseRejected",
           reason: .invalidRequest
         )
       }
@@ -334,7 +382,7 @@ enum SchedulerControlOperations {
     runtimeMutation: RuntimeMutation,
     preemptionMutation: PreemptionMutation?
   ) throws -> ControlPlaneJSONValue {
-    let data = try SchedulerControlWireContract.applyData(from: request.body)
+    let data = try SchedulerControlWireContract.workloadMutationData(from: request.body)
     let projectUUID = try resolvedProjectID(data.projectID, using: projectResolver)
     guard let artifact = try repository.decisionArtifact(
       id: data.decisionID,
@@ -472,6 +520,69 @@ enum SchedulerControlOperations {
       result["preemptionIntent"] = try jsonValue(finalIntent)
     }
     return .object(result)
+  }
+
+  private static func release(
+    request: ControlRequestEnvelope,
+    repository: SchedulerAdmissionRepository,
+    subjectID: String?,
+    now: @escaping @Sendable () -> String,
+    projectResolver: ProjectResolver?,
+    runtimeRelease: RuntimeRelease
+  ) throws -> ControlPlaneJSONValue {
+    let data = try SchedulerControlWireContract.workloadMutationData(from: request.body)
+    let projectUUID = try resolvedProjectID(data.projectID, using: projectResolver)
+    guard let snapshot = try repository.decisionState(
+      id: data.decisionID,
+      projectUUID: projectUUID
+    ), snapshot.artifact.inputDigest == data.expectedInputDigest,
+      let binding = snapshot.artifact.binding(for: data.workloadID),
+      subjectID == nil || subjectID == binding.ownerSubjectID else {
+      throw SchedulerControlOperationError.staleDecision
+    }
+    let matching = snapshot.reservations.filter {
+      $0.workloadID == data.workloadID
+    }
+    guard matching.count == 1, let reservation = matching.first else {
+      throw SchedulerControlOperationError.invalidBody
+    }
+    guard reservation.projectUUID == projectUUID,
+      reservation.decisionID == data.decisionID,
+      reservation.inputDigest == data.expectedInputDigest else {
+      throw SchedulerControlOperationError.staleAuthority
+    }
+    if reservation.status == .released {
+      return .object(["release": try jsonValue(reservation)])
+    }
+    guard reservation.status == .pending || reservation.status == .committed
+      || reservation.status == .releasePending else {
+      throw SchedulerControlOperationError.staleAuthority
+    }
+    let releasing = try repository.requestRelease(
+      reservationID: reservation.reservationID,
+      expectedToken: reservation.fencingToken,
+      updatedAt: now()
+    )
+    let execution: ReleaseExecutionResult
+    do {
+      execution = try runtimeRelease(releasing)
+    } catch {
+      // The durable release-pending row retains capacity until an exact
+      // authoritative absence proof completes this transition.
+      throw SchedulerControlOperationError.runtimeMutationFailed
+    }
+    let released = try repository.release(
+      reservationID: releasing.reservationID,
+      expectedToken: releasing.fencingToken,
+      evidence: .verifiedRuntimeAbsence(
+        evidenceDigest: execution.evidenceDigest,
+        verifiedAt: execution.verifiedAt
+      )
+    )
+    return .object([
+      "release": try jsonValue(released),
+      "mutation": execution.mutation,
+    ])
   }
 
   private static func validateProjectScope(

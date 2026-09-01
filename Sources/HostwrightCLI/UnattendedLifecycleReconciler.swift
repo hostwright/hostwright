@@ -73,14 +73,16 @@ public struct SchedulerLifecycleReleaseHandoff: Sendable {
         self.reservation = reservation
     }
 
-    fileprivate func validate(
+    func validate(
         manifest: HostwrightManifest,
         compiled: LifecycleCompiledCommand,
         preparation: LifecycleCommandPreparation,
-        options: LifecycleCLIOptions
+        options: LifecycleCLIOptions,
+        stateDatabasePath: String
     ) throws {
         guard !options.dryRun,
               options.command == .rm,
+              options.stateDatabasePath == stateDatabasePath,
               preparation.projectResourceUUID == reservation.projectUUID,
               preparation.manifestSHA256 == reservation.lifecyclePlanDigest,
               compiled.plan.nodes.isEmpty == false else {
@@ -92,6 +94,33 @@ public struct SchedulerLifecycleReleaseHandoff: Sendable {
               "project-\(manifestProject)" == preparation.projectID else {
             throw RuntimeAdapterError.mutationUnavailableByPolicy(
                 "The scheduler release no longer matches the authoritative project lifecycle snapshot."
+            )
+        }
+        do {
+            let repository = SQLiteStateStore(path: stateDatabasePath)
+                .schedulerAdmissions
+            guard let current = try repository.reservation(
+                id: reservation.reservationID
+            ), current == reservation,
+                  current.status == .releasePending,
+                  let active = try repository.activeReservation(
+                    workloadID: reservation.workloadID,
+                    projectUUID: reservation.projectUUID
+                  ), active == current else {
+                throw SchedulerAdmissionError.stateInvariant(
+                    "scheduler-release-authority-changed"
+                )
+            }
+            let fence = try repository.fencingState(nodeID: reservation.nodeID)
+            guard fence.nodeID == reservation.nodeID,
+                  fence.nodeEpoch == reservation.fencingToken.nodeEpoch else {
+                throw SchedulerAdmissionError.stateInvariant(
+                    "scheduler-release-fence-changed"
+                )
+            }
+        } catch {
+            throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                "scheduler-release-authority-unavailable: the exact release-pending reservation or node fence changed before lifecycle execution. No runtime mutation was attempted."
             )
         }
     }
@@ -370,7 +399,15 @@ public struct UnattendedLifecycleReconciler: DaemonReconciliationDriving {
         return try await reconcile(
             request: request,
             command: .rm,
-            authorityCheck: handoff.validate
+            authorityCheck: { manifest, compiled, preparation, options in
+                try handoff.validate(
+                    manifest: manifest,
+                    compiled: compiled,
+                    preparation: preparation,
+                    options: options,
+                    stateDatabasePath: stateDatabasePath
+                )
+            }
         )
     }
 

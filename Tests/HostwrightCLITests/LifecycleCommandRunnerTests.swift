@@ -494,6 +494,25 @@ struct LifecycleCommandRunnerTests {
         #expect(result.status == .mutated)
         #expect(result.runtimeMutationAttempted)
         #expect(driver.snapshot().executions == 1)
+
+        var staleReplayRefused = false
+        do {
+            _ = try await reconciler.executeAuthorizedSchedulerRelease(
+                manifestPath: manifestPath,
+                stateDatabasePath: databasePath,
+                reservation: releasePending,
+                maximumParallelism: 4
+            )
+        } catch {
+            staleReplayRefused = true
+            #expect(
+                String(describing: error).contains(
+                    "scheduler-release-authority-unavailable"
+                )
+            )
+        }
+        #expect(staleReplayRefused)
+        #expect(driver.snapshot().executions == 1)
     }
 
     @Test

@@ -233,6 +233,28 @@ final class SchedulerControlOperationsTests: XCTestCase {
         "expectedInputDigest": .string(inputDigest),
       ])
     )
+    let unauthorized = try XCTUnwrap(SchedulerControlOperations.handle(
+      request: request,
+      repository: repository,
+      subjectID: "other-subject",
+      now: { "2026-08-31T12:01:30Z" },
+      runtimeRelease: { _ in
+        XCTFail("An unauthorized release reached the runtime boundary.")
+        return SchedulerControlOperations.ReleaseExecutionResult(
+          mutation: .null,
+          evidenceDigest: String(repeating: "6", count: 64),
+          verifiedAt: "2026-08-31T12:01:31Z"
+        )
+      }
+    ))
+    XCTAssertEqual(unauthorized.status, .rejected)
+    XCTAssertEqual(unauthorized.reasonCode, .invalidRequest)
+    XCTAssertEqual(unauthorized.error?.code, "schedulerDecisionStale")
+    XCTAssertEqual(
+      try repository.reservation(id: reservation.reservationID)?.status,
+      .committed
+    )
+
     let failed = try XCTUnwrap(SchedulerControlOperations.handle(
       request: request,
       repository: repository,

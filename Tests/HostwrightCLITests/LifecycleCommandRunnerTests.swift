@@ -494,6 +494,15 @@ struct LifecycleCommandRunnerTests {
         #expect(result.status == .mutated)
         #expect(result.runtimeMutationAttempted)
         #expect(driver.snapshot().executions == 1)
+        _ = try SQLiteStateStore(path: databasePath)
+            .schedulerAdmissions.release(
+                reservationID: releasePending.reservationID,
+                expectedToken: releasePending.fencingToken,
+                evidence: .verifiedRuntimeAbsence(
+                    evidenceDigest: String(repeating: "5", count: 64),
+                    verifiedAt: "2026-08-13T08:00:03Z"
+                )
+            )
 
         var staleReplayRefused = false
         do {

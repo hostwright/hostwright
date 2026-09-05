@@ -1,0 +1,38 @@
+name: Qualification tests
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  qualification:
+    runs-on: macos-26
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [distribution, phase09-gate13, phase09-gate14, phase09-other, release, live]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Run qualification shard
+        shell: bash
+        env:
+          HOSTWRIGHT_TEST_SHARD: ${{ matrix.shard }}
+          HOSTWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/hostwright-test-results
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOSTWRIGHT_TEST_RESULTS_DIR"
+          scripts/test.sh qualification "$HOSTWRIGHT_TEST_SHARD" 2>&1 \
+            | tee "$HOSTWRIGHT_TEST_RESULTS_DIR/qualification.log"
+      - name: Retain qualification logs and results
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: qualification-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/hostwright-test-results
+          retention-days: 7
+          if-no-files-found: warn

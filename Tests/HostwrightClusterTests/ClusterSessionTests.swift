@@ -254,7 +254,9 @@ final class ClusterSessionTests: XCTestCase {
             subjectID: fixture.credential.subjectID,
             operation: "echo",
             payload: Data("node-agent-payload".utf8),
-            nowMilliseconds: 1_002
+            nowMilliseconds: 1_002,
+            // Allow cold Python startup on shared runners; the production default stays bounded.
+            timeoutMilliseconds: 30_000
         )
         XCTAssertEqual(result, Data("daolyap-tnega-edon".utf8))
     }
@@ -479,6 +481,34 @@ final class ClusterSessionTests: XCTestCase {
             XCTFail("cancelled transport must not return a response")
         } catch let error as ClusterNodeAgentTransportError {
             XCTAssertEqual(error, .cancelled)
+        }
+    }
+
+    func testAuthenticatedNodeAgentTransportDeadlineRejectsUnresponsiveAgent() async throws {
+        let fixture = try makeFixture()
+        let challenge = try fixture.authority.issueChallenge(
+            credentialID: fixture.credential.credentialID,
+            nowMilliseconds: 5_000
+        )
+        let session = try authenticate(fixture, challenge: challenge, nowMilliseconds: 5_001)
+        let (transport, root) = try makeTransport(
+            fixture: fixture,
+            program: Self.blockingAgentProgram
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        do {
+            _ = try await transport.send(
+                session: session,
+                subjectID: fixture.credential.subjectID,
+                operation: "block",
+                payload: Data(),
+                nowMilliseconds: 5_002,
+                timeoutMilliseconds: 250
+            )
+            XCTFail("unresponsive agent must not return a response")
+        } catch let error as ClusterNodeAgentTransportError {
+            XCTAssertEqual(error, .timedOut)
         }
     }
 

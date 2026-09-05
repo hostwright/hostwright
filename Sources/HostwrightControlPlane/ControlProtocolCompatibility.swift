@@ -27,7 +27,7 @@ public enum ControlProtocolCompatibility {
   public static func requiredRevision(for operation: String) -> ControlProtocolRevision? {
     switch operation {
     case "scheduler.status", "scheduler.plan", "scheduler.simulate",
-      "scheduler.explain", "scheduler.apply":
+      "scheduler.explain", "scheduler.apply", "scheduler.release":
       return .current
     default:
       return nil

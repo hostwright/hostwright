@@ -211,6 +211,36 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
       }
       return try Self.controlPlaneValue(result)
     }
+    let schedulerRuntimeRelease: SchedulerControlOperations.RuntimeRelease = {
+      reservation in
+      let result = try Self.waitForSchedulerRuntime {
+        try await schedulerLifecycleReconciler
+          .executeAuthorizedSchedulerRelease(
+            manifestPath: schedulerManifestPath,
+            stateDatabasePath: schedulerStateDatabasePath,
+            reservation: reservation,
+            maximumParallelism: schedulerMaximumParallelism
+          )
+      }
+      guard result.status.isSuccessfulIteration else {
+        throw SchedulerControlOperationError.runtimeMutationFailed
+      }
+      let inventory = try Self.waitForSchedulerRuntime {
+        try await commandEnvironment.runtimeAdapter().inventory()
+      }
+      let observation = try Self.schedulerRuntimeObservation(
+        reservation: reservation,
+        inventory: inventory
+      )
+      guard observation.state == .absent else {
+        throw SchedulerControlOperationError.runtimeMutationFailed
+      }
+      return SchedulerControlOperations.ReleaseExecutionResult(
+        mutation: try Self.controlPlaneValue(result),
+        evidenceDigest: observation.evidenceDigest,
+        verifiedAt: ISO8601DateFormatter().string(from: Date())
+      )
+    }
     let schedulerPreemptionMutation: SchedulerControlOperations.PreemptionMutation = {
       intent in
       let reservations = try intent.proposal.victims.map { victim in
@@ -528,6 +558,7 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
           schedulerAuthorityProvider: schedulerAuthorityProvider,
           schedulerPressureCoordinator: schedulerPressureCoordinator,
           schedulerRuntimeMutation: schedulerRuntimeMutation,
+          schedulerRuntimeRelease: schedulerRuntimeRelease,
           schedulerPreemptionMutation: schedulerPreemptionMutation)
       }
     )
@@ -843,6 +874,7 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
     schedulerAuthorityProvider: @escaping SchedulerControlOperations.AuthorityProvider,
     schedulerPressureCoordinator: SchedulerPressureAuthorityCoordinator,
     schedulerRuntimeMutation: @escaping SchedulerControlOperations.RuntimeMutation,
+    schedulerRuntimeRelease: @escaping SchedulerControlOperations.RuntimeRelease,
     schedulerPreemptionMutation: @escaping SchedulerControlOperations.PreemptionMutation
   ) throws -> ControlResponseEnvelope {
     if let route = try CLIControlRoute.validateStreamPreparation(request: request) {
@@ -877,6 +909,7 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
         return try schedulerRepository.projectResourceUUID(forProjectID: projectID)
       },
       runtimeMutation: schedulerRuntimeMutation,
+      runtimeRelease: schedulerRuntimeRelease,
       pressureRefresher: { input in
         try schedulerPressureCoordinator.refresh(input: input)
       },

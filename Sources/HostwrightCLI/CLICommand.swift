@@ -229,6 +229,7 @@ public enum SchedulerCLIAction: String, CaseIterable, Equatable, Sendable {
     case simulate
     case explain
     case apply
+    case release
 }
 
 public enum SchedulerCLIRequestSource: Equatable, Sendable {
@@ -2486,7 +2487,7 @@ public enum CLICommand: Equatable, Sendable {
         guard arguments.count >= 2,
               let action = SchedulerCLIAction(rawValue: arguments[1]) else {
             throw CLIUsageError(
-                "scheduler requires status, plan, simulate, explain, or apply."
+                "scheduler requires status, plan, simulate, explain, apply, or release."
             )
         }
 

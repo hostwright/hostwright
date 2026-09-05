@@ -15,7 +15,7 @@ final class SchedulerCLIParityTests: XCTestCase {
             XCTAssertEqual(route.execution, .unary)
             XCTAssertEqual(route.operation, "scheduler.\(action.rawValue)")
             XCTAssertEqual(route.subcommand, action.rawValue)
-            XCTAssertEqual(route.mutating, action == .apply)
+            XCTAssertEqual(route.mutating, action == .apply || action == .release)
             XCTAssertEqual(route.output, .json)
         }
     }
@@ -72,6 +72,33 @@ final class SchedulerCLIParityTests: XCTestCase {
         XCTAssertTrue(result.standardOutput.contains("Scheduler operation: scheduler.apply"))
         XCTAssertTrue(result.standardOutput.contains("\"status\":\"fenced\""))
         XCTAssertEqual(capture.request?.operation, "scheduler.apply")
+        XCTAssertEqual(capture.request?.protocolRevision, .current)
+        XCTAssertEqual(capture.request?.idempotencyKey, "scheduler-request")
+        XCTAssertEqual(capture.request?.body, try ControlPlaneJSONValue.decode(bodyData))
+        XCTAssertEqual(capture.standardInputReads, 1)
+        XCTAssertEqual(capture.fileReads, 0)
+    }
+
+    func testReleaseUsesTheExactApplyReferenceAndIsMutating() throws {
+        let decisionID = "11111111-1111-4111-8111-111111111111"
+        let workloadID = "22222222-2222-4222-8222-222222222222"
+        let digest = String(repeating: "c", count: 64)
+        let bodyData = Data(
+            "{\"decisionID\":\"\(decisionID)\",\"expectedInputDigest\":\"\(digest)\",\"projectID\":\"project-a\",\"workloadID\":\"\(workloadID)\"}".utf8
+        )
+        let capture = RequestCapture()
+        let environment = makeEnvironment(
+            capture: capture,
+            standardInput: bodyData,
+            response: .object(["status": .string("released")])
+        )
+
+        let result = HostwrightCommandRunner.run(arguments: [
+            "scheduler", "release", "--stdin", "--json",
+        ], environment: environment)
+
+        XCTAssertEqual(result.exitCode, 0, result.standardError)
+        XCTAssertEqual(capture.request?.operation, "scheduler.release")
         XCTAssertEqual(capture.request?.protocolRevision, .current)
         XCTAssertEqual(capture.request?.idempotencyKey, "scheduler-request")
         XCTAssertEqual(capture.request?.body, try ControlPlaneJSONValue.decode(bodyData))
@@ -158,6 +185,12 @@ final class SchedulerCLIParityTests: XCTestCase {
             ),
             (
                 .apply,
+                Data(
+                    "{\"decisionID\":\"11111111-1111-4111-8111-111111111111\",\"expectedInputDigest\":\"not-a-digest\",\"projectID\":\"project-a\",\"workloadID\":\"22222222-2222-4222-8222-222222222222\"}".utf8
+                )
+            ),
+            (
+                .release,
                 Data(
                     "{\"decisionID\":\"11111111-1111-4111-8111-111111111111\",\"expectedInputDigest\":\"not-a-digest\",\"projectID\":\"project-a\",\"workloadID\":\"22222222-2222-4222-8222-222222222222\"}".utf8
                 )

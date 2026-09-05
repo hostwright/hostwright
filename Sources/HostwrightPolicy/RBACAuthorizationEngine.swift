@@ -226,7 +226,8 @@ public final class RBACAuthorizationEngine: @unchecked Sendable {
     case "plan": (resourceKind, verb) = (.project, .plan)
     case "scheduler.plan", "scheduler.simulate": (resourceKind, verb) = (.project, .plan)
     case "scheduler.status", "scheduler.explain": (resourceKind, verb) = (.project, .get)
-    case "scheduler.apply": (resourceKind, verb) = (.project, .update)
+    case "scheduler.apply", "scheduler.release":
+      (resourceKind, verb) = (.project, .update)
     case "status": (resourceKind, verb) = (.project, .get)
     case "events": (resourceKind, verb) = (.observability, .list)
     case "recovery":

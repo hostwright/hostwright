@@ -6,23 +6,25 @@ public enum SchedulerControlOperation: String, Codable, CaseIterable, Sendable {
   case simulate = "scheduler.simulate"
   case explain = "scheduler.explain"
   case apply = "scheduler.apply"
+  case release = "scheduler.release"
 
   public var requiresCurrentRevision: Bool { true }
 
   /// Planning records an immutable decision artifact that apply can later
   /// reload. Simulation is the only stateless scheduler operation.
-  public var isMutating: Bool { self == .plan || self == .apply }
+  public var isMutating: Bool { self == .plan || self == .apply || self == .release }
 }
 
-/// The daemon-side scheduler bridge has one intentionally narrow body shape.
+/// The daemon-side scheduler bridge has intentionally narrow body shapes.
 /// Keeping this contract in ControlPlane avoids a ControlPlane -> Scheduler
 /// dependency while still making the wire boundary strict before dispatch.
 public enum SchedulerControlWireContract {
   public static let planBodyKeys: Set<String> = ["projectID", "input"]
   public static let decisionBodyKeys: Set<String> = ["projectID", "decisionID"]
-  public static let applyBodyKeys: Set<String> = [
+  public static let workloadMutationBodyKeys: Set<String> = [
     "projectID", "decisionID", "workloadID", "expectedInputDigest",
   ]
+  public static let applyBodyKeys = workloadMutationBodyKeys
   public static let bodyKeys: Set<String> = planBodyKeys
   public static let inputKeys: Set<String> = [
     "inputDigest", "pendingWorkloads", "nodes", "fairnessStates",
@@ -85,7 +87,7 @@ public enum SchedulerControlWireContract {
     return (projectID, decisionID)
   }
 
-  public static func applyData(
+  public static func workloadMutationData(
     from body: ControlPlaneJSONValue?
   ) throws -> (
     projectID: String,
@@ -94,8 +96,8 @@ public enum SchedulerControlWireContract {
     expectedInputDigest: String
   ) {
     guard case .object(let fields) = body,
-      Set(fields.keys) == applyBodyKeys else {
-      throw ContractValidationError.invalid("scheduler apply body")
+      Set(fields.keys) == workloadMutationBodyKeys else {
+      throw ContractValidationError.invalid("scheduler workload mutation body")
     }
     let projectID = try validatedProjectID(fields["projectID"])
     guard case .string(let decisionIDValue) = fields["decisionID"],
@@ -107,12 +109,23 @@ public enum SchedulerControlWireContract {
       expectedInputDigest.unicodeScalars.allSatisfy({
         ($0.value >= 48 && $0.value <= 57) || ($0.value >= 97 && $0.value <= 102)
       }) else {
-      throw ContractValidationError.invalid("scheduler apply body")
+      throw ContractValidationError.invalid("scheduler workload mutation body")
     }
     guard expectedInputDigest.utf8.count <= maximumDigestBytes else {
-      throw ContractValidationError.outOfBounds("scheduler apply body")
+      throw ContractValidationError.outOfBounds("scheduler workload mutation body")
     }
     return (projectID, decisionID, workloadID, expectedInputDigest)
+  }
+
+  public static func applyData(
+    from body: ControlPlaneJSONValue?
+  ) throws -> (
+    projectID: String,
+    decisionID: UUID,
+    workloadID: UUID,
+    expectedInputDigest: String
+  ) {
+    try workloadMutationData(from: body)
   }
 
   private static func validatedProjectID(

@@ -18,7 +18,9 @@ Hostwright separates deterministic test coverage from evidence that exercises re
 
 Reports conform to `schemas/hostwright-evidence.schema.json`; production Swift models and validation live in `HostwrightCore/EvidenceModels.swift`. Status is one of `passed`, `failed`, or `blocked`; there is no skipped-success status.
 
-The default repository gate runs `swift test` for unit-contract and XCTest-backed local integration coverage, then `scripts/integration.sh` against the built tools. Distribution tests exercise actual debug Hostwright binaries, tar archives, checksums, subprocesses, permission failures, and temporary prefixes, but remain local-integration evidence because they use dirty prebuilt assembly and no signing/notarization credentials. `hostwright-dist build` is the separate clean release-build lane. `hostwright benchmark` similarly separates scripted contracts from hardware evidence.
+`scripts/test.sh pr` runs governance and lint checks, builds the package, exercises the built tools through `scripts/integration.sh`, and runs regression tests plus five durable distribution lifecycle checks. Expensive distribution, Phase 09 aggregate qualification, release-registry, and live-runtime suites run separately through `scripts/test.sh qualification <shard>` and the manually dispatched **Qualification tests** workflow. Both workflows retain logs and structured results. No test is deleted by this split; `scripts/test.sh full` (also the default with no arguments) runs the full suite and documentation checks. A green PR is regression evidence, not release or live-runtime qualification.
+
+Distribution tests exercise actual debug Hostwright binaries, tar archives, checksums, subprocesses, permission failures, and temporary prefixes, but remain local-integration evidence because they use dirty prebuilt assembly and no signing/notarization credentials. `hostwright-dist build` is the separate clean release-build lane. `hostwright benchmark` similarly separates scripted contracts from hardware evidence.
 
 ## Passing Rules
 

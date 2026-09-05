@@ -288,8 +288,8 @@ public enum HostwrightCommandRunner {
                 _ = try SchedulerControlWireContract.scopedInputData(from: body)
             case .status, .explain:
                 _ = try SchedulerControlWireContract.decisionReference(from: body)
-            case .apply:
-                _ = try SchedulerControlWireContract.applyData(from: body)
+            case .apply, .release:
+                _ = try SchedulerControlWireContract.workloadMutationData(from: body)
             }
             return body
         } catch let diagnostic as HostwrightDiagnostic {

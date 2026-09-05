@@ -527,7 +527,7 @@ public struct CLIControlRoute: Equatable, Sendable {
         case .diagnostics:
             return false
         case .scheduler(let options):
-            return options.action == .apply
+            return options.action == .apply || options.action == .release
         case .registry(let options):
             switch options.action {
             case .status:

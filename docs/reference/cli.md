@@ -79,7 +79,7 @@ hostwright init
 hostwright import-stack <path> [--output text|json] [--team-profile <path>]
 hostwright validate [path] [--team-profile <path>]
 hostwright plan [path] [--output text|json] [--team-profile <path>]
-hostwright scheduler status|plan|simulate|explain|apply (--request <absolute-path> | --stdin) [--output text|json]
+hostwright scheduler status|plan|simulate|explain|apply|release (--request <absolute-path> | --stdin) [--output text|json]
 hostwright status [path] [--state-db <path>] [--output text|json] [--runtime-provider auto|apple-cli|containerization]
 hostwright restart-budget status [--project <project-id>] [--state-db <path>] [--output text|json]
 hostwright restart-budget release --project <project-id> --service <name> --confirm-hold <sha256> [--state-db <path>] [--output text|json]
@@ -511,7 +511,7 @@ JSON shape:
 }
 ```
 
-## `hostwright scheduler status|plan|simulate|explain|apply`
+## `hostwright scheduler status|plan|simulate|explain|apply|release`
 
 These commands use the persistent authenticated Control API 2.2 seam. They do not run a local scheduler, read SQLite directly, or bypass durable admission authority. Provide exactly one bounded JSON request with `--request <absolute-path>` or `--stdin`; `--output text|json` selects the presentation only.
 
@@ -520,8 +520,9 @@ The operation bodies are strict:
 - `plan` and `simulate`: `{"projectID":"...","input":{...}}`. `plan` persists an immutable decision; `simulate` is pure and persists neither a decision nor a reservation.
 - `status` and `explain`: `{"projectID":"...","decisionID":"<uuid>"}`.
 - `apply`: `{"projectID":"...","decisionID":"<uuid>","workloadID":"<uuid>","expectedInputDigest":"<64 lowercase hex>"}`. Apply revalidates the complete durable decision, capacity generation, pressure, profile, and fence bindings before any runtime effect.
+- `release`: the exact same decision/workload/input reference as `apply`. Release persists `release-pending`, removes only the selected Hostwright-owned workload, requires fresh authoritative absence evidence, and then returns its reserved capacity. Failure keeps capacity reserved for an idempotent retry.
 
-The sealed current-source scheduler qualification covers the pure contract and retains 382 replayable intentional optimization-gap diagnostics; it does not make runtime mutation or `scheduler.optimization` available. `scheduler.apply` remains fail-closed with `scheduler-authority-unavailable` when the repository-backed lifecycle/runtime handoff or remaining G13-G15 evidence is unavailable.
+The single-host admission path is repository-backed and fail-closed: `scheduler.apply` requires fresh daemon authority before lifecycle mutation, and `scheduler.release` requires exact owned cleanup plus authoritative absence before capacity release. The sealed scheduler qualification retains 382 replayable intentional optimization-gap diagnostics; it does not make `scheduler.optimization`, remote placement, or accelerator execution available.
 
 ## `hostwright apply [path] [--state-db <path>] --confirm-plan <hash> [--team-profile <path> --approval-record <path>]`
 

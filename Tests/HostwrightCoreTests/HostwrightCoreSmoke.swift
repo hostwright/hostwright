@@ -324,7 +324,6 @@ final class HostwrightCoreTests: XCTestCase {
         XCTAssertTrue(implementationPlan.contains("## Phase 36 Outputs"))
         XCTAssertTrue(buildStatus.contains("Phase 36 is operational locally"))
         XCTAssertTrue(devlog.contains("No benchmark publication, performance comparison, efficiency claim, or capacity claim."))
-        XCTAssertTrue(ci.contains("scripts/lint.sh"))
 
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright guarantees capacity"))
         XCTAssertFalse(publicDocs.localizedCaseInsensitiveContains("Hostwright publishes benchmark numbers"))

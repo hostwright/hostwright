@@ -20,6 +20,8 @@ REPOSITORY = "hostwright/hostwright"
 RELEASE_LABEL = "roadmap:v0.0.2"
 ASSIGNEE = "d3v07"
 EVIDENCE_MARKER = "<!-- hostwright-evidence-gate:v1 -->"
+SCOPE_DECISION = "docs/design/adr-0015-reduced-local-release.md"
+SCOPE_URL = f"https://github.com/{REPOSITORY}/blob/main/{SCOPE_DECISION}"
 EVIDENCE_CLASSES = [
     "unit-contract",
     "local-integration",
@@ -64,7 +66,7 @@ def require(condition: bool, message: str) -> None:
 
 def validate_manifest(path: Path) -> dict[str, Any]:
     document = load_json(path)
-    require(document.get("schemaVersion") == 1, "roadmap schemaVersion must be 1")
+    require(document.get("schemaVersion") == 2, "roadmap schemaVersion must be 2")
     require(document.get("repository") == REPOSITORY, f"roadmap repository must be {REPOSITORY}")
     require(document.get("release") == "v0.0.2", "roadmap release must be v0.0.2")
     require(document.get("evidenceClasses") == EVIDENCE_CLASSES, "roadmap evidenceClasses must match the v0.0.2 verification constitution")
@@ -72,10 +74,13 @@ def validate_manifest(path: Path) -> dict[str, Any]:
     milestone = document.get("milestone")
     require(isinstance(milestone, dict), "roadmap milestone must be an object")
     require(milestone.get("number") == 10, "v0.0.2 milestone number must be 10")
-    require(milestone.get("dueOn") == "2026-07-27", "v0.0.2 due date must be 2026-07-27")
+    require(milestone.get("dueOn") is None, "v0.0.2 uses dependency sequencing, not an obsolete due date")
+    require(document.get("scopeDecision") == SCOPE_DECISION, "roadmap scope decision is invalid")
+    require((ROOT / SCOPE_DECISION).is_file(), "roadmap scope decision document is missing")
+    require(document.get("deliverySequence") == ["scope-reset", "P10", "P13", "P14", "P15"], "roadmap delivery sequence is invalid")
     require(
-        document.get("phaseSchedule") == PHASE_SCHEDULE,
-        "v0.0.2 phase schedule must run daily from 2026-07-13 through 2026-07-27",
+        document.get("historicalPhaseSchedule") == PHASE_SCHEDULE,
+        "historical phase schedule must preserve the original July targets",
     )
 
     issues = document.get("issues")
@@ -112,6 +117,15 @@ def validate_manifest(path: Path) -> dict[str, Any]:
         require(issue.get("url") == f"https://github.com/{REPOSITORY}/issues/{number}", f"issue #{number} URL is invalid")
         require(isinstance(labels, list) and RELEASE_LABEL in labels, f"issue #{number} lacks {RELEASE_LABEL}")
         require(isinstance(assignees, list) and ASSIGNEE in assignees, f"issue #{number} lacks assignee {ASSIGNEE}")
+        require(issue.get("releaseDisposition") in {"required", "deferred"}, f"issue #{number} has invalid release disposition")
+        require(issue.get("scopeDecision") == SCOPE_DECISION, f"issue #{number} lacks the recorded scope decision")
+        if issue["releaseDisposition"] == "deferred":
+            require(isinstance(issue.get("deferralReason"), str) and issue["deferralReason"].strip(), f"issue #{number} has no deferral reason")
+        elif number >= 207:
+            criteria = issue.get("acceptanceCriteria")
+            evidence = issue.get("requiredEvidence")
+            require(isinstance(criteria, list) and criteria and all(isinstance(value, str) and value.strip() for value in criteria), f"issue #{number} has no reduced acceptance criteria")
+            require(isinstance(evidence, list) and evidence and set(evidence) <= set(EVIDENCE_CLASSES), f"issue #{number} has invalid required evidence")
 
     for phase, epic in epic_by_phase.items():
         require(epic.get("marker") == f"P{phase:02d}", f"phase {phase} epic marker is invalid")
@@ -129,6 +143,8 @@ def validate_manifest(path: Path) -> dict[str, Any]:
             index = child["child"]
             require(child.get("marker") == f"P{phase:02d}-C{index:02d}", f"issue #{child['number']} marker is invalid")
             require(child.get("parent") == epic["number"], f"issue #{child['number']} parent is invalid")
+            if epic["releaseDisposition"] == "deferred":
+                require(child["releaseDisposition"] == "deferred", f"deferred epic #{epic['number']} has required child #{child['number']}")
 
     return document
 
@@ -228,6 +244,9 @@ def check_pull_request(event_path: Path, manifest_path: Path) -> None:
         return
 
     errors: list[str] = []
+    deferred = {issue["number"] for issue in document["issues"] if issue["releaseDisposition"] == "deferred"}
+    if closure_numbers & deferred:
+        errors.append("deferred issues must close explicitly as not_planned, never through implementation closure keywords")
     if "status:verification" not in labels_from(event, "pull_request"):
         errors.append("closing a roadmap issue requires the PR label status:verification")
     errors.extend(evidence_errors(body))
@@ -270,6 +289,25 @@ def github_issue_comments(number: int, token: str) -> list[dict[str, Any]]:
     raise GovernanceError(f"issue #{number} has more comments than the closure gate can safely inspect")
 
 
+def closure_policy_errors(
+    record: dict[str, Any], issue: dict[str, Any], children: list[tuple[dict[str, Any], Any]]
+) -> list[str]:
+    errors: list[str] = []
+    deferred = record["releaseDisposition"] == "deferred"
+    expected_reason = "not_planned" if deferred else "completed"
+    if issue.get("state") != "closed" or issue.get("state_reason") != expected_reason:
+        errors.append(f"issue #{record['number']} requires a closed {expected_reason} disposition")
+    if deferred and SCOPE_URL not in (issue.get("body") or ""):
+        errors.append("deferred issue body lacks the committed scope-decision link")
+    for child, current in children:
+        child_reason = "not_planned" if child["releaseDisposition"] == "deferred" else "completed"
+        if not isinstance(current, dict) or current.get("state") != "closed" or current.get("state_reason") != child_reason:
+            errors.append(f"child #{child['number']} must be closed as {child_reason}")
+        if deferred and child["releaseDisposition"] != "deferred":
+            errors.append(f"deferred issue has required child #{child['number']}")
+    return errors
+
+
 def enforce_issue_closure(event_path: Path, manifest_path: Path, token: str) -> None:
     document = validate_manifest(manifest_path)
     event = load_json(event_path)
@@ -282,36 +320,28 @@ def enforce_issue_closure(event_path: Path, manifest_path: Path, token: str) -> 
         print(f"roadmap governance: issue #{number} is outside the v0.0.2 roadmap")
         return
 
-    errors: list[str] = []
-    if "status:verification" not in labels_from(event, "issue"):
-        errors.append("issue lacks status:verification")
-    issue_body = issue.get("body") or ""
-    require(isinstance(issue_body, str), f"issue #{number} body must be text")
-    required_classes, declaration_errors = declared_evidence_classes(issue_body)
-    errors.extend(declaration_errors)
-
-    comments = github_issue_comments(number, token)
-    evidence_bodies = [
-        comment.get("body", "")
-        for comment in comments
-        if isinstance(comment, dict) and EVIDENCE_MARKER in (comment.get("body") or "")
-    ]
-    if not evidence_bodies:
-        errors.append("no final evidence comment was found")
-    else:
-        errors.extend(evidence_errors(evidence_bodies[-1], required_classes=required_classes))
-
+    record = roadmap_by_number[number]
     children = [record for record in document["issues"] if record.get("parent") == number]
-    open_children: list[int] = []
-    for child in children:
-        current = github_request("GET", f"/issues/{child['number']}", token)
-        if not isinstance(current, dict) or current.get("state") != "closed":
-            open_children.append(child["number"])
-    if open_children:
-        errors.append("open child issues: " + ", ".join(f"#{child}" for child in open_children))
+    child_payloads = [(child, github_request("GET", f"/issues/{child['number']}", token)) for child in children]
+    errors = closure_policy_errors(record, issue, child_payloads)
+    if record["releaseDisposition"] == "required":
+        if "status:verification" not in labels_from(event, "issue"):
+            errors.append("issue lacks status:verification")
+        issue_body = issue.get("body") or ""
+        require(isinstance(issue_body, str), f"issue #{number} body must be text")
+        required_classes, declaration_errors = declared_evidence_classes(issue_body)
+        errors.extend(declaration_errors)
+        if "requiredEvidence" in record and required_classes != set(record["requiredEvidence"]):
+            errors.append("issue evidence declaration differs from the committed release requirements")
+        comments = github_issue_comments(number, token)
+        evidence_bodies = [comment.get("body", "") for comment in comments if EVIDENCE_MARKER in (comment.get("body") or "")]
+        if not evidence_bodies:
+            errors.append("no final evidence comment was found")
+        else:
+            errors.extend(evidence_errors(evidence_bodies[-1], required_classes=required_classes))
 
     if not errors:
-        print(f"roadmap governance: issue #{number} closure evidence passed")
+        print(f"roadmap governance: issue #{number} closure policy passed")
         return
 
     github_request("PATCH", f"/issues/{number}", token, {"state": "open"})
@@ -320,7 +350,7 @@ def enforce_issue_closure(event_path: Path, manifest_path: Path, token: str) -> 
         "<!-- hostwright-governance:reopen:v1 -->\n"
         "This roadmap issue was reopened because the executable closure gate did not pass:\n\n"
         f"{reason_lines}\n\n"
-        "Add the `status:verification` label, close every child, and post a complete clean final evidence comment before closing again."
+        "Required issues need `status:verification` and clean final evidence. Deferred issues need the committed scope-decision link and an explicit not-planned closure. Resolve every child according to its recorded disposition before closing again."
     )
     github_request("POST", f"/issues/{number}/comments", token, {"body": comment})
     raise GovernanceError(f"issue #{number} was reopened: " + "; ".join(errors))
@@ -381,6 +411,49 @@ def self_test(manifest_path: Path) -> None:
             require("Dirty must be false" in str(error), "invalid dirty evidence did not fail for the expected reason")
         else:
             raise GovernanceError("invalid dirty evidence unexpectedly passed")
+    deferred = next(issue for issue in document["issues"] if issue["releaseDisposition"] == "deferred")
+    required = next(issue for issue in document["issues"] if issue["releaseDisposition"] == "required")
+    deferred_closed = {"state": "closed", "state_reason": "not_planned", "body": SCOPE_URL}
+    required_closed = {"state": "closed", "state_reason": "completed", "body": ""}
+    require(not closure_policy_errors(deferred, deferred_closed, []), "recorded deferral should close without implementation evidence")
+    require(not closure_policy_errors(required, required_closed, [(deferred, deferred_closed)]), "required parent should accept correctly deferred child")
+    require(bool(closure_policy_errors(deferred, required_closed, [])), "deferral must not count as completed implementation")
+    require(bool(closure_policy_errors(required, deferred_closed, [])), "required issue must not bypass evidence through not-planned closure")
+    require(bool(closure_policy_errors(deferred, {**deferred_closed, "body": ""}, [])), "missing decision link must reject deferral")
+    require(bool(closure_policy_errors(required, required_closed, [(deferred, {**deferred_closed, "state": "open"})])), "open deferred child must block parent")
+    require(bool(closure_policy_errors(required, required_closed, [(deferred, required_closed)])), "completed deferred child must block parent")
+    require(bool(closure_policy_errors(required, required_closed, [(required, deferred_closed)])), "not-planned required child must block parent")
+    require(bool(closure_policy_errors(deferred, deferred_closed, [(required, required_closed)])), "required child must block deferred parent")
+    require(bool(closure_policy_errors(required, required_closed, [(required, None)])), "unavailable child state must fail closed")
+    with tempfile.TemporaryDirectory(prefix="hostwright-roadmap-") as directory:
+        path = Path(directory) / "deferred.json"
+        event = {"pull_request": {"body": valid_evidence_body(deferred["number"]), "labels": [{"name": "status:verification"}]}}
+        path.write_text(json.dumps(event))
+        try:
+            check_pull_request(path, manifest_path)
+        except GovernanceError as error:
+            require("not_planned" in str(error), "deferred PR closure failed for wrong reason")
+        else:
+            raise GovernanceError("implementation PR must not complete a deferred issue")
+    with tempfile.TemporaryDirectory(prefix="hostwright-roadmap-") as directory:
+        path = Path(directory) / "manifest.json"
+        mutations = [
+            lambda value: value.update(schemaVersion=1),
+            lambda value: value.update(scopeDecision="docs/unreviewed.md"),
+            lambda value: value["issues"][0].update(releaseDisposition="complete"),
+            lambda value: value["issues"][0].update(scopeDecision="docs/unreviewed.md"),
+            lambda value: next(item for item in value["issues"] if item["number"] == 220).update(releaseDisposition="required"),
+        ]
+        for mutate in mutations:
+            invalid = json.loads(json.dumps(document))
+            mutate(invalid)
+            path.write_text(json.dumps(invalid))
+            try:
+                validate_manifest(path)
+            except GovernanceError:
+                pass
+            else:
+                raise GovernanceError("invalid release disposition manifest unexpectedly passed")
     print("roadmap governance: self-test passed")
 
 

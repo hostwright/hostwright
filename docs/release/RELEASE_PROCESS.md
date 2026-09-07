@@ -18,9 +18,9 @@ qualification builds for upgrade evidence.
 ## Release Ladder
 
 1. the `0.0.2-dev` line throughout implementation, including the preserved Phase 02 dev.11 and dev.12 qualification builds;
-2. `v0.0.2-rc.1` only after all 15 phase epics and child issues reach verification;
-3. `v0.0.2-rc.2` or later after every defect from the prior clean RC run is fixed and the entire qualification run is repeated;
-4. `v0.0.2` only after two clean complete RC qualification runs and final maintainer approval.
+2. `v0.0.2-rc.1` after required local implementation issues reach verification and the Phase 15 lanes are ready;
+3. fix RC defects and repeat affected qualification on the corrected candidate;
+4. `v0.0.2` after one clean complete RC qualification, independent signed-artifact lifecycle verification, final-version qualification and maintainer approval. Release artifact and master issues close after publication verification.
 
 An RC tag is a pre-release, not a partial implementation escape hatch. It uses the same supported-scope contract as GA and may differ only by resolved defects and repeated evidence.
 
@@ -34,25 +34,19 @@ The two Phase 02 `v0.0.2-dev.11` and `v0.0.2-dev.12` qualification artifacts are
 - [evidence JSON schema](../../schemas/hostwright-evidence.schema.json)
 - [master release issue #284](https://github.com/hostwright/hostwright/issues/284)
 
-Every child issue, phase epic, and master gate closes through a final `status:verification` PR and clean evidence comment. Intermediate implementation, research, design, and documentation PRs use `Refs #NN`; only the final evidence PR uses `Closes #NN`.
+Every required child issue, phase epic, and master gate closes through a final `status:verification` PR and clean evidence comment. Deferred issues close explicitly as `not_planned` under the merged [ADR 0015](../design/adr-0015-reduced-local-release.md), with matching child dispositions; they are not completed implementation. Intermediate implementation, research, design, and documentation PRs use `Refs #NN`; only the final evidence PR uses `Closes #NN`.
 
 ## Baseline Gate for Every Phase and RC
 
 ```bash
-swift build
-swift test list || swift test --list-tests
-swift test
-scripts/integration.sh
-scripts/grep-orchard.sh .
-scripts/test.sh
-scripts/lint.sh
+scripts/test.sh pr
 ```
 
-The owning phase adds its required live, migration, security, resilience, multi-host, interoperability, accessibility, distribution, and performance lanes. A command that is unavailable, skipped, blocked, fixture-only, mock-only, dirty, or cleanup-failed is recorded honestly and fails that implementation/release gate.
+The owning phase adds its required live, migration, security, resilience, declared interoperability, accessibility, distribution, and performance lanes. A command that is unavailable, skipped, blocked, fixture-only, mock-only, dirty, or cleanup-failed is recorded honestly and fails that implementation/release gate.
 
 ## Governance Gate
 
-Roadmap manifest validation, issue-parent/label/assignee checks, final-PR evidence enforcement, child closure, security review triggers, and exact public claims must pass. The executable workflow reopens a roadmap issue closed without valid evidence.
+Roadmap manifest validation, issue-parent/label/assignee checks, final-PR evidence enforcement, child closure, security review triggers, and exact public claims must pass. The executable workflow reopens required issues without valid evidence and deferred issues without an explicit recorded not-planned scope decision. Required parents require completed required children and correctly deferred children.
 
 ## Distribution Readiness Gate
 
@@ -60,7 +54,7 @@ Phase 02 turned the former unsigned developer lane into signed/notarized archive
 
 ## Benchmark Gate
 
-Phase 10 implements scheduling, pressure, energy, and accelerator measurement; Phase 15 qualifies performance/density/energy budgets on physical hardware. No benchmark, capacity, efficiency, or comparison claim is published from a dirty, incomplete, blocked, scripted, or cleanup-failed report.
+Phase 10 qualifies local admission and safe pressure deferral; Phase 15 records bounded local timings and resource stability on the M4 Pro. Broad density, energy, accelerator and cluster-scale claims are deferred. No benchmark, capacity, efficiency, or comparison claim is published from a dirty, incomplete, blocked, scripted, or cleanup-failed report.
 
 ## Public Education Gate
 
@@ -68,33 +62,33 @@ Current core docs and `hostwright capabilities --json` are the product-truth sou
 
 ## Beta Readiness Gate
 
-The former beta checklist is historical. The active pre-GA gate is a complete `v0.0.2-rc.*` qualification run over the same intended GA scope; an RC cannot omit an unimplemented phase or downgrade a blocker into a known limitation.
+The former beta checklist is historical. The active pre-GA gate is a complete `v0.0.2-rc.*` qualification run over the same intended GA scope; an RC cannot omit a retained requirement or downgrade a blocker into a known limitation. Deferred requirements are explicitly recorded in the issue manifest.
 
 ## v0.0.2 GA Gate
 
 All of the following are required:
 
-- all 167 workstreams, 15 phase epics, and the master issue are complete;
+- every required implementation workstream is verified, and all deferred issues are explicitly closed as not planned; release-artifact, Phase 15 and master issues close after publication verification;
 - zero unresolved P0/P1 defects;
-- exact current/previous supported macOS, Apple `container`, Kubernetes, Docker API, and client-family matrices are frozen from passing evidence;
+- macOS 26 arm64, Apple `container` 1.0.0/1.1.0 and Containerization 0.35.0 declared capabilities are frozen from passing evidence with exact OS builds and hardware;
 - Apple CLI and pinned Containerization providers pass declared-capability conformance;
-- 10,000 lifecycle cycles and a cumulative checkpointed 72-hour single-host soak pass without duplicate resources, unmanaged mutation, or monotonic leaks; gaps and incomplete intervals do not count;
-- physical three- and five-Mac fault matrices and a seven-day mixed-fault soak pass, including safe read-only behavior without quorum;
-- every critical parser/protocol receives at least 24 aggregate fuzz CPU-hours;
+- ten live lifecycle cycles per provider and a checkpointed 30-minute physical-host soak pass without duplicate resources, unmanaged mutation, leaked reservations, or monotonic leaks; gaps do not count;
+- the physical M4 Pro provides live runtime evidence and one macOS VM provides independent clean-environment artifact lifecycle evidence; neither implies independent-hardware or HA qualification;
+- every shipped critical parser/protocol receives five minutes of fuzzing plus retained corpus replay;
 - supported ASan and TSan lanes pass;
-- independent security assessment findings required for release are remediated and retested;
+- focused independent security review of shipped boundaries is complete and release-blocking findings are remediated and retested;
 - dependency, license, secret, SAST, SBOM, signature, vulnerability, and provenance gates pass;
-- performance, density, energy, upgrade lineage, rollback, disaster recovery, compatibility, and accessibility gates pass;
+- bounded local performance, upgrade lineage, rollback, local backup/recovery, compatibility, and desktop accessibility gates pass;
 - every documentation quickstart executes and website typecheck/build/link checks pass;
 - signed/notarized archives and `.pkg` pass checksum, stapling, Gatekeeper, clean install, reboot, upgrade, rollback, repair, and uninstall;
 - the vendor Homebrew tap installs those exact verified artifacts;
-- two complete clean RC qualification runs pass.
+- one complete clean RC qualification and independent signed-artifact install/reboot/upgrade/rollback/repair/uninstall verification pass; final-version bytes qualify before promotion.
 
 ## Artifact and Package Policy
 
 The release publishes only artifacts produced from the final clean tag by the reviewed release workflow:
 
-- signed/notarized Apple-silicon archive;
+- signed/notarized Apple-silicon archive containing the local CLI, desktop app and required helpers;
 - signed/notarized `.pkg`;
 - checksums;
 - SPDX SBOM;
@@ -106,7 +100,7 @@ Unsigned developer `hostwright-dist` output is useful local integration evidence
 
 The protected workflow retains its exact verified bundle for 90 days. Published release assets and the corresponding checksums, SBOMs, provenance, manifest, detached signatures, and evidence are retained indefinitely and are not replaced in place. Exceptional removal is a separate reviewed repository action; it is never an automatic workflow cleanup step.
 
-`brew install hostwright` depends on Homebrew-core acceptance. Phase 15 submits the formula after GA artifact evidence passes. The Hostwright-controlled qualification channel is available now as `brew install hostwright/tap/hostwright`; documentation must not claim the unqualified command before core acceptance.
+`brew install hostwright` depends on Homebrew-core acceptance. Homebrew-core submission is deferred from v0.0.2. The Hostwright-controlled qualification channel is available now as `brew install hostwright/tap/hostwright`; documentation must not claim the unqualified command before core acceptance.
 
 ## Final Evidence Record
 
@@ -128,7 +122,7 @@ Only after the final RC evidence and approval:
 4. let that workflow build, sign, notarize, staple, verify, create the immutable annotated tag, publish, download, compare, and attest the exact bytes;
 5. verify clean installation, upgrade, rollback, and uninstall from the published channel;
 6. publish the GitHub Release and vendor-tap formula only after artifact verification;
-7. submit the Homebrew-core formula separately and report its external acceptance state exactly;
+7. retain the explicit Homebrew-core deferral and publish only the verified vendor-tap installation claim;
 8. run the post-release canary/support checks and retain release evidence according to policy.
 
 ## Immutable Historical Releases

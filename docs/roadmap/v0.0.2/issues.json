@@ -1,29 +1,12 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "repository": "hostwright/hostwright",
   "release": "v0.0.2",
   "milestone": {
     "number": 10,
-    "dueOn": "2026-07-27",
+    "dueOn": null,
     "url": "https://github.com/hostwright/hostwright/milestone/10"
   },
-  "phaseSchedule": [
-    { "phase": 1, "targetDate": "2026-07-13" },
-    { "phase": 2, "targetDate": "2026-07-14" },
-    { "phase": 3, "targetDate": "2026-07-15" },
-    { "phase": 4, "targetDate": "2026-07-16" },
-    { "phase": 5, "targetDate": "2026-07-17" },
-    { "phase": 6, "targetDate": "2026-07-18" },
-    { "phase": 7, "targetDate": "2026-07-19" },
-    { "phase": 8, "targetDate": "2026-07-20" },
-    { "phase": 9, "targetDate": "2026-07-21" },
-    { "phase": 10, "targetDate": "2026-07-22" },
-    { "phase": 11, "targetDate": "2026-07-23" },
-    { "phase": 12, "targetDate": "2026-07-24" },
-    { "phase": 13, "targetDate": "2026-07-25" },
-    { "phase": 14, "targetDate": "2026-07-26" },
-    { "phase": 15, "targetDate": "2026-07-27" }
-  ],
   "source": "GitHub issue metadata; refresh deliberately and review the diff",
   "evidenceClasses": [
     "unit-contract",
@@ -52,7 +35,7 @@
       "phase": null,
       "child": null,
       "parent": null,
-      "title": "Hostwright v0.0.2 implementation roadmap and release gate",
+      "title": "Hostwright v0.0.2 local CLI and desktop release gate",
       "state": "open",
       "url": "https://github.com/hostwright/hostwright/issues/284",
       "labels": [
@@ -72,6 +55,19 @@
       ],
       "assignees": [
         "d3v07"
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "acceptanceCriteria": [
+        "Every required child satisfies its reduced acceptance criteria with clean final evidence.",
+        "Every deferred child is explicitly closed as not planned under ADR 0015; deferral is not implementation.",
+        "Public capability, compatibility, packaging and documentation claims match the tested local release scope."
+      ],
+      "requiredEvidence": [
+        "local-integration",
+        "distribution-artifact",
+        "ux-accessibility",
+        "security-assessment"
       ]
     },
     {
@@ -81,8 +77,8 @@
       "phase": 1,
       "child": null,
       "parent": 284,
-      "title": "Phase 01 — Truth reset, architecture contracts, and verification constitution",
-      "state": "open",
+      "title": "Phase 01 \u2014 Truth reset, architecture contracts, and verification constitution",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/110",
       "labels": [
         "area:ci",
@@ -103,7 +99,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P02",
@@ -112,8 +110,8 @@
       "phase": 2,
       "child": null,
       "parent": 284,
-      "title": "Phase 02 — Trusted installation, secure local foundation, and durable state",
-      "state": "open",
+      "title": "Phase 02 \u2014 Trusted installation, secure local foundation, and durable state",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/120",
       "labels": [
         "area:ci",
@@ -122,7 +120,7 @@
         "area:state",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:in-progress",
+        "status:verification",
         "type:epic",
         "type:implementation",
         "type:release",
@@ -132,7 +130,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P03",
@@ -141,8 +141,8 @@
       "phase": 3,
       "child": null,
       "parent": 284,
-      "title": "Phase 03 — Apple `container` and Containerization runtime conformance",
-      "state": "open",
+      "title": "Phase 03 \u2014 Apple `container` and Containerization runtime conformance",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/129",
       "labels": [
         "area:apple-silicon",
@@ -150,7 +150,7 @@
         "area:runtime",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:epic",
         "type:implementation",
         "type:roadmap",
@@ -159,7 +159,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P04",
@@ -168,8 +170,8 @@
       "phase": 4,
       "child": null,
       "parent": 284,
-      "title": "Phase 04 — Manifest v2 and complete single-host lifecycle",
-      "state": "open",
+      "title": "Phase 04 \u2014 Manifest v2 and complete single-host lifecycle",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/140",
       "labels": [
         "area:cli",
@@ -180,6 +182,7 @@
         "risk:high",
         "roadmap:v0.0.2",
         "status:planned",
+        "status:verification",
         "type:docs",
         "type:epic",
         "type:implementation",
@@ -189,7 +192,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P05",
@@ -198,8 +203,8 @@
       "phase": 5,
       "child": null,
       "parent": 284,
-      "title": "Phase 05 — Images, registries, secrets, and supply-chain trust",
-      "state": "open",
+      "title": "Phase 05 \u2014 Images, registries, secrets, and supply-chain trust",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/152",
       "labels": [
         "area:ci",
@@ -209,6 +214,7 @@
         "risk:high",
         "roadmap:v0.0.2",
         "status:planned",
+        "status:verification",
         "type:epic",
         "type:implementation",
         "type:release",
@@ -218,7 +224,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P06",
@@ -227,8 +235,8 @@
       "phase": 6,
       "child": null,
       "parent": 284,
-      "title": "Phase 06 — Persistent storage and data protection",
-      "state": "open",
+      "title": "Phase 06 \u2014 Persistent storage and data protection",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/163",
       "labels": [
         "area:ci",
@@ -237,7 +245,7 @@
         "area:storage",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:epic",
         "type:implementation",
         "type:roadmap",
@@ -246,7 +254,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P07",
@@ -255,8 +265,8 @@
       "phase": 7,
       "child": null,
       "parent": 284,
-      "title": "Phase 07 — Networking, DNS, ingress, policy, and secure tunnels",
-      "state": "open",
+      "title": "Phase 07 \u2014 Networking, DNS, ingress, policy, and secure tunnels",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/178",
       "labels": [
         "area:ci",
@@ -265,7 +275,7 @@
         "area:tunnels",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:epic",
         "type:implementation",
         "type:roadmap",
@@ -274,7 +284,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P08",
@@ -283,8 +295,8 @@
       "phase": 8,
       "child": null,
       "parent": 284,
-      "title": "Phase 08 — Autonomous daemon, health, recovery, observability, and garbage collection",
-      "state": "open",
+      "title": "Phase 08 \u2014 Autonomous daemon, health, recovery, observability, and garbage collection",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/194",
       "labels": [
         "area:ci",
@@ -295,6 +307,7 @@
         "risk:high",
         "roadmap:v0.0.2",
         "status:planned",
+        "status:verification",
         "type:epic",
         "type:implementation",
         "type:roadmap",
@@ -303,7 +316,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P09",
@@ -312,8 +327,8 @@
       "phase": 9,
       "child": null,
       "parent": 284,
-      "title": "Phase 09 — Control API, identity, RBAC, admission, audit, and secure extensions",
-      "state": "open",
+      "title": "Phase 09 \u2014 Control API, identity, RBAC, admission, audit, and secure extensions",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/206",
       "labels": [
         "area:ci",
@@ -323,7 +338,8 @@
         "area:security",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:in-progress",
+        "status:verification",
         "type:epic",
         "type:implementation",
         "type:roadmap",
@@ -332,7 +348,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P10",
@@ -341,7 +359,7 @@
       "phase": 10,
       "child": null,
       "parent": 284,
-      "title": "Phase 10 — Scheduler, optimization, pressure management, and accelerators",
+      "title": "Phase 10 \u2014 Local resource admission and scheduling",
       "state": "open",
       "url": "https://github.com/hostwright/hostwright/issues/219",
       "labels": [
@@ -362,6 +380,19 @@
       ],
       "assignees": [
         "d3v07"
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "acceptanceCriteria": [
+        "Every required child satisfies its reduced acceptance criteria with clean final evidence.",
+        "Every deferred child is explicitly closed as not planned under ADR 0015; deferral is not implementation.",
+        "Public capability, compatibility, packaging and documentation claims match the tested local release scope."
+      ],
+      "requiredEvidence": [
+        "unit-contract",
+        "local-integration",
+        "live-runtime",
+        "security-assessment"
       ]
     },
     {
@@ -371,7 +402,7 @@
       "phase": 11,
       "child": null,
       "parent": 284,
-      "title": "Phase 11 — Multi-Mac consensus, high availability, and remote operations",
+      "title": "Phase 11 \u2014 Multi-Mac consensus, high availability, and remote operations",
       "state": "open",
       "url": "https://github.com/hostwright/hostwright/issues/235",
       "labels": [
@@ -392,7 +423,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P12",
@@ -401,7 +435,7 @@
       "phase": 12,
       "child": null,
       "parent": 284,
-      "title": "Phase 12 — Kubernetes, CRI, CNI, CSI, and Helm interoperability",
+      "title": "Phase 12 \u2014 Kubernetes, CRI, CNI, CSI, and Helm interoperability",
       "state": "open",
       "url": "https://github.com/hostwright/hostwright/issues/247",
       "labels": [
@@ -424,7 +458,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P13",
@@ -433,7 +470,7 @@
       "phase": 13,
       "child": null,
       "parent": 284,
-      "title": "Phase 13 — Docker, Compose, Podman, Testcontainers, CI, and IDE interoperability",
+      "title": "Phase 13 \u2014 Narrow Compose conversion and execution",
       "state": "open",
       "url": "https://github.com/hostwright/hostwright/issues/257",
       "labels": [
@@ -453,6 +490,19 @@
       ],
       "assignees": [
         "d3v07"
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "acceptanceCriteria": [
+        "Every required child satisfies its reduced acceptance criteria with clean final evidence.",
+        "Every deferred child is explicitly closed as not planned under ADR 0015; deferral is not implementation.",
+        "Public capability, compatibility, packaging and documentation claims match the tested local release scope."
+      ],
+      "requiredEvidence": [
+        "unit-contract",
+        "local-integration",
+        "live-runtime",
+        "security-assessment"
       ]
     },
     {
@@ -462,7 +512,7 @@
       "phase": 14,
       "child": null,
       "parent": 284,
-      "title": "Phase 14 — Native GUI, team/MDM, and optional cloud control plane",
+      "title": "Phase 14 \u2014 Local desktop console and lifecycle actions",
       "state": "open",
       "url": "https://github.com/hostwright/hostwright/issues/270",
       "labels": [
@@ -484,6 +534,19 @@
       ],
       "assignees": [
         "d3v07"
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "acceptanceCriteria": [
+        "Every required child satisfies its reduced acceptance criteria with clean final evidence.",
+        "Every deferred child is explicitly closed as not planned under ADR 0015; deferral is not implementation.",
+        "Public capability, compatibility, packaging and documentation claims match the tested local release scope."
+      ],
+      "requiredEvidence": [
+        "local-integration",
+        "distribution-artifact",
+        "ux-accessibility",
+        "security-assessment"
       ]
     },
     {
@@ -493,7 +556,7 @@
       "phase": 15,
       "child": null,
       "parent": 284,
-      "title": "Phase 15 — Exhaustive qualification, documentation, and v0.0.2 GA",
+      "title": "Phase 15 \u2014 Bounded local qualification and v0.0.2 release",
       "state": "open",
       "url": "https://github.com/hostwright/hostwright/issues/283",
       "labels": [
@@ -514,6 +577,19 @@
       ],
       "assignees": [
         "d3v07"
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "acceptanceCriteria": [
+        "Every required child satisfies its reduced acceptance criteria with clean final evidence.",
+        "Every deferred child is explicitly closed as not planned under ADR 0015; deferral is not implementation.",
+        "Public capability, compatibility, packaging and documentation claims match the tested local release scope."
+      ],
+      "requiredEvidence": [
+        "local-integration",
+        "distribution-artifact",
+        "ux-accessibility",
+        "security-assessment"
       ]
     },
     {
@@ -524,7 +600,7 @@
       "child": 1,
       "parent": 110,
       "title": "P01-C01: Align release and version truth for v0.0.2",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/103",
       "labels": [
         "area:ci",
@@ -541,7 +617,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P01-C02",
@@ -551,7 +629,7 @@
       "child": 2,
       "parent": 110,
       "title": "P01-C02: Separate immutable release documentation from current-main documentation",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/104",
       "labels": [
         "area:ci",
@@ -569,7 +647,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P01-C03",
@@ -579,7 +659,7 @@
       "child": 3,
       "parent": 110,
       "title": "P01-C03: Implement the v0.0.2 gap and evidence taxonomy",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/105",
       "labels": [
         "area:ci",
@@ -597,7 +677,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P01-C04",
@@ -607,7 +689,7 @@
       "child": 4,
       "parent": 110,
       "title": "P01-C04: Lock resource identity, backend binding, and operation saga architecture",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/106",
       "labels": [
         "area:ci",
@@ -625,7 +707,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P01-C05",
@@ -635,7 +719,7 @@
       "child": 5,
       "parent": 110,
       "title": "P01-C05: Version Manifest, Control API, Runtime Provider, plugin, and state contracts",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/107",
       "labels": [
         "area:ci",
@@ -653,7 +737,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P01-C06",
@@ -663,7 +749,7 @@
       "child": 6,
       "parent": 110,
       "title": "P01-C06: Enforce cross-repository website, docs, links, and quickstart checks",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/108",
       "labels": [
         "area:ci",
@@ -681,7 +767,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P01-C07",
@@ -691,7 +779,7 @@
       "child": 7,
       "parent": 110,
       "title": "P01-C07: Enforce GitHub evidence-gated issue and PR closure",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/109",
       "labels": [
         "area:ci",
@@ -709,7 +797,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P02-C01",
@@ -719,7 +809,7 @@
       "child": 1,
       "parent": 120,
       "title": "P02-C01: Ship the vendor Homebrew tap and production formula",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/111",
       "labels": [
         "area:ci",
@@ -728,7 +818,7 @@
         "area:state",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:release",
         "type:security",
@@ -736,7 +826,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P02-C02",
@@ -746,7 +838,7 @@
       "child": 2,
       "parent": 120,
       "title": "P02-C02: Ship signed and notarized archives and macOS packages",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/112",
       "labels": [
         "area:ci",
@@ -755,7 +847,7 @@
         "area:state",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:release",
         "type:security",
@@ -763,7 +855,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P02-C03",
@@ -773,7 +867,7 @@
       "child": 3,
       "parent": 120,
       "title": "P02-C03: Adopt secure macOS Application Support defaults",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/113",
       "labels": [
         "area:ci",
@@ -782,7 +876,7 @@
         "area:state",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:release",
         "type:security",
@@ -790,7 +884,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P02-C04",
@@ -800,7 +896,7 @@
       "child": 4,
       "parent": 120,
       "title": "P02-C04: Implement state backup, restore, integrity check, and repair",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/114",
       "labels": [
         "area:ci",
@@ -809,7 +905,7 @@
         "area:state",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:release",
         "type:security",
@@ -817,7 +913,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P02-C05",
@@ -827,7 +925,7 @@
       "child": 5,
       "parent": 120,
       "title": "P02-C05: Harden SQLite files, transactions, and local state ownership",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/115",
       "labels": [
         "area:ci",
@@ -836,7 +934,7 @@
         "area:state",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:release",
         "type:security",
@@ -844,7 +942,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P02-C06",
@@ -854,16 +954,17 @@
       "child": 6,
       "parent": 120,
       "title": "P02-C06: Harden subprocess execution, cancellation, and process-tree cleanup",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/116",
       "labels": [
         "area:ci",
         "area:cli",
         "area:release",
         "area:state",
+        "bug",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:in-progress",
+        "status:verification",
         "type:implementation",
         "type:release",
         "type:security",
@@ -871,7 +972,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P02-C07",
@@ -881,7 +984,7 @@
       "child": 7,
       "parent": 120,
       "title": "P02-C07: Turn `hostwright doctor` into a real readiness and remediation command",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/117",
       "labels": [
         "area:ci",
@@ -890,7 +993,7 @@
         "area:state",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:release",
         "type:security",
@@ -898,7 +1001,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P02-C08",
@@ -908,7 +1013,7 @@
       "child": 8,
       "parent": 120,
       "title": "P02-C08: Implement safe upgrade, rollback, repair, and uninstall workflows",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/118",
       "labels": [
         "area:ci",
@@ -917,7 +1022,7 @@
         "area:state",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:release",
         "type:security",
@@ -925,7 +1030,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P02-C09",
@@ -935,7 +1042,7 @@
       "child": 9,
       "parent": 120,
       "title": "P02-C09: Publish release SBOM, checksums, provenance, and verification tooling",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/119",
       "labels": [
         "area:ci",
@@ -944,7 +1051,7 @@
         "area:state",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:release",
         "type:security",
@@ -952,7 +1059,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P03-C01",
@@ -962,7 +1071,7 @@
       "child": 1,
       "parent": 129,
       "title": "P03-C01: Implement versioned Apple CLI structured codecs",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/121",
       "labels": [
         "area:apple-silicon",
@@ -970,14 +1079,16 @@
         "area:runtime",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P03-C02",
@@ -987,7 +1098,7 @@
       "child": 2,
       "parent": 129,
       "title": "P03-C02: Implement runtime capability negotiation and compatibility reporting",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/122",
       "labels": [
         "area:apple-silicon",
@@ -995,14 +1106,16 @@
         "area:runtime",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P03-C03",
@@ -1012,7 +1125,7 @@
       "child": 3,
       "parent": 129,
       "title": "P03-C03: Implement complete Apple runtime observation",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/123",
       "labels": [
         "area:apple-silicon",
@@ -1020,14 +1133,16 @@
         "area:runtime",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P03-C04",
@@ -1037,7 +1152,7 @@
       "child": 4,
       "parent": 129,
       "title": "P03-C04: Normalize runtime processes, errors, timeouts, and cancellation",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/124",
       "labels": [
         "area:apple-silicon",
@@ -1045,14 +1160,16 @@
         "area:runtime",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P03-C05",
@@ -1062,7 +1179,7 @@
       "child": 5,
       "parent": 129,
       "title": "P03-C05: Build the pinned out-of-process Containerization helper",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/125",
       "labels": [
         "area:apple-silicon",
@@ -1070,14 +1187,16 @@
         "area:runtime",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P03-C06",
@@ -1087,7 +1206,7 @@
       "child": 6,
       "parent": 129,
       "title": "P03-C06: Build the cross-provider runtime conformance suite",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/126",
       "labels": [
         "area:apple-silicon",
@@ -1095,14 +1214,16 @@
         "area:runtime",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P03-C07",
@@ -1112,7 +1233,7 @@
       "child": 7,
       "parent": 129,
       "title": "P03-C07: Enforce project-generation backend binding and safe provider migration",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/127",
       "labels": [
         "area:apple-silicon",
@@ -1120,14 +1241,16 @@
         "area:runtime",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P03-C08",
@@ -1137,7 +1260,7 @@
       "child": 8,
       "parent": 129,
       "title": "P03-C08: Recover safely across Apple runtime and provider upgrades",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/128",
       "labels": [
         "area:apple-silicon",
@@ -1145,14 +1268,16 @@
         "area:runtime",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P04-C01",
@@ -1162,7 +1287,7 @@
       "child": 1,
       "parent": 140,
       "title": "P04-C01: Replace the restricted parser with maintained YAML",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/130",
       "labels": [
         "area:cli",
@@ -1173,6 +1298,7 @@
         "risk:high",
         "roadmap:v0.0.2",
         "status:planned",
+        "status:verification",
         "type:docs",
         "type:implementation",
         "type:security",
@@ -1180,7 +1306,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P04-C02",
@@ -1190,7 +1318,7 @@
       "child": 2,
       "parent": 140,
       "title": "P04-C02: Implement the complete Manifest v2 workload schema",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/131",
       "labels": [
         "area:cli",
@@ -1201,6 +1329,7 @@
         "risk:high",
         "roadmap:v0.0.2",
         "status:planned",
+        "status:verification",
         "type:docs",
         "type:implementation",
         "type:security",
@@ -1208,7 +1337,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P04-C03",
@@ -1218,7 +1349,7 @@
       "child": 3,
       "parent": 140,
       "title": "P04-C03: Implement the durable operation DAG and saga engine",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/132",
       "labels": [
         "area:cli",
@@ -1229,6 +1360,7 @@
         "risk:high",
         "roadmap:v0.0.2",
         "status:planned",
+        "status:verification",
         "type:docs",
         "type:implementation",
         "type:security",
@@ -1236,7 +1368,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P04-C04",
@@ -1246,7 +1380,7 @@
       "child": 4,
       "parent": 140,
       "title": "P04-C04: Implement dependency-aware multi-service reconciliation",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/133",
       "labels": [
         "area:cli",
@@ -1257,6 +1391,7 @@
         "risk:high",
         "roadmap:v0.0.2",
         "status:planned",
+        "status:verification",
         "type:docs",
         "type:implementation",
         "type:security",
@@ -1264,7 +1399,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P04-C05",
@@ -1274,7 +1411,7 @@
       "child": 5,
       "parent": 140,
       "title": "P04-C05: Implement complete lifecycle commands",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/134",
       "labels": [
         "area:cli",
@@ -1285,6 +1422,7 @@
         "risk:high",
         "roadmap:v0.0.2",
         "status:planned",
+        "status:verification",
         "type:docs",
         "type:implementation",
         "type:security",
@@ -1292,7 +1430,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P04-C06",
@@ -1302,7 +1442,7 @@
       "child": 6,
       "parent": 140,
       "title": "P04-C06: Implement exec, attach, copy, export, inspect, stats, and log follow",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/135",
       "labels": [
         "area:cli",
@@ -1313,6 +1453,7 @@
         "risk:high",
         "roadmap:v0.0.2",
         "status:planned",
+        "status:verification",
         "type:docs",
         "type:implementation",
         "type:security",
@@ -1320,7 +1461,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P04-C07",
@@ -1330,7 +1473,7 @@
       "child": 7,
       "parent": 140,
       "title": "P04-C07: Implement typed startup, readiness, and liveness probes",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/136",
       "labels": [
         "area:cli",
@@ -1341,6 +1484,7 @@
         "risk:high",
         "roadmap:v0.0.2",
         "status:planned",
+        "status:verification",
         "type:docs",
         "type:implementation",
         "type:security",
@@ -1348,7 +1492,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P04-C08",
@@ -1358,7 +1504,7 @@
       "child": 8,
       "parent": 140,
       "title": "P04-C08: Implement rolling and recreate update strategies",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/137",
       "labels": [
         "area:cli",
@@ -1369,6 +1515,7 @@
         "risk:high",
         "roadmap:v0.0.2",
         "status:planned",
+        "status:verification",
         "type:docs",
         "type:implementation",
         "type:security",
@@ -1376,7 +1523,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P04-C09",
@@ -1386,7 +1535,7 @@
       "child": 9,
       "parent": 140,
       "title": "P04-C09: Implement automatic rollback and rollout recovery",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/138",
       "labels": [
         "area:cli",
@@ -1397,6 +1546,7 @@
         "risk:high",
         "roadmap:v0.0.2",
         "status:planned",
+        "status:verification",
         "type:docs",
         "type:implementation",
         "type:security",
@@ -1404,7 +1554,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P04-C10",
@@ -1414,7 +1566,7 @@
       "child": 10,
       "parent": 140,
       "title": "P04-C10: Ship executable end-to-end lifecycle examples",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/139",
       "labels": [
         "area:cli",
@@ -1425,6 +1577,7 @@
         "risk:high",
         "roadmap:v0.0.2",
         "status:planned",
+        "status:verification",
         "type:docs",
         "type:implementation",
         "type:security",
@@ -1432,7 +1585,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P05-C01",
@@ -1442,7 +1597,7 @@
       "child": 1,
       "parent": 152,
       "title": "P05-C01: Implement the complete OCI image lifecycle",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/141",
       "labels": [
         "area:ci",
@@ -1452,6 +1607,7 @@
         "risk:high",
         "roadmap:v0.0.2",
         "status:planned",
+        "status:verification",
         "type:implementation",
         "type:release",
         "type:security",
@@ -1459,7 +1615,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P05-C02",
@@ -1469,7 +1627,7 @@
       "child": 2,
       "parent": 152,
       "title": "P05-C02: Implement registry login, challenges, and token refresh",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/142",
       "labels": [
         "area:ci",
@@ -1479,6 +1637,7 @@
         "risk:high",
         "roadmap:v0.0.2",
         "status:planned",
+        "status:verification",
         "type:implementation",
         "type:release",
         "type:security",
@@ -1486,7 +1645,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P05-C03",
@@ -1496,7 +1657,7 @@
       "child": 3,
       "parent": 152,
       "title": "P05-C03: Implement production Keychain secret CRUD",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/143",
       "labels": [
         "area:ci",
@@ -1506,6 +1667,7 @@
         "risk:high",
         "roadmap:v0.0.2",
         "status:planned",
+        "status:verification",
         "type:implementation",
         "type:release",
         "type:security",
@@ -1513,7 +1675,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P05-C04",
@@ -1523,7 +1687,7 @@
       "child": 4,
       "parent": 152,
       "title": "P05-C04: Implement configuration and secret provider contracts",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/144",
       "labels": [
         "area:ci",
@@ -1533,6 +1697,7 @@
         "risk:high",
         "roadmap:v0.0.2",
         "status:planned",
+        "status:verification",
         "type:implementation",
         "type:release",
         "type:security",
@@ -1540,7 +1705,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P05-C05",
@@ -1550,7 +1717,7 @@
       "child": 5,
       "parent": 152,
       "title": "P05-C05: Implement immutable image digest locks",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/145",
       "labels": [
         "area:ci",
@@ -1560,6 +1727,7 @@
         "risk:high",
         "roadmap:v0.0.2",
         "status:planned",
+        "status:verification",
         "type:implementation",
         "type:release",
         "type:security",
@@ -1567,7 +1735,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P05-C06",
@@ -1577,7 +1747,7 @@
       "child": 6,
       "parent": 152,
       "title": "P05-C06: Implement OCI referrer discovery and retention",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/146",
       "labels": [
         "area:ci",
@@ -1587,6 +1757,7 @@
         "risk:high",
         "roadmap:v0.0.2",
         "status:planned",
+        "status:verification",
         "type:implementation",
         "type:release",
         "type:security",
@@ -1594,7 +1765,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P05-C07",
@@ -1604,7 +1777,7 @@
       "child": 7,
       "parent": 152,
       "title": "P05-C07: Enforce image signature and trust policy",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/147",
       "labels": [
         "area:ci",
@@ -1614,6 +1787,7 @@
         "risk:high",
         "roadmap:v0.0.2",
         "status:planned",
+        "status:verification",
         "type:implementation",
         "type:release",
         "type:security",
@@ -1621,7 +1795,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P05-C08",
@@ -1631,7 +1807,7 @@
       "child": 8,
       "parent": 152,
       "title": "P05-C08: Generate, ingest, and bind image SBOMs",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/148",
       "labels": [
         "area:ci",
@@ -1641,6 +1817,7 @@
         "risk:high",
         "roadmap:v0.0.2",
         "status:planned",
+        "status:verification",
         "type:implementation",
         "type:release",
         "type:security",
@@ -1648,7 +1825,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P05-C09",
@@ -1658,7 +1837,7 @@
       "child": 9,
       "parent": 152,
       "title": "P05-C09: Enforce vulnerability policy with explainable decisions",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/149",
       "labels": [
         "area:ci",
@@ -1668,6 +1847,7 @@
         "risk:high",
         "roadmap:v0.0.2",
         "status:planned",
+        "status:verification",
         "type:implementation",
         "type:release",
         "type:security",
@@ -1675,7 +1855,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P05-C10",
@@ -1685,7 +1867,7 @@
       "child": 10,
       "parent": 152,
       "title": "P05-C10: Generate and verify build provenance",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/150",
       "labels": [
         "area:ci",
@@ -1695,6 +1877,7 @@
         "risk:high",
         "roadmap:v0.0.2",
         "status:planned",
+        "status:verification",
         "type:implementation",
         "type:release",
         "type:security",
@@ -1702,7 +1885,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P05-C11",
@@ -1712,7 +1897,7 @@
       "child": 11,
       "parent": 152,
       "title": "P05-C11: Implement content leases, cache pressure, and safe garbage collection",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/151",
       "labels": [
         "area:ci",
@@ -1722,6 +1907,7 @@
         "risk:high",
         "roadmap:v0.0.2",
         "status:planned",
+        "status:verification",
         "type:implementation",
         "type:release",
         "type:security",
@@ -1729,7 +1915,9 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P06-C01",
@@ -1739,7 +1927,7 @@
       "child": 1,
       "parent": 163,
       "title": "P06-C01: Implement named-volume lifecycle and ownership",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/153",
       "labels": [
         "area:ci",
@@ -1748,14 +1936,16 @@
         "area:storage",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P06-C02",
@@ -1765,7 +1955,7 @@
       "child": 2,
       "parent": 163,
       "title": "P06-C02: Implement guarded bind, read-only, and tmpfs mounts",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/154",
       "labels": [
         "area:ci",
@@ -1774,14 +1964,16 @@
         "area:storage",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P06-C03",
@@ -1791,7 +1983,7 @@
       "child": 3,
       "parent": 163,
       "title": "P06-C03: Define and ship the volume-provider SPI",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/155",
       "labels": [
         "area:ci",
@@ -1800,14 +1992,16 @@
         "area:storage",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P06-C04",
@@ -1817,7 +2011,7 @@
       "child": 4,
       "parent": 163,
       "title": "P06-C04: Implement volume snapshots and restore points",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/156",
       "labels": [
         "area:ci",
@@ -1826,14 +2020,16 @@
         "area:storage",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P06-C05",
@@ -1843,7 +2039,7 @@
       "child": 5,
       "parent": 163,
       "title": "P06-C05: Implement verified online backup and restore",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/157",
       "labels": [
         "area:ci",
@@ -1852,14 +2048,16 @@
         "area:storage",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P06-C06",
@@ -1869,7 +2067,7 @@
       "child": 6,
       "parent": 163,
       "title": "P06-C06: Implement quotas, capacity accounting, and storage pressure policy",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/158",
       "labels": [
         "area:ci",
@@ -1878,14 +2076,16 @@
         "area:storage",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P06-C07",
@@ -1895,7 +2095,7 @@
       "child": 7,
       "parent": 163,
       "title": "P06-C07: Implement attachment fencing and concurrency control",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/159",
       "labels": [
         "area:ci",
@@ -1904,14 +2104,16 @@
         "area:storage",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P06-C08",
@@ -1921,7 +2123,7 @@
       "child": 8,
       "parent": 163,
       "title": "P06-C08: Implement reclaim and retention policy",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/160",
       "labels": [
         "area:ci",
@@ -1930,14 +2132,16 @@
         "area:storage",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P06-C09",
@@ -1947,7 +2151,7 @@
       "child": 9,
       "parent": 163,
       "title": "P06-C09: Discover, quarantine, and garbage-collect storage orphans",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/161",
       "labels": [
         "area:ci",
@@ -1956,14 +2160,16 @@
         "area:storage",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P06-C10",
@@ -1973,7 +2179,7 @@
       "child": 10,
       "parent": 163,
       "title": "P06-C10: Implement CSI-like internal storage semantics",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/162",
       "labels": [
         "area:ci",
@@ -1982,14 +2188,16 @@
         "area:storage",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P07-C01",
@@ -1999,7 +2207,7 @@
       "child": 1,
       "parent": 178,
       "title": "P07-C01: Implement isolated project networks",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/164",
       "labels": [
         "area:ci",
@@ -2008,14 +2216,16 @@
         "area:tunnels",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P07-C02",
@@ -2025,7 +2235,7 @@
       "child": 2,
       "parent": 178,
       "title": "P07-C02: Implement network lifecycle ownership and recovery",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/165",
       "labels": [
         "area:ci",
@@ -2034,14 +2244,16 @@
         "area:tunnels",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P07-C03",
@@ -2051,7 +2263,7 @@
       "child": 3,
       "parent": 178,
       "title": "P07-C03: Implement service DNS and aliases",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/166",
       "labels": [
         "area:ci",
@@ -2060,14 +2272,16 @@
         "area:tunnels",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P07-C04",
@@ -2077,7 +2291,7 @@
       "child": 4,
       "parent": 178,
       "title": "P07-C04: Implement TCP and UDP transport semantics",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/167",
       "labels": [
         "area:ci",
@@ -2086,14 +2300,16 @@
         "area:tunnels",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P07-C05",
@@ -2103,7 +2319,7 @@
       "child": 5,
       "parent": 178,
       "title": "P07-C05: Implement IPv4 and IPv6 dual-stack behavior",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/168",
       "labels": [
         "area:ci",
@@ -2112,14 +2328,16 @@
         "area:tunnels",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P07-C06",
@@ -2129,7 +2347,7 @@
       "child": 6,
       "parent": 178,
       "title": "P07-C06: Implement published ports and Unix sockets",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/169",
       "labels": [
         "area:ci",
@@ -2138,14 +2356,16 @@
         "area:tunnels",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P07-C07",
@@ -2155,7 +2375,7 @@
       "child": 7,
       "parent": 178,
       "title": "P07-C07: Implement guarded workload access to host services",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/170",
       "labels": [
         "area:ci",
@@ -2164,14 +2384,16 @@
         "area:tunnels",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P07-C08",
@@ -2181,7 +2403,7 @@
       "child": 8,
       "parent": 178,
       "title": "P07-C08: Implement explicit LAN exposure policy",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/171",
       "labels": [
         "area:ci",
@@ -2190,14 +2412,16 @@
         "area:tunnels",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P07-C09",
@@ -2207,7 +2431,7 @@
       "child": 9,
       "parent": 178,
       "title": "P07-C09: Implement reverse proxy and ingress routing",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/172",
       "labels": [
         "area:ci",
@@ -2216,14 +2440,16 @@
         "area:tunnels",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P07-C10",
@@ -2233,7 +2459,7 @@
       "child": 10,
       "parent": 178,
       "title": "P07-C10: Implement TLS certificate lifecycle",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/173",
       "labels": [
         "area:ci",
@@ -2242,14 +2468,16 @@
         "area:tunnels",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P07-C11",
@@ -2259,7 +2487,7 @@
       "child": 11,
       "parent": 178,
       "title": "P07-C11: Implement mTLS workload and node identity",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/174",
       "labels": [
         "area:ci",
@@ -2268,14 +2496,16 @@
         "area:tunnels",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P07-C12",
@@ -2285,7 +2515,7 @@
       "child": 12,
       "parent": 178,
       "title": "P07-C12: Implement ingress and egress network policy",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/175",
       "labels": [
         "area:ci",
@@ -2294,14 +2524,16 @@
         "area:tunnels",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P07-C13",
@@ -2311,7 +2543,7 @@
       "child": 13,
       "parent": 178,
       "title": "P07-C13: Implement Hostwright-to-Hostwright secure tunnels",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/176",
       "labels": [
         "area:ci",
@@ -2320,14 +2552,16 @@
         "area:tunnels",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P07-C14",
@@ -2337,7 +2571,7 @@
       "child": 14,
       "parent": 178,
       "title": "P07-C14: Define and ship the third-party tunnel-provider SPI",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/177",
       "labels": [
         "area:ci",
@@ -2346,14 +2580,16 @@
         "area:tunnels",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P07-C15",
@@ -2363,7 +2599,7 @@
       "child": 15,
       "parent": 178,
       "title": "Verify Apple container localhost forwarding after Local Network permission",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/84",
       "labels": [
         "area:ci",
@@ -2372,14 +2608,16 @@
         "area:tunnels",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:blocked",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P08-C01",
@@ -2389,7 +2627,7 @@
       "child": 1,
       "parent": 194,
       "title": "P08-C01: Implement the complete LaunchAgent lifecycle",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/179",
       "labels": [
         "area:ci",
@@ -2400,13 +2638,16 @@
         "risk:high",
         "roadmap:v0.0.2",
         "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P08-C02",
@@ -2416,7 +2657,7 @@
       "child": 2,
       "parent": 194,
       "title": "P08-C02: Implement level-triggered unattended reconciliation",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/180",
       "labels": [
         "area:ci",
@@ -2427,13 +2668,16 @@
         "risk:high",
         "roadmap:v0.0.2",
         "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P08-C03",
@@ -2443,7 +2687,7 @@
       "child": 3,
       "parent": 194,
       "title": "P08-C03: Implement secure configuration watch and reload",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/181",
       "labels": [
         "area:ci",
@@ -2454,13 +2698,16 @@
         "risk:high",
         "roadmap:v0.0.2",
         "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P08-C04",
@@ -2470,7 +2717,7 @@
       "child": 4,
       "parent": 194,
       "title": "P08-C04: Implement restart budgets and crash-loop holds",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/182",
       "labels": [
         "area:ci",
@@ -2481,13 +2728,16 @@
         "risk:high",
         "roadmap:v0.0.2",
         "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P08-C05",
@@ -2497,7 +2747,7 @@
       "child": 5,
       "parent": 194,
       "title": "P08-C05: Implement maintenance windows and change deferral",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/183",
       "labels": [
         "area:ci",
@@ -2508,13 +2758,16 @@
         "risk:high",
         "roadmap:v0.0.2",
         "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P08-C06",
@@ -2524,7 +2777,7 @@
       "child": 6,
       "parent": 194,
       "title": "P08-C06: Implement health-gated unattended rollout",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/184",
       "labels": [
         "area:ci",
@@ -2535,13 +2788,16 @@
         "risk:high",
         "roadmap:v0.0.2",
         "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P08-C07",
@@ -2551,7 +2807,7 @@
       "child": 7,
       "parent": 194,
       "title": "P08-C07: Implement autonomous rollback and safe holds",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/185",
       "labels": [
         "area:ci",
@@ -2562,13 +2818,16 @@
         "risk:high",
         "roadmap:v0.0.2",
         "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P08-C08",
@@ -2578,7 +2837,7 @@
       "child": 8,
       "parent": 194,
       "title": "P08-C08: Implement mutation checkpoint recovery",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/186",
       "labels": [
         "area:ci",
@@ -2589,13 +2848,16 @@
         "risk:high",
         "roadmap:v0.0.2",
         "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P08-C09",
@@ -2605,7 +2867,7 @@
       "child": 9,
       "parent": 194,
       "title": "P08-C09: Implement ownership, finalizers, and leases",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/187",
       "labels": [
         "area:ci",
@@ -2616,13 +2878,16 @@
         "risk:high",
         "roadmap:v0.0.2",
         "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P08-C10",
@@ -2632,7 +2897,7 @@
       "child": 10,
       "parent": 194,
       "title": "P08-C10: Implement retention, compaction, and state maintenance",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/188",
       "labels": [
         "area:ci",
@@ -2643,13 +2908,16 @@
         "risk:high",
         "roadmap:v0.0.2",
         "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P08-C11",
@@ -2659,7 +2927,7 @@
       "child": 11,
       "parent": 194,
       "title": "P08-C11: Integrate structured redacted OSLog",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/189",
       "labels": [
         "area:ci",
@@ -2670,13 +2938,16 @@
         "risk:high",
         "roadmap:v0.0.2",
         "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P08-C12",
@@ -2686,7 +2957,7 @@
       "child": 12,
       "parent": 194,
       "title": "P08-C12: Implement durable event history and watches",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/190",
       "labels": [
         "area:ci",
@@ -2697,13 +2968,16 @@
         "risk:high",
         "roadmap:v0.0.2",
         "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P08-C13",
@@ -2713,7 +2987,7 @@
       "child": 13,
       "parent": 194,
       "title": "P08-C13: Implement bounded metrics and SLO instrumentation",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/191",
       "labels": [
         "area:ci",
@@ -2724,13 +2998,16 @@
         "risk:high",
         "roadmap:v0.0.2",
         "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P08-C14",
@@ -2740,7 +3017,7 @@
       "child": 14,
       "parent": 194,
       "title": "P08-C14: Implement correlated traces across control and runtime operations",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/192",
       "labels": [
         "area:ci",
@@ -2751,13 +3028,16 @@
         "risk:high",
         "roadmap:v0.0.2",
         "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P08-C15",
@@ -2767,7 +3047,7 @@
       "child": 15,
       "parent": 194,
       "title": "P08-C15: Implement privacy-safe diagnostic support bundles",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/193",
       "labels": [
         "area:ci",
@@ -2778,13 +3058,16 @@
         "risk:high",
         "roadmap:v0.0.2",
         "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P09-C01",
@@ -2794,7 +3077,7 @@
       "child": 1,
       "parent": 206,
       "title": "P09-C01: Implement the persistent Unix-socket Control API",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/195",
       "labels": [
         "area:ci",
@@ -2804,14 +3087,16 @@
         "area:security",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P09-C02",
@@ -2821,7 +3106,7 @@
       "child": 2,
       "parent": 206,
       "title": "P09-C02: Achieve complete CLI and Control API parity",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/196",
       "labels": [
         "area:ci",
@@ -2831,14 +3116,16 @@
         "area:security",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P09-C03",
@@ -2848,7 +3135,7 @@
       "child": 3,
       "parent": 206,
       "title": "P09-C03: Implement streaming, watches, backpressure, and recovery",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/197",
       "labels": [
         "area:ci",
@@ -2858,14 +3145,16 @@
         "area:security",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P09-C04",
@@ -2875,7 +3164,7 @@
       "child": 4,
       "parent": 206,
       "title": "P09-C04: Implement local authentication and peer identity",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/198",
       "labels": [
         "area:ci",
@@ -2885,14 +3174,16 @@
         "area:security",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P09-C05",
@@ -2902,7 +3193,7 @@
       "child": 5,
       "parent": 206,
       "title": "P09-C05: Implement least-privilege RBAC",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/199",
       "labels": [
         "area:ci",
@@ -2912,14 +3203,16 @@
         "area:security",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P09-C06",
@@ -2929,7 +3222,7 @@
       "child": 6,
       "parent": 206,
       "title": "P09-C06: Implement admission validation and mutation policy",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/200",
       "labels": [
         "area:ci",
@@ -2939,14 +3232,16 @@
         "area:security",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P09-C07",
@@ -2956,7 +3251,7 @@
       "child": 7,
       "parent": 206,
       "title": "P09-C07: Implement immutable tamper-evident audit",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/201",
       "labels": [
         "area:ci",
@@ -2966,14 +3261,16 @@
         "area:security",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P09-C08",
@@ -2983,7 +3280,7 @@
       "child": 8,
       "parent": 206,
       "title": "P09-C08: Implement secure workload profiles",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/202",
       "labels": [
         "area:ci",
@@ -2993,14 +3290,16 @@
         "area:security",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P09-C09",
@@ -3010,7 +3309,7 @@
       "child": 9,
       "parent": 206,
       "title": "P09-C09: Ship the capability-limited WASI provider SDK",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/203",
       "labels": [
         "area:ci",
@@ -3020,14 +3319,16 @@
         "area:security",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P09-C10",
@@ -3037,7 +3338,7 @@
       "child": 10,
       "parent": 206,
       "title": "P09-C10: Implement the signed XPC provider boundary",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/204",
       "labels": [
         "area:ci",
@@ -3047,14 +3348,16 @@
         "area:security",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P09-C11",
@@ -3064,7 +3367,7 @@
       "child": 11,
       "parent": 206,
       "title": "P09-C11: Implement plugin discovery, install, update, revoke, and quarantine",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/205",
       "labels": [
         "area:ci",
@@ -3074,14 +3377,16 @@
         "area:security",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:security",
         "type:testing"
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
     },
     {
       "marker": "P10-C01",
@@ -3090,7 +3395,7 @@
       "phase": 10,
       "child": 1,
       "parent": 219,
-      "title": "P10-C01: Implement requests, limits, reservations, and admission",
+      "title": "P10-C01: Qualify local resource admission and release",
       "state": "open",
       "url": "https://github.com/hostwright/hostwright/issues/207",
       "labels": [
@@ -3109,6 +3414,21 @@
       ],
       "assignees": [
         "d3v07"
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "acceptanceCriteria": [
+        "Require explicit CPU/memory requests and limits and persist reservations before runtime mutation.",
+        "Execute confirmed local lifecycle through Control API 2.2 and the daemon; release capacity only after verified termination.",
+        "Reject stale plans, unauthorized requests, conflicting replays and unsupported scheduling features before effects; recover interrupted admission/release."
+      ],
+      "requiredEvidence": [
+        "unit-contract",
+        "local-integration",
+        "live-runtime",
+        "migration-upgrade",
+        "security-assessment",
+        "resilience-chaos"
       ]
     },
     {
@@ -3118,7 +3438,7 @@
       "phase": 10,
       "child": 2,
       "parent": 219,
-      "title": "P10-C02: Implement hard placement filters",
+      "title": "P10-C02: Qualify single-host hard placement filters",
       "state": "open",
       "url": "https://github.com/hostwright/hostwright/issues/208",
       "labels": [
@@ -3137,6 +3457,19 @@
       ],
       "assignees": [
         "d3v07"
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "acceptanceCriteria": [
+        "Enforce provider, architecture, health, ownership, resource and local policy constraints before placement.",
+        "Reject missing or stale capacity/pressure evidence and over-capacity workloads with stable explanations.",
+        "Verify normal and rejected requests through the real local lifecycle path."
+      ],
+      "requiredEvidence": [
+        "unit-contract",
+        "local-integration",
+        "live-runtime",
+        "security-assessment"
       ]
     },
     {
@@ -3146,7 +3479,7 @@
       "phase": 10,
       "child": 3,
       "parent": 219,
-      "title": "P10-C03: Implement multi-resource best-fit-decreasing packing",
+      "title": "P10-C03: Qualify deterministic local resource packing",
       "state": "open",
       "url": "https://github.com/hostwright/hostwright/issues/209",
       "labels": [
@@ -3165,6 +3498,18 @@
       ],
       "assignees": [
         "d3v07"
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "acceptanceCriteria": [
+        "Retain deterministic CPU/memory packing on the single physical host and stable tie ordering.",
+        "Replay retained safety/oracle regression cases; prove no capacity violations or nondeterministic results.",
+        "Record bounded local performance without cluster-scale or optimality guarantees."
+      ],
+      "requiredEvidence": [
+        "unit-contract",
+        "local-integration",
+        "hardware-benchmark"
       ]
     },
     {
@@ -3193,7 +3538,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P10-C05",
@@ -3221,7 +3569,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P10-C06",
@@ -3249,7 +3600,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P10-C07",
@@ -3258,7 +3612,7 @@
       "phase": 10,
       "child": 7,
       "parent": 219,
-      "title": "P10-C07: Implement anti-churn hysteresis and placement stability",
+      "title": "P10-C07: Qualify stable local placement",
       "state": "open",
       "url": "https://github.com/hostwright/hostwright/issues/213",
       "labels": [
@@ -3277,6 +3631,19 @@
       ],
       "assignees": [
         "d3v07"
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "acceptanceCriteria": [
+        "Preserve an existing valid local placement and reservations across repeated reconciliation.",
+        "Exercise hysteresis and repeated pressure transitions without duplicate resources or restart storms.",
+        "Verify cancellation, daemon restart and exact cleanup."
+      ],
+      "requiredEvidence": [
+        "unit-contract",
+        "local-integration",
+        "live-runtime",
+        "resilience-chaos"
       ]
     },
     {
@@ -3286,7 +3653,7 @@
       "phase": 10,
       "child": 8,
       "parent": 219,
-      "title": "P10-C08: Implement scheduler explainability and simulation",
+      "title": "P10-C08: Expose local admission and rejection explanations",
       "state": "open",
       "url": "https://github.com/hostwright/hostwright/issues/214",
       "labels": [
@@ -3305,6 +3672,18 @@
       ],
       "assignees": [
         "d3v07"
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "acceptanceCriteria": [
+        "Return deterministic decision and rejection reasons through CLI and authenticated Control API reads.",
+        "Bind explanations to the actual local input, provider, generation and resource snapshot.",
+        "Keep simulation read-only and distinguish it from actual runtime admission."
+      ],
+      "requiredEvidence": [
+        "unit-contract",
+        "local-integration",
+        "security-assessment"
       ]
     },
     {
@@ -3314,7 +3693,7 @@
       "phase": 10,
       "child": 9,
       "parent": 219,
-      "title": "P10-C09: Implement thermal, battery, sleep, and pressure policy",
+      "title": "P10-C09: Qualify safe local pressure deferral",
       "state": "open",
       "url": "https://github.com/hostwright/hostwright/issues/215",
       "labels": [
@@ -3333,6 +3712,19 @@
       ],
       "assignees": [
         "d3v07"
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "acceptanceCriteria": [
+        "Defer admission when memory/host pressure or required observations are unsafe, stale or unknown.",
+        "Exercise cancellation, sleep/wake observation refresh and recovery without automatic eviction or preemption.",
+        "Verify bounded recovery and stable reconciliation after pressure clears; power optimization and VM reclamation are deferred."
+      ],
+      "requiredEvidence": [
+        "unit-contract",
+        "local-integration",
+        "live-runtime",
+        "resilience-chaos"
       ]
     },
     {
@@ -3361,7 +3753,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P10-C11",
@@ -3389,7 +3784,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P10-C12",
@@ -3417,7 +3815,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P11-C01",
@@ -3445,7 +3846,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P11-C02",
@@ -3473,7 +3877,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P11-C03",
@@ -3501,7 +3908,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P11-C04",
@@ -3529,7 +3939,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P11-C05",
@@ -3557,7 +3970,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P11-C06",
@@ -3585,7 +4001,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P11-C07",
@@ -3613,7 +4032,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P11-C08",
@@ -3641,7 +4063,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P11-C09",
@@ -3669,7 +4094,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P11-C10",
@@ -3697,7 +4125,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P11-C11",
@@ -3725,7 +4156,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P11-C12",
@@ -3753,7 +4187,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P11-C13",
@@ -3781,7 +4218,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P11-C14",
@@ -3809,7 +4249,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P11-C15",
@@ -3837,7 +4280,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P12-C01",
@@ -3867,7 +4313,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P12-C02",
@@ -3897,7 +4346,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P12-C03",
@@ -3927,7 +4379,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P12-C04",
@@ -3957,7 +4412,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P12-C05",
@@ -3987,7 +4445,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P12-C06",
@@ -4017,7 +4478,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P12-C07",
@@ -4047,7 +4511,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P12-C08",
@@ -4077,7 +4544,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P12-C09",
@@ -4107,7 +4577,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P12-C10",
@@ -4137,7 +4610,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P12-C11",
@@ -4167,7 +4643,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P13-C01",
@@ -4194,7 +4673,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P13-C02",
@@ -4221,7 +4703,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P13-C03",
@@ -4230,7 +4715,7 @@
       "phase": 13,
       "child": 3,
       "parent": 257,
-      "title": "P13-C03: Implement complete Compose import, execution, update, export, and loss reporting",
+      "title": "P13-C03: Ship the narrow Compose conversion and lifecycle workflow",
       "state": "open",
       "url": "https://github.com/hostwright/hostwright/issues/250",
       "labels": [
@@ -4248,6 +4733,20 @@
       ],
       "assignees": [
         "d3v07"
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "acceptanceCriteria": [
+        "Import the existing documented Compose subset into strict Manifest v3 with explicit requests and limits.",
+        "Review and execute imported output using ordinary Hostwright up/down/restart commands on the physical Mac.",
+        "Retain deterministic export/update planning and loss reports; reject unsupported fields without silent loss or runtime mutation."
+      ],
+      "requiredEvidence": [
+        "unit-contract",
+        "local-integration",
+        "live-runtime",
+        "interop-conformance",
+        "security-assessment"
       ]
     },
     {
@@ -4275,7 +4774,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P13-C05",
@@ -4302,7 +4804,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P13-C06",
@@ -4329,7 +4834,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P13-C07",
@@ -4356,7 +4864,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P13-C08",
@@ -4383,7 +4894,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P13-C09",
@@ -4410,7 +4924,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P14-C01",
@@ -4419,7 +4936,7 @@
       "phase": 14,
       "child": 1,
       "parent": 270,
-      "title": "P14-C01: Build the signed SwiftUI app and menu-bar client",
+      "title": "P14-C01: Ship the signed local SwiftUI console and menu bar",
       "state": "open",
       "url": "https://github.com/hostwright/hostwright/issues/258",
       "labels": [
@@ -4439,6 +4956,19 @@
       ],
       "assignees": [
         "d3v07"
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "acceptanceCriteria": [
+        "Package a signed/notarized native app using the existing split-view design and menu-bar health.",
+        "Select a local manifest and connect through the authenticated persistent Control API.",
+        "Show services, status, logs and events with explicit unavailable/empty/error/reconnect states."
+      ],
+      "requiredEvidence": [
+        "local-integration",
+        "live-runtime",
+        "distribution-artifact",
+        "ux-accessibility"
       ]
     },
     {
@@ -4448,7 +4978,7 @@
       "phase": 14,
       "child": 2,
       "parent": 270,
-      "title": "P14-C02: Enforce complete CLI and GUI action parity",
+      "title": "P14-C02: Add reviewed desktop up, down and restart",
       "state": "open",
       "url": "https://github.com/hostwright/hostwright/issues/259",
       "labels": [
@@ -4468,6 +4998,20 @@
       ],
       "assignees": [
         "d3v07"
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "acceptanceCriteria": [
+        "Preview up/down/restart through the existing Control API and display the resulting changes before confirmation.",
+        "Bind confirmation to the exact plan hash and selected manifest; stale plans require a fresh preview.",
+        "Enforce the same authorization, fencing and lifecycle coordinator as the CLI; test cancellation, duplicate clicks, failures and reconnects."
+      ],
+      "requiredEvidence": [
+        "unit-contract",
+        "local-integration",
+        "live-runtime",
+        "security-assessment",
+        "ux-accessibility"
       ]
     },
     {
@@ -4477,7 +5021,7 @@
       "phase": 14,
       "child": 3,
       "parent": 270,
-      "title": "P14-C03: Visualize topology, status, logs, events, metrics, and recovery",
+      "title": "P14-C03: Show local services, health, logs and events",
       "state": "open",
       "url": "https://github.com/hostwright/hostwright/issues/260",
       "labels": [
@@ -4497,6 +5041,19 @@
       ],
       "assignees": [
         "d3v07"
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "acceptanceCriteria": [
+        "Show real local project/service state, health and bounded log/event streams.",
+        "Keep selections and stream cancellation correct across refreshes, reconnection and manifest changes.",
+        "Expose actual recovery/error information without fleet topology or invented metrics."
+      ],
+      "requiredEvidence": [
+        "unit-contract",
+        "local-integration",
+        "live-runtime",
+        "ux-accessibility"
       ]
     },
     {
@@ -4506,7 +5063,7 @@
       "phase": 14,
       "child": 4,
       "parent": 270,
-      "title": "P14-C04: Meet the native accessibility quality gate",
+      "title": "P14-C04: Verify accessibility of the local desktop workflows",
       "state": "open",
       "url": "https://github.com/hostwright/hostwright/issues/261",
       "labels": [
@@ -4526,6 +5083,17 @@
       ],
       "assignees": [
         "d3v07"
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "acceptanceCriteria": [
+        "Complete manifest selection, inspection, plan review and lifecycle confirmation using keyboard navigation and VoiceOver.",
+        "Inspect normal and narrow windows in light/dark appearance, reduced motion and long-content states.",
+        "Ensure actionable errors, visible focus and no clipped primary controls or inert actions."
+      ],
+      "requiredEvidence": [
+        "local-integration",
+        "ux-accessibility"
       ]
     },
     {
@@ -4535,7 +5103,7 @@
       "phase": 14,
       "child": 5,
       "parent": 270,
-      "title": "P14-C05: Implement signed native app updates and rollback",
+      "title": "P14-C05: Qualify signed desktop package upgrade and rollback",
       "state": "open",
       "url": "https://github.com/hostwright/hostwright/issues/262",
       "labels": [
@@ -4555,6 +5123,20 @@
       ],
       "assignees": [
         "d3v07"
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "acceptanceCriteria": [
+        "Include the app and required helpers in signed distribution manifests and ownership-scoped installation.",
+        "Verify package upgrade, one-generation rollback, repair and uninstall in the macOS VM.",
+        "Preserve user state and modified/unmanaged files; automatic in-app updates are deferred."
+      ],
+      "requiredEvidence": [
+        "unit-contract",
+        "local-integration",
+        "distribution-artifact",
+        "migration-upgrade",
+        "security-assessment"
       ]
     },
     {
@@ -4584,7 +5166,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P14-C07",
@@ -4613,7 +5198,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P14-C08",
@@ -4642,7 +5230,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P14-C09",
@@ -4671,7 +5262,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P14-C10",
@@ -4700,7 +5294,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P14-C11",
@@ -4729,7 +5326,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P14-C12",
@@ -4758,7 +5358,10 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     },
     {
       "marker": "P15-C01",
@@ -4767,7 +5370,7 @@
       "phase": 15,
       "child": 1,
       "parent": 283,
-      "title": "P15-C01: Freeze and test all supported-version matrices",
+      "title": "P15-C01: Freeze the supported local compatibility matrix",
       "state": "open",
       "url": "https://github.com/hostwright/hostwright/issues/271",
       "labels": [
@@ -4786,6 +5389,18 @@
       ],
       "assignees": [
         "d3v07"
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "acceptanceCriteria": [
+        "Record exact physical/VM OS builds and Apple-silicon hardware.",
+        "Qualify macOS 26 arm64, Apple container 1.0.0/1.1.0 and Containerization 0.35.0 only for declared provider capabilities.",
+        "Exclude multi-Mac, Kubernetes, Docker-client and unsupported hardware claims."
+      ],
+      "requiredEvidence": [
+        "local-integration",
+        "live-runtime",
+        "distribution-artifact"
       ]
     },
     {
@@ -4795,7 +5410,7 @@
       "phase": 15,
       "child": 2,
       "parent": 283,
-      "title": "P15-C02: Complete the independent security assessment and remediation gate",
+      "title": "P15-C02: Review shipped local security boundaries",
       "state": "open",
       "url": "https://github.com/hostwright/hostwright/issues/272",
       "labels": [
@@ -4814,6 +5429,16 @@
       ],
       "assignees": [
         "d3v07"
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "acceptanceCriteria": [
+        "Complete focused independent security review of shipped authentication, authorization, parsers, state, mutations, desktop confirmation and distribution.",
+        "Remediate and retest release-blocking findings; retain review and regression evidence.",
+        "No unresolved P0/P1 defects; an external platform-wide penetration assessment is outside this release scope."
+      ],
+      "requiredEvidence": [
+        "security-assessment"
       ]
     },
     {
@@ -4823,7 +5448,7 @@
       "phase": 15,
       "child": 3,
       "parent": 283,
-      "title": "P15-C03: Run release-grade coverage-guided fuzzing",
+      "title": "P15-C03: Run bounded fuzzing and retained corpus replay",
       "state": "open",
       "url": "https://github.com/hostwright/hostwright/issues/273",
       "labels": [
@@ -4842,6 +5467,17 @@
       ],
       "assignees": [
         "d3v07"
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "acceptanceCriteria": [
+        "Identify every shipped critical parser/protocol and replay its retained regression corpus.",
+        "Run five minutes of coverage-guided fuzzing per target and retain seeds, counts, crashes, source and tool identities.",
+        "Fix and replay failures; blocked or unavailable fuzz providers do not count as passed."
+      ],
+      "requiredEvidence": [
+        "unit-contract",
+        "security-assessment"
       ]
     },
     {
@@ -4851,7 +5487,7 @@
       "phase": 15,
       "child": 4,
       "parent": 283,
-      "title": "P15-C04: Run supported ASan and TSan qualification lanes",
+      "title": "P15-C04: Run supported local sanitizer lanes",
       "state": "open",
       "url": "https://github.com/hostwright/hostwright/issues/274",
       "labels": [
@@ -4870,6 +5506,16 @@
       ],
       "assignees": [
         "d3v07"
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "acceptanceCriteria": [
+        "Run ASan and TSan lanes supported by the actual toolchain on shipped native/state/process boundaries.",
+        "Retain toolchain, selectors and results; fix sanitizer findings before release."
+      ],
+      "requiredEvidence": [
+        "local-integration",
+        "security-assessment"
       ]
     },
     {
@@ -4879,7 +5525,7 @@
       "phase": 15,
       "child": 5,
       "parent": 283,
-      "title": "P15-C05: Enforce dependency, SAST, secret, and license gates",
+      "title": "P15-C05: Complete release dependency and supply-chain checks",
       "state": "open",
       "url": "https://github.com/hostwright/hostwright/issues/275",
       "labels": [
@@ -4898,6 +5544,18 @@
       ],
       "assignees": [
         "d3v07"
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "acceptanceCriteria": [
+        "Verify locked dependencies, reviewed license receipts/texts, secrets, static security and vulnerability policy for shipped artifacts.",
+        "Produce and independently verify SBOM, signatures, checksums and provenance.",
+        "Retain exact source/artifact results; empty license receipts and blocked scanners fail required gates."
+      ],
+      "requiredEvidence": [
+        "local-integration",
+        "security-assessment",
+        "distribution-artifact"
       ]
     },
     {
@@ -4907,7 +5565,7 @@
       "phase": 15,
       "child": 6,
       "parent": 283,
-      "title": "P15-C06: Qualify performance, density, energy, and regression budgets",
+      "title": "P15-C06: Measure bounded single-Mac performance and stability",
       "state": "open",
       "url": "https://github.com/hostwright/hostwright/issues/276",
       "labels": [
@@ -4926,6 +5584,18 @@
       ],
       "assignees": [
         "d3v07"
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "acceptanceCriteria": [
+        "Record local planning, API and scheduler timings and process/resource behavior on the M4 Pro.",
+        "Run ten live lifecycle cycles per provider and one checkpointed 30-minute physical-host soak.",
+        "Reject duplicate resources, unmanaged mutation, leaked reservations and monotonic leaks; publish measurements without broad density/energy claims."
+      ],
+      "requiredEvidence": [
+        "live-runtime",
+        "hardware-benchmark",
+        "resilience-chaos"
       ]
     },
     {
@@ -4935,7 +5605,7 @@
       "phase": 15,
       "child": 7,
       "parent": 283,
-      "title": "P15-C07: Complete single-host and cluster disaster-recovery drills",
+      "title": "P15-C07: Verify local backup, recovery and interruption handling",
       "state": "open",
       "url": "https://github.com/hostwright/hostwright/issues/277",
       "labels": [
@@ -4954,6 +5624,19 @@
       ],
       "assignees": [
         "d3v07"
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "acceptanceCriteria": [
+        "Restore verified local state/data backups and recover interrupted lifecycle operations.",
+        "Verify daemon interruption, cancellation, stale authority and exact cleanup without touching unmanaged resources.",
+        "Cluster disaster recovery is deferred."
+      ],
+      "requiredEvidence": [
+        "local-integration",
+        "live-runtime",
+        "migration-upgrade",
+        "resilience-chaos"
       ]
     },
     {
@@ -4963,7 +5646,7 @@
       "phase": 15,
       "child": 8,
       "parent": 283,
-      "title": "P15-C08: Verify the complete upgrade lineage and rollback window",
+      "title": "P15-C08: Verify release upgrade lineage and rollback",
       "state": "open",
       "url": "https://github.com/hostwright/hostwright/issues/278",
       "labels": [
@@ -4982,6 +5665,18 @@
       ],
       "assignees": [
         "d3v07"
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "acceptanceCriteria": [
+        "Exercise preserved dev.11/dev.12 upgrade inputs to the current release schema through supported migrations.",
+        "Verify backup, downgrade refusal, interruption recovery and one-generation rollback in the clean VM.",
+        "Bind evidence to actual signed artifacts and preserve historical releases unchanged."
+      ],
+      "requiredEvidence": [
+        "distribution-artifact",
+        "migration-upgrade",
+        "resilience-chaos"
       ]
     },
     {
@@ -4991,7 +5686,7 @@
       "phase": 15,
       "child": 9,
       "parent": 283,
-      "title": "P15-C09: Finish and execute all documentation, website, and examples",
+      "title": "P15-C09: Execute local quickstarts and synchronize public documentation",
       "state": "open",
       "url": "https://github.com/hostwright/hostwright/issues/279",
       "labels": [
@@ -5010,6 +5705,18 @@
       ],
       "assignees": [
         "d3v07"
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "acceptanceCriteria": [
+        "Execute the CLI, Compose and desktop release quickstarts.",
+        "Synchronize README, capability output, reference docs, website, examples and supported matrix.",
+        "Pass documentation links and website typecheck/build checks; deferred surfaces must be explicit."
+      ],
+      "requiredEvidence": [
+        "local-integration",
+        "live-runtime",
+        "ux-accessibility"
       ]
     },
     {
@@ -5019,7 +5726,7 @@
       "phase": 15,
       "child": 10,
       "parent": 283,
-      "title": "P15-C10: Establish support, governance, compatibility, and incident operations",
+      "title": "P15-C10: Document local release support and incident recovery",
       "state": "open",
       "url": "https://github.com/hostwright/hostwright/issues/280",
       "labels": [
@@ -5038,6 +5745,17 @@
       ],
       "assignees": [
         "d3v07"
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "acceptanceCriteria": [
+        "Publish exact compatibility, known limitations, support-bundle consent and data-handling instructions.",
+        "Document reproducible install/upgrade/rollback/recovery and security reporting for the local product.",
+        "Keep roadmap governance and ownership/evidence requirements executable."
+      ],
+      "requiredEvidence": [
+        "local-integration",
+        "security-assessment"
       ]
     },
     {
@@ -5047,7 +5765,7 @@
       "phase": 15,
       "child": 11,
       "parent": 283,
-      "title": "P15-C11: Produce and verify signed v0.0.2 GA artifacts",
+      "title": "P15-C11: Publish and verify signed v0.0.2 local release artifacts",
       "state": "open",
       "url": "https://github.com/hostwright/hostwright/issues/281",
       "labels": [
@@ -5066,6 +5784,19 @@
       ],
       "assignees": [
         "d3v07"
+      ],
+      "releaseDisposition": "required",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "acceptanceCriteria": [
+        "Enable reviewed RC and GA versions in the protected release workflow with correct prerelease status.",
+        "Build and verify signed/notarized CLI, app and required helpers, archive/package, checksums, SBOM and provenance.",
+        "Complete one clean RC and independent artifact lifecycle verification, qualify final-version bytes, publish immutable v0.0.2 and update the vendor tap."
+      ],
+      "requiredEvidence": [
+        "distribution-artifact",
+        "migration-upgrade",
+        "security-assessment",
+        "live-runtime"
       ]
     },
     {
@@ -5094,7 +5825,80 @@
       ],
       "assignees": [
         "d3v07"
-      ]
+      ],
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
     }
-  ]
+  ],
+  "historicalPhaseSchedule": [
+    {
+      "phase": 1,
+      "targetDate": "2026-07-13"
+    },
+    {
+      "phase": 2,
+      "targetDate": "2026-07-14"
+    },
+    {
+      "phase": 3,
+      "targetDate": "2026-07-15"
+    },
+    {
+      "phase": 4,
+      "targetDate": "2026-07-16"
+    },
+    {
+      "phase": 5,
+      "targetDate": "2026-07-17"
+    },
+    {
+      "phase": 6,
+      "targetDate": "2026-07-18"
+    },
+    {
+      "phase": 7,
+      "targetDate": "2026-07-19"
+    },
+    {
+      "phase": 8,
+      "targetDate": "2026-07-20"
+    },
+    {
+      "phase": 9,
+      "targetDate": "2026-07-21"
+    },
+    {
+      "phase": 10,
+      "targetDate": "2026-07-22"
+    },
+    {
+      "phase": 11,
+      "targetDate": "2026-07-23"
+    },
+    {
+      "phase": 12,
+      "targetDate": "2026-07-24"
+    },
+    {
+      "phase": 13,
+      "targetDate": "2026-07-25"
+    },
+    {
+      "phase": 14,
+      "targetDate": "2026-07-26"
+    },
+    {
+      "phase": 15,
+      "targetDate": "2026-07-27"
+    }
+  ],
+  "deliverySequence": [
+    "scope-reset",
+    "P10",
+    "P13",
+    "P14",
+    "P15"
+  ],
+  "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
 }

@@ -82,6 +82,7 @@ struct LifecycleOwnershipFinalizer: LifecycleSagaFinalizing {
                     runtimeAdapter: record.runtimeAdapter,
                     expectedResourceUUID: record.resourceUUID,
                     expectedFencingToken: record.fencingToken,
+                    expectedOperationFencingToken: operationGroup.fencingToken,
                     expectedOperationGroupID: operationGroup.id,
                     expectedLeaseOwner: leaseOwner,
                     expectedLeaseExpiresAt: leaseExpiry,

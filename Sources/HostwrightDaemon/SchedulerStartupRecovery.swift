@@ -83,7 +83,7 @@ public struct SchedulerStartupRecoveryCoordinator {
     // reservations. A forged or incomplete intent must not let its victim be
     // released by the generic reservation pass.
     let recoveries = try repository.recoverablePreemptionIntents()
-    let reservations = try repository.recoverableReservations()
+    let reservations = try repository.activeReservations()
     var committedReservations = 0
     var releasedReservations = 0
     var retainedReservations = 0

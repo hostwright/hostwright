@@ -1201,13 +1201,16 @@ public struct OwnershipRepository: Sendable {
         runtimeAdapter: String,
         expectedResourceUUID: String,
         expectedFencingToken: String,
+        expectedOperationFencingToken: String? = nil,
         expectedOperationGroupID: String,
         expectedLeaseOwner: String,
         expectedLeaseExpiresAt: String,
         observedAt: String
     ) throws {
+        let operationFencingToken = expectedOperationFencingToken ?? expectedFencingToken
         guard HostwrightResourceUUID.isValid(expectedResourceUUID),
               HostwrightResourceUUID.isValid(expectedFencingToken),
+              HostwrightResourceUUID.isValid(operationFencingToken),
               HostwrightResourceUUID.isValid(expectedOperationGroupID),
               !expectedLeaseOwner.isEmpty,
               !expectedLeaseExpiresAt.isEmpty else {
@@ -1228,7 +1231,7 @@ public struct OwnershipRepository: Sendable {
                 )
                 guard groups.count == 1,
                       groups[0][0] == OperationGroupStatus.active.rawValue,
-                      groups[0][1] == expectedFencingToken.lowercased(),
+                      groups[0][1] == operationFencingToken.lowercased(),
                       groups[0][2] == expectedLeaseOwner,
                       groups[0][3] == expectedLeaseExpiresAt else {
                     throw StateStoreError.invalidRecord(

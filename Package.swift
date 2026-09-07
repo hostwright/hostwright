@@ -222,6 +222,7 @@ let package = Package(
                 "HostwrightReconciler",
                 "HostwrightRegistry",
                 "HostwrightRuntime",
+                "HostwrightScheduler",
                 "HostwrightSecrets",
                 "HostwrightState",
                 "HostwrightStorage"

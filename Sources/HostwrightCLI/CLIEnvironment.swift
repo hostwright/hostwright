@@ -13,6 +13,7 @@ import HostwrightSecrets
 import HostwrightStorage
 
 public struct CLIEnvironment: @unchecked Sendable {
+    public var lifecycleScheduler: LifecycleSchedulerContext? = nil
     public var fileExists: (String) -> Bool
     public var readTextFile: (String) throws -> String
     public var readBoundedTextFile: (String, Int) throws -> String

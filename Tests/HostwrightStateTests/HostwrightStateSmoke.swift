@@ -9,6 +9,72 @@ import XCTest
 @testable import HostwrightState
 
 final class HostwrightStateTests: XCTestCase {
+    func testSchedulerProjectRegistrationDoesNotPublishDesiredServices() throws {
+        try withTemporaryStore { store, _ in
+            try store.migrate()
+            let project = StateProjectRecord(
+                id: projectID, name: "api-local", manifestPath: "/tmp/hostwright.yaml",
+                manifestHash: String(repeating: "a", count: 64),
+                createdAt: timestamp, updatedAt: timestamp,
+                manifestVersion: HostwrightContractVersions.manifest,
+                mutationProvider: RuntimeProviderID.appleContainerCLI.rawValue,
+                providerGeneration: 1
+            )
+            XCTAssertTrue(try store.desiredStates.registerProjectForAdmission(project))
+            XCTAssertFalse(try store.desiredStates.registerProjectForAdmission(project))
+            XCTAssertEqual(try store.desiredStates.loadProject(id: projectID), project)
+            XCTAssertTrue(try store.desiredStates.loadDesiredServices(projectID: projectID).isEmpty)
+            XCTAssertTrue(try store.ownership.loadAll().isEmpty)
+        }
+    }
+
+    func testSchedulerProjectRegistrationPreservesPublishedDesiredRevision() throws {
+        try withTemporaryStore { store, _ in
+            try saveDesiredState(in: store)
+            let before = try store.desiredStates.loadProject(id: projectID)
+            let services = try store.desiredStates.loadDesiredServices(projectID: projectID)
+            let candidate = StateProjectRecord(
+                id: projectID, name: "api-local", manifestPath: "/tmp/new-hostwright.yaml",
+                manifestHash: String(repeating: "b", count: 64),
+                createdAt: timestamp, updatedAt: timestamp,
+                resourceUUID: before.resourceUUID,
+                manifestVersion: HostwrightContractVersions.manifest,
+                mutationProvider: RuntimeProviderID.appleContainerCLI.rawValue,
+                providerGeneration: 2
+            )
+            XCTAssertFalse(try store.desiredStates.registerProjectForAdmission(candidate))
+            XCTAssertEqual(try store.desiredStates.loadProject(id: projectID), before)
+            XCTAssertEqual(try store.desiredStates.loadDesiredServices(projectID: projectID), services)
+        }
+    }
+
+    func testSchedulerProjectRegistrationRejectsConflictingIdentityAndProvider() throws {
+        try withTemporaryStore { store, _ in
+            try store.migrate()
+            let resourceUUID = HostwrightResourceUUID.generate()
+            func candidate(uuid: String, provider: String) -> StateProjectRecord {
+                StateProjectRecord(
+                    id: projectID, name: "api-local", manifestPath: nil,
+                    manifestHash: String(repeating: "a", count: 64),
+                    createdAt: timestamp, updatedAt: timestamp, resourceUUID: uuid,
+                    manifestVersion: HostwrightContractVersions.manifest,
+                    mutationProvider: provider, providerGeneration: 1
+                )
+            }
+            let project = candidate(uuid: resourceUUID, provider: "apple-container-cli")
+            try store.desiredStates.registerProjectForAdmission(project)
+            for rejected in [
+                candidate(uuid: HostwrightResourceUUID.generate(), provider: "apple-container-cli"),
+                candidate(uuid: resourceUUID, provider: "apple-containerization"),
+                candidate(uuid: resourceUUID, provider: "unsupported-provider")
+            ] {
+                XCTAssertThrowsError(try store.desiredStates.registerProjectForAdmission(rejected))
+            }
+            XCTAssertEqual(try store.desiredStates.loadProject(id: projectID), project)
+            XCTAssertTrue(try store.desiredStates.loadDesiredServices(projectID: projectID).isEmpty)
+        }
+    }
+
     func testSQLiteMigrationsAreIdempotentAndRecordSchemaVersion() throws {
         try withTemporaryStore { store, databaseURL in
             try store.migrate()

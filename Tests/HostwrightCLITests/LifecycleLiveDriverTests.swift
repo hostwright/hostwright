@@ -3,7 +3,7 @@ import HostwrightCore
 import HostwrightControlPlane
 import HostwrightManifest
 import HostwrightReconciler
-import HostwrightRuntime
+@testable import HostwrightRuntime
 import HostwrightSecrets
 import HostwrightScheduler
 import HostwrightState
@@ -11,6 +11,150 @@ import XCTest
 @testable import HostwrightCLI
 
 final class LifecycleLiveDriverTests: XCTestCase {
+    func testLocalSchedulerRunsConfirmedLifecycleAndReleasesCapacity() throws {
+        try withFixture { fixture in
+            try fixture.wait {
+                await fixture.adapter.useAuthoritativeInventory()
+                await fixture.adapter.setPreserveExistingOwnershipFenceOnMutation(true)
+            }
+            let environment = try fixture.localSchedulerEnvironment()
+            for command: LifecycleCommandKind in [.up, .restart, .down, .up, .rm] {
+                let preview = fixture.options(command: command, dryRun: true)
+                let previewDriver = LifecycleLiveDriver(environment: environment, options: preview)
+                let previewResult = LifecycleCommandRunner(options: preview, driver: previewDriver).run()
+                XCTAssertEqual(previewResult.exitCode, 0, previewResult.standardError)
+                let plan = try JSONDecoder().decode(LifecyclePlan.self, from: Data(previewResult.standardOutput.utf8))
+                let options = fixture.options(command: command, dryRun: false, confirmation: plan.planSHA256)
+                let result = LifecycleCommandRunner(
+                    options: options, driver: LifecycleLiveDriver(environment: environment, options: options)
+                ).run()
+                XCTAssertEqual(result.exitCode, 0, "\(command): \(result.standardError)")
+                guard result.exitCode == 0 else { return }
+                let reservations = try fixture.store.schedulerAdmissions.activeReservations()
+                if command == .down || command == .rm {
+                    XCTAssertTrue(reservations.isEmpty, "\(command): \(reservations)")
+                } else {
+                    XCTAssertEqual(reservations.count, 1)
+                    let inventory = try fixture.wait { try await fixture.adapter.inventory() }
+                    XCTAssertEqual(reservations.first?.status, .committed,
+                        "expected: \(String(describing: reservations.first?.runtimeOwnership)); inventory: \(inventory.containers)")
+                }
+            }
+            XCTAssertTrue(try fixture.wait { try await fixture.adapter.inventory() }.containers.isEmpty)
+        }
+    }
+
+    func testLocalSchedulerCapacityRejectionDoesNotPublishDesiredIntentOrMutate() throws {
+        try withFixture { fixture in
+            let environment = try fixture.localSchedulerEnvironment(capacity: ResourceVector(["memory": 1]))
+            let preview = fixture.options(command: .up, dryRun: true)
+            let driver = LifecycleLiveDriver(environment: environment, options: preview)
+            let preparation = try driver.prepare(options: preview)
+            let compiled = try LifecycleCommandPlanCompiler().compile(options: preview, preparation: preparation)
+            let options = fixture.options(command: .up, dryRun: false, confirmation: compiled.plan.planSHA256)
+            XCTAssertThrowsError(try driver.execute(compiled: compiled, preparation: preparation, options: options))
+            XCTAssertTrue(try fixture.store.desiredStates.loadDesiredServices(projectID: fixture.projectID).isEmpty)
+            XCTAssertTrue(try fixture.store.schedulerAdmissions.activeReservations().isEmpty)
+            XCTAssertTrue(try fixture.adapterSnapshot().mutations.isEmpty)
+        }
+    }
+
+    func testLocalSchedulerRejectsStalePressureBeforeReservationsOrEffects() throws {
+        try withFixture { fixture in
+            var environment = try fixture.localSchedulerEnvironment()
+            let context = try XCTUnwrap(environment.lifecycleScheduler)
+            environment.lifecycleScheduler = LifecycleSchedulerContext(subjectID: context.subjectID) {
+                let snapshot = try context.refresh()
+                return LifecycleSchedulerHostSnapshot(
+                    capacity: snapshot.capacity, pressure: snapshot.pressure,
+                    configDigest: snapshot.configDigest, profileDigest: snapshot.profileDigest,
+                    labels: snapshot.labels, observedAt: Date().addingTimeInterval(-60)
+                )
+            }
+            let preview = fixture.options(command: .up, dryRun: true)
+            let driver = LifecycleLiveDriver(environment: environment, options: preview)
+            let preparation = try driver.prepare(options: preview)
+            let compiled = try LifecycleCommandPlanCompiler().compile(options: preview, preparation: preparation)
+            let options = fixture.options(command: .up, dryRun: false, confirmation: compiled.plan.planSHA256)
+            XCTAssertThrowsError(try driver.execute(compiled: compiled, preparation: preparation, options: options)) {
+                XCTAssertEqual($0 as? SchedulerAdmissionError, .staleInput(field: "lifecycle-host-authority"))
+            }
+            XCTAssertTrue(try fixture.store.desiredStates.loadDesiredServices(projectID: fixture.projectID).isEmpty)
+            XCTAssertTrue(try fixture.store.schedulerAdmissions.activeReservations().isEmpty)
+            XCTAssertTrue(try fixture.adapterSnapshot().mutations.isEmpty)
+        }
+    }
+
+    func testFreshSchedulerWorkloadsBindConfirmedRuntimeIdentityWithoutInventingOwnership() throws {
+        try withFixture { fixture in
+            let options = fixture.options(command: .up, dryRun: true)
+            let preparation = try fixture.driver(options: options).prepare(options: options)
+            let compiled = try LifecycleCommandPlanCompiler().compile(
+                options: options, preparation: preparation
+            )
+            let workloads = try LifecycleSchedulerWorkloads.prepare(
+                manifest: ManifestValidator.validated(fixture.environment.readTextFile(fixture.manifestPath)),
+                compiled: compiled,
+                preparation: preparation,
+                options: options,
+                subjectID: "authenticated-owner",
+                providerVersion: "1.1.0"
+            )
+            let created = compiled.plan.nodes.filter { $0.action == .create }
+            XCTAssertFalse(workloads.isEmpty)
+            XCTAssertEqual(workloads.count, created.count)
+            for entry in workloads {
+                let node = try XCTUnwrap(created.first { $0.resourceUUID == entry.ownership.resourceUUID })
+                XCTAssertEqual(entry.ownership.resourceIdentifier, node.resourceIdentifier)
+                XCTAssertEqual(entry.ownership.resourceGeneration, Int64(node.resourceGeneration))
+                XCTAssertEqual(entry.ownership.projectUUID, preparation.projectResourceUUID)
+                XCTAssertEqual(entry.ownership.fencingToken, preparation.planFencingToken)
+                XCTAssertEqual(entry.workload.subjectID, "authenticated-owner")
+                XCTAssertEqual(entry.workload.projectID, preparation.projectResourceUUID)
+                XCTAssertGreaterThan(entry.workload.request["cpu"], 0)
+                XCTAssertGreaterThan(entry.workload.request["memory"], 0)
+            }
+            XCTAssertTrue(try fixture.store.ownership.loadAll().isEmpty)
+            XCTAssertTrue(try fixture.store.operationGroups.loadAll().isEmpty)
+            XCTAssertTrue(try fixture.adapterSnapshot().mutations.isEmpty)
+        }
+    }
+
+    func testDeferredPreemptionFailsBeforeStateAccessOrRuntimeMutation() throws {
+        let manifest = """
+        version: 3
+        project: demo
+        services:
+          api:
+            image: registry.example/api:latest
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
+            scheduling:
+              preemption: lower-priority
+        """
+        try withFixture(manifestOverride: manifest) { fixture in
+            var environment = fixture.environment
+            environment.localPathResolution = { _ in
+                XCTFail("Unsupported scheduling must fail before opening state authority.")
+                throw CocoaError(.fileReadUnknown)
+            }
+            let options = fixture.options(command: .up, dryRun: true)
+            XCTAssertThrowsError(
+                try LifecycleLiveDriver(environment: environment, options: options)
+                    .prepare(options: options)
+            ) { error in
+                XCTAssertEqual(
+                    error as? ManifestSchedulerAdmissionError,
+                    .unsupportedRuntimeClaims(["scheduling.preemption"])
+                )
+            }
+            XCTAssertTrue(try fixture.adapterSnapshot().mutations.isEmpty)
+            XCTAssertTrue(try fixture.store.operationGroups.loadAll().isEmpty)
+            XCTAssertTrue(try fixture.store.ownership.loadAll().isEmpty)
+        }
+    }
+
     func testConfirmedMutationFailsClosedWithoutPersistedSchedulerAuthority()
         throws
     {
@@ -2936,6 +3080,9 @@ private actor LifecycleLiveTestAdapter:
     private var ignoreRemoveMutation = false
     private var includeMissingDesiredServices = false
     private var shouldFailNextObservation = false
+    private var authoritativeInventory = false
+
+    func useAuthoritativeInventory() { authoritativeInventory = true }
 
     init(
         capability: RuntimeCapabilitySnapshot,
@@ -2972,7 +3119,7 @@ private actor LifecycleLiveTestAdapter:
     }
 
     func inventory() async throws -> RuntimeInventory {
-        try RuntimeInventoryBuilder.build(
+        let snapshot = try RuntimeInventoryBuilder.build(
             machine: RuntimeInventoryMachine(
                 state: .running,
                 operatingSystem: "macOS 26.0",
@@ -3005,6 +3152,9 @@ private actor LifecycleLiveTestAdapter:
             networks: [],
             volumes: []
         )
+        return authoritativeInventory ? try RuntimeInventoryBuilder.markRuntimeListAuthoritative(
+            snapshot, source: .appleContainerCLIRuntimeList
+        ) : snapshot
     }
 
     func observe(desiredState: DesiredRuntimeState) async throws -> ObservedRuntimeState {
@@ -3768,6 +3918,34 @@ private struct LifecycleLiveDriverFixture {
     let environment: CLIEnvironment
     let manifestSource: LifecycleMutableManifestSource
     let schedulerAuthority: LifecycleSchedulerAuthorityFixture
+
+    func localSchedulerEnvironment(capacity: ResourceVector? = nil) throws -> CLIEnvironment {
+        let nodeID = UUID(uuidString: "00000000-0000-0000-0000-000000009002")!
+        let store = self.store
+        let snapshot = try store.schedulerAdmissions.recordNodeCapacity(snapshot: SchedulerNodeCapacitySnapshot(
+            nodeID: nodeID, capacity: capacity ?? ResourceVector(["cpu": 4, "memory": 4_294_967_296]),
+            generation: 1, observedAt: ISO8601DateFormatter().string(from: Date())
+        ))
+        var result = environment
+        result.lifecycleScheduler = LifecycleSchedulerContext(subjectID: "owner") {
+            let now = Date()
+            let old = try store.schedulerAdmissions.hostPressure(nodeID: nodeID)
+            let pressure = try store.schedulerAdmissions.recordHostPressure(record: SchedulerHostPressureRecord(
+                nodeID: nodeID, posture: SchedulerHostPosture(), generation: (old?.generation ?? 0) + 1,
+                observedAt: ISO8601DateFormatter().string(from: now), evidenceDigest: String(repeating: "a", count: 64),
+                policyState: SchedulerHostPressurePolicyState(
+                    version: 1, reasonCodes: [.allowed], nextHysteresisState: SchedulerHostPressureHysteresisState(
+                        posture: .allowed, consecutiveClearObservations: 0, version: 1
+                    )
+                )
+            ))
+            return LifecycleSchedulerHostSnapshot(
+                capacity: snapshot, pressure: pressure, configDigest: String(repeating: "c", count: 64),
+                profileDigest: String(repeating: "d", count: 64), labels: [:], observedAt: now
+            )
+        }
+        return result
+    }
 
     init(
         directory: URL,

@@ -34,7 +34,8 @@ final class SchedulerStartupRecoveryTests: XCTestCase {
       XCTAssertEqual(try repository.activeCapacity(nodeID: nodeID), try ResourceVector(["cpu": 1]))
 
       let replay = try coordinator.recover()
-      XCTAssertEqual(replay.examinedReservations, 0)
+      XCTAssertEqual(replay.examinedReservations, 1)
+      XCTAssertEqual(replay.retainedReservations, 1)
       XCTAssertEqual(
         try repository.reservation(id: reservation.reservationID)?.status,
         .committed
@@ -61,6 +62,21 @@ final class SchedulerStartupRecoveryTests: XCTestCase {
       let replay = try coordinator.recover()
       XCTAssertEqual(replay.examinedReservations, 0)
       XCTAssertEqual(try repository.activeCapacity(nodeID: nodeID), .zero)
+    }
+  }
+
+  func testStartupRecoveryReleasesCommittedWorkloadThatStoppedWhileDaemonWasDown() throws {
+    try withPendingReservation { repository, reservation in
+      try repository.commit(
+        reservationID: reservation.reservationID, expectedToken: reservation.fencingToken,
+        updatedAt: createdAt
+      )
+      let report = try makeCoordinator(repository: repository) { _ in
+        try SchedulerRuntimeObservation(state: .absent, evidenceDigest: String(repeating: "f", count: 64))
+      }.recover()
+      XCTAssertEqual(report.releasedReservations, 1)
+      XCTAssertEqual(try repository.activeCapacity(nodeID: nodeID), .zero)
+      XCTAssertEqual(try repository.reservation(id: reservation.reservationID)?.status, .released)
     }
   }
 

@@ -11,6 +11,38 @@ public struct DesiredStateRepository: Sendable {
         self.store = store
     }
 
+    @discardableResult
+    public func registerProjectForAdmission(_ project: StateProjectRecord) throws -> Bool {
+        guard project.id == "project-\(project.name)",
+              HostwrightResourceUUID.isValid(project.resourceUUID),
+              project.manifestHash.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil,
+              project.manifestVersion == HostwrightContractVersions.manifest,
+              let provider = project.mutationProvider,
+              RuntimeProviderID.knownValues.contains(RuntimeProviderID(rawValue: provider)),
+              project.providerGeneration > 0 else {
+            throw StateStoreError.invalidRecord("Scheduler project registration requires exact manifest and provider authority.")
+        }
+        return try store.withValidatedConnection { connection in
+            try connection.transaction {
+                let rows = try connection.query(
+                    "SELECT resource_uuid, name, mutation_provider FROM projects WHERE id = ? LIMIT 1",
+                    bindings: [.text(project.id)]
+                )
+                if let row = rows.first {
+                    guard row.count == 3,
+                          row[0] == project.resourceUUID,
+                          row[1] == project.name,
+                          row[2] == nil || row[2] == provider else {
+                        throw StateStoreError.invalidRecord("Scheduler project registration conflicts with existing authority.")
+                    }
+                    return false
+                }
+                try upsert(project, on: connection)
+                return true
+            }
+        }
+    }
+
     public func saveManifestSnapshot(
         projectID: String,
         manifestPath: String?,

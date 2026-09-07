@@ -119,6 +119,10 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             text: manifestText,
             manifest: manifest
         )
+        _ = try ManifestSchedulerAdmissionBridge.admit(
+            manifest: manifest,
+            subjectID: "owner"
+        )
         let store = SQLiteStateStore(
             configuration: try hostwrightStateStoreConfiguration(
                 explicitPath: options.stateDatabasePath,
@@ -134,12 +138,6 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             store: store,
             projectID: projectID,
             fallbackBindings: []
-        )
-        // Placement semantics are admitted by the canonical scheduler bridge;
-        // this mapper only translates the already-admitted runtime boundary.
-        _ = try ManifestSchedulerAdmissionBridge.map(
-            manifest: manifest,
-            subjectID: "owner"
         )
         var mapping = ManifestRuntimeMapper.map(
             manifest,
@@ -395,12 +393,29 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             store: store,
             manifest: validated.manifest
         )
-        try schedulerAuthorityValidator(
-            validated.manifest,
-            compiled,
-            preparation,
-            options
-        )
+        let schedulerSession: LifecycleSchedulerSession?
+        if let context = environment.lifecycleScheduler {
+            let inventory = try hostwrightWaitForAsync { try await adapter.inventory() }
+            try LifecycleSchedulerSession.reconcile(
+                store: store, projectUUID: preparation.projectResourceUUID,
+                providerID: preparation.providerID, inventory: inventory
+            )
+            schedulerSession = try LifecycleSchedulerSession.admit(
+                context: context, store: store, manifest: validated.manifest,
+                compiled: compiled, preparation: preparation, options: options,
+                providerVersion: inventory.machine.runtimeVersion
+            )
+        } else {
+            try schedulerAuthorityValidator(validated.manifest, compiled, preparation, options)
+            schedulerSession = nil
+        }
+        var schedulerReconciled = false
+        defer {
+            if !schedulerReconciled, let schedulerSession,
+               let inventory = try? hostwrightWaitForAsync({ try await adapter.inventory() }) {
+                try? schedulerSession.reconcile(inventory: inventory)
+            }
+        }
         let recoverySnapshot: DesiredStateRecoverySnapshot?
         if compiled.plan.command == .update {
             guard let snapshot = try store.desiredStates.loadRecoverySnapshot(
@@ -557,7 +572,8 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             adapter: adapter,
             state: state,
             store: store,
-            groupIdempotencyKey: groupIdempotencyKey
+            groupIdempotencyKey: groupIdempotencyKey,
+            schedulerSession: schedulerSession
         )
         let effects = LifecycleLiveEffects(
             adapter: adapter,
@@ -800,6 +816,10 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
                     )
             }
         }
+        if let schedulerSession {
+            try schedulerSession.reconcile(inventory: hostwrightWaitForAsync { try await adapter.inventory() })
+        }
+        schedulerReconciled = true
         return result
     }
 }
@@ -3087,17 +3107,20 @@ struct LifecycleLiveValidator: LifecycleSagaContextValidating {
     let state: LifecycleRuntimeExecutionState
     let store: SQLiteStateStore
     let groupIdempotencyKey: String?
+    let schedulerSession: LifecycleSchedulerSession?
 
     init(
         adapter: any RuntimeAdapter,
         state: LifecycleRuntimeExecutionState,
         store: SQLiteStateStore,
-        groupIdempotencyKey: String? = nil
+        groupIdempotencyKey: String? = nil,
+        schedulerSession: LifecycleSchedulerSession? = nil
     ) {
         self.adapter = adapter
         self.state = state
         self.store = store
         self.groupIdempotencyKey = groupIdempotencyKey
+        self.schedulerSession = schedulerSession
     }
 
     func validate(
@@ -3108,6 +3131,7 @@ struct LifecycleLiveValidator: LifecycleSagaContextValidating {
         let capability: RuntimeCapabilitySnapshot
         let inventory: RuntimeInventory
         do {
+            try schedulerSession?.validate(node: node)
             capability = try await adapter.capabilitySnapshot()
             inventory = try await adapter.inventory()
         } catch {

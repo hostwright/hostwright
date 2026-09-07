@@ -1,4 +1,5 @@
 import CryptoKit
+import Darwin
 import Dispatch
 import Foundation
 import HostwrightHealth
@@ -289,8 +290,6 @@ public enum SchedulerPressureAuthorityError: String, Error, Codable, Equatable, 
 /// admission therefore remains fail-closed until Dispatch delivers an actual
 /// memory-pressure observation.
 public struct SchedulerMacOSHostPressureProbe: HostPressureProbe, Sendable {
-  private let memoryPressure: OSAllocatedUnfairLock<HostPressureLevel>
-  private let source: any DispatchSourceMemoryPressure
   private let volumeURL: URL
   private let sleepWakeState: HostSleepWakeState
   private let maintenanceState: HostMaintenanceState
@@ -299,10 +298,13 @@ public struct SchedulerMacOSHostPressureProbe: HostPressureProbe, Sendable {
   private let processInfoReader: any HostProcessInfoReader
   private let diskFactsReader: any HostDiskFactsReader
   private let powerSourceReader: any HostPowerSourceReader
+  private let memoryPressureReader: @Sendable () -> HostPressureLevel
 
   public init(
     volumeURL: URL = URL(fileURLWithPath: "/"),
-    initialMemoryPressure: HostPressureLevel = .unknown,
+    memoryPressureReader: @escaping @Sendable () -> HostPressureLevel = {
+      SchedulerMacOSHostPressureProbe.currentMemoryPressure()
+    },
     sleepWakeState: HostSleepWakeState = .awake,
     maintenanceState: HostMaintenanceState = .inactive,
     availability: HostAvailability = .available,
@@ -311,10 +313,6 @@ public struct SchedulerMacOSHostPressureProbe: HostPressureProbe, Sendable {
     diskFactsReader: any HostDiskFactsReader = MacOSDiskFactsReader(),
     powerSourceReader: any HostPowerSourceReader = MacOSPowerSourceReader()
   ) {
-    let memoryPressure = OSAllocatedUnfairLock<HostPressureLevel>(
-      uncheckedState: initialMemoryPressure
-    )
-    self.memoryPressure = memoryPressure
     self.volumeURL = volumeURL
     self.sleepWakeState = sleepWakeState
     self.maintenanceState = maintenanceState
@@ -323,17 +321,11 @@ public struct SchedulerMacOSHostPressureProbe: HostPressureProbe, Sendable {
     self.processInfoReader = processInfoReader
     self.diskFactsReader = diskFactsReader
     self.powerSourceReader = powerSourceReader
-    let source = MacOSHostPressureProbe.makeMemoryPressureSource { level in
-      memoryPressure.withLock { state in
-        state = level
-      }
-    }
-    self.source = source
-    source.activate()
+    self.memoryPressureReader = memoryPressureReader
   }
 
   public func sample(at observationTime: Date) -> HostPressureSample {
-    let level = memoryPressure.withLock { $0 }
+    let level = memoryPressureReader()
     return MacOSHostPressureProbe(
       volumeURL: volumeURL,
       systemMemoryPressure: level,
@@ -345,6 +337,23 @@ public struct SchedulerMacOSHostPressureProbe: HostPressureProbe, Sendable {
       diskFactsReader: diskFactsReader,
       powerSourceReader: powerSourceReader
     ).sample(at: observationTime)
+  }
+
+  public static func currentMemoryPressure() -> HostPressureLevel {
+    var value: UInt32 = 0
+    var size = MemoryLayout<UInt32>.size
+    guard sysctlbyname("kern.memorystatus_vm_pressure_level", &value, &size, nil, 0) == 0,
+          size == MemoryLayout<UInt32>.size else { return .unknown }
+    return memoryPressureLevel(value)
+  }
+
+  static func memoryPressureLevel(_ value: UInt32) -> HostPressureLevel {
+    switch value {
+    case 1: .nominal
+    case 2: .warning
+    case 4: .critical
+    default: .unknown
+    }
   }
 }
 

@@ -1150,7 +1150,7 @@ private enum SchedulerAdmissionRecordCoding {
         }
         if let runtimeOwnership {
             guard runtimeOwnership.projectUUID == projectUUID.lowercased(),
-                  runtimeOwnership.resourceUUID == workloadID.uuidString.lowercased() else {
+                  runtimeOwnership.matches(workloadID: workloadID) else {
                 throw SchedulerAdmissionError.stateInvariant(
                     "scheduler-runtime-ownership-binding"
                 )
@@ -1838,6 +1838,17 @@ public struct SchedulerRuntimeOwnershipBinding:
         self.fencingToken = fencingToken.lowercased()
     }
 
+    public var lifecycleWorkloadID: UUID {
+        UUID(uuidString: HostwrightResourceUUID.legacy(
+            kind: "local-scheduler-workload",
+            identifier: "\(resourceUUID):\(resourceGeneration)"
+        ))!
+    }
+
+    public func matches(workloadID: UUID) -> Bool {
+        resourceUUID == workloadID.uuidString.lowercased() || lifecycleWorkloadID == workloadID
+    }
+
     private static func isName(_ value: String) -> Bool {
         value.utf8.count <= RuntimeManagedResourceIdentity.maximumIdentifierLength &&
             value.range(
@@ -1892,7 +1903,7 @@ public struct SchedulerDecisionWorkloadBinding:
         }
         if let runtimeOwnership {
             guard runtimeOwnership.projectUUID == projectUUID.lowercased(),
-                  runtimeOwnership.resourceUUID == workloadID.uuidString.lowercased() else {
+                  runtimeOwnership.matches(workloadID: workloadID) else {
                 throw SchedulerAdmissionError.invalidBinding(
                     field: "decision-binding-runtime-ownership"
                 )

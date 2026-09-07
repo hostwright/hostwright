@@ -266,170 +266,217 @@ public struct SchedulerAdmissionRepository: Sendable {
                 on: connection
             )
             return try connection.transaction {
-                guard let artifact = try loadDecisionArtifact(decisionID, on: connection) else {
-                    throw SchedulerAdmissionError.notFound(
-                        kind: "decision",
-                        id: decisionID
-                    )
-                }
-                guard artifact.projectUUID == projectUUID.lowercased() else {
-                    throw SchedulerAdmissionError.invalidBinding(
-                        field: "apply-project-scope"
-                    )
-                }
-                guard artifact.inputDigest == expectedInputDigest else {
-                    throw SchedulerAdmissionError.staleInput(field: "input-digest")
-                }
-                guard let workloadBinding = artifact.binding(for: workloadID) else {
-                    throw SchedulerAdmissionError.invalidBinding(
-                        field: "apply-workload-binding"
-                    )
-                }
-                guard workloadBinding.projectUUID == artifact.projectUUID else {
-                    throw SchedulerAdmissionError.invalidBinding(
-                        field: "apply-workload-project-scope"
-                    )
-                }
-                guard artifact.configDigest == currentAuthority.configDigest,
-                      artifact.profileDigest == currentAuthority.profileDigest,
-                      artifact.lifecyclePlanDigest == currentAuthority.lifecyclePlanDigest,
-                      workloadBinding.capacityDigest == currentAuthority.nodeCapacityDigest,
-                      workloadBinding.capacityGeneration
-                        == currentAuthority.nodeCapacityGeneration else {
-                    throw SchedulerAdmissionError.staleInput(
-                        field: "apply-authority"
-                    )
-                }
-                let authority = try SchedulerAdmissionAuthority(
-                    nodeCapacityDigest: currentAuthority.nodeCapacityDigest,
-                    nodeCapacityGeneration: currentAuthority.nodeCapacityGeneration,
-                    inputDigest: expectedInputDigest,
-                    configDigest: currentAuthority.configDigest,
-                    profileDigest: currentAuthority.profileDigest,
-                    lifecyclePlanDigest: currentAuthority.lifecyclePlanDigest,
-                    expectedNodeEpoch: currentAuthority.expectedNodeEpoch
+                try applyDecisionInTransaction(
+                    decisionID: decisionID, projectUUID: projectUUID,
+                    workloadID: workloadID, expectedInputDigest: expectedInputDigest,
+                    currentAuthority: currentAuthority, on: connection
                 )
-                let decisionWorkload = artifact.decision.workloadDecisions.first {
-                    $0.workloadID == workloadID
+            }
+        }
+    }
+
+    public func applyPlacements(
+        decisionID: UUID,
+        projectUUID: String,
+        expectedInputDigest: String,
+        authorities: [UUID: SchedulerAdmissionCurrentAuthority]
+    ) throws -> [SchedulerReservationRecord] {
+        try store.withValidatedConnection { connection in
+            try connection.transaction {
+                guard let artifact = try loadDecisionArtifact(decisionID, on: connection),
+                      !authorities.isEmpty,
+                      artifact.projectUUID == projectUUID.lowercased(),
+                      Set(artifact.workloadIDs) == Set(authorities.keys),
+                      artifact.decision.workloadDecisions.allSatisfy({
+                          [.placed, .retainedExistingPlacement].contains($0.outcome)
+                      }) else {
+                    throw SchedulerAdmissionError.invalidBinding(field: "atomic-placement-scope")
                 }
-                guard let decisionWorkload else {
-                    throw SchedulerAdmissionError.invalidBinding(
-                        field: "apply-decision-workload"
+                return try authorities.keys.sorted { $0.uuidString < $1.uuidString }.map { workloadID in
+                    guard let authority = authorities[workloadID],
+                          let reservation = try applyDecisionInTransaction(
+                              decisionID: decisionID, projectUUID: projectUUID,
+                              workloadID: workloadID, expectedInputDigest: expectedInputDigest,
+                              currentAuthority: authority, on: connection
+                          ).reservation else {
+                        throw SchedulerAdmissionError.invalidBinding(field: "atomic-placement-reservation")
+                    }
+                    return reservation
+                }
+            }
+        }
+    }
+
+    private func applyDecisionInTransaction(
+        decisionID: UUID,
+        projectUUID: String,
+        workloadID: UUID,
+        expectedInputDigest: String,
+        currentAuthority: SchedulerAdmissionCurrentAuthority,
+        on connection: SQLiteConnection
+    ) throws -> SchedulerAdmissionApplyResult {
+        guard let artifact = try loadDecisionArtifact(decisionID, on: connection) else {
+            throw SchedulerAdmissionError.notFound(
+                kind: "decision",
+                id: decisionID
+            )
+        }
+        guard artifact.projectUUID == projectUUID.lowercased() else {
+            throw SchedulerAdmissionError.invalidBinding(
+                field: "apply-project-scope"
+            )
+        }
+        guard artifact.inputDigest == expectedInputDigest else {
+            throw SchedulerAdmissionError.staleInput(field: "input-digest")
+        }
+        guard let workloadBinding = artifact.binding(for: workloadID) else {
+            throw SchedulerAdmissionError.invalidBinding(
+                field: "apply-workload-binding"
+            )
+        }
+        guard workloadBinding.projectUUID == artifact.projectUUID else {
+            throw SchedulerAdmissionError.invalidBinding(
+                field: "apply-workload-project-scope"
+            )
+        }
+        guard artifact.configDigest == currentAuthority.configDigest,
+              artifact.profileDigest == currentAuthority.profileDigest,
+              artifact.lifecyclePlanDigest == currentAuthority.lifecyclePlanDigest,
+              workloadBinding.capacityDigest == currentAuthority.nodeCapacityDigest,
+              workloadBinding.capacityGeneration
+                == currentAuthority.nodeCapacityGeneration else {
+            throw SchedulerAdmissionError.staleInput(
+                field: "apply-authority"
+            )
+        }
+        let authority = try SchedulerAdmissionAuthority(
+            nodeCapacityDigest: currentAuthority.nodeCapacityDigest,
+            nodeCapacityGeneration: currentAuthority.nodeCapacityGeneration,
+            inputDigest: expectedInputDigest,
+            configDigest: currentAuthority.configDigest,
+            profileDigest: currentAuthority.profileDigest,
+            lifecyclePlanDigest: currentAuthority.lifecyclePlanDigest,
+            expectedNodeEpoch: currentAuthority.expectedNodeEpoch
+        )
+        let decisionWorkload = artifact.decision.workloadDecisions.first {
+            $0.workloadID == workloadID
+        }
+        guard let decisionWorkload else {
+            throw SchedulerAdmissionError.invalidBinding(
+                field: "apply-decision-workload"
+            )
+        }
+        try validateCurrentPressure(
+            nodeID: workloadBinding.nodeID,
+            authority: currentAuthority,
+            on: connection
+        )
+        switch decisionWorkload.outcome {
+        case .placed, .retainedExistingPlacement:
+            let binding = try SchedulerAdmissionBinding(
+                decisionID: decisionID,
+                workloadID: workloadBinding.workloadID,
+                nodeID: workloadBinding.nodeID,
+                resources: workloadBinding.resources,
+                nodeCapacityDigest: workloadBinding.capacityDigest,
+                nodeCapacityGeneration: workloadBinding.capacityGeneration,
+                inputDigest: artifact.inputDigest,
+                configDigest: artifact.configDigest,
+                profileDigest: artifact.profileDigest,
+                lifecyclePlanDigest: artifact.lifecyclePlanDigest,
+                ownerSubjectID: workloadBinding.ownerSubjectID,
+                projectUUID: artifact.projectUUID,
+                createdAt: currentAuthority.leaseCreatedAt,
+                expiresAt: currentAuthority.leaseExpiresAt
+            )
+            let reservation = try reserveInTransaction(
+                binding: binding,
+                authority: authority,
+                pressureAuthority: currentAuthority,
+                on: connection
+            )
+            return try SchedulerAdmissionApplyResult(
+                decisionID: decisionID,
+                inputDigest: expectedInputDigest,
+                reservation: reservation,
+                preemptionIntent: nil
+            )
+        case .preemptionProposed:
+            guard let proposal = decisionWorkload.preemption,
+                  proposal.projectID == artifact.projectUUID,
+                  proposal.nodeID == workloadBinding.nodeID else {
+                throw SchedulerAdmissionError.invalidBinding(
+                    field: "apply-preemption-project-or-node"
+                )
+            }
+            try validateCurrentAuthority(
+                nodeID: workloadBinding.nodeID,
+                authority: authority,
+                on: connection
+            )
+            let intentID = SchedulerAdmissionStableIdentifier.preemptionIntentID(
+                decisionID: decisionID,
+                targetWorkloadID: proposal.targetWorkloadID
+            )
+            if let existing = try loadPreemptionIntent(intentID, on: connection) {
+                guard existing.proposal == proposal else {
+                    throw SchedulerAdmissionError.stateInvariant(
+                        "preemption-intent-replay-mismatch"
                     )
                 }
-                try validateCurrentPressure(
-                    nodeID: workloadBinding.nodeID,
-                    authority: currentAuthority,
-                    on: connection
-                )
-                switch decisionWorkload.outcome {
-                case .placed, .retainedExistingPlacement:
-                    let binding = try SchedulerAdmissionBinding(
+                switch existing.status {
+                case .fenced, .applied:
+                    guard let reservation = try loadReservation(
                         decisionID: decisionID,
-                        workloadID: workloadBinding.workloadID,
-                        nodeID: workloadBinding.nodeID,
-                        resources: workloadBinding.resources,
-                        nodeCapacityDigest: workloadBinding.capacityDigest,
-                        nodeCapacityGeneration: workloadBinding.capacityGeneration,
-                        inputDigest: artifact.inputDigest,
-                        configDigest: artifact.configDigest,
-                        profileDigest: artifact.profileDigest,
-                        lifecyclePlanDigest: artifact.lifecyclePlanDigest,
-                        ownerSubjectID: workloadBinding.ownerSubjectID,
-                        projectUUID: artifact.projectUUID,
-                        createdAt: currentAuthority.leaseCreatedAt,
-                        expiresAt: currentAuthority.leaseExpiresAt
-                    )
-                    let reservation = try reserveInTransaction(
-                        binding: binding,
-                        authority: authority,
-                        pressureAuthority: currentAuthority,
+                        workloadID: workloadID,
                         on: connection
-                    )
+                    ) else {
+                        throw SchedulerAdmissionError.stateInvariant(
+                            "preemption-reservation-missing"
+                        )
+                    }
+                    try validateArtifactReservationPair(artifact, reservation)
                     return try SchedulerAdmissionApplyResult(
                         decisionID: decisionID,
                         inputDigest: expectedInputDigest,
                         reservation: reservation,
-                        preemptionIntent: nil
+                        preemptionIntent: existing
                     )
-                case .preemptionProposed:
-                    guard let proposal = decisionWorkload.preemption,
-                          proposal.projectID == artifact.projectUUID,
-                          proposal.nodeID == workloadBinding.nodeID else {
-                        throw SchedulerAdmissionError.invalidBinding(
-                            field: "apply-preemption-project-or-node"
-                        )
-                    }
-                    try validateCurrentAuthority(
-                        nodeID: workloadBinding.nodeID,
-                        authority: authority,
-                        on: connection
-                    )
-                    let intentID = SchedulerAdmissionStableIdentifier.preemptionIntentID(
-                        decisionID: decisionID,
-                        targetWorkloadID: proposal.targetWorkloadID
-                    )
-                    if let existing = try loadPreemptionIntent(intentID, on: connection) {
-                        guard existing.proposal == proposal else {
-                            throw SchedulerAdmissionError.stateInvariant(
-                                "preemption-intent-replay-mismatch"
-                            )
-                        }
-                        switch existing.status {
-                        case .fenced, .applied:
-                            guard let reservation = try loadReservation(
-                                decisionID: decisionID,
-                                workloadID: workloadID,
-                                on: connection
-                            ) else {
-                                throw SchedulerAdmissionError.stateInvariant(
-                                    "preemption-reservation-missing"
-                                )
-                            }
-                            try validateArtifactReservationPair(artifact, reservation)
-                            return try SchedulerAdmissionApplyResult(
-                                decisionID: decisionID,
-                                inputDigest: expectedInputDigest,
-                                reservation: reservation,
-                                preemptionIntent: existing
-                            )
-                        case .proposed, .fencePending:
-                            return try SchedulerAdmissionApplyResult(
-                                decisionID: decisionID,
-                                inputDigest: expectedInputDigest,
-                                reservation: nil,
-                                preemptionIntent: existing
-                            )
-                        case .recovered, .rejected:
-                            throw SchedulerAdmissionError.invalidBinding(
-                                field: "preemption-intent-status"
-                            )
-                        }
-                    }
-                    let intent = try SchedulerPreemptionIntentRecord(
-                        decisionID: decisionID,
-                        intentID: intentID,
-                        proposal: proposal,
-                        status: .proposed,
-                        createdAt: artifact.createdAt,
-                        updatedAt: artifact.updatedAt
-                    )
-                    let storedIntent = try insertPreemptionIntentInTransaction(
-                        intent,
-                        on: connection
-                    )
+                case .proposed, .fencePending:
                     return try SchedulerAdmissionApplyResult(
                         decisionID: decisionID,
                         inputDigest: expectedInputDigest,
                         reservation: nil,
-                        preemptionIntent: storedIntent
+                        preemptionIntent: existing
                     )
-                case .unschedulable:
+                case .recovered, .rejected:
                     throw SchedulerAdmissionError.invalidBinding(
-                        field: "apply-unschedulable-decision"
+                        field: "preemption-intent-status"
                     )
                 }
             }
+            let intent = try SchedulerPreemptionIntentRecord(
+                decisionID: decisionID,
+                intentID: intentID,
+                proposal: proposal,
+                status: .proposed,
+                createdAt: artifact.createdAt,
+                updatedAt: artifact.updatedAt
+            )
+            let storedIntent = try insertPreemptionIntentInTransaction(
+                intent,
+                on: connection
+            )
+            return try SchedulerAdmissionApplyResult(
+                decisionID: decisionID,
+                inputDigest: expectedInputDigest,
+                reservation: nil,
+                preemptionIntent: storedIntent
+            )
+        case .unschedulable:
+            throw SchedulerAdmissionError.invalidBinding(
+                field: "apply-unschedulable-decision"
+            )
         }
     }
 
@@ -951,7 +998,7 @@ public struct SchedulerAdmissionRepository: Sendable {
                 """,
                 bindings: [.text(uuidText(nodeID))]
             )
-            let records = try rows.map(decodeReservation)
+            let records = try rows.map { try hydrateReservation(decodeReservation($0), on: connection) }
             for reservation in records {
                 guard let artifact = try loadDecisionArtifact(
                     reservation.decisionID,
@@ -970,6 +1017,14 @@ public struct SchedulerAdmissionRepository: Sendable {
     /// Returns only reservations whose runtime transition is recoverable after
     /// a daemon restart.  Expiry never changes this set or releases capacity.
     public func recoverableReservations() throws -> [SchedulerReservationRecord] {
+        try reservationsForRecovery(includeCommitted: false)
+    }
+
+    public func activeReservations() throws -> [SchedulerReservationRecord] {
+        try reservationsForRecovery(includeCommitted: true)
+    }
+
+    private func reservationsForRecovery(includeCommitted: Bool) throws -> [SchedulerReservationRecord] {
         try store.withValidatedConnection(readOnly: true) { connection in
             try requireSchedulerTable(
                 SchedulerAdmissionAuthorityTables.reservations,
@@ -991,17 +1046,19 @@ public struct SchedulerAdmissionRepository: Sendable {
                        release_evidence_reservation_id, release_evidence_workload_uuid
                 FROM scheduler_reservations
                 WHERE status IN ('pending', 'release-pending', 'fenced')
+                   OR (? = 1 AND status = 'committed')
                 ORDER BY reservation_id ASC
                 LIMIT ?
                 """,
                 bindings: [
+                    .int(includeCommitted ? 1 : 0),
                     .int(SchedulerAdmissionStateLimits.maximumRecoverableReservationCount + 1)
                 ],
                 limit: SchedulerAdmissionStateLimits.maximumRecoverableReservationCount,
                 field: "recoverable-reservations",
                 on: connection
             )
-            let records = try rows.map(decodeReservation)
+            let records = try rows.map { try hydrateReservation(decodeReservation($0), on: connection) }
             for reservation in records {
                 guard let artifact = try loadDecisionArtifact(
                     reservation.decisionID,

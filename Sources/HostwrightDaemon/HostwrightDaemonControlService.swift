@@ -288,6 +288,12 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
     let schedulerRuntimeInventoryCache = SchedulerRuntimeInventoryCache()
     let schedulerRuntimeObservation: SchedulerStartupRecoveryCoordinator.RuntimeObservationProvider = {
       reservation in
+      if let binding = reservation.runtimeOwnership,
+         binding.lifecycleWorkloadID == reservation.workloadID {
+        let adapter = try commandEnvironment.runtimeAdapterForProvider(binding.providerID)
+        let inventory = try Self.waitForSchedulerRuntime { try await adapter.inventory() }
+        return try Self.schedulerRuntimeObservation(reservation: reservation, inventory: inventory)
+      }
       let inventory = try schedulerRuntimeInventoryCache.load {
         try Self.waitForSchedulerRuntime {
           try await commandEnvironment.runtimeAdapter().inventory()
@@ -434,6 +440,11 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
       socketIdentity: listener.identity,
       mutatingOperations: mutatingOperations,
       requestPreparer: { peer, request in
+        var peerEnvironment = commandEnvironment
+        peerEnvironment.lifecycleScheduler = LocalLifecycleScheduler.context(
+          subjectID: peer.binding.subject.identifier, store: store,
+          configPath: schedulerManifestPath, pressure: schedulerPressureCoordinator
+        )
         if let prepared = try CLIControlCommandExecutor.prepare(
           request: request,
           environment: commandEnvironment,
@@ -458,7 +469,7 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
         }
         if let prepared = try CLIControlCommandExecutor.prepare(
           request: request,
-          environment: commandEnvironment
+          environment: peerEnvironment
         ) {
           return try PersistentControlPreparedRequest(
             request: prepared.request,
@@ -896,6 +907,9 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
     ) {
       return response
     }
+    if let rejection = try LocalLifecycleScheduler.rejection(request: request, repository: schedulerRepository) {
+      return rejection
+    }
     if let response = SchedulerControlOperations.handle(
       request: request,
       repository: schedulerRepository,
@@ -1091,6 +1105,17 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
     reservation: SchedulerReservationRecord,
     inventory: RuntimeInventory
   ) throws -> SchedulerRuntimeObservation {
+    if let binding = reservation.runtimeOwnership,
+       binding.lifecycleWorkloadID == reservation.workloadID {
+      let observation = try LifecycleSchedulerRuntimeObservation.observe(expected: binding, inventory: inventory)
+      let state: SchedulerRuntimeObservationState
+      switch observation.state {
+      case .running: state = .present
+      case .inactive, .absent: state = .absent
+      case .unknown: state = .unknown
+      }
+      return try SchedulerRuntimeObservation(state: state, evidenceDigest: observation.evidenceDigest)
+    }
     let digest = inventory.semanticSHA256
     guard let expected = reservation.runtimeOwnership,
           inventory.isAuthoritative,

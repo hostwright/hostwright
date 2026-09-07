@@ -176,8 +176,8 @@ def main() -> int:
             require(claim not in content, f"{document} retains obsolete state-path claim: {claim}", errors)
     require("active release target is `v0.0.2`" in release, "release process does not name v0.0.2", errors)
     require("one master issue, 15 phase epics, and 167 child workstreams" in roadmap, "roadmap count statement is missing", errors)
-    require("Target GA gate: 2026-07-27" in roadmap, "roadmap GA target is not 2026-07-27", errors)
-    require("2026-07-13 through 2026-07-27" in roadmap, "roadmap daily execution cadence is missing", errors)
+    require("scope reset → Phase 10 → Phase 13 → Phase 14 → Phase 15" in roadmap, "roadmap dependency sequence is missing", errors)
+    require("2026-07-13 through 2026-07-27" in roadmap, "roadmap historical schedule is missing", errors)
     require(historical_plan.startswith("# Historical Implementation Plan"), "former plan is not visibly historical", errors)
 
     schema = json.loads(read("schemas/hostwright-yaml.schema.json"))
@@ -193,8 +193,8 @@ def main() -> int:
     require(schema_evidence_classes == EVIDENCE_CLASSES, "evidence schema classes drifted from the v0.0.2 constitution", errors)
     require(issue_manifest.get("evidenceClasses") == EVIDENCE_CLASSES, "roadmap issue evidence classes drifted from the v0.0.2 constitution", errors)
     require(
-        issue_manifest.get("phaseSchedule") == PHASE_SCHEDULE,
-        "roadmap phase schedule must run daily from 2026-07-13 through 2026-07-27",
+        issue_manifest.get("historicalPhaseSchedule") == PHASE_SCHEDULE,
+        "historical roadmap phase schedule must preserve daily targets from 2026-07-13 through 2026-07-27",
         errors,
     )
 

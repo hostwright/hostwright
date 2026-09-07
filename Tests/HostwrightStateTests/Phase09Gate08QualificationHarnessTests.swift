@@ -223,7 +223,10 @@ final class Phase09Gate08QualificationHarnessTests: XCTestCase {
       XCTAssertTrue(result.stderr.contains("cell 3 failed"), result.stderr)
 
       let ledger = try String(contentsOf: root.appendingPathComponent("ownership-v1.tsv"), encoding: .utf8)
-      let process = try XCTUnwrap(ledger.split(separator: "\n").first(where: { $0.contains("\tprocess\t") }))
+      let process = try XCTUnwrap(
+        ledger.split(separator: "\n").first(where: { $0.contains("\tprocess\t") }),
+        "Gate run exited \(result.status) before recording a process: \(result.stderr)"
+      )
       let processFields = process.split(separator: "\t", omittingEmptySubsequences: false)
       let executable = try XCTUnwrap(processFields.indices.contains(3) ? String(processFields[3]) : nil)
       let pid = try XCTUnwrap(process.split(separator: "\t").last?.split(separator: ";").first?.split(separator: "=").last)
@@ -306,7 +309,10 @@ final class Phase09Gate08QualificationHarnessTests: XCTestCase {
       XCTAssertEqual(try run(["prepare", "8"], environment: failing).status, 0)
       let result = try run(["run", "8"], environment: failing)
       let ledger = try String(contentsOf: root.appendingPathComponent("ownership-v1.tsv"), encoding: .utf8)
-      let process = try XCTUnwrap(ledger.split(separator: "\n").first(where: { $0.contains("\tprocess\t") }))
+      let process = try XCTUnwrap(
+        ledger.split(separator: "\n").first(where: { $0.contains("\tprocess\t") }),
+        "Gate run exited \(result.status) before recording a process: \(result.stderr)"
+      )
       let processFields = process.split(separator: "\t", omittingEmptySubsequences: false)
       let executable = try XCTUnwrap(processFields.indices.contains(3) ? String(processFields[3]) : nil)
       let pidText = try XCTUnwrap(process.split(separator: "\t").last?.split(separator: ";").first?.split(separator: "=").last)

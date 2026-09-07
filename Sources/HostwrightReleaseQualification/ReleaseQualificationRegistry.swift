@@ -315,9 +315,9 @@ public struct ReleaseQualificationDefaultRegistry {
             id: "documentation-current-truth-validator",
             relativePath: "scripts/check-current-truth.py",
             sha256: try! ReleaseQualificationSHA256(
-                "211b1e1716334b11aeac5d399ec99d68834ece7151f9dc0da05cb76f358dcfd4"
+                "96aad63aa30b08f3749a98901370d9c5cab7bc3acff380f886fbb959f1fe2d1d"
             ),
-            sizeBytes: 14_233,
+            sizeBytes: 14_303,
             expectation: .accept
         )
         return ReleaseQualificationRegistry(lanes: [
@@ -816,6 +816,7 @@ public struct ReleaseQualificationLocalLaneRunner: Sendable {
         "docs/architecture/runtime-adapter.md",
         "docs/architecture/state-store.md",
         "docs/design/adr-0007-resource-identity-provider-binding.md",
+        "docs/design/adr-0015-reduced-local-release.md",
         "docs/reference/cli.md",
         "docs/reference/compatibility.md",
         "docs/reference/install.md",

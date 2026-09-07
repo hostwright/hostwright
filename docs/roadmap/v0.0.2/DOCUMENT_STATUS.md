@@ -14,7 +14,7 @@ The v0.0.2 truth reset separates current contracts from immutable history. A fil
 - `schemas/hostwright-evidence.schema.json` and `docs/reference/testing-evidence.md`: evidence contract.
 - `docs/reference/install.md`, `compatibility.md`, `manifest.md`, `cli.md`, `local-paths.md`, and `security-safety.md`: current behavior and constraints.
 - `docs/release/RELEASE_PROCESS.md`: active v0.0.2 release ladder and gate.
-- ADRs 0007–0009: v0.0.2 identity, saga, scope, and compatibility decisions.
+- ADRs 0007–0009 and 0015: v0.0.2 identity, saga, scope, and compatibility decisions.
 
 When these disagree, executable contract tests and capability output expose the failure; the disagreement must be fixed before merge.
 
@@ -44,8 +44,8 @@ Historical files can still contain valuable implementation detail and tests may 
 
 ## Enforcement
 
-- `scripts/check-current-truth.py` verifies release/contract values, Manifest v3 examples/schema, state schema v23, active docs, and immutable historical hashes.
-- `scripts/roadmap-governance.py` validates the 183-issue ledger and clean evidence closure rules.
+- `scripts/check-current-truth.py` verifies release/contract values, Manifest v3 examples/schema, state schema v24, active docs, and immutable historical hashes.
+- `scripts/roadmap-governance.py` validates the 183-issue historical ledger, explicit required/deferred scope, and clean evidence or not-planned closure rules.
 - `scripts/check-docs.sh` validates current repository links and executes each checked-in quickstart manifest.
 - `.github/workflows/docs-site.yml` validates both repositories together.
 

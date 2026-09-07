@@ -52,7 +52,7 @@ Release evidence must come from a clean checkout. A dirty report can support dev
 
 ## Closure Evidence
 
-Every roadmap child, epic, and release gate declares the evidence classes it requires. Research, design, or documentation can inform an implementation issue, but cannot close it. A final issue evidence comment and a closing PR use this stable marker:
+Every required roadmap child, epic, and release gate declares the evidence classes it requires. Research, design, or documentation can inform an implementation issue, but cannot close it. A final issue evidence comment and a closing PR use this stable marker:
 
 ```text
 <!-- hostwright-evidence-gate:v1 -->
@@ -60,13 +60,19 @@ Every roadmap child, epic, and release gate declares the evidence classes it req
 
 The evidence comment records the exact commit, `Dirty: false`, OS, hardware, runtime and framework versions, commands, raw outcomes, failures, blockers, and cleanup. `Blocked`, `skipped`, fixture-only, mock-only, dirty, or cleanup-failed results never satisfy a required class. Intermediate PRs use `Refs #NN`; only the final verification PR can use `Closes #NN`.
 
+Deferred issues are not implementation closures. Under [ADR 0015](../design/adr-0015-reduced-local-release.md), the committed manifest must mark an issue deferred and identify its scope decision. Its body links that decision and it closes explicitly as `not_planned`, after matching deferred children. Required parents accept completed required children and correctly deferred children. The governance workflow rejects unrecorded deferrals and implementation closure keywords for deferred issues.
+
+## Bounded v0.0.2 Release Qualification
+
+The local release requires ten live lifecycle cycles per supported provider, one checkpointed 30-minute physical-host soak, five minutes of fuzzing per shipped critical parser/protocol with retained corpus replay, supported sanitizers, focused independent security review, and one clean RC plus independent signed-artifact lifecycle verification. Required lanes still fail on missing prerequisites, failures or incomplete cleanup. Exact scoped requirements live in the issue manifest and release process; historical multi-day results are retained rather than relabeled as current evidence.
+
 ## Evidence Storage
 
 Schemas, runners, and sanitized reviewed evidence may be committed. Machine-local paths, hostnames, account names, credentials, raw secrets, and unrelated resource identifiers must not be committed. CI or release artifacts retain full command logs after redaction; public docs summarize only evidence that passed for the exact reviewed commit.
 
-## Cumulative Soak Checkpoints
+## Historical Phase 08 Cumulative Soak Checkpoints
 
-The Phase 08 single-host soak is a cumulative checkpointed qualification. It requires exactly 864 committed five-minute intervals, totaling 259,200 qualified seconds. Each checkpoint is hash-chained to its predecessor and binds the qualification, physical host, source, executables, configuration, state integrity, project, exact owned runtime, and immutable runtime-inventory evidence. A process exit, reboot, power loss, or operator pause ends the current segment; it does not invalidate earlier checkpoints whose complete chain still validates. Time between segments and incomplete intervals never counts.
+This section preserves the closed Phase 08 gate, not the current Phase 15 release budget. The Phase 08 single-host soak is a cumulative checkpointed qualification. It requires exactly 864 committed five-minute intervals, totaling 259,200 qualified seconds. Each checkpoint is hash-chained to its predecessor and binds the qualification, physical host, source, executables, configuration, state integrity, project, exact owned runtime, and immutable runtime-inventory evidence. A process exit, reboot, power loss, or operator pause ends the current segment; it does not invalidate earlier checkpoints whose complete chain still validates. Time between segments and incomplete intervals never counts.
 
 `scripts/phase08-soak-qualification.sh status` validates the chain without rewriting it. `resume` reconstructs the derived sample ledger, preserves partial writes separately, reuses only exact completed fault receipts, and continues with the next sequence. Changed source, binary, template, image, host port, physical host, ownership, runtime inventory, or checkpoint data fails before mutation. The required real sleep and full wake must occur in order inside one recorded qualified segment.
 

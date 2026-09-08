@@ -424,7 +424,9 @@ Supported import input is intentionally small:
 - service `healthcheck.interval`;
 - service `restart` as a scalar policy or `restart.policy`.
 
-Unsupported, unknown, or high-risk stack-file fields fail closed with stable diagnostics. This includes build contexts, named volumes, `secrets`, `configs`, `env_file`, `depends_on`, `deploy`, `network_mode`, `networks`, DNS/service discovery fields, shell health checks, cloud/tunnel semantics, and lifecycle behavior that Hostwright cannot convert safely.
+Complete `deploy.resources.reservations` and `deploy.resources.limits` CPU/memory blocks map to Manifest v3 resource requests and limits. CPU counts must be positive whole numbers; supported memory suffixes and the confirmed local execution flow are documented in the [import guide](../guides/stack-import.md).
+
+Unsupported, unknown, or high-risk stack-file fields fail closed with stable diagnostics. This includes build contexts, named volumes, `secrets`, `configs`, `env_file`, `depends_on`, unsupported `deploy` fields, `network_mode`, `networks`, DNS/service discovery fields, shell health checks, cloud/tunnel semantics, and lifecycle behavior that Hostwright cannot convert safely.
 
 Text success prints the converted manifest and warnings on stderr. JSON success uses:
 

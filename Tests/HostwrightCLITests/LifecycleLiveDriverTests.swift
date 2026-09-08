@@ -43,6 +43,48 @@ final class LifecycleLiveDriverTests: XCTestCase {
         }
     }
 
+    func testCompensatedCreationAndUpdateRetriesAdvanceGeneration() throws {
+        for (replacement, replicas) in [(false, 1), (true, 1), (true, 2)] {
+            try withFixture { fixture in
+                if replicas > 1 {
+                    fixture.manifestSource.replace(fixture.manifestSource.value + "    replicas: 2\n")
+                }
+                try fixture.wait {
+                    await fixture.adapter.useAuthoritativeInventory()
+                    await fixture.adapter.setPreserveExistingOwnershipFenceOnMutation(true)
+                }
+                var environment = try fixture.localSchedulerEnvironment(capacity: ResourceVector(["cpu": 8, "memory": 8_589_934_592]))
+                func run(_ command: LifecycleCommandKind, key: Int, fail: Bool) throws -> (LifecyclePlan, LifecycleSagaExecutionResult) {
+                    environment.lifecycleOperationIdempotencyKeySHA256 = String(format: "%064x", key)
+                    let preview = fixture.options(command: command, dryRun: true)
+                    let driver = LifecycleLiveDriver(environment: environment, options: preview)
+                    let preparation = try driver.prepare(options: preview)
+                    let compiled = try LifecycleCommandPlanCompiler().compile(options: preview, preparation: preparation)
+                    if fail { try fixture.wait { await fixture.adapter.failNextStart() } }
+                    let confirmed = fixture.options(command: command, dryRun: false, confirmation: compiled.plan.planSHA256)
+                    return (compiled.plan, try driver.execute(compiled: compiled, preparation: preparation, options: confirmed))
+                }
+                if replacement {
+                    XCTAssertEqual(try run(.up, key: 1, fail: false).1.status, .succeeded)
+                    fixture.manifestSource.replace(fixture.manifestSource.value.replacingOccurrences(
+                        of: "cpus: 1", with: "cpus: 2"
+                    ) + "    update: {strategy: recreate}\n")
+                }
+                let command: LifecycleCommandKind = replacement ? .update : .up
+                let failed = try run(command, key: 2, fail: true)
+                XCTAssertEqual(failed.1.status, .compensated, failed.1.recoveryHintRedacted)
+                XCTAssertEqual(try fixture.store.ownership.loadAll().count, replacement ? replicas : 0)
+                let retry = try run(command, key: 3, fail: false)
+                XCTAssertEqual(retry.1.status, .succeeded, "replacement \(replacement): \(retry.1.recoveryHintRedacted)")
+                let firstGeneration = try XCTUnwrap(failed.0.nodes.filter { $0.action == .create }.map(\.resourceGeneration).max())
+                let nextGenerations = retry.0.nodes.filter { $0.action == .create }.map(\.resourceGeneration)
+                XCTAssertEqual(nextGenerations.count, replicas)
+                XCTAssertTrue(nextGenerations.allSatisfy { $0 > firstGeneration })
+                XCTAssertNotEqual(retry.0.planSHA256, failed.0.planSHA256)
+            }
+        }
+    }
+
     func testPersistedRecoveryReacquiresReleasedLocalAdmission() throws {
         try assertRecoveryAdmission()
     }
@@ -169,7 +211,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
                 await fixture.adapter.setPreserveExistingOwnershipFenceOnMutation(true)
             }
             var environment = try fixture.localSchedulerEnvironment()
-            for (index, command) in (Array(repeating: [LifecycleCommandKind.up, .restart, .down], count: 3).flatMap({ $0 }) + [.rm]).enumerated() {
+            for (index, command) in (Array(repeating: [LifecycleCommandKind.up, .restart, .down, .rm], count: 3).flatMap({ $0 })).enumerated() {
                 environment.lifecycleOperationIdempotencyKeySHA256 = String(format: "%064x", index + 1)
                 let preview = fixture.options(command: command, dryRun: true)
                 let previewDriver = LifecycleLiveDriver(environment: environment, options: preview)

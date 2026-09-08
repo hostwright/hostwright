@@ -2313,7 +2313,7 @@ public struct LifecycleUpdatePlanner: Sendable {
               HostwrightResourceUUID.isValid(resource.candidateResourceUUID),
               resource.currentResourceUUID != resource.candidateResourceUUID,
               resource.currentGeneration > 0,
-              resource.candidateGeneration == resource.currentGeneration + 1 else {
+              resource.candidateGeneration > resource.currentGeneration else {
             throw LifecycleUpdatePlanningError.invalidResourceIdentity(
                 expectedIdentity.displayName
             )

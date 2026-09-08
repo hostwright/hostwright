@@ -531,7 +531,7 @@ enum NetworkPortLifecycleCoordinator {
                 newRecords.append(
                     NetworkPortReservationRecord(
                         id: reservationID(
-                            planSHA256: plan.planSHA256,
+                            operationGroupID: group.id,
                             nodeKey: node.key,
                             resourceUUID: node.resourceUUID,
                             mapping: item.mapping,
@@ -1414,7 +1414,7 @@ enum NetworkPortLifecycleCoordinator {
     }
 
     private static func reservationID(
-        planSHA256: String,
+        operationGroupID: String,
         nodeKey: String,
         resourceUUID: String,
         mapping: RuntimePortMapping,
@@ -1423,7 +1423,7 @@ enum NetworkPortLifecycleCoordinator {
         HostwrightResourceUUID.legacy(
             kind: "network-port-reservation",
             identifier: [
-                planSHA256,
+                operationGroupID,
                 nodeKey,
                 resourceUUID,
                 String(mapping.containerPort),

@@ -1336,13 +1336,13 @@ enum StorageLifecycleCoordinator {
         state: StorageStateRepository
     ) throws {
         let existing = try state.loadAttachment(id: record.id)
-        let createdAt = existing?.createdAt ?? hostwrightTimestamp()
         let updatedAt = timestamp(
             max(
                 Int64(Date().timeIntervalSince1970 * 1_000),
                 record.leaseRenewedAtUnixMilliseconds
             )
         )
+        let createdAt = existing?.createdAt ?? timestamp(record.leaseRenewedAtUnixMilliseconds)
         let normalizedStagingPath = URL(
             fileURLWithPath: stagingPath
         ).standardizedFileURL.path

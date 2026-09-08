@@ -312,6 +312,10 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             capabilitySHA256: selectedProvider.selection.capabilitySHA256,
             planFencingToken: planFence,
             resourceBindings: resourceBindings,
+            nextResourceGenerations: try lifecycleNextResourceGenerations(
+                store: store, projectID: projectID, projectUUID: projectResourceUUID,
+                providerID: providerID, desiredState: desiredState, bindings: resourceBindings
+            ),
             unmanagedResourceIdentifiers: lifecycleUnmanagedIdentifiers(
                 inventory: inventory,
                 bindings: resourceBindings
@@ -1157,13 +1161,6 @@ private struct LifecycleRecoveryDeadlineEffects:
         plan: LifecyclePlan,
         context: LifecycleSagaContext
     ) async -> LifecycleSagaCompensationVerification {
-        guard plan.command == .update else {
-            return .verified(
-                LifecycleNodeVerification(
-                    summaryRedacted: "No update revision restoration was required."
-                )
-            )
-        }
         guard let verifier = base as? any LifecycleSagaCompensationVerifying else {
             return .safeHold(
                 reasonCode:
@@ -3211,8 +3208,7 @@ struct LifecycleLiveValidator: LifecycleSagaContextValidating {
             record.map {
                 $0.resourceIdentifier == node.resourceIdentifier &&
                     $0.resourceUUID == node.resourceUUID &&
-                    $0.resourceGeneration + 1 ==
-                        node.resourceGeneration &&
+                    $0.resourceGeneration < node.resourceGeneration &&
                     $0.projectResourceUUID ==
                         plan.projectResourceUUID &&
                     $0.projectGeneration == plan.projectGeneration &&
@@ -4644,6 +4640,25 @@ struct LifecycleLiveEffects:
     }
 
     func verifyCompensation(
+        plan: LifecyclePlan,
+        context: LifecycleSagaContext
+    ) async -> LifecycleSagaCompensationVerification {
+        let verification = await verifyRestoredRevision(plan: plan, context: context)
+        guard case .verified = verification else { return verification }
+        do {
+            try await LifecycleOwnershipFinalizer(store: store, adapter: adapter)
+                .finalize(context: context)
+            return verification
+        } catch {
+            return .safeHold(
+                reasonCode: LifecycleRecoverySafeHoldReason.compensationFailed.rawValue,
+                hintRedacted: "Compensated ownership cleanup could not be verified: " +
+                    RuntimeRedactionPolicy.default.redact(String(describing: error))
+            )
+        }
+    }
+
+    private func verifyRestoredRevision(
         plan: LifecyclePlan,
         context: LifecycleSagaContext
     ) async -> LifecycleSagaCompensationVerification {
@@ -6495,7 +6510,7 @@ struct LifecycleLiveEffects:
                 id: HostwrightResourceUUID.legacy(
                     kind: "image-digest-lock-observed",
                     identifier:
-                        "\(context.plan.planSHA256):\(node.resourceUUID)"
+                        "\(context.groupID):\(node.resourceUUID)"
                 ),
                 projectID: context.plan.projectID,
                 resourceUUID: node.resourceUUID,
@@ -7067,6 +7082,51 @@ private func lifecycleHealthyDesiredState(
         )
     }
     return DesiredRuntimeState(projectName: projectName, services: services)
+}
+
+private func lifecycleNextResourceGenerations(
+    store: SQLiteStateStore, projectID: String, projectUUID: String,
+    providerID: RuntimeProviderID, desiredState: DesiredRuntimeState,
+    bindings: [LifecycleResourceBinding]
+) throws -> [String: Int] {
+    let bound = Dictionary(bindings.map { ($0.identity, $0.resourceUUID) }, uniquingKeysWith: { first, _ in first })
+    let resources = Dictionary(uniqueKeysWithValues: desiredState.services.map {
+        ($0.identity.displayName, bound[$0.identity] ?? HostwrightResourceUUID.legacy(
+            kind: "service", identifier: "\(projectID):\($0.identity.displayName)"
+        ))
+    })
+    guard !resources.isEmpty else { return [:] }
+    var generations: [String: Int] = [:]
+    try store.operationGroups.visitProjectLifecycleHistory(projectID: projectID) { group in
+        let plan = try LifecyclePersistedIntentCodec.decode(group.intentJSONRedacted)
+        guard plan.planSHA256 == group.planHash else {
+            throw StateStoreError.invalidRecord("Lifecycle generation history has an invalid plan digest.")
+        }
+        guard plan.projectResourceUUID == projectUUID,
+              plan.providerID == providerID else { return }
+        for node in plan.nodes {
+            let resourceUUID: String?
+            if node.desiredSpecificationJSONRedacted != "{}" {
+                let desired = try LifecycleRevisionCodec.decodeRedactedDesiredJSON(
+                    node.desiredSpecificationJSONRedacted
+                )
+                guard desired.identity.projectName == desiredState.projectName,
+                      node.serviceName == desired.identity.displayName ||
+                        node.serviceName == desired.logicalServiceName else {
+                    throw StateStoreError.invalidRecord("Lifecycle generation history has an inconsistent service identity.")
+                }
+                resourceUUID = resources[desired.identity.displayName]
+            } else {
+                resourceUUID = resources.values.first { $0 == node.resourceUUID }
+            }
+            guard let resourceUUID else { continue }
+            guard node.resourceGeneration < Int.max else {
+                throw StateStoreError.invalidRecord("Lifecycle resource generation is exhausted.")
+            }
+            generations[resourceUUID] = max(generations[resourceUUID] ?? 1, node.resourceGeneration + 1)
+        }
+    }
+    return generations
 }
 
 private func lifecycleBindings(

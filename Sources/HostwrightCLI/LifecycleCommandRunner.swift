@@ -177,6 +177,7 @@ public struct LifecycleCommandPreparation: Sendable {
     public let capabilitySHA256: String
     public let planFencingToken: String
     public let resourceBindings: [LifecycleResourceBinding]
+    public let nextResourceGenerations: [String: Int]
     public let unmanagedResourceIdentifiers: Set<String>
 
     public init(
@@ -200,6 +201,7 @@ public struct LifecycleCommandPreparation: Sendable {
         capabilitySHA256: String,
         planFencingToken: String,
         resourceBindings: [LifecycleResourceBinding] = [],
+        nextResourceGenerations: [String: Int] = [:],
         unmanagedResourceIdentifiers: Set<String> = []
     ) {
         self.manifestSHA256 = manifestSHA256
@@ -220,6 +222,7 @@ public struct LifecycleCommandPreparation: Sendable {
         self.capabilitySHA256 = capabilitySHA256
         self.planFencingToken = planFencingToken
         self.resourceBindings = resourceBindings
+        self.nextResourceGenerations = nextResourceGenerations
         self.unmanagedResourceIdentifiers = unmanagedResourceIdentifiers
     }
 }
@@ -465,6 +468,7 @@ enum LifecycleImageLockBinder {
             capabilitySHA256: preparation.capabilitySHA256,
             planFencingToken: preparation.planFencingToken,
             resourceBindings: preparation.resourceBindings,
+            nextResourceGenerations: preparation.nextResourceGenerations,
             unmanagedResourceIdentifiers:
                 preparation.unmanagedResourceIdentifiers
         )
@@ -1076,7 +1080,7 @@ public struct LifecycleCommandPlanCompiler: Sendable {
                 )
             }
             let revisionSHA256 = try LifecycleRevisionCodec.revisionSHA256(for: service)
-            let candidateGeneration = binding.resourceGeneration + 1
+            let candidateGeneration = max(binding.resourceGeneration + 1, preparation.nextResourceGenerations[binding.resourceUUID] ?? 1)
             let candidateNameIdentity = RuntimeServiceIdentity(
                 projectName: service.identity.projectName,
                 serviceName: service.identity.serviceName,
@@ -1660,9 +1664,9 @@ public struct LifecycleCommandPlanCompiler: Sendable {
             )
             let resourceGeneration: Int
             if createIdentities.contains(draft.identity), let existing {
-                resourceGeneration = existing.resourceGeneration + 1
+                resourceGeneration = max(existing.resourceGeneration + 1, preparation.nextResourceGenerations[resourceUUID] ?? 1)
             } else {
-                resourceGeneration = existing?.resourceGeneration ?? 1
+                resourceGeneration = existing?.resourceGeneration ?? preparation.nextResourceGenerations[resourceUUID] ?? 1
             }
             let desiredJSON = try desiredSpecificationJSON(draft.desiredService)
             let compensation = compensation(

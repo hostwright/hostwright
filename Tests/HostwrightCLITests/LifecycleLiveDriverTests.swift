@@ -6,7 +6,7 @@ import HostwrightReconciler
 @testable import HostwrightRuntime
 import HostwrightSecrets
 import HostwrightScheduler
-import HostwrightState
+@testable import HostwrightState
 import XCTest
 @testable import HostwrightCLI
 
@@ -192,6 +192,57 @@ final class LifecycleLiveDriverTests: XCTestCase {
                         "expected: \(String(describing: reservations.first?.runtimeOwnership)); inventory: \(inventory.containers)")
                 }
             }
+            XCTAssertTrue(try fixture.wait { try await fixture.adapter.inventory() }.containers.isEmpty)
+        }
+    }
+
+    func testConfirmedRemovalCanRetryFailedDeletionWithoutReactivatingResource() throws {
+        try withFixture { fixture in
+            try fixture.wait {
+                await fixture.adapter.useAuthoritativeInventory()
+                await fixture.adapter.setPreserveExistingOwnershipFenceOnMutation(true)
+            }
+            var environment = try fixture.localSchedulerEnvironment()
+            func run(_ command: LifecycleCommandKind, key: Int) throws -> CLIRunResult {
+                environment.lifecycleOperationIdempotencyKeySHA256 = String(format: "%064x", key)
+                let preview = fixture.options(command: command, dryRun: true)
+                let result = LifecycleCommandRunner(options: preview,
+                    driver: LifecycleLiveDriver(environment: environment, options: preview)).run()
+                XCTAssertEqual(result.exitCode, 0, result.standardError)
+                let plan = try JSONDecoder().decode(LifecyclePlan.self, from: Data(result.standardOutput.utf8))
+                let options = fixture.options(command: command, dryRun: false, confirmation: plan.planSHA256)
+                return LifecycleCommandRunner(options: options,
+                    driver: LifecycleLiveDriver(environment: environment, options: options)).run()
+            }
+            XCTAssertEqual(try run(.up, key: 1).exitCode, 0)
+            XCTAssertEqual(try run(.down, key: 2).exitCode, 0)
+            try fixture.wait { await fixture.adapter.setDeletionFailure(true) }
+            XCTAssertNotEqual(try run(.rm, key: 3).exitCode, 0)
+            let original = try XCTUnwrap(OwnershipAuthorityMetadata.decode(
+                from: try XCTUnwrap(fixture.store.ownership.loadAll().first).metadataJSONRedacted))
+            let priorID = try XCTUnwrap(original.operationGroupID)
+            try fixture.store.withValidatedConnection { connection in
+                try connection.run("UPDATE operation_groups SET status = 'interrupted' WHERE id = ?",
+                    bindings: [.text(priorID)])
+            }
+            let before = try fixture.adapterSnapshot().mutations
+            XCTAssertNotEqual(try run(.rm, key: 4).exitCode, 0)
+            XCTAssertEqual(try fixture.adapterSnapshot().mutations, before)
+            try fixture.store.withValidatedConnection { connection in
+                try connection.run("UPDATE operation_groups SET status = 'failed' WHERE id = ?",
+                    bindings: [.text(priorID)])
+            }
+            XCTAssertNotEqual(try run(.rm, key: 5).exitCode, 0)
+            let rebound = try XCTUnwrap(OwnershipAuthorityMetadata.decode(
+                from: try XCTUnwrap(fixture.store.ownership.loadAll().first).metadataJSONRedacted))
+            XCTAssertEqual(rebound.deletionTimestamp, original.deletionTimestamp)
+            XCTAssertEqual(rebound.handoffGeneration, original.handoffGeneration + 1)
+            XCTAssertNotEqual(rebound.operationGroupID, original.operationGroupID)
+            XCTAssertEqual(Set(rebound.finalizers.map(\.state)), [.releasing])
+            try fixture.wait { await fixture.adapter.setDeletionFailure(false) }
+            XCTAssertNotEqual(try run(.up, key: 6).exitCode, 0)
+            let retry = try run(.rm, key: 7)
+            XCTAssertEqual(retry.exitCode, 0, retry.standardError)
             XCTAssertTrue(try fixture.wait { try await fixture.adapter.inventory() }.containers.isEmpty)
         }
     }
@@ -3266,6 +3317,7 @@ actor LifecycleLiveTestAdapter:
     private var createdSecretValues: [String] = []
     private var networkCreateAttempts: [LifecycleLiveNetworkCreateAttempt] = []
     private var observationDesiredStates: [DesiredRuntimeState] = []
+    private var deletionFailure = false
     private var cancellationMutationIndex: Int?
     private var mutationDelayNanoseconds: UInt64 = 0
     private var inventoryObserver: (@Sendable () throws -> Void)?
@@ -3559,6 +3611,10 @@ actor LifecycleLiveTestAdapter:
                 standardError: ""
             )
         }
+        if action.kind == .remove, deletionFailure {
+            throw RuntimeAdapterError.commandFailed(exitStatus: 75,
+                message: "injected deletion failure", standardError: "")
+        }
         mutations.append(action.kind)
         completionRequirements.append(action.requiresProcessCompletion)
         mutationResourceUUIDs.append(context.resourceUUID)
@@ -3718,6 +3774,8 @@ actor LifecycleLiveTestAdapter:
     func setInventoryObserver(_ observer: @escaping @Sendable () throws -> Void) {
         inventoryObserver = observer
     }
+
+    func setDeletionFailure(_ enabled: Bool) { deletionFailure = enabled }
 
     func setCompletionStartFailure(_ enabled: Bool) {
         completionStartFails = enabled

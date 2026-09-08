@@ -3639,14 +3639,28 @@ struct LifecycleLiveEffects:
         try prior?.validate(for: current)
         if let prior, prior.deletionTimestamp != nil {
             guard node.action == .delete || node.action == .retire,
-                  prior.operationGroupID == group.id,
-                  prior.leaseOwner == groupOwner,
-                  prior.leaseExpiresAt == groupExpiry else {
+                  Set(prior.finalizers.map(\.state)) == [.releasing] else {
                 throw StateStoreError.invalidRecord(
                     "Lifecycle mutation found ownership already bound to deletion."
                 )
             }
-            return
+            if prior.operationGroupID == group.id,
+               prior.leaseOwner == groupOwner,
+               prior.leaseExpiresAt == groupExpiry {
+                return
+            }
+            guard node.action == .delete, group.plannedActionType == "rm",
+                  let priorID = prior.operationGroupID,
+                  let previous = try store.operationGroups.load(id: priorID),
+                  previous.groupKind == "lifecycle-v1",
+                  previous.projectID == group.projectID,
+                  previous.status == .failed,
+                  previous.lockOwner == nil,
+                  previous.lockExpiresAt == nil else {
+                throw StateStoreError.invalidRecord(
+                    "Lifecycle deletion retry requires a failed operation with no active lease."
+                )
+            }
         }
         if let prior,
            prior.operationGroupID == group.id,
@@ -3659,7 +3673,8 @@ struct LifecycleLiveEffects:
         let bound = try OwnershipAuthorityRecord.lifecycle(
             ownership: current,
             operationGroup: group,
-            finalizerState: .active,
+            finalizerState: prior?.deletionTimestamp == nil ? .active : .releasing,
+            deletionTimestamp: prior?.deletionTimestamp,
             handoffGeneration: handoffGeneration
         )
         let metadata = try OwnershipAuthorityMetadata.encode(

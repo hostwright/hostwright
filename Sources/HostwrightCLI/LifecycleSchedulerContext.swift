@@ -1,4 +1,5 @@
 import Foundation
+import HostwrightReconciler
 import HostwrightScheduler
 import HostwrightState
 
@@ -30,12 +31,15 @@ public struct LifecycleSchedulerHostSnapshot: Sendable {
 public struct LifecycleSchedulerContext: Sendable {
     public let subjectID: String
     public let refresh: @Sendable () throws -> LifecycleSchedulerHostSnapshot
+    public let authorize: @Sendable (LifecyclePlan) throws -> Void
 
     public init(
         subjectID: String,
+        authorize: @escaping @Sendable (LifecyclePlan) throws -> Void = { _ in },
         refresh: @escaping @Sendable () throws -> LifecycleSchedulerHostSnapshot
     ) {
         self.subjectID = subjectID
         self.refresh = refresh
+        self.authorize = authorize
     }
 }

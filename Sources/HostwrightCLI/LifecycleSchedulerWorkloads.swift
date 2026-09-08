@@ -18,7 +18,8 @@ enum LifecycleSchedulerWorkloads {
         preparation: LifecycleCommandPreparation,
         options: LifecycleCLIOptions,
         subjectID: String,
-        providerVersion: String
+        providerVersion: String,
+        priorWorkloads: [UUID: SchedulerWorkload] = [:]
     ) throws -> [LifecycleSchedulerWorkload] {
         let admissions = try ManifestSchedulerAdmissionBridge.admit(
             manifest: manifest, subjectID: subjectID
@@ -28,7 +29,8 @@ enum LifecycleSchedulerWorkloads {
         } ?? preparation.planFencingToken
         let createResources = Set(compiled.plan.nodes.filter { $0.action == .create }.map(\.resourceUUID))
         var result: [UUID: LifecycleSchedulerWorkload] = [:]
-        for node in compiled.plan.nodes where [.create, .start, .restart, .verify].contains(node.action) {
+        for node in compiled.plan.nodes where [.create, .start, .restart, .verify].contains(node.action) ||
+            node.compensation.map({ [.create, .start, .restart].contains($0.action) }) == true {
             guard [.up, .run, .start, .restart, .update].contains(compiled.plan.command),
                   compiled.desiredServicesByNodeKey[node.key] != nil else { continue }
             if node.action == .verify,
@@ -63,23 +65,11 @@ enum LifecycleSchedulerWorkloads {
                     ? executionFence : (prior?.currentFencingToken ?? executionFence)
             )
             let workloadID = ownership.lifecycleWorkloadID
-            let requirement = admission.workload.requirements
-            let workload = try SchedulerWorkload(
-                requirements: WorkloadPlacementRequirements(
-                    workloadID: workloadID,
-                    resources: requirement.resources,
-                    requiredArchitectures: requirement.requiredArchitectures,
-                    requiredRuntime: requirement.requiredRuntime,
-                    requiredProvider: requirement.requiredProvider,
-                    requiredCapabilities: requirement.requiredCapabilities,
-                    affinity: requirement.affinity,
-                    tolerations: requirement.tolerations,
-                    acceleratorRequirements: requirement.acceleratorRequirements
-                ),
-                priority: admission.workload.priority,
-                subjectID: subjectID,
-                projectID: preparation.projectResourceUUID,
-                topology: admission.workload.topology
+            let previousWorkload = compiled.plan.command == .update && !createResources.contains(node.resourceUUID)
+                ? priorWorkloads[workloadID] : nil
+            let workload = try bind(
+                workload: previousWorkload ?? admission.workload, workloadID: workloadID,
+                subjectID: subjectID, projectID: preparation.projectResourceUUID
             )
             if let existing = result[workloadID] {
                 guard existing.workload == workload, existing.ownership == ownership else {
@@ -91,4 +81,28 @@ enum LifecycleSchedulerWorkloads {
         }
         return result.keys.sorted { $0.uuidString < $1.uuidString }.compactMap { result[$0] }
     }
+
+    static func bind(
+        workload: SchedulerWorkload, workloadID: UUID,
+        subjectID: String, projectID: String
+    ) throws -> SchedulerWorkload {
+        let requirement = workload.requirements
+        return try SchedulerWorkload(
+            requirements: WorkloadPlacementRequirements(
+                workloadID: workloadID,
+                resources: requirement.resources,
+                requiredArchitectures: requirement.requiredArchitectures,
+                requiredRuntime: requirement.requiredRuntime,
+                requiredProvider: requirement.requiredProvider,
+                requiredCapabilities: requirement.requiredCapabilities,
+                affinity: requirement.affinity,
+                tolerations: requirement.tolerations,
+                acceleratorRequirements: requirement.acceleratorRequirements
+            ),
+            priority: workload.priority,
+            subjectID: subjectID, projectID: projectID,
+            topology: workload.topology
+        )
+    }
+
 }

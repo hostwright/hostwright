@@ -11,6 +11,142 @@ import XCTest
 @testable import HostwrightCLI
 
 final class LifecycleLiveDriverTests: XCTestCase {
+    func testFailedRecreateUpdateRestoresOriginalAdmissionAndConstraints() throws {
+        try withFixture { fixture in
+            try fixture.wait {
+                await fixture.adapter.useAuthoritativeInventory()
+                await fixture.adapter.setPreserveExistingOwnershipFenceOnMutation(true)
+            }
+            let environment = try fixture.localSchedulerEnvironment()
+            for command: LifecycleCommandKind in [.up, .update] {
+                if command == .update {
+                    fixture.manifestSource.replace(fixture.manifestSource.value.replacingOccurrences(
+                        of: "cpus: 1", with: "cpus: 2"
+                    ) + "    update: {strategy: recreate}\n")
+                }
+                let preview = fixture.options(command: command, dryRun: true)
+                let driver = LifecycleLiveDriver(environment: environment, options: preview)
+                let preparation = try driver.prepare(options: preview)
+                let compiled = try LifecycleCommandPlanCompiler().compile(options: preview, preparation: preparation)
+                if command == .update { try fixture.wait { await fixture.adapter.failNextStart() } }
+                let confirmed = fixture.options(command: command, dryRun: false, confirmation: compiled.plan.planSHA256)
+                let result = try driver.execute(compiled: compiled, preparation: preparation, options: confirmed)
+                XCTAssertEqual(result.status, command == .update ? .compensated : .succeeded, result.recoveryHintRedacted)
+            }
+            let active = try fixture.store.schedulerAdmissions.activeReservations()
+            XCTAssertEqual(active.count, 1)
+            XCTAssertEqual(active.first?.status, .committed)
+            XCTAssertEqual(active.first?.resources["cpu"], 1)
+            let inventory = try fixture.wait { try await fixture.adapter.inventory() }
+            XCTAssertEqual(inventory.containers.count, 1)
+            XCTAssertEqual(inventory.containers.first?.lifecycle, .running)
+        }
+    }
+
+    func testPersistedRecoveryReacquiresReleasedLocalAdmission() throws {
+        try assertRecoveryAdmission()
+    }
+
+    func testPersistedRecoveryPreservesHardConstraintsAfterAdmissionRelease() throws {
+        try assertRecoveryAdmission(removeRequiredLabel: true)
+    }
+
+    func testPersistedRecoveryRejectsChangedManifestBeforeAdmission() throws {
+        try assertRecoveryAdmission(changeManifest: true)
+    }
+
+    private func assertRecoveryAdmission(removeRequiredLabel: Bool = false, changeManifest: Bool = false) throws {
+        try withFixture { fixture in
+            try fixture.wait {
+                await fixture.adapter.useAuthoritativeInventory()
+                await fixture.adapter.setPreserveExistingOwnershipFenceOnMutation(true)
+            }
+            fixture.manifestSource.replace(fixture.manifestSource.value + """
+                scheduling:
+                  requiredAffinity:
+                    - key: local-test
+                      operator: in
+                      values: [qualified]
+
+            """)
+            var environment = try fixture.localSchedulerEnvironment(labels: ["local-test": "qualified"])
+            let context = try XCTUnwrap(environment.lifecycleScheduler)
+            let preview = fixture.options(command: .up, dryRun: true)
+            let driver = LifecycleLiveDriver(environment: environment, options: preview)
+            let preparation = try driver.prepare(options: preview)
+            let compiled = try LifecycleCommandPlanCompiler().compile(options: preview, preparation: preparation)
+            let confirmed = fixture.options(command: .up, dryRun: false, confirmation: compiled.plan.planSHA256)
+            _ = try LifecycleSchedulerSession.admit(
+                context: context, store: fixture.store,
+                manifest: ManifestValidator.validated(fixture.manifestSource.value),
+                compiled: compiled, preparation: preparation, options: confirmed,
+                providerVersion: fixture.wait { try await fixture.adapter.inventory() }.machine.runtimeVersion
+            )
+            try persistLifecycleProject(fixture: fixture, preparation: preparation)
+            let group = try persistLifecycleGroup(
+                store: fixture.store, plan: compiled.plan, status: .interrupted, completedNodeKeys: []
+            )
+            let inventory = try fixture.wait { try await fixture.adapter.inventory() }
+            try LifecycleSchedulerSession.reconcile(
+                store: fixture.store, projectUUID: preparation.projectResourceUUID,
+                providerID: .appleContainerCLI, inventory: inventory
+            )
+            XCTAssertTrue(try fixture.store.schedulerAdmissions.activeReservations().isEmpty)
+            if removeRequiredLabel {
+                environment.lifecycleScheduler = LifecycleSchedulerContext(subjectID: context.subjectID) {
+                    let snapshot = try context.refresh()
+                    return LifecycleSchedulerHostSnapshot(
+                        capacity: snapshot.capacity, pressure: snapshot.pressure,
+                        configDigest: snapshot.configDigest, profileDigest: snapshot.profileDigest,
+                        labels: [:], observedAt: snapshot.observedAt
+                    )
+                }
+            }
+            if changeManifest {
+                fixture.manifestSource.replace(fixture.manifestSource.value + "# changed after admission\n")
+            }
+            let result = try LifecyclePersistedRecoveryDriver(environment: environment).execute(
+                LifecyclePersistedRecoveryRequest(
+                    action: .resume, groupID: group.id, confirmationPlanSHA256: group.planHash,
+                    stateStoreConfiguration: StateStoreConfiguration(explicitDatabasePath: fixture.databasePath),
+                    timeoutSeconds: 60
+                )
+            )
+            if removeRequiredLabel || changeManifest {
+                XCTAssertNotEqual(result.status, .succeeded)
+                XCTAssertTrue(try fixture.store.schedulerAdmissions.activeReservations().isEmpty)
+                XCTAssertTrue(try fixture.adapterSnapshot().mutations.isEmpty)
+                return
+            }
+            XCTAssertEqual(result.status, .succeeded, String(describing: result))
+            let reservations = try fixture.store.schedulerAdmissions.activeReservations()
+            XCTAssertEqual(reservations.count, 1)
+            XCTAssertEqual(reservations.first?.status, .committed)
+            XCTAssertEqual(try fixture.adapterSnapshot().mutations, [.create, .start])
+        }
+    }
+
+    func testPersistedRecoveryWithoutAdmissionCannotActivateRuntime() throws {
+        try withFixture { fixture in
+            let options = fixture.options(command: .up, dryRun: true)
+            let preparation = try fixture.driver(options: options).prepare(options: options)
+            let compiled = try LifecycleCommandPlanCompiler().compile(options: options, preparation: preparation)
+            try persistLifecycleProject(fixture: fixture, preparation: preparation)
+            let group = try persistLifecycleGroup(
+                store: fixture.store, plan: compiled.plan, status: .interrupted, completedNodeKeys: []
+            )
+            let result = try LifecyclePersistedRecoveryDriver(environment: fixture.environment).execute(
+                LifecyclePersistedRecoveryRequest(
+                    action: .resume, groupID: group.id, confirmationPlanSHA256: group.planHash,
+                    stateStoreConfiguration: StateStoreConfiguration(explicitDatabasePath: fixture.databasePath),
+                    timeoutSeconds: 60
+                )
+            )
+            XCTAssertNotEqual(result.status, .succeeded)
+            XCTAssertTrue(try fixture.adapterSnapshot().mutations.isEmpty)
+        }
+    }
+
     func testLocalSchedulerRunsConfirmedLifecycleAndReleasesCapacity() throws {
         try withFixture { fixture in
             try fixture.wait {
@@ -852,7 +988,8 @@ final class LifecycleLiveDriverTests: XCTestCase {
             )
 
             let resumed = try LifecyclePersistedRecoveryDriver(
-                environment: fixture.environment
+                environment: fixture.environment,
+                schedulerActivationValidator: fixture.recoveryActivationValidator
             ).execute(
                 LifecyclePersistedRecoveryRequest(
                     action: .resume,
@@ -1338,7 +1475,8 @@ final class LifecycleLiveDriverTests: XCTestCase {
 
             XCTAssertThrowsError(
                 try LifecyclePersistedRecoveryDriver(
-                    environment: fixture.environment
+                    environment: fixture.environment,
+                schedulerActivationValidator: fixture.recoveryActivationValidator
                 ).execute(
                     LifecyclePersistedRecoveryRequest(
                         action: .resume,
@@ -1399,7 +1537,8 @@ final class LifecycleLiveDriverTests: XCTestCase {
             )
 
             let result = try LifecyclePersistedRecoveryDriver(
-                environment: fixture.environment
+                environment: fixture.environment,
+                schedulerActivationValidator: fixture.recoveryActivationValidator
             ).execute(
                 LifecyclePersistedRecoveryRequest(
                     action: .resume,
@@ -1517,7 +1656,8 @@ final class LifecycleLiveDriverTests: XCTestCase {
             )
 
             let result = try LifecyclePersistedRecoveryDriver(
-                environment: fixture.environment
+                environment: fixture.environment,
+                schedulerActivationValidator: fixture.recoveryActivationValidator
             ).execute(
                 LifecyclePersistedRecoveryRequest(
                     action: .resume,
@@ -1579,7 +1719,8 @@ final class LifecycleLiveDriverTests: XCTestCase {
                 completedNodeKeys: []
             )
             let driver = LifecyclePersistedRecoveryDriver(
-                environment: fixture.environment
+                environment: fixture.environment,
+                schedulerActivationValidator: fixture.recoveryActivationValidator
             )
             try fixture.wait {
                 await fixture.adapter.setMutationDelayNanoseconds(
@@ -1684,7 +1825,8 @@ final class LifecycleLiveDriverTests: XCTestCase {
                 timeoutSeconds: 1
             )
             let driver = LifecyclePersistedRecoveryDriver(
-                environment: fixture.environment
+                environment: fixture.environment,
+                schedulerActivationValidator: fixture.recoveryActivationValidator
             )
             try fixture.wait {
                 await fixture.adapter.setMutationDelayNanoseconds(
@@ -1759,7 +1901,8 @@ final class LifecycleLiveDriverTests: XCTestCase {
                 completedNodeKeys: []
             )
             let driver = LifecyclePersistedRecoveryDriver(
-                environment: fixture.environment
+                environment: fixture.environment,
+                schedulerActivationValidator: fixture.recoveryActivationValidator
             )
             let configuration = StateStoreConfiguration(
                 explicitDatabasePath: fixture.databasePath
@@ -1823,7 +1966,8 @@ final class LifecycleLiveDriverTests: XCTestCase {
             )
 
             let result = try LifecyclePersistedRecoveryDriver(
-                environment: fixture.environment
+                environment: fixture.environment,
+                schedulerActivationValidator: fixture.recoveryActivationValidator
             ).execute(
                 LifecyclePersistedRecoveryRequest(
                     action: .rollback,
@@ -1889,7 +2033,8 @@ final class LifecycleLiveDriverTests: XCTestCase {
             )
 
             let result = try LifecyclePersistedRecoveryDriver(
-                environment: fixture.environment
+                environment: fixture.environment,
+                schedulerActivationValidator: fixture.recoveryActivationValidator
             ).execute(
                 LifecyclePersistedRecoveryRequest(
                     action: .rollback,
@@ -1962,7 +2107,8 @@ final class LifecycleLiveDriverTests: XCTestCase {
             )
 
             let result = try LifecyclePersistedRecoveryDriver(
-                environment: fixture.environment
+                environment: fixture.environment,
+                schedulerActivationValidator: fixture.recoveryActivationValidator
             ).execute(
                 LifecyclePersistedRecoveryRequest(
                     action: .rollback,
@@ -2017,7 +2163,8 @@ final class LifecycleLiveDriverTests: XCTestCase {
             )
 
             let result = try LifecyclePersistedRecoveryDriver(
-                environment: fixture.environment
+                environment: fixture.environment,
+                schedulerActivationValidator: fixture.recoveryActivationValidator
             ).execute(
                 LifecyclePersistedRecoveryRequest(
                     action: .rollback,
@@ -2121,7 +2268,8 @@ final class LifecycleLiveDriverTests: XCTestCase {
                 timeoutSeconds: 60
             )
             let driver = LifecyclePersistedRecoveryDriver(
-                environment: fixture.environment
+                environment: fixture.environment,
+                schedulerActivationValidator: fixture.recoveryActivationValidator
             )
 
             let result = try driver.execute(request)
@@ -2263,7 +2411,8 @@ final class LifecycleLiveDriverTests: XCTestCase {
                 timeoutSeconds: 60
             )
             let driver = LifecyclePersistedRecoveryDriver(
-                environment: fixture.environment
+                environment: fixture.environment,
+                schedulerActivationValidator: fixture.recoveryActivationValidator
             )
 
             let interrupted = try driver.execute(request)
@@ -2313,7 +2462,8 @@ final class LifecycleLiveDriverTests: XCTestCase {
                 completedNodeKeys: [hook.key]
             )
             let driver = LifecyclePersistedRecoveryDriver(
-                environment: fixture.environment
+                environment: fixture.environment,
+                schedulerActivationValidator: fixture.recoveryActivationValidator
             )
             let configuration = StateStoreConfiguration(
                 explicitDatabasePath: fixture.databasePath
@@ -2355,7 +2505,8 @@ final class LifecycleLiveDriverTests: XCTestCase {
 
             XCTAssertThrowsError(
                 try LifecyclePersistedRecoveryDriver(
-                    environment: fixture.environment
+                    environment: fixture.environment,
+                schedulerActivationValidator: fixture.recoveryActivationValidator
                 ).execute(
                     LifecyclePersistedRecoveryRequest(
                         action: .rollback,
@@ -2436,7 +2587,8 @@ final class LifecycleLiveDriverTests: XCTestCase {
 
             XCTAssertThrowsError(
                 try LifecyclePersistedRecoveryDriver(
-                    environment: fixture.environment
+                    environment: fixture.environment,
+                schedulerActivationValidator: fixture.recoveryActivationValidator
                 ).execute(
                     LifecyclePersistedRecoveryRequest(
                         action: .rollback,
@@ -3016,7 +3168,7 @@ private func appendSupplyChainNotRequiredMarkers(
     ])
 }
 
-private struct LifecycleLiveAdapterSnapshot: Equatable, Sendable {
+struct LifecycleLiveAdapterSnapshot: Equatable, Sendable {
     let mutations: [PlannedRuntimeActionKind]
     let completionRequirements: [Bool]
     let mutationResourceUUIDs: [String]
@@ -3027,12 +3179,12 @@ private struct LifecycleLiveAdapterSnapshot: Equatable, Sendable {
     let observationDesiredStates: [DesiredRuntimeState]
 }
 
-private struct LifecycleLiveNetworkCreateAttempt: Equatable, Sendable {
+struct LifecycleLiveNetworkCreateAttempt: Equatable, Sendable {
     let context: RuntimeMutationContext
     let project: StateProjectRecord
 }
 
-private struct LifecycleLiveTestResource: Sendable {
+struct LifecycleLiveTestResource: Sendable {
     let desired: DesiredRuntimeService
     let resourceIdentifier: String
     let runtimeID: String
@@ -3055,7 +3207,7 @@ private struct LifecycleLiveTestResource: Sendable {
     }
 }
 
-private actor LifecycleLiveTestAdapter:
+actor LifecycleLiveTestAdapter:
     RuntimeAdapter,
     RuntimeNetworkProvider
 {
@@ -3073,6 +3225,7 @@ private actor LifecycleLiveTestAdapter:
     private var observationDesiredStates: [DesiredRuntimeState] = []
     private var cancellationMutationIndex: Int?
     private var mutationDelayNanoseconds: UInt64 = 0
+    private var inventoryObserver: (@Sendable () throws -> Void)?
     private var completionStartFails = false
     private var shouldFailNextStart = false
     private var strictOwnedHintFences = false
@@ -3119,6 +3272,7 @@ private actor LifecycleLiveTestAdapter:
     }
 
     func inventory() async throws -> RuntimeInventory {
+        try inventoryObserver?()
         let snapshot = try RuntimeInventoryBuilder.build(
             machine: RuntimeInventoryMachine(
                 state: .running,
@@ -3515,6 +3669,10 @@ private actor LifecycleLiveTestAdapter:
         mutationDelayNanoseconds = value
     }
 
+    func setInventoryObserver(_ observer: @escaping @Sendable () throws -> Void) {
+        inventoryObserver = observer
+    }
+
     func setCompletionStartFailure(_ enabled: Bool) {
         completionStartFails = enabled
     }
@@ -3591,6 +3749,7 @@ private actor LifecycleLiveTestAdapter:
             )
             labels = try RuntimeManagedResourceIdentity.labels(
                 for: resource.desired.identity,
+                resourceIdentifier: resource.resourceIdentifier,
                 context: context
             ).map { RuntimeInventoryLabel(key: $0.key, value: $0.value) }
         } else {
@@ -3691,7 +3850,7 @@ private enum FailingLifecycleSecretError: Error {
     case unavailable(String)
 }
 
-private final class LifecycleSchedulerAuthorityFixture: @unchecked Sendable {
+final class LifecycleSchedulerAuthorityFixture: @unchecked Sendable {
     private let store: SQLiteStateStore
     private let repository: SchedulerAdmissionRepository
     private let nodeID: UUID
@@ -3908,7 +4067,7 @@ private final class LifecycleSchedulerAuthorityFixture: @unchecked Sendable {
     }
 }
 
-private struct LifecycleLiveDriverFixture {
+struct LifecycleLiveDriverFixture {
     let directory: URL
     let manifestPath: String
     let databasePath: String
@@ -3919,7 +4078,18 @@ private struct LifecycleLiveDriverFixture {
     let manifestSource: LifecycleMutableManifestSource
     let schedulerAuthority: LifecycleSchedulerAuthorityFixture
 
-    func localSchedulerEnvironment(capacity: ResourceVector? = nil) throws -> CLIEnvironment {
+    var recoveryActivationValidator: @Sendable (LifecyclePlan, LifecyclePlanNode) throws -> Void {
+        { plan, node in
+            guard plan.projectID == "project-demo", plan.providerID == .appleContainerCLI,
+                  plan.nodes.contains(where: {
+                      $0.resourceUUID == node.resourceUUID && $0.resourceGeneration == node.resourceGeneration
+                  }) else {
+                throw SchedulerAdmissionError.invalidBinding(field: "fixture-recovery-authority")
+            }
+        }
+    }
+
+    func localSchedulerEnvironment(capacity: ResourceVector? = nil, labels: [String: String] = [:]) throws -> CLIEnvironment {
         let nodeID = UUID(uuidString: "00000000-0000-0000-0000-000000009002")!
         let store = self.store
         let snapshot = try store.schedulerAdmissions.recordNodeCapacity(snapshot: SchedulerNodeCapacitySnapshot(
@@ -3932,7 +4102,9 @@ private struct LifecycleLiveDriverFixture {
             let old = try store.schedulerAdmissions.hostPressure(nodeID: nodeID)
             let pressure = try store.schedulerAdmissions.recordHostPressure(record: SchedulerHostPressureRecord(
                 nodeID: nodeID, posture: SchedulerHostPosture(), generation: (old?.generation ?? 0) + 1,
-                observedAt: ISO8601DateFormatter().string(from: now), evidenceDigest: String(repeating: "a", count: 64),
+                observedAt: ISO8601DateFormatter().string(from: Date(
+                    timeIntervalSince1970: floor(now.timeIntervalSince1970)
+                )), evidenceDigest: String(repeating: "a", count: 64),
                 policyState: SchedulerHostPressurePolicyState(
                     version: 1, reasonCodes: [.allowed], nextHysteresisState: SchedulerHostPressureHysteresisState(
                         posture: .allowed, consecutiveClearObservations: 0, version: 1
@@ -3941,7 +4113,7 @@ private struct LifecycleLiveDriverFixture {
             ))
             return LifecycleSchedulerHostSnapshot(
                 capacity: snapshot, pressure: pressure, configDigest: String(repeating: "c", count: 64),
-                profileDigest: String(repeating: "d", count: 64), labels: [:], observedAt: now
+                profileDigest: String(repeating: "d", count: 64), labels: labels, observedAt: now
             )
         }
         return result
@@ -4219,7 +4391,7 @@ private struct LifecycleLiveDriverFixture {
     }
 }
 
-private final class LifecycleMutableManifestSource: @unchecked Sendable {
+final class LifecycleMutableManifestSource: @unchecked Sendable {
     private let lock = NSLock()
     private var text: String
 
@@ -4295,7 +4467,7 @@ private func reviewedPlan(
     )
 }
 
-private func withFixture(
+func withFixture(
     secretStore: (any SecretStore)? = nil,
     includesSecret: Bool = false,
     unmanagedCollision: Bool = false,

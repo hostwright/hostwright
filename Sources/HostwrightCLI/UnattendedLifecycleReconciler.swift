@@ -199,6 +199,10 @@ typealias SchedulerLifecycleAuthorityCheck = @Sendable (
 ) throws -> Void
 
 public struct UnattendedLifecycleReconciler: DaemonReconciliationDriving {
+    public func lifecycleManifestSHA256(text: String, manifest: HostwrightManifest) throws -> String {
+        try HostwrightLifecycleManifestDigest.sha256(text: text, manifest: manifest)
+    }
+
     private let readManifest: @Sendable (String) throws -> String
     private let readConfiguration: @Sendable (
         String,
@@ -424,6 +428,27 @@ public struct UnattendedLifecycleReconciler: DaemonReconciliationDriving {
                 throw RuntimeAdapterError.mutationUnavailableByPolicy(
                     "The daemon scheduler authority binding was not attached to the prepared lifecycle plan."
                 )
+            }
+            if let local = binding.localLifecycleAuthority {
+                try local.revalidate(
+                    store: SQLiteStateStore(path: stateDatabasePath), manifest: manifest,
+                    projectID: preparation.projectID,
+                    lifecycleManifestSHA256: HostwrightLifecycleManifestDigest.sha256(
+                        text: self.readManifest(options.manifestPath), manifest: manifest
+                    )
+                )
+                let admitted = Set(local.entries.map(\.serviceName))
+                let resources = Set(local.entries.map(\.resourceUUID))
+                guard !local.entries.isEmpty,
+                      preparation.manifestSHA256 == local.manifestSHA256,
+                      compiled.plan.nodes.filter({ $0.serviceName != nil && $0.resourceIdentifier != nil })
+                        .allSatisfy({ resources.contains($0.resourceUUID) }),
+                      compiled.desiredServicesByNodeKey.values.allSatisfy({
+                          admitted.contains($0.identity.serviceName)
+                      }) else {
+                    throw SchedulerAdmissionError.invalidBinding(field: "daemon-local-run-intent")
+                }
+                return
             }
             guard let lifecyclePlanDigest = binding.reservations.first?.lifecyclePlanDigest,
                   binding.reservations.allSatisfy({

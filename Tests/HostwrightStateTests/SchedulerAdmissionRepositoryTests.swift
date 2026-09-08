@@ -996,6 +996,55 @@ final class SchedulerAdmissionRepositoryTests: XCTestCase {
         }
     }
 
+    func testReservationHistoryPagesOneLineageAndValidatesLaterRows() throws {
+        try withRepository { repository, store in
+            let capacity = try self.nodeCapacity(
+                node: "00000000-0000-0000-0000-000000000306", capacity: ["cpu": 2]
+            )
+            try repository.recordNodeCapacity(snapshot: capacity)
+            let formatter = ISO8601DateFormatter()
+            let base = try XCTUnwrap(formatter.date(from: self.createdAt))
+            var last: SchedulerReservationRecord?
+            for index in 0..<257 {
+                let time = base.addingTimeInterval(Double(index * 2))
+                let binding = try self.binding(
+                    decision: String(format: "99999999-0000-4000-8000-%012d", index),
+                    workload: "00000000-0000-0000-0000-000000000214",
+                    node: capacity.nodeID.uuidString, resources: ["cpu": 1], nodeCapacity: capacity,
+                    createdAt: formatter.string(from: time), expiresAt: formatter.string(from: time.addingTimeInterval(300))
+                )
+                let reservation = try reserve(repository: repository, binding: binding,
+                    authority: self.authority(binding: binding, expectedNodeEpoch: 1))
+                last = try repository.release(
+                    reservationID: reservation.reservationID, expectedToken: reservation.fencingToken,
+                    evidence: .verifiedRuntimeAbsence(evidenceDigest: String(repeating: "c", count: 64),
+                        verifiedAt: formatter.string(from: time.addingTimeInterval(1)))
+                )
+            }
+            let final = try XCTUnwrap(last)
+            var count = 0
+            try repository.visitReservationHistory(projectUUID: projectUUID, workloadID: final.workloadID) { _ in
+                count += 1
+                return true
+            }
+            XCTAssertEqual(count, 257)
+            let visitorError = NSError(domain: "history-visitor", code: 7)
+            XCTAssertThrowsError(try repository.visitReservationHistory(projectUUID: projectUUID) { _ in
+                throw visitorError
+            }) { XCTAssertEqual($0 as NSError, visitorError) }
+            try store.withConnection { connection in
+                try connection.run("UPDATE scheduler_reservations SET capacity_digest = ? WHERE reservation_id = ?",
+                    bindings: [.text(String(repeating: "f", count: 64)), .text(final.reservationID.uuidString.lowercased())])
+            }
+            count = 0
+            XCTAssertThrowsError(try repository.visitReservationHistory(projectUUID: projectUUID) { _ in
+                count += 1
+                return true
+            })
+            XCTAssertEqual(count, 256)
+        }
+    }
+
     func testVerifiedRuntimeAbsenceIsAnExplicitReleaseProof() throws {
         try withRepository { repository, _ in
             let capacity = try self.nodeCapacity(

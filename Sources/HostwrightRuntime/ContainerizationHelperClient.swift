@@ -1241,7 +1241,10 @@ public actor ContainerizationHelperClient: RuntimeNetworkProvider {
         }
 
         return try await withTaskCancellationHandler {
-            let response = try await exchangeLaunchingIfNeeded(frame: frame, deadline: deadline)
+            let response = try await exchangeLaunchingIfNeeded(
+                frame: frame, deadline: deadline,
+                requiresActivationAuthority: [.create, .start, .restart].contains(operation)
+            )
             return try decode(
                 Result.self,
                 response: response,
@@ -1261,17 +1264,18 @@ public actor ContainerizationHelperClient: RuntimeNetworkProvider {
 
     private func exchangeLaunchingIfNeeded(
         frame: Data,
-        deadline: Int64
+        deadline: Int64,
+        requiresActivationAuthority: Bool = false
     ) async throws -> ContainerizationHelperTransportResponse {
         do {
-            return try await exchange(frame: frame, deadline: deadline)
+            return try await exchange(frame: frame, deadline: deadline, requiresActivationAuthority: requiresActivationAuthority)
         } catch ContainerizationHelperClientError.socketUnavailable {
-            return try await launchAndExchange(frame: frame, deadline: deadline)
+            return try await launchAndExchange(frame: frame, deadline: deadline, requiresActivationAuthority: requiresActivationAuthority)
         } catch ContainerizationHelperClientError.connectionFailed {
             if let process, !process.isRunning {
                 try removeStaleOwnedSocket(processID: process.processID)
                 self.process = nil
-                return try await launchAndExchange(frame: frame, deadline: deadline)
+                return try await launchAndExchange(frame: frame, deadline: deadline, requiresActivationAuthority: requiresActivationAuthority)
             }
             throw ContainerizationHelperClientError.connectionFailed
         } catch is CancellationError {
@@ -1281,7 +1285,8 @@ public actor ContainerizationHelperClient: RuntimeNetworkProvider {
 
     private func launchAndExchange(
         frame: Data,
-        deadline: Int64
+        deadline: Int64,
+        requiresActivationAuthority: Bool = false
     ) async throws -> ContainerizationHelperTransportResponse {
         if let process, !process.isRunning {
             try removeStaleOwnedSocket(processID: process.processID)
@@ -1302,7 +1307,7 @@ public actor ContainerizationHelperClient: RuntimeNetworkProvider {
                 throw ContainerizationHelperClientError.helperExited
             }
             do {
-                return try await exchange(frame: frame, deadline: deadline)
+                return try await exchange(frame: frame, deadline: deadline, requiresActivationAuthority: requiresActivationAuthority)
             } catch ContainerizationHelperClientError.socketUnavailable {
                 try await Task.sleep(for: .milliseconds(25))
             } catch ContainerizationHelperClientError.connectionFailed {
@@ -1316,9 +1321,11 @@ public actor ContainerizationHelperClient: RuntimeNetworkProvider {
 
     private func exchange(
         frame: Data,
-        deadline: Int64
+        deadline: Int64,
+        requiresActivationAuthority: Bool = false
     ) async throws -> ContainerizationHelperTransportResponse {
         let expectedPID = process?.isRunning == true ? process?.processID : nil
+        if requiresActivationAuthority { try RuntimeActivationAuthority.validate() }
         let response = try await transport.exchange(
             frame: frame,
             socketURL: configuration.socketURL,

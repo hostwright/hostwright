@@ -10,6 +10,55 @@ final class ContainerizationHelperClientTests: XCTestCase {
     private let projectUUID = "22222222-2222-4222-8222-222222222222"
     private let fencingToken = "33333333-3333-4333-8333-333333333333"
 
+    func testActivationAuthorityExpiresDuringHelperImageAndNegotiationPreparation() async throws {
+        for kind: PlannedRuntimeActionKind in [.create, .start, .restart] {
+            let fixture = try ClientFixture()
+            let capability = snapshot()
+            let helper = ScriptedHelper(snapshot: capability)
+            let gate = ActivationAuthorityTestGate()
+            let client = ContainerizationHelperClient(
+                configuration: fixture.configuration,
+                launcher: inertLauncher,
+                transport: ContainerizationHelperClientTransport { frame, _, _, _ in
+                    let response = try await helper.exchange(frame: frame, peerProcessID: 7)
+                    let payload = try ContainerizationHelperFraming.decodeSingleFrame(frame)
+                    let request = try JSONDecoder().decode(ActivationPreparationEnvelope.self, from: payload)
+                    let delayedOperation: ContainerizationHelperOperation = kind == .create ? .localImageEvidence : .negotiate
+                    if request.operation == delayedOperation {
+                        try await Task.sleep(for: .milliseconds(10))
+                        gate.deny()
+                    }
+                    return response
+                }
+            )
+            let adapter = AppleContainerizationRuntimeAdapter(client: client)
+            let identity = RuntimeServiceIdentity(projectName: "demo", serviceName: "api")
+            let action = PlannedRuntimeAction(
+                kind: kind, identity: identity, resourceIdentifier: identity.managedResourceIdentifier,
+                isDestructive: kind == .restart, summary: kind.rawValue,
+                desiredService: DesiredRuntimeService(identity: identity, image: "example.local/demo:latest")
+            )
+            let confirmation = RuntimeMutationConfirmation(
+                confirmed: true, reason: "Confirmed lifecycle", planHash: String(repeating: "a", count: 64),
+                context: mutationContext(digest: capability.canonicalSHA256)
+            )
+            do {
+                _ = try await RuntimeActivationAuthority.$validator.withValue({ try gate.validate() }) {
+                    try RuntimeActivationAuthority.validate()
+                    return try await adapter.execute(action, confirmation: confirmation)
+                }
+                XCTFail("Expired provider authority must reject \(kind).")
+            } catch let error as RuntimeActivationAuthorityRejection {
+                XCTAssertTrue(error.diagnostic.contains("Admission expired"))
+            }
+            let mutations = await helper.mutationOperationIDs()
+            XCTAssertTrue(mutations.isEmpty, "No activating helper RPC may be sent after authority expires.")
+            let operations = await helper.operations()
+            XCTAssertEqual(operations, kind == .create ? [.negotiate, .localImageEvidence] : [.negotiate])
+            XCTAssertNoThrow(try RuntimeActivationAuthority.validate())
+        }
+    }
+
     func testLiveCodeValidationUsesSecurityFrameworkSupportedFlags() throws {
         XCTAssertEqual(
             ContainerizationHelperLiveCodeValidation.flags.rawValue,
@@ -972,6 +1021,10 @@ final class ContainerizationHelperClientTests: XCTestCase {
             fencingToken: fencingToken
         )
     }
+}
+
+private struct ActivationPreparationEnvelope: Decodable {
+    let operation: ContainerizationHelperOperation
 }
 
 private func waitForHelperOperation(

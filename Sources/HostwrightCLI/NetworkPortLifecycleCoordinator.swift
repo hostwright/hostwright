@@ -124,6 +124,7 @@ enum NetworkPortLifecycleCoordinator {
         bindings: [LifecycleResourceBinding],
         store: SQLiteStateStore,
         occupiedPorts: Set<NetworkPortEndpoint> = [],
+        allowReleasingForRemoval: Bool = false,
         isAvailable: AvailabilityProbe = { _ in true },
         isExposureAvailable: ExposureAvailabilityProbe? = nil
     ) throws -> DesiredRuntimeState {
@@ -160,6 +161,7 @@ enum NetworkPortLifecycleCoordinator {
             },
             store: store,
             occupiedPorts: occupiedPorts,
+            allowReleasingForRemoval: allowReleasingForRemoval,
             isAvailable: isAvailable,
             isExposureAvailable: isExposureAvailable
         )
@@ -174,6 +176,7 @@ enum NetworkPortLifecycleCoordinator {
         resourceUUID: ResourceUUIDResolver,
         store: SQLiteStateStore,
         occupiedPorts: Set<NetworkPortEndpoint> = [],
+        allowReleasingForRemoval: Bool = false,
         isAvailable: AvailabilityProbe = { _ in true },
         isExposureAvailable: ExposureAvailabilityProbe? = nil
     ) throws -> DesiredRuntimeState {
@@ -297,7 +300,8 @@ enum NetworkPortLifecycleCoordinator {
                     providerGeneration: providerGeneration,
                     mapping: item.mapping,
                     bindAddress: item.bindAddress,
-                    desiredSHA256: desiredSHA256
+                    desiredSHA256: desiredSHA256,
+                    allowReleasingForRemoval: allowReleasingForRemoval
                 )
                 hostPort = existing.hostPort
             } else {
@@ -723,6 +727,9 @@ enum NetworkPortLifecycleCoordinator {
             if let priorFencingToken {
                 fences.insert(priorFencingToken)
             }
+            if let fence = try verifiedCreationFence(
+                node: node, plan: plan, container: container, store: store
+            ) { fences.insert(fence) }
             guard exactOwnership(
                 container.ownership,
                 node: node,
@@ -1110,7 +1117,8 @@ enum NetworkPortLifecycleCoordinator {
         providerGeneration: Int,
         mapping: RuntimePortMapping,
         bindAddress: String,
-        desiredSHA256: String
+        desiredSHA256: String,
+        allowReleasingForRemoval: Bool = false
     ) throws {
         guard record.projectUUID == projectUUID,
               record.resourceUUID == resourceUUID,
@@ -1126,7 +1134,8 @@ enum NetworkPortLifecycleCoordinator {
                 allocationKind(mapping.allocation),
               record.desiredSHA256 == desiredSHA256,
               record.lifecycleState == .reserved ||
-                record.lifecycleState == .active,
+                record.lifecycleState == .active ||
+                (allowReleasingForRemoval && record.lifecycleState == .releasing),
               mapping.allocation == .dynamic ||
                 record.hostPort == mapping.hostPort else {
             throw conflict(
@@ -1231,6 +1240,58 @@ enum NetworkPortLifecycleCoordinator {
                         $0.runtimeID ==
                             node.resourceIdentifier))
         }
+    }
+
+    private static func verifiedCreationFence(
+        node: LifecyclePlanNode, plan: LifecyclePlan,
+        container: RuntimeInventoryContainer, store: SQLiteStateStore
+    ) throws -> String? {
+        guard let observed = container.ownership else { return nil }
+        let workloadID = UUID(uuidString: HostwrightResourceUUID.legacy(
+            kind: "local-scheduler-workload", identifier: "\(node.resourceUUID):\(node.resourceGeneration)"
+        ))!
+        var verified: String?
+        var checkedPlans = Set<String>()
+        try store.schedulerAdmissions.visitReservationHistory(
+            projectUUID: plan.projectResourceUUID, workloadID: workloadID
+        ) { reservation in
+            guard let binding = reservation.runtimeOwnership,
+                  [.committed, .released].contains(reservation.status),
+                  binding.lifecycleWorkloadID == reservation.workloadID,
+                  binding.resourceUUID == node.resourceUUID,
+                  binding.resourceIdentifier == node.resourceIdentifier,
+                  binding.resourceGeneration == Int64(node.resourceGeneration),
+                  binding.projectUUID == plan.projectResourceUUID,
+                  binding.projectGeneration == Int64(plan.projectGeneration),
+                  binding.providerID == plan.providerID,
+                  binding.providerGeneration == Int64(plan.providerGeneration),
+                  binding.fencingToken == observed.fencingToken else { return true }
+            if checkedPlans.count >= 256 { checkedPlans.removeAll(keepingCapacity: true) }
+            guard checkedPlans.insert(reservation.lifecyclePlanDigest).inserted else { return true }
+            try store.operationGroups.visitProjectLifecycleHistory(
+                projectID: plan.projectID, planHash: reservation.lifecyclePlanDigest
+            ) { group in
+                let origin = try LifecyclePersistedIntentCodec.decode(group.intentJSONRedacted)
+                guard origin.planSHA256 == group.planHash else {
+                    throw conflict("Port release found invalid creation lineage.")
+                }
+                if group.status == .succeeded && group.fencingToken == binding.fencingToken &&
+                    origin.projectResourceUUID == plan.projectResourceUUID &&
+                    origin.projectGeneration == plan.projectGeneration &&
+                    origin.providerID == plan.providerID && origin.providerGeneration == plan.providerGeneration &&
+                    origin.nodes.contains(where: {
+                        $0.action == .create && $0.resourceUUID == node.resourceUUID &&
+                            $0.resourceIdentifier == node.resourceIdentifier &&
+                            $0.resourceGeneration == node.resourceGeneration &&
+                            ($0.serviceName == binding.serviceName || $0.serviceName == RuntimeServiceIdentity(
+                                projectName: binding.projectName, serviceName: binding.serviceName,
+                                instanceName: binding.instanceName
+                            ).displayName)
+                    }) { verified = binding.fencingToken }
+            }
+            return true
+        }
+        return verified
     }
 
     private static func exactOwnership(

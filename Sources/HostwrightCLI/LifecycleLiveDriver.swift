@@ -231,6 +231,7 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
                     NetworkPortLifecycleCoordinator.occupiedPorts(
                         in: inventory
                     ),
+                allowReleasingForRemoval: options.command == .rm,
                 isAvailable:
                     NetworkPortSocketAvailability.isAvailable,
                 isExposureAvailable: { endpoint, policy in

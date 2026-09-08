@@ -197,7 +197,21 @@ final class LifecycleLiveDriverTests: XCTestCase {
     }
 
     func testConfirmedRemovalCanRetryFailedDeletionWithoutReactivatingResource() throws {
-        try withFixture { fixture in
+        let manifest = """
+        version: 3
+        project: demo
+        imagePolicy: require-digest
+        services:
+          api:
+            image: registry.example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
+            ports:
+              - target: 8080
+                protocol: tcp
+        """
+        try withFixture(manifestOverride: manifest) { fixture in
             try fixture.wait {
                 await fixture.adapter.useAuthoritativeInventory()
                 await fixture.adapter.setPreserveExistingOwnershipFenceOnMutation(true)
@@ -208,7 +222,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
                 let preview = fixture.options(command: command, dryRun: true)
                 let result = LifecycleCommandRunner(options: preview,
                     driver: LifecycleLiveDriver(environment: environment, options: preview)).run()
-                XCTAssertEqual(result.exitCode, 0, result.standardError)
+                guard result.exitCode == 0 else { return result }
                 let plan = try JSONDecoder().decode(LifecyclePlan.self, from: Data(result.standardOutput.utf8))
                 let options = fixture.options(command: command, dryRun: false, confirmation: plan.planSHA256)
                 return LifecycleCommandRunner(options: options,

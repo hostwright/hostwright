@@ -46,6 +46,8 @@ Unattended recovery reads the latest persisted lifecycle intent in insertion ord
 
 Explicit persisted recovery uses the same capacity transaction and effect checks. Reusing an admission lineage requires its exact resource generation, local node, capacity generation, configuration, and profile. A changed or missing lineage refuses activation. Pressure rejection still allows exact compensating stop or removal. Existing recovery fixtures declare their isolated authority explicitly; production recovery has no implicit admission bypass.
 
+Each authenticated lifecycle request binds its operation identity to the subject, operation, and idempotency key, or to its request ID when no key is supplied. Retrying that identity replays its result; a new request can execute the same plan shape without reusing an earlier lifecycle group or operation fence. Explicit unattended recovery keys retain their durable identity.
+
 Recovery scans historical rows in bounded pages under a read transaction. The active-reservation limit does not truncate cumulative lifecycle history. Resource-generation and originating-plan lookups retain only relevant results, with bounded identity caches; malformed history still blocks authority. Restart and probe plans retain the exact observed replacement identifier after a rolling update.
 
 ## Qualification Boundary

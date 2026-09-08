@@ -15,6 +15,23 @@ import XCTest
 @testable import HostwrightState
 
 final class HostwrightDaemonControlServiceTests: XCTestCase {
+  func testLifecycleIdentitySeparatesRequestsAndPreservesAuthenticatedRetries() throws {
+    func identity(_ requestID: String, key: String? = nil, subject: String = "owner", operation: String = "up") throws -> String {
+      try HostwrightDaemonControlService.lifecycleOperationIdentity(
+        subjectID: subject,
+        request: ControlRequestEnvelope(
+          requestID: requestID, operation: operation, timeoutMilliseconds: 30_000,
+          idempotencyKey: key
+        )
+      )
+    }
+    XCTAssertNotEqual(try identity("first"), try identity("second"))
+    XCTAssertEqual(try identity("first", key: "same"), try identity("retry", key: "same"))
+    XCTAssertNotEqual(try identity("same"), try identity("first", key: "same"))
+    XCTAssertNotEqual(try identity("first", key: "same"), try identity("first", key: "same", subject: "other"))
+    XCTAssertNotEqual(try identity("first", key: "same"), try identity("first", key: "same", operation: "down"))
+  }
+
   func testSanitizedLocalControlFailurePreservesValidStateCodeAndMessage() {
     let response = LocalControlResponse(
       requestID: "sanitized-state-failure",

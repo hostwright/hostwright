@@ -153,8 +153,9 @@ final class LifecycleLiveDriverTests: XCTestCase {
                 await fixture.adapter.useAuthoritativeInventory()
                 await fixture.adapter.setPreserveExistingOwnershipFenceOnMutation(true)
             }
-            let environment = try fixture.localSchedulerEnvironment()
-            for command: LifecycleCommandKind in [.up, .restart, .down, .up, .rm] {
+            var environment = try fixture.localSchedulerEnvironment()
+            for (index, command) in (Array(repeating: [LifecycleCommandKind.up, .restart, .down], count: 3).flatMap({ $0 }) + [.rm]).enumerated() {
+                environment.lifecycleOperationIdempotencyKeySHA256 = String(format: "%064x", index + 1)
                 let preview = fixture.options(command: command, dryRun: true)
                 let previewDriver = LifecycleLiveDriver(environment: environment, options: preview)
                 let previewResult = LifecycleCommandRunner(options: preview, driver: previewDriver).run()
@@ -177,6 +178,33 @@ final class LifecycleLiveDriverTests: XCTestCase {
                 }
             }
             XCTAssertTrue(try fixture.wait { try await fixture.adapter.inventory() }.containers.isEmpty)
+        }
+    }
+
+    func testExplicitLifecycleIdentityReplaysWithoutDuplicateEffectsDespiteDifferentRequestIdentity() throws {
+        try withFixture { fixture in
+            try fixture.wait {
+                await fixture.adapter.useAuthoritativeInventory()
+                await fixture.adapter.setPreserveExistingOwnershipFenceOnMutation(true)
+            }
+            var environment = try fixture.localSchedulerEnvironment()
+            environment.lifecycleOperationIdempotencyKeySHA256 = String(repeating: "a", count: 64)
+            let preview = fixture.options(command: .up, dryRun: true)
+            let driver = LifecycleLiveDriver(environment: environment, options: preview)
+            let preparation = try driver.prepare(options: preview)
+            let compiled = try LifecycleCommandPlanCompiler().compile(options: preview, preparation: preparation)
+            let options = fixture.options(command: .up, dryRun: false, confirmation: compiled.plan.planSHA256)
+                .withOperationIdempotencyKeySHA256(String(repeating: "b", count: 64))
+            let first = try driver.execute(compiled: compiled, preparation: preparation, options: options)
+            XCTAssertEqual(first.status, .succeeded)
+            let mutations = try fixture.adapterSnapshot().mutations
+            environment.lifecycleOperationIdempotencyKeySHA256 = String(repeating: "c", count: 64)
+            let retry = try LifecycleLiveDriver(environment: environment, options: options)
+                .execute(compiled: compiled, preparation: preparation, options: options)
+            XCTAssertEqual(retry.status, .alreadySucceeded)
+            XCTAssertEqual(retry.groupID, first.groupID)
+            XCTAssertEqual(try fixture.adapterSnapshot().mutations, mutations)
+            XCTAssertEqual(try fixture.store.operationGroups.loadAll().count, 1)
         }
     }
 

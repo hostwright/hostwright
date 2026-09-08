@@ -57,6 +57,17 @@ public struct LifecycleCLIOptions: Equatable, Sendable {
         self.workloadProfileID = workloadProfileID
         self.workloadProfileSHA256 = workloadProfileSHA256
     }
+
+    func withOperationIdempotencyKeySHA256(_ key: String?) -> Self {
+        Self(
+            command: command, manifestPath: manifestPath, serviceNames: serviceNames,
+            stateDatabasePath: stateDatabasePath, confirmationPlanSHA256: confirmationPlanSHA256,
+            dryRun: dryRun, runtimeProvider: runtimeProvider, timeoutSeconds: timeoutSeconds,
+            parallelism: parallelism, output: output,
+            operationIdempotencyKeySHA256: operationIdempotencyKeySHA256 ?? key,
+            workloadProfileID: workloadProfileID, workloadProfileSHA256: workloadProfileSHA256
+        )
+    }
 }
 
 enum LifecycleCLIParser {

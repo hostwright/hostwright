@@ -361,6 +361,7 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
         preparation: LifecycleCommandPreparation,
         options: LifecycleCLIOptions
     ) throws -> LifecycleSagaExecutionResult {
+        let options = options.withOperationIdempotencyKeySHA256(environment.lifecycleOperationIdempotencyKeySHA256)
         let store = SQLiteStateStore(
             configuration: try hostwrightStateStoreConfiguration(
                 explicitPath: options.stateDatabasePath,

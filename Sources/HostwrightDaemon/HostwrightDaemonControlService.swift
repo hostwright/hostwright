@@ -60,6 +60,17 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
     )
   }
 
+  static func lifecycleOperationIdentity(
+    subjectID: String, request: ControlRequestEnvelope
+  ) throws -> String {
+    let identity = try ControlPlaneCanonicalJSON.encode([
+      subjectID, request.operation,
+      request.idempotencyKey == nil ? "request-id" : "idempotency-key",
+      request.idempotencyKey ?? request.requestID
+    ])
+    return SHA256.hash(data: identity).map { String(format: "%02x", $0) }.joined()
+  }
+
   static func recoverInterruptedUnaryRequests(
     repository: ControlRequestRepository,
     auditRecorder: any ControlSecurityAuditRecording,
@@ -441,6 +452,9 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
       mutatingOperations: mutatingOperations,
       requestPreparer: { peer, request in
         var peerEnvironment = commandEnvironment
+        peerEnvironment.lifecycleOperationIdempotencyKeySHA256 = try Self.lifecycleOperationIdentity(
+          subjectID: peer.binding.subject.identifier, request: request
+        )
         peerEnvironment.lifecycleScheduler = LocalLifecycleScheduler.context(
           subjectID: peer.binding.subject.identifier, store: store,
           configPath: schedulerManifestPath, pressure: schedulerPressureCoordinator

@@ -41,8 +41,13 @@ func hostwrightWaitForAsync<T: Sendable>(_ operation: @escaping @Sendable () asy
     let traceSession = HostwrightTraceContext.session
     let traceSpan = HostwrightTraceContext.span
 
-    Task {
+    let cancellation = HostwrightCancellationContext.token
+    try Task.checkCancellation()
+    guard cancellation?.isCancelled != true else { throw CancellationError() }
+    let child = Task {
         do {
+            guard cancellation?.isCancelled != true else { throw CancellationError() }
+            try Task.checkCancellation()
             box.result = Result.success(try await HostwrightTraceContext.withValues(
                 session: traceSession,
                 span: traceSpan,
@@ -54,7 +59,11 @@ func hostwrightWaitForAsync<T: Sendable>(_ operation: @escaping @Sendable () asy
         semaphore.signal()
     }
 
-    semaphore.wait()
+    while semaphore.wait(timeout: .now() + .milliseconds(25)) == .timedOut {
+        if Task.isCancelled || cancellation?.isCancelled == true {
+            child.cancel()
+        }
+    }
     return try box.result!.get()
 }
 

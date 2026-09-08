@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import HostwrightControlPlane
+import HostwrightCore
 
 final class ControlUnaryDispatcher: @unchecked Sendable {
   typealias Processor = @Sendable (
@@ -16,6 +17,7 @@ final class ControlUnaryDispatcher: @unchecked Sendable {
   )
   private let group = DispatchGroup()
   private let lock = NSLock()
+  private let cancellation = HostwrightCancellationToken()
   private var outstanding = 0
   private var failed = false
 
@@ -62,7 +64,10 @@ final class ControlUnaryDispatcher: @unchecked Sendable {
         group.leave()
       }
       do {
-        let result = try processor(request)
+        let result = try HostwrightCancellationContext.$token.withValue(cancellation) {
+          guard !cancellation.isCancelled else { throw CancellationError() }
+          return try processor(request)
+        }
         try context.writeResponse(result.response, deadline: result.deadline)
       } catch {
         failConnection()
@@ -84,7 +89,10 @@ final class ControlUnaryDispatcher: @unchecked Sendable {
       failed = true
       return true
     }
-    if shouldShutdown { _ = shutdown(descriptor, SHUT_RDWR) }
+    if shouldShutdown {
+      cancellation.cancel()
+      _ = shutdown(descriptor, SHUT_RDWR)
+    }
   }
 }
 

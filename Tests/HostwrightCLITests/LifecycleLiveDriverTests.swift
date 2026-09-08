@@ -148,7 +148,22 @@ final class LifecycleLiveDriverTests: XCTestCase {
     }
 
     func testLocalSchedulerRunsConfirmedLifecycleAndReleasesCapacity() throws {
-        try withFixture { fixture in
+        let manifest = """
+        version: 3
+        project: demo
+        imagePolicy: require-digest
+        services:
+          api:
+            image: registry.example/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+            resources:
+              requests: {cpus: 1, memory: 512MiB}
+              limits: {cpus: 1, memory: 512MiB}
+            ports:
+              - target: 8080
+                protocol: tcp
+
+        """
+        try withFixture(manifestOverride: manifest) { fixture in
             try fixture.wait {
                 await fixture.adapter.useAuthoritativeInventory()
                 await fixture.adapter.setPreserveExistingOwnershipFenceOnMutation(true)
@@ -171,7 +186,7 @@ final class LifecycleLiveDriverTests: XCTestCase {
                 if command == .down || command == .rm {
                     XCTAssertTrue(reservations.isEmpty, "\(command): \(reservations)")
                 } else {
-                    XCTAssertEqual(reservations.count, 1)
+                    XCTAssertEqual(reservations.count, 1, "cycle step \(index) \(command): \(result.standardOutput)")
                     let inventory = try fixture.wait { try await fixture.adapter.inventory() }
                     XCTAssertEqual(reservations.first?.status, .committed,
                         "expected: \(String(describing: reservations.first?.runtimeOwnership)); inventory: \(inventory.containers)")
@@ -3375,7 +3390,10 @@ actor LifecycleLiveTestAdapter:
                 resourceIdentifier: resource.resourceIdentifier,
                 image: resource.desired.image,
                 lifecycleState: lifecycleState(resource.lifecycle),
-                healthState: .notConfigured
+                healthState: .notConfigured,
+                ports: resource.desired.ports,
+                publishedSockets: resource.desired.publishedSockets,
+                mounts: resource.desired.mounts
             )
         }
         if includeMissingDesiredServices {

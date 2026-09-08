@@ -1193,13 +1193,10 @@ enum NetworkPortLifecycleCoordinator {
             id: plan.projectID
         )
         guard authorizedNode != nil,
-              node.fencingToken == group.fencingToken,
               group.groupKind == "lifecycle-v1",
               group.projectID == plan.projectID,
               group.status == .active,
               group.planHash == plan.planSHA256,
-              group.groupIdempotencyKey ==
-                plan.planSHA256,
               let persisted,
               persisted.status == .active,
               persisted.id == group.id,
@@ -1208,8 +1205,8 @@ enum NetworkPortLifecycleCoordinator {
               persisted.projectID == plan.projectID,
               persisted.groupKind == "lifecycle-v1",
               persisted.planHash == plan.planSHA256,
-              persisted.groupIdempotencyKey ==
-                plan.planSHA256,
+              persisted.groupIdempotencyKey == group.groupIdempotencyKey,
+              persisted.operationID == group.operationID,
               project.resourceUUID ==
                 plan.projectResourceUUID,
               project.providerGeneration ==

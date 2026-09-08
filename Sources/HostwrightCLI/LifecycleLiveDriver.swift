@@ -4297,8 +4297,7 @@ struct LifecycleLiveEffects:
         group.groupKind == "lifecycle-v1",
         group.projectID == context.plan.projectID,
         group.planHash == context.plan.planSHA256,
-        group.groupIdempotencyKey ==
-            context.plan.planSHA256,
+        group.operationID == context.operationID,
         group.fencingToken == context.fencingToken else {
             throw HostwrightDiagnostic(
                 code: .runtimeUnavailable,

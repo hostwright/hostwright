@@ -93,11 +93,19 @@ final class LifecycleLiveDriverTests: XCTestCase {
         try assertRecoveryAdmission(removeRequiredLabel: true)
     }
 
+    func testPersistedRecoveryUsesIndependentUniqueOperationFence() throws {
+        try assertRecoveryAdmission(independentOperationFence: true)
+    }
+
     func testPersistedRecoveryRejectsChangedManifestBeforeAdmission() throws {
         try assertRecoveryAdmission(changeManifest: true)
     }
 
-    private func assertRecoveryAdmission(removeRequiredLabel: Bool = false, changeManifest: Bool = false) throws {
+    private func assertRecoveryAdmission(
+        removeRequiredLabel: Bool = false,
+        changeManifest: Bool = false,
+        independentOperationFence: Bool = false
+    ) throws {
         try withFixture { fixture in
             try fixture.wait {
                 await fixture.adapter.useAuthoritativeInventory()
@@ -117,7 +125,14 @@ final class LifecycleLiveDriverTests: XCTestCase {
             let driver = LifecycleLiveDriver(environment: environment, options: preview)
             let preparation = try driver.prepare(options: preview)
             let compiled = try LifecycleCommandPlanCompiler().compile(options: preview, preparation: preparation)
-            let confirmed = fixture.options(command: .up, dryRun: false, confirmation: compiled.plan.planSHA256)
+            let operationKey = String(repeating: "e", count: 64)
+            let confirmed = fixture.options(
+                command: .up,
+                dryRun: false,
+                confirmation: compiled.plan.planSHA256
+            ).withOperationIdempotencyKeySHA256(
+                independentOperationFence ? operationKey : nil
+            )
             _ = try LifecycleSchedulerSession.admit(
                 context: context, store: fixture.store,
                 manifest: ManifestValidator.validated(fixture.manifestSource.value),
@@ -126,7 +141,19 @@ final class LifecycleLiveDriverTests: XCTestCase {
             )
             try persistLifecycleProject(fixture: fixture, preparation: preparation)
             let group = try persistLifecycleGroup(
-                store: fixture.store, plan: compiled.plan, status: .interrupted, completedNodeKeys: []
+                store: fixture.store,
+                plan: compiled.plan,
+                status: .interrupted,
+                completedNodeKeys: [],
+                groupIdempotencyKey: independentOperationFence
+                    ? operationKey
+                    : nil,
+                fencingToken: independentOperationFence
+                    ? HostwrightResourceUUID.legacy(
+                        kind: "lifecycle-fencing",
+                        identifier: operationKey
+                    )
+                    : nil
             )
             let inventory = try fixture.wait { try await fixture.adapter.inventory() }
             try LifecycleSchedulerSession.reconcile(
@@ -319,6 +346,21 @@ final class LifecycleLiveDriverTests: XCTestCase {
                 .withOperationIdempotencyKeySHA256(String(repeating: "b", count: 64))
             let first = try driver.execute(compiled: compiled, preparation: preparation, options: options)
             XCTAssertEqual(first.status, .succeeded)
+            let persisted = try XCTUnwrap(
+                fixture.store.operationGroups.load(id: first.groupID)
+            )
+            XCTAssertEqual(
+                persisted.fencingToken,
+                HostwrightResourceUUID.legacy(
+                    kind: "lifecycle-fencing",
+                    identifier: String(repeating: "b", count: 64)
+                )
+            )
+            XCTAssertTrue(
+                compiled.plan.nodes.allSatisfy {
+                    $0.fencingToken != persisted.fencingToken
+                }
+            )
             let mutations = try fixture.adapterSnapshot().mutations
             environment.lifecycleOperationIdempotencyKeySHA256 = String(repeating: "c", count: 64)
             let retry = try LifecycleLiveDriver(environment: environment, options: options)
@@ -3173,7 +3215,9 @@ private func persistLifecycleGroup(
     completedNodeKeys: Set<String>,
     terminalCheckpoint: String? = nil,
     terminalMetadataJSONRedacted: String = "{}",
-    recoveryStateJSONRedacted: String? = nil
+    recoveryStateJSONRedacted: String? = nil,
+    groupIdempotencyKey: String? = nil,
+    fencingToken: String? = nil
 ) throws -> OperationGroupRecord {
     let groupID = HostwrightResourceUUID.legacy(
         kind: "recovery-source-group",
@@ -3197,7 +3241,7 @@ private func persistLifecycleGroup(
         serviceName: nil,
         plannedActionType: plan.command.rawValue,
         status: .active,
-        groupIdempotencyKey: plan.planSHA256,
+        groupIdempotencyKey: groupIdempotencyKey ?? plan.planSHA256,
         planHash: plan.planSHA256,
         checkpoint: "intent-persisted",
         lockOwner: "recovery-test",
@@ -3209,7 +3253,7 @@ private func persistLifecycleGroup(
         createdAt: timestamp,
         updatedAt: timestamp,
         metadataJSONRedacted: "{}",
-        fencingToken: plan.nodes.first?.fencingToken,
+        fencingToken: fencingToken ?? plan.nodes.first?.fencingToken,
         intentJSONRedacted: try LifecyclePersistedIntentCodec.encode(
             plan,
             recoveryStateJSONRedacted:

@@ -1260,10 +1260,7 @@ struct LifecyclePersistedRecoveryDriver {
                   sourceGroup.intentJSONRedacted
               ),
               persistedPlan.planSHA256 == sourceGroup.planHash,
-              persistedPlan.projectID == sourceGroup.projectID,
-              persistedPlan.nodes.allSatisfy({
-                  $0.fencingToken == sourceGroup.fencingToken
-              }) else {
+              persistedPlan.projectID == sourceGroup.projectID else {
             throw LifecyclePersistedRecoveryError.confirmationMismatch
         }
         if request.action != .rollback ||

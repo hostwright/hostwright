@@ -858,9 +858,28 @@ public final class DesktopOperationsModel: ObservableObject {
             return
         } catch {
             guard !Task.isCancelled, self.connectionID == connectionID else { return }
-            let failure = Self.failure(from: error)
-            connectionState = .unavailable(failure)
-            lastFailure = failure
+            let statusRequest = Task.detached {
+                try Task.checkCancellation()
+                return try api.projectStatus()
+            }
+            defer { statusRequest.cancel() }
+            do {
+                let project = try await withTaskCancellationHandler(operation: {
+                    try await statusRequest.value
+                }, onCancel: {
+                    statusRequest.cancel()
+                })
+                guard !Task.isCancelled, self.connectionID == connectionID else { return }
+                apply(project: project)
+                connectionState = .connected
+            } catch is CancellationError {
+                return
+            } catch {
+                guard !Task.isCancelled, self.connectionID == connectionID else { return }
+                let failure = Self.failure(from: error)
+                connectionState = .unavailable(failure)
+                lastFailure = failure
+            }
         }
     }
 

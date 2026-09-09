@@ -135,6 +135,33 @@ final class DesktopOperationsModelTests: XCTestCase {
         XCTAssertNil(model.lastFailure)
     }
 
+    func testModelConnectsToForegroundDaemonWhenManagedServiceStatusIsUnavailable() async throws {
+        let transport = ScriptedTransport { request in
+            if request.operation == "daemon" {
+                return ControlResponseEnvelope(
+                    requestID: request.requestID,
+                    status: .error,
+                    reasonCode: .internalError,
+                    error: SanitizedError(
+                        code: "cliExitNonZero",
+                        message: "The delegated CLI command returned a non-zero exit status."
+                    )
+                )
+            }
+            return Self.completed(request: request, result: Self.statusJSON)
+        }
+        let model = DesktopOperationsModel(transport: transport)
+
+        model.connect()
+        await model.connectionTaskForTesting?.value
+
+        XCTAssertEqual(model.connectionState, .connected)
+        XCTAssertNil(model.daemonHealth)
+        XCTAssertEqual(model.projects.first?.name, "demo")
+        XCTAssertNil(model.lastFailure)
+        XCTAssertEqual(transport.requests.map(\.operation), ["daemon", "status"])
+    }
+
     func testEventAndLogStreamsOpenWithCreditsAcknowledgePayloadsAndFinish() async throws {
         let session = ScriptedStreamSession(
             eventFrames: [

@@ -71,12 +71,12 @@ The default registry is plan-visible and fail-closed:
 | Dependency lock integrity | Requires the canonical five exact `Package.swift` declarations and exact direct-pin locations, versions, and revisions in a structurally canonical `Package.resolved`; it validates only the `originHash` field's 64-lowercase-hex shape and does not recompute that hash. | Executable locally; both required inputs must be regular exact-commit blobs. Git snapshot observations and output hashes bind the input, but this is not origin-hash integrity, provenance, or license evidence. |
 | License policy | Requires canonical receipts for exactly the five supported direct pins and verifies each receipt's committed regular license-text blob by byte size and SHA-256. | Executable locally and fail-closed. [`contracts/v0.0.2/license-policy.json`](../../contracts/v0.0.2/license-policy.json) binds the exact pinned revisions to their committed upstream license texts, byte sizes, SHA-256 digests, and SPDX expressions. This is structural local integrity, not legal advice, a compliance conclusion, or transitive-license completeness. |
 | Secret scan | Bounded high-confidence byte-pattern scan over eligible immutable regular blobs from the detected commit, including ASCII patterns in arbitrary bytes and BOM-marked UTF-16 LE/BE, with no secret contents in the report. | Executable locally; validated unrelated symlinks and gitlinks are ignored, unsupported encodings block, Git snapshot observations and output hashes bind the input, and findings remain failures. The base test tree contains intentionally secret-shaped AWS/GitHub fixture strings, so a clean scan result is not assumed. |
-| Phase 08 protocol fuzz | Plan only. | Phase 08 authority is released; the lane remains blocked by the absent bounded fuzzing provider and corpus. |
-| ASan/TSan | Plan only. | Blocked; no sanitizer provider is wired. |
-| Semgrep/SAST | Plan only unless a safe provider is explicitly supplied. | Blocked when unavailable; tool presence alone cannot pass the lane. |
+| Critical parser/protocol fuzz | The registry remains plan-only; `scripts/phase15-critical-fuzz.sh` is the release gate provider. | The script builds the real Swift parser modules with AddressSanitizer and edge/inline-counter/PC-table coverage, links the local LLVM libFuzzer runtime, runs each frozen target for the requested bounded duration, and retains logs plus the evolved corpora. The required release invocation uses 300 seconds for each of Manifest v3, Compose import, control stream v2.1, Containerization helper v1 framing/JSON, Apple container JSON, and release-qualification JSON. |
+| ASan/TSan | The registry remains plan-only; `scripts/phase15-sanitizers.sh` is the release gate provider. | Runs the real Swift test suite serially in independent AddressSanitizer and ThreadSanitizer scratch trees and retains exact logs plus a source-bound receipt. |
+| Semgrep/SAST | The registry remains plan-only; `scripts/phase15-sast.sh` is the release gate provider. | Runs the committed Hostwright rules and the committed Semgrep Swift rules with metrics disabled. Findings and non-warning scan errors fail the lane; parser warnings remain explicit in the receipt and must be covered by the focused manual review. |
 | Documentation source contracts | Securely reads committed `check-doc-links.py` and `check-current-truth.py` bytes once, verifies their exact corpus identities, snapshots the detected commit through trusted bounded Git object reads, and executes the immutable validators only against that in-memory snapshot. | Executable locally. A missing, symlinked, changed, or concurrently replaced validator fails closed; transient working-tree swaps cannot change validator inputs, and persistent source drift yields stale evidence. It does not qualify the separately deployed website, CLI/example quickstarts, screenshots, search, accessibility, or clean-system runtime examples. |
 
-The registry records budgets, exclusions, corpus paths, sizes, and SHA-256 identities. It does not claim 24-hour fuzzing, ASan/TSan execution, an independent assessment, external supply-chain evidence, signing/notarization, or public submission.
+The registry records budgets, exclusions, corpus paths, sizes, and SHA-256 identities. A registry planning result does not claim a fuzz run. The retained `phase15-critical-fuzz` completion receipt binds the exact source commit, LLVM runtime, sanitizer coverage mode, per-target duration, log hashes, and every final corpus file. It does not claim an independent assessment, external supply-chain evidence, signing/notarization, or public submission.
 
 The former `--execute-safe-checks` cell option is intentionally rejected. Dependency-lock, license-policy, and secret-scan evidence must be requested through their exact first-class lane IDs so immutable commit inputs, Git command observations, and post-run source checks remain bound to the evidence.
 
@@ -97,5 +97,15 @@ scripts/phase15-release-qualification.sh
 ```
 
 It runs `swift package dump-package`, a serial product build, the filtered `HostwrightReleaseQualificationTests` target, canonical plan decoding, the JSON schema parse check, the exact-commit `documentation-source-contracts` lane, and `git diff --check`. The script succeeds only when that required local evidence is clean, `passed`, and free of blockers or failures; dirty or otherwise non-promotable evidence stops the script before its success message. It does not run the repository-wide suite or any live runtime.
+
+The coverage-guided release fuzz gate is separate because it consumes 30 minutes by design:
+
+```bash
+HOSTWRIGHT_FUZZ_DURATION_SECONDS=300 \
+HOSTWRIGHT_FUZZ_EVIDENCE_ROOT=/absolute/private/evidence/root \
+scripts/phase15-critical-fuzz.sh
+```
+
+The executable also supports deterministic corpus replay without libFuzzer. Set `HOSTWRIGHT_FUZZ_TARGET` to one frozen target and pass one or more corpus files to `hostwright-critical-fuzzer`.
 
 Remaining Phase 15 evidence gates include final convergence, long-duration fuzz/soak runs, physical multi-host and hardware qualification, independent security assessment, signing/notarization, trusted GA artifacts, and Homebrew submission.

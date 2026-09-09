@@ -96,6 +96,10 @@ let package = Package(
             name: "hostwright-runtime-conformance",
             targets: ["HostwrightRuntimeConformanceTool"]
         ),
+        .executable(
+            name: "hostwright-critical-fuzzer",
+            targets: ["HostwrightCriticalFuzzer"]
+        ),
         .library(name: "HostwrightCore", targets: ["HostwrightCore"]),
         .library(
             name: "HostwrightReleaseQualification",
@@ -327,6 +331,17 @@ let package = Package(
         .target(
             name: "HostwrightReleaseQualification",
             dependencies: ["HostwrightCore"]
+        ),
+        .executableTarget(
+            name: "HostwrightCriticalFuzzer",
+            dependencies: [
+                "HostwrightControlPlane",
+                "HostwrightImport",
+                "HostwrightManifest",
+                "HostwrightReleaseQualification",
+                "HostwrightRuntime"
+            ],
+            path: "Sources/HostwrightCriticalFuzzer"
         ),
         .target(
             name: "HostwrightControlPlane",

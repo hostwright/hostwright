@@ -590,13 +590,25 @@ public struct TrustedReleaseVerifier: Sendable {
         cancellation: SecureSubprocessCancellation,
         commands: inout [HostwrightEvidenceCommand]
     ) throws {
-        for relativePath in payloadFiles.map(\.path).filter({ $0.hasPrefix("bin/") }) {
+        let payloadPaths = Set(payloadFiles.map(\.path))
+        for relativePath in DistributionLayout.shippedBinaryPaths where payloadPaths.contains(relativePath) {
             try verifyExecutableTrust(
                 root.appendingPathComponent(relativePath),
                 signer: signer,
                 cancellation: cancellation,
                 commands: &commands
             )
+        }
+        if payloadPaths.contains(DistributionLayout.desktopExecutablePath) {
+            let desktopBundle = root.appendingPathComponent(DistributionLayout.desktopAppPath)
+            let bundleSignature = try runner.run(
+                executablePath: "/usr/bin/codesign",
+                arguments: ["--verify", "--deep", "--strict", "--verbose=4", desktopBundle.path],
+                label: "verify extracted Hostwright.app signature",
+                timeoutSeconds: 60,
+                cancellation: cancellation
+            )
+            commands.append(record("verify extracted Hostwright.app signature", bundleSignature))
         }
     }
 

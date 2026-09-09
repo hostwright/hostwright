@@ -14,6 +14,12 @@ public enum DesktopAccessibilityIdentifier {
     public static let reconnect = "desktop.connection.reconnect"
     public static let disconnect = "desktop.connection.disconnect"
     public static let statusRefresh = "desktop.status.refresh"
+    public static let lifecycleUp = "desktop.lifecycle.up.preview"
+    public static let lifecycleDown = "desktop.lifecycle.down.preview"
+    public static let lifecycleRestart = "desktop.lifecycle.restart.preview"
+    public static let lifecycleReview = "desktop.lifecycle.review"
+    public static let lifecycleConfirm = "desktop.lifecycle.confirm"
+    public static let lifecycleCancel = "desktop.lifecycle.cancel"
     public static let workspaceOverview = "desktop.workspace.overview"
     public static let workspaceEvents = "desktop.workspace.events"
     public static let workspaceLogs = "desktop.workspace.logs"
@@ -36,6 +42,126 @@ public enum DesktopAccessibilityIdentifier {
 
     public static func logsOpen(for serviceID: String) -> String {
         "\(logsOpenPrefix)\(serviceID)"
+    }
+}
+
+public enum DesktopLifecycleAction: String, CaseIterable, Codable, Equatable, Sendable {
+    case up
+    case down
+    case restart
+
+    public var label: String {
+        switch self {
+        case .up: return "Start"
+        case .down: return "Stop"
+        case .restart: return "Restart"
+        }
+    }
+
+    public var systemImage: String {
+        switch self {
+        case .up: return "play.fill"
+        case .down: return "stop.fill"
+        case .restart: return "arrow.clockwise"
+        }
+    }
+}
+
+public struct DesktopLifecyclePlanNode: Equatable, Identifiable, Sendable {
+    public let key: String
+    public let action: String
+    public let serviceName: String
+    public let resourceIdentifier: String
+
+    public var id: String { key }
+
+    public init(
+        key: String,
+        action: String,
+        serviceName: String,
+        resourceIdentifier: String
+    ) {
+        self.key = key
+        self.action = action
+        self.serviceName = serviceName
+        self.resourceIdentifier = resourceIdentifier
+    }
+}
+
+public struct DesktopLifecyclePlanReview: Equatable, Identifiable, Sendable {
+    public let action: DesktopLifecycleAction
+    public let manifestPath: String
+    public let manifestSHA256: String
+    public let observationSHA256: String
+    public let planSHA256: String
+    public let projectName: String
+    public let nodes: [DesktopLifecyclePlanNode]
+
+    public var id: String { planSHA256 }
+
+    public init(
+        action: DesktopLifecycleAction,
+        manifestPath: String,
+        manifestSHA256: String,
+        observationSHA256: String,
+        planSHA256: String,
+        projectName: String,
+        nodes: [DesktopLifecyclePlanNode]
+    ) {
+        self.action = action
+        self.manifestPath = manifestPath
+        self.manifestSHA256 = manifestSHA256
+        self.observationSHA256 = observationSHA256
+        self.planSHA256 = planSHA256
+        self.projectName = projectName
+        self.nodes = nodes
+    }
+}
+
+public struct DesktopLifecycleExecutionResult: Equatable, Sendable {
+    public let action: DesktopLifecycleAction
+    public let groupID: String
+    public let planSHA256: String
+    public let completedNodeKeys: [String]
+
+    public init(
+        action: DesktopLifecycleAction,
+        groupID: String,
+        planSHA256: String,
+        completedNodeKeys: [String]
+    ) {
+        self.action = action
+        self.groupID = groupID
+        self.planSHA256 = planSHA256
+        self.completedNodeKeys = completedNodeKeys
+    }
+}
+
+public enum DesktopLifecycleState: Equatable, Sendable {
+    case idle
+    case previewing(DesktopLifecycleAction)
+    case awaitingConfirmation(DesktopLifecyclePlanReview)
+    case executing(DesktopLifecyclePlanReview)
+    case succeeded(DesktopLifecycleExecutionResult)
+    case cancelled(DesktopLifecycleAction)
+
+    public var isBusy: Bool {
+        switch self {
+        case .previewing, .executing: return true
+        default: return false
+        }
+    }
+
+    public var reviewPlan: DesktopLifecyclePlanReview? {
+        switch self {
+        case .awaitingConfirmation(let plan), .executing(let plan): return plan
+        default: return nil
+        }
+    }
+
+    public var isExecuting: Bool {
+        if case .executing = self { return true }
+        return false
     }
 }
 

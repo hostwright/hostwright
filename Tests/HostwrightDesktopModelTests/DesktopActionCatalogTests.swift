@@ -37,10 +37,10 @@ final class DesktopActionCatalogTests: XCTestCase {
             Set(DesktopActionCatalog.guiActions.map(\.identifier)).count
         )
         XCTAssertEqual(DesktopActionCatalog.contractVersion, 1)
-        XCTAssertEqual(DesktopActionCatalog.controlProtocolRevision, "2.1")
+        XCTAssertEqual(DesktopActionCatalog.controlProtocolRevision, "2.2")
         XCTAssertEqual(
             DesktopActionCatalog.parityStatus,
-            .phase09PromotionRequired
+            .localLifecyclePromoted
         )
 
         let document = DesktopActionCatalog.document
@@ -112,6 +112,12 @@ final class DesktopActionCatalogTests: XCTestCase {
             DesktopAccessibilityIdentifier.reconnect,
             DesktopAccessibilityIdentifier.disconnect,
             DesktopAccessibilityIdentifier.statusRefresh,
+            DesktopAccessibilityIdentifier.lifecycleUp,
+            DesktopAccessibilityIdentifier.lifecycleDown,
+            DesktopAccessibilityIdentifier.lifecycleRestart,
+            DesktopAccessibilityIdentifier.lifecycleReview,
+            DesktopAccessibilityIdentifier.lifecycleConfirm,
+            DesktopAccessibilityIdentifier.lifecycleCancel,
             DesktopAccessibilityIdentifier.workspaceOverview,
             DesktopAccessibilityIdentifier.workspaceEvents,
             DesktopAccessibilityIdentifier.workspaceLogs,
@@ -143,6 +149,11 @@ final class DesktopActionCatalogTests: XCTestCase {
             DesktopAccessibilityIdentifier.reconnect,
             DesktopAccessibilityIdentifier.disconnect,
             DesktopAccessibilityIdentifier.statusRefresh,
+            DesktopAccessibilityIdentifier.lifecycleUp,
+            DesktopAccessibilityIdentifier.lifecycleDown,
+            DesktopAccessibilityIdentifier.lifecycleRestart,
+            DesktopAccessibilityIdentifier.lifecycleConfirm,
+            DesktopAccessibilityIdentifier.lifecycleCancel,
             DesktopAccessibilityIdentifier.eventsRefresh,
             DesktopAccessibilityIdentifier.eventsCancel,
             DesktopAccessibilityIdentifier.selectedLogsOpen,
@@ -262,12 +273,26 @@ final class DesktopActionCatalogTests: XCTestCase {
         XCTAssertEqual(unknown.state, .blocked)
         XCTAssertEqual(unknown.reason, .unknownAction)
 
-        for action in DesktopActionCatalog.cliActions where action.mutability == .requiresReview {
+        for action in DesktopActionCatalog.cliActions
+            where action.mutability == .requiresReview
+                && !["up", "down", "restart"].contains(action.command) {
             XCTAssertEqual(action.confirmationReview, .phase09Review, action.command)
             XCTAssertTrue(action.guiElementIdentifiers.isEmpty, action.command)
             XCTAssertFalse(
                 DesktopActionCatalog.guiActions.contains { $0.command == action.command },
                 action.command
+            )
+        }
+
+        for command in ["up", "down", "restart"] {
+            let action = try XCTUnwrap(DesktopActionCatalog.cliAction(command: command))
+            XCTAssertEqual(action.mutability, .requiresReview)
+            XCTAssertEqual(action.confirmationReview, .exactPlan)
+            XCTAssertEqual(action.guiElementIdentifiers.count, 1)
+            XCTAssertNotNil(
+                DesktopActionCatalog.guiAction(
+                    identifier: try XCTUnwrap(action.guiElementIdentifiers.first)
+                )
             )
         }
     }

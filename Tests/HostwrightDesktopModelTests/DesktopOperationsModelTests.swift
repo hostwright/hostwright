@@ -593,6 +593,156 @@ final class DesktopOperationsModelTests: XCTestCase {
         )
     }
 
+    func testLifecycleAPIUsesManifestBoundPreviewAndExactConfirmationRoutes() throws {
+        let hashA = String(repeating: "a", count: 64)
+        let hashB = String(repeating: "b", count: 64)
+        let hashC = String(repeating: "c", count: 64)
+        let group = "11111111-1111-4111-8111-111111111111"
+        let transport = ScriptedTransport { request in
+            let arguments = Self.arguments(from: request)
+            if arguments.contains("--dry-run") {
+                return Self.cliCompleted(
+                    request: request,
+                    standardOutput: Self.lifecyclePlanJSON(
+                        action: "up",
+                        manifestSHA256: hashA,
+                        observationSHA256: hashB,
+                        planSHA256: hashC
+                    )
+                )
+            }
+            return Self.cliCompleted(
+                request: request,
+                standardOutput: Self.lifecycleResultJSON(
+                    groupID: group,
+                    planSHA256: hashC
+                )
+            )
+        }
+        let api = DesktopControlAPIClient(transport: transport)
+        let cancellation = PersistentControlRequestCancellation()
+        let manifest = "/Users/tester/project.yml"
+
+        let plan = try api.lifecyclePreview(
+            action: .up,
+            manifestPath: manifest,
+            cancellation: cancellation
+        )
+        XCTAssertEqual(plan.action, .up)
+        XCTAssertEqual(plan.manifestPath, manifest)
+        XCTAssertEqual(plan.manifestSHA256, hashA)
+        XCTAssertEqual(plan.observationSHA256, hashB)
+        XCTAssertEqual(plan.planSHA256, hashC)
+        XCTAssertEqual(plan.nodes.map(\.action), ["create"])
+
+        let result = try api.executeLifecycle(plan: plan, cancellation: cancellation)
+        XCTAssertEqual(result.groupID, group)
+        XCTAssertEqual(result.planSHA256, hashC)
+        XCTAssertEqual(result.completedNodeKeys, ["create-web"])
+        XCTAssertEqual(
+            transport.requests.map(Self.arguments(from:)),
+            [
+                ["up", manifest, "--dry-run", "--output", "json"],
+                ["up", manifest, "--confirm-plan", hashC, "--output", "json"],
+            ]
+        )
+    }
+
+    func testLifecycleModelRejectsDuplicateAndStaleConfirmationThenExecutesExactPlan() async throws {
+        let planSHA256 = String(repeating: "c", count: 64)
+        let transport = ScriptedTransport { request in
+            if request.operation == "daemon" {
+                return Self.completed(
+                    request: request,
+                    result: .object([
+                        "exitCode": .integer(0),
+                        "resultSchemaVersion": .integer(1),
+                        "standardError": .string(""),
+                        "standardOutput": .string(Self.daemonHealthJSON),
+                    ])
+                )
+            }
+            if request.operation == "status" {
+                return Self.completed(request: request, result: Self.statusJSON)
+            }
+            let arguments = Self.arguments(from: request)
+            if arguments.contains("--dry-run") {
+                return Self.cliCompleted(
+                    request: request,
+                    standardOutput: Self.lifecyclePlanJSON(
+                        action: "up",
+                        manifestSHA256: String(repeating: "a", count: 64),
+                        observationSHA256: String(repeating: "b", count: 64),
+                        planSHA256: planSHA256
+                    )
+                )
+            }
+            return Self.cliCompleted(
+                request: request,
+                standardOutput: Self.lifecycleResultJSON(
+                    groupID: "11111111-1111-4111-8111-111111111111",
+                    planSHA256: planSHA256
+                )
+            )
+        }
+        let model = DesktopOperationsModel(transport: transport)
+        model.connect()
+        await model.connectionTaskForTesting?.value
+
+        model.previewLifecycle(.up, manifestPath: "/Users/tester/project.yml")
+        await model.lifecycleTaskForTesting?.value
+        guard case .awaitingConfirmation(let plan) = model.lifecycleState else {
+            return XCTFail("Expected a reviewed lifecycle plan.")
+        }
+        let countAfterPreview = transport.requests.count
+        model.previewLifecycle(.down, manifestPath: "/Users/tester/project.yml")
+        XCTAssertEqual(transport.requests.count, countAfterPreview)
+
+        model.confirmLifecycle(planSHA256: String(repeating: "d", count: 64))
+        XCTAssertEqual(model.lifecycleState, .idle)
+        XCTAssertEqual(model.lastFailure?.code, "lifecycle.staleConfirmation")
+
+        model.previewLifecycle(.up, manifestPath: "/Users/tester/project.yml")
+        await model.lifecycleTaskForTesting?.value
+        model.confirmLifecycle(planSHA256: plan.planSHA256)
+        await model.lifecycleTaskForTesting?.value
+        guard case .succeeded(let result) = model.lifecycleState else {
+            return XCTFail("Expected exact confirmed lifecycle success.")
+        }
+        XCTAssertEqual(result.planSHA256, planSHA256)
+        XCTAssertEqual(
+            transport.requests.filter { Self.arguments(from: $0).contains("--confirm-plan") }.count,
+            1
+        )
+    }
+
+    func testLifecycleCancellationAndDisconnectCloseTheActiveControlRequest() async {
+        for disconnect in [false, true] {
+            let transport = CancellableLifecycleTransport(
+                daemonResponse: Self.daemonHealthJSON,
+                statusResponse: Self.statusJSON
+            )
+            let model = DesktopOperationsModel(transport: transport)
+            model.connect()
+            await model.connectionTaskForTesting?.value
+            model.previewLifecycle(.restart, manifestPath: "/Users/tester/project.yml")
+            await fulfillment(of: [transport.started], timeout: 1)
+            let task = model.lifecycleTaskForTesting
+
+            if disconnect {
+                model.disconnect()
+                XCTAssertEqual(model.connectionState, .disconnected)
+                XCTAssertEqual(model.lifecycleState, .idle)
+            } else {
+                model.cancelLifecycle()
+                XCTAssertEqual(model.lifecycleState, .cancelled(.restart))
+            }
+            await task?.value
+            XCTAssertTrue(transport.observedCancellation)
+            XCTAssertNil(model.lastFailure)
+        }
+    }
+
     nonisolated private static let daemonHealthJSON = """
     {
       "schemaVersion": 1,
@@ -652,6 +802,52 @@ final class DesktopOperationsModelTests: XCTestCase {
             reasonCode: .completed,
             result: result
         )
+    }
+
+    nonisolated private static func cliCompleted(
+        request: ControlRequestEnvelope,
+        standardOutput: String
+    ) -> ControlResponseEnvelope {
+        completed(
+            request: request,
+            result: .object([
+                "exitCode": .integer(0),
+                "resultSchemaVersion": .integer(1),
+                "standardError": .string(""),
+                "standardOutput": .string(standardOutput),
+            ])
+        )
+    }
+
+    nonisolated private static func arguments(
+        from request: ControlRequestEnvelope
+    ) -> [String] {
+        guard case .object(let fields)? = request.body,
+              case .array(let values)? = fields["arguments"] else { return [] }
+        return values.compactMap {
+            guard case .string(let value) = $0 else { return nil }
+            return value
+        }
+    }
+
+    nonisolated private static func lifecyclePlanJSON(
+        action: String,
+        manifestSHA256: String,
+        observationSHA256: String,
+        planSHA256: String
+    ) -> String {
+        """
+        {"schemaVersion":1,"command":"\(action)","manifestSHA256":"\(manifestSHA256)","observationSHA256":"\(observationSHA256)","planSHA256":"\(planSHA256)","projectName":"demo","nodes":[{"key":"create-web","action":"create","serviceName":"demo/web","resourceIdentifier":"resource-web"}]}
+        """
+    }
+
+    nonisolated private static func lifecycleResultJSON(
+        groupID: String,
+        planSHA256: String
+    ) -> String {
+        """
+        {"checkpoint":"verified","completedNodeKeys":["create-web"],"groupID":"\(groupID)","kind":"lifecycle-result","planSHA256":"\(planSHA256)","status":"succeeded"}
+        """
     }
 
     private func assertDisconnectFencesLateConnectionResult(
@@ -981,6 +1177,66 @@ private final class ScriptedTransport: DesktopControlTransport, @unchecked Senda
             code: "test.noSession",
             message: "The test transport has no stream session."
         )
+    }
+}
+
+private final class CancellableLifecycleTransport: DesktopControlTransport, @unchecked Sendable {
+    let started = XCTestExpectation(description: "lifecycle request entered transport")
+
+    private let daemonResponse: String
+    private let statusResponse: ControlPlaneJSONValue
+    private let lock = NSLock()
+    private var didObserveCancellation = false
+
+    init(daemonResponse: String, statusResponse: ControlPlaneJSONValue) {
+        self.daemonResponse = daemonResponse
+        self.statusResponse = statusResponse
+    }
+
+    var observedCancellation: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return didObserveCancellation
+    }
+
+    func send(_ request: ControlRequestEnvelope) throws -> ControlResponseEnvelope {
+        if request.operation == "daemon" {
+            return ControlResponseEnvelope(
+                requestID: request.requestID,
+                status: .completed,
+                reasonCode: .completed,
+                result: .object([
+                    "exitCode": .integer(0),
+                    "resultSchemaVersion": .integer(1),
+                    "standardError": .string(""),
+                    "standardOutput": .string(daemonResponse),
+                ])
+            )
+        }
+        return ControlResponseEnvelope(
+            requestID: request.requestID,
+            status: .completed,
+            reasonCode: .completed,
+            result: statusResponse
+        )
+    }
+
+    func send(
+        _ request: ControlRequestEnvelope,
+        cancellation: PersistentControlRequestCancellation
+    ) throws -> ControlResponseEnvelope {
+        started.fulfill()
+        while !cancellation.isCancelled {
+            usleep(1_000)
+        }
+        lock.lock()
+        didObserveCancellation = true
+        lock.unlock()
+        throw PersistentControlClientError.connectionClosed
+    }
+
+    func connectSession() throws -> any DesktopControlSession {
+        throw DesktopControlFailure(code: "test.noSession", message: "No stream session.")
     }
 }
 

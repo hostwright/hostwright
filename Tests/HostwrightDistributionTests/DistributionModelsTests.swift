@@ -160,6 +160,42 @@ final class DistributionModelsTests: XCTestCase {
         )
     }
 
+    func testArtifactSchemaTwoPreservesPreDesktopReleaseLayout() throws {
+        let manifest = DistributionArtifactManifest(
+            schemaVersion: 2,
+            artifactID: "hostwright-0.0.2-dev.12-macos-arm64-\(commit.prefix(12))",
+            packageVersion: "0.0.2-dev.12",
+            sourceCommit: commit,
+            sourceDirty: false,
+            architecture: "arm64",
+            createdAt: "2026-07-25T12:00:00Z",
+            files: DistributionLayout.legacyPayloadModesV4.keys.sorted().map {
+                DistributionFileRecord(
+                    path: $0,
+                    sha256: digest,
+                    sizeBytes: 1,
+                    mode: DistributionLayout.legacyPayloadModesV4[$0]!
+                )
+            }
+        )
+        XCTAssertNoThrow(try manifest.validate())
+        XCTAssertEqual(
+            DistributionLayout.executableNames(
+                payloadPaths: Set(manifest.files.map(\.path))
+            ),
+            [
+                "hostwright",
+                "hostwright-control",
+                "hostwright-containerization-helper",
+                "hostwright-network-helper",
+                "hostwright-network-provider-worker",
+                "hostwright-storage-helper",
+                "hostwright-dist",
+                "hostwrightd",
+            ]
+        )
+    }
+
     func testPathPolicyRejectsAbsoluteTraversalControlAndNestedFileNames() {
         XCTAssertTrue(DistributionPathPolicy.isSafeRelativePath("share/doc/hostwright/LICENSE"))
         XCTAssertFalse(DistributionPathPolicy.isSafeRelativePath("/tmp/file"))

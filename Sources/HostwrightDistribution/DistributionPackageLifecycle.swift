@@ -711,6 +711,7 @@ public struct DistributionPackageLifecycle: Sendable {
         }
         let team = try verifySignatures(
             root: root,
+            payloadPaths: Set(manifest.files.map(\.path)),
             cancellation: cancellation
         )
         return (manifest, team)
@@ -718,11 +719,12 @@ public struct DistributionPackageLifecycle: Sendable {
 
     private func verifySignatures(
         root: URL,
+        payloadPaths: Set<String>,
         cancellation: SecureSubprocessCancellation
     ) throws -> String {
         guard verifyExecutableSignatures else { return "TESTTEAM01" }
         var teamIdentifier: String?
-        for path in DistributionLayout.shippedBinaryPaths {
+        for path in DistributionLayout.shippedBinaryPaths where payloadPaths.contains(path) {
             let binary = root.appendingPathComponent(path)
             _ = try runner.run(
                 executablePath: "/usr/bin/codesign",
@@ -753,6 +755,16 @@ public struct DistributionPackageLifecycle: Sendable {
                 )
             }
             teamIdentifier = current
+        }
+        if payloadPaths.contains(DistributionLayout.desktopExecutablePath) {
+            let desktopBundle = root.appendingPathComponent(DistributionLayout.desktopAppPath)
+            _ = try runner.run(
+                executablePath: "/usr/bin/codesign",
+                arguments: ["--verify", "--deep", "--strict", "--verbose=4", desktopBundle.path],
+                label: "verify staged Hostwright.app signature",
+                timeoutSeconds: 30,
+                cancellation: cancellation
+            )
         }
         guard let teamIdentifier else {
             throw DistributionError.invalidArtifact("package contains no signed executables")

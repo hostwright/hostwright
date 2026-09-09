@@ -224,7 +224,8 @@ public struct TrustedReleaseManifest: Codable, Equatable, Sendable {
             throw DistributionError.invalidManifest("application and installer identities must belong to one Developer ID team")
         }
         guard let expectedModes = DistributionLayout.trustedPayloadModes(
-            schemaVersion: schemaVersion
+            schemaVersion: schemaVersion,
+            paths: Set(payloadFiles.map(\.path))
         ),
               payloadFiles.map(\.path) == payloadFiles.map(\.path).sorted(),
               Set(payloadFiles.map(\.path)) == Set(expectedModes.keys),

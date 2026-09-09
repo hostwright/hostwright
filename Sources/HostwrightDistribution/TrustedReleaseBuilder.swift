@@ -332,6 +332,40 @@ public struct TrustedReleaseBuilder: Sendable {
                 commands.append(record("inspect containerization helper entitlements", entitlements))
             }
         }
+        let desktopBundle = signedRoot.appendingPathComponent(DistributionLayout.desktopAppPath)
+        let signDesktopBundle = try runner.run(
+            executablePath: "/usr/bin/codesign",
+            arguments: [
+                "--force", "--options", "runtime", "--timestamp",
+                "--sign", applicationResolution.identity.sha1Fingerprint,
+                desktopBundle.path,
+            ],
+            label: "Developer ID sign Hostwright.app",
+            timeoutSeconds: 300,
+            cancellation: cancellation
+        )
+        commands.append(record("Developer ID sign Hostwright.app", signDesktopBundle))
+        let verifyDesktopBundle = try runner.run(
+            executablePath: "/usr/bin/codesign",
+            arguments: ["--verify", "--deep", "--strict", "--verbose=4", desktopBundle.path],
+            label: "verify Developer ID signature for Hostwright.app",
+            timeoutSeconds: 30,
+            cancellation: cancellation
+        )
+        commands.append(record("verify Developer ID signature for Hostwright.app", verifyDesktopBundle))
+        let desktopExecutable = signedRoot.appendingPathComponent(
+            DistributionLayout.desktopExecutablePath
+        )
+        let desktopDetails = try runner.run(
+            executablePath: "/usr/bin/codesign",
+            arguments: ["--display", "--verbose=4", desktopExecutable.path],
+            label: "inspect Developer ID signature for Hostwright.app",
+            timeoutSeconds: 30,
+            cancellation: cancellation
+        )
+        signedBinaryCDHashes[DistributionLayout.desktopExecutablePath] =
+            try requireSignedExecutableCDHash(desktopDetails)
+        commands.append(record("inspect Developer ID signature for Hostwright.app", desktopDetails))
 
         let createdAt = DistributionTimestamp.string(Date())
         let signedFiles = try DistributionLayout.payloadModes.keys.sorted().map { path in

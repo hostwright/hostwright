@@ -3,6 +3,7 @@ import HostwrightCommandTransport
 
 public enum DesktopActionCatalogParityStatus: String, Codable, Equatable, Sendable {
     case phase09PromotionRequired = "phase09-promotion-required"
+    case localLifecyclePromoted = "local-lifecycle-promoted"
 }
 
 public enum DesktopActionMutability: String, Codable, Equatable, Sendable {
@@ -19,6 +20,7 @@ public enum DesktopActionReviewState: String, Codable, Equatable, Sendable {
 public struct DesktopActionConfirmationReview: Codable, Equatable, Sendable {
     public static let notRequiredReasonCode = "desktop.confirmation.notRequired"
     public static let phase09ReviewReasonCode = "desktop.confirmation.phase09ReviewRequired"
+    public static let exactPlanReasonCode = "desktop.confirmation.exactPlanRequired"
     public static let notExposedReasonCode = "desktop.action.notExposed"
 
     public let state: DesktopActionReviewState
@@ -47,6 +49,12 @@ public struct DesktopActionConfirmationReview: Codable, Equatable, Sendable {
         message: "Review authorization and the exact Control API operation after Phase 09 promotion."
     )
 
+    public static let exactPlan = Self(
+        state: .required,
+        reasonCode: exactPlanReasonCode,
+        message: "Review the exact manifest-bound plan and confirm its SHA-256 before execution."
+    )
+
     public static let notExposed = Self(
         state: .blocked,
         reasonCode: notExposedReasonCode,
@@ -70,6 +78,8 @@ public enum DesktopActionAvailabilityReason: String, Codable, Equatable, Sendabl
     case requiresService = "requires-service"
     case requiresObservedResource = "requires-observed-resource"
     case streamNotRunning = "stream-not-running"
+    case lifecycleBusy = "lifecycle-busy"
+    case requiresConfirmation = "requires-confirmation"
     case notExposed = "not-exposed"
     case phase09PromotionRequired = "phase09-promotion-required"
     case unknownAction = "unknown-action"
@@ -119,6 +129,9 @@ public enum DesktopGUIActionKind: String, Codable, Equatable, Sendable {
     case eventStream = "event-stream"
     case logStream = "log-stream"
     case streamCancellation = "stream-cancellation"
+    case lifecyclePreview = "lifecycle-preview"
+    case lifecycleConfirmation = "lifecycle-confirmation"
+    case lifecycleCancellation = "lifecycle-cancellation"
     case window
     case application
 }
@@ -329,11 +342,13 @@ public enum DesktopActionFailureContract {
 
 public enum DesktopActionCatalog {
     public static let contractVersion = 1
-    public static let controlProtocolRevision = "2.1"
+    public static let controlProtocolRevision = "2.2"
     public static let sourceCLIInventory =
         "contracts/v0.0.2/phase09-cli-parity-inventory.json"
     public static let parityStatus: DesktopActionCatalogParityStatus =
-        .phase09PromotionRequired
+        .localLifecyclePromoted
+
+    private static let promotedLifecycleCommands: Set<String> = ["up", "down", "restart"]
 
     private static let knownReadOnlyCommands: Set<String> = [
         "version", "help", "capabilities", "observability", "runtime", "paths",
@@ -383,12 +398,12 @@ public enum DesktopActionCatalog {
             DesktopAccessibilityIdentifier.statusRefresh,
         ]),
         cli("apply", .persistentControlAPI),
-        cli("up", .persistentControlAPI),
-        cli("down", .persistentControlAPI),
+        cli("up", .persistentControlAPI, guiElements: [DesktopAccessibilityIdentifier.lifecycleUp]),
+        cli("down", .persistentControlAPI, guiElements: [DesktopAccessibilityIdentifier.lifecycleDown]),
         cli("run", .persistentControlAPI),
         cli("start", .persistentControlAPI),
         cli("stop", .persistentControlAPI),
-        cli("restart", .persistentControlAPI),
+        cli("restart", .persistentControlAPI, guiElements: [DesktopAccessibilityIdentifier.lifecycleRestart]),
         cli("rm", .persistentControlAPI),
         cli("update", .persistentControlAPI),
         cli("exec", .persistentControlAPI),
@@ -418,6 +433,12 @@ public enum DesktopActionCatalog {
         element(DesktopAccessibilityIdentifier.reconnect, .action, command: nil),
         element(DesktopAccessibilityIdentifier.disconnect, .action, command: nil),
         element(DesktopAccessibilityIdentifier.statusRefresh, .action, command: "status"),
+        element(DesktopAccessibilityIdentifier.lifecycleUp, .action, command: "up"),
+        element(DesktopAccessibilityIdentifier.lifecycleDown, .action, command: "down"),
+        element(DesktopAccessibilityIdentifier.lifecycleRestart, .action, command: "restart"),
+        element(DesktopAccessibilityIdentifier.lifecycleReview, .region, command: nil),
+        element(DesktopAccessibilityIdentifier.lifecycleConfirm, .action, command: nil),
+        element(DesktopAccessibilityIdentifier.lifecycleCancel, .action, command: nil),
         element(DesktopAccessibilityIdentifier.workspaceOverview, .navigation, command: nil),
         element(DesktopAccessibilityIdentifier.workspaceEvents, .navigation, command: nil),
         element(DesktopAccessibilityIdentifier.workspaceLogs, .navigation, command: nil),
@@ -445,6 +466,16 @@ public enum DesktopActionCatalog {
         gui(DesktopAccessibilityIdentifier.reconnect, .session, command: nil),
         gui(DesktopAccessibilityIdentifier.disconnect, .session, command: nil),
         gui(DesktopAccessibilityIdentifier.statusRefresh, .statusRequest, command: "status"),
+        gui(DesktopAccessibilityIdentifier.lifecycleUp, .lifecyclePreview, command: "up"),
+        gui(DesktopAccessibilityIdentifier.lifecycleDown, .lifecyclePreview, command: "down"),
+        gui(DesktopAccessibilityIdentifier.lifecycleRestart, .lifecyclePreview, command: "restart"),
+        gui(
+            DesktopAccessibilityIdentifier.lifecycleConfirm,
+            .lifecycleConfirmation,
+            command: nil,
+            confirmationReview: .exactPlan
+        ),
+        gui(DesktopAccessibilityIdentifier.lifecycleCancel, .lifecycleCancellation, command: nil),
         gui(DesktopAccessibilityIdentifier.eventsRefresh, .eventStream, command: "events"),
         gui(DesktopAccessibilityIdentifier.eventsCancel, .streamCancellation, command: nil),
         gui(DesktopAccessibilityIdentifier.selectedLogsOpen, .logStream, command: "logs"),
@@ -528,6 +559,31 @@ public enum DesktopActionCatalog {
             return ready(identifier: identifier)
         case .statusRequest, .eventStream:
             return connectionAvailability(identifier: identifier, state: model.connectionState)
+        case .lifecyclePreview:
+            guard case .connected = model.connectionState else {
+                return connectionAvailability(identifier: identifier, state: model.connectionState)
+            }
+            guard !model.lifecycleState.isBusy else {
+                return unavailable(identifier: identifier, reason: .lifecycleBusy)
+            }
+            guard let project = model.projects.first,
+                  project.manifestIsValid,
+                  context.projectID == project.id else {
+                return unavailable(identifier: identifier, reason: .requiresProject)
+            }
+            return ready(identifier: identifier)
+        case .lifecycleConfirmation:
+            guard case .awaitingConfirmation = model.lifecycleState else {
+                return unavailable(identifier: identifier, reason: .requiresConfirmation)
+            }
+            return connectionAvailability(identifier: identifier, state: model.connectionState)
+        case .lifecycleCancellation:
+            switch model.lifecycleState {
+            case .previewing, .awaitingConfirmation, .executing:
+                return ready(identifier: identifier)
+            case .idle, .succeeded, .cancelled:
+                return unavailable(identifier: identifier, reason: .requiresConfirmation)
+            }
         case .streamCancellation:
             let running = identifier == DesktopAccessibilityIdentifier.eventsCancel
                 ? model.isEventStreamRunning
@@ -565,7 +621,7 @@ public enum DesktopActionCatalog {
         guard let action = cliAction(command: command) else {
             return blocked(identifier: command, reason: .unknownAction)
         }
-        guard action.mutability == .readOnly else {
+        guard action.mutability == .readOnly || promotedLifecycleCommands.contains(command) else {
             return blocked(identifier: command, reason: .phase09PromotionRequired)
         }
         guard let guiAction = guiActions.first(where: { $0.command == command }) else {
@@ -601,7 +657,7 @@ public enum DesktopActionCatalog {
             mutability: mutability,
             confirmationReview: mutability == .readOnly
                 ? .notRequired
-                : .phase09Review,
+                : promotedLifecycleCommands.contains(command) ? .exactPlan : .phase09Review,
             guiElementIdentifiers: guiElements
         )
     }
@@ -617,9 +673,11 @@ public enum DesktopActionCatalog {
     private static func gui(
         _ identifier: String,
         _ kind: DesktopGUIActionKind,
-        command: String?
+        command: String?,
+        confirmationReview explicitReview: DesktopActionConfirmationReview? = nil
     ) -> DesktopGUIActionDescriptor {
-        let confirmationReview = command.flatMap { cliAction(command: $0)?.confirmationReview }
+        let confirmationReview = explicitReview
+            ?? command.flatMap { cliAction(command: $0)?.confirmationReview }
             ?? .notRequired
         return DesktopGUIActionDescriptor(
             identifier: identifier,
@@ -701,6 +759,10 @@ public enum DesktopActionCatalog {
             return "The selected service has no observed runtime resource."
         case .streamNotRunning:
             return "No stream is active for this action."
+        case .lifecycleBusy:
+            return "A lifecycle request is already in progress."
+        case .requiresConfirmation:
+            return "Review a current lifecycle plan before using this action."
         case .notExposed:
             return "This operation is not exposed by the desktop console."
         case .phase09PromotionRequired:

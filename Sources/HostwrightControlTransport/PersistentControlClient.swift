@@ -15,6 +15,46 @@ public enum PersistentControlClientError: Error, Equatable, Sendable {
   case connectionClosed
 }
 
+public final class PersistentControlRequestCancellation: @unchecked Sendable {
+  private let lock = NSLock()
+  private var descriptor: Int32?
+  private var cancelled = false
+
+  public init() {}
+
+  public var isCancelled: Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return cancelled
+  }
+
+  public func cancel() {
+    lock.lock()
+    cancelled = true
+    let descriptor = descriptor
+    lock.unlock()
+    if let descriptor {
+      _ = shutdown(descriptor, SHUT_RDWR)
+    }
+  }
+
+  fileprivate func bind(descriptor: Int32) -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    guard !cancelled else { return false }
+    self.descriptor = descriptor
+    return true
+  }
+
+  fileprivate func unbind(descriptor: Int32) {
+    lock.lock()
+    if self.descriptor == descriptor {
+      self.descriptor = nil
+    }
+    lock.unlock()
+  }
+}
+
 public struct PersistentControlServerTrustPolicy: Sendable, Equatable {
   public let expectedUserID: UInt32
   public let pinnedAdHocCodeDirectoryHashes: Set<String>
@@ -64,6 +104,13 @@ public struct PersistentControlClient: Sendable {
   }
 
   public func send(_ request: ControlRequestEnvelope) throws -> ControlResponseEnvelope {
+    try send(request, cancellation: nil)
+  }
+
+  public func send(
+    _ request: ControlRequestEnvelope,
+    cancellation: PersistentControlRequestCancellation?
+  ) throws -> ControlResponseEnvelope {
     try request.validate()
     guard let requestRevision = request.protocolRevision,
       ControlProtocolCompatibility.supportsRequestRevision(requestRevision),
@@ -73,7 +120,14 @@ public struct PersistentControlClient: Sendable {
     let pinned = try pinSocket()
     let descriptor = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
     guard descriptor >= 0 else { throw PersistentControlClientError.connectionFailed }
-    defer { _ = Darwin.close(descriptor) }
+    guard cancellation?.bind(descriptor: descriptor) != false else {
+      _ = Darwin.close(descriptor)
+      throw PersistentControlClientError.connectionClosed
+    }
+    defer {
+      cancellation?.unbind(descriptor: descriptor)
+      _ = Darwin.close(descriptor)
+    }
     try ControlFrameCodec.configureNoSigPipe(descriptor: descriptor)
     var address = try Self.address(socketPath)
     let connected = withUnsafePointer(to: &address) { pointer in

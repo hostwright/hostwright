@@ -24,6 +24,38 @@ private enum DesktopModelBoundary {
     }
 }
 
+private struct DesktopLifecyclePlanWire: Decodable {
+    let schemaVersion: Int
+    let command: String
+    let manifestSHA256: String
+    let observationSHA256: String
+    let planSHA256: String
+    let projectName: String
+    let nodes: [Node]
+
+    struct Node: Decodable {
+        let key: String
+        let action: String
+        let serviceName: String
+        let resourceIdentifier: String
+    }
+}
+
+private struct DesktopLifecycleResultWire: Decodable {
+    let checkpoint: String
+    let completedNodeKeys: [String]
+    let groupID: String
+    let kind: String
+    let planSHA256: String
+    let status: String
+}
+
+private struct DesktopLifecycleCLIResult {
+    let standardOutput: String
+    let standardError: String
+    let exitCode: Int32
+}
+
 public struct DesktopControlAPIClient: Sendable {
     public let transport: any DesktopControlTransport
 
@@ -124,6 +156,154 @@ public struct DesktopControlAPIClient: Sendable {
         try transport.connectSession()
     }
 
+    public func lifecyclePreview(
+        action: DesktopLifecycleAction,
+        manifestPath: String,
+        cancellation: PersistentControlRequestCancellation
+    ) throws -> DesktopLifecyclePlanReview {
+        let result = try lifecycleCLIResult(
+            arguments: [action.rawValue, manifestPath, "--dry-run", "--output", "json"],
+            cancellation: cancellation,
+            prefix: "lifecycle-preview"
+        )
+        let wire: DesktopLifecyclePlanWire
+        do {
+            wire = try JSONDecoder().decode(
+                DesktopLifecyclePlanWire.self,
+                from: Data(result.standardOutput.utf8)
+            )
+        } catch {
+            throw DesktopControlFailure(
+                code: "lifecycle.invalidPlan",
+                message: "The daemon returned an invalid lifecycle plan."
+            )
+        }
+        guard wire.schemaVersion == 1,
+              wire.command == action.rawValue,
+              wire.nodes.count <= 1_024,
+              Self.isSHA256(wire.manifestSHA256),
+              Self.isSHA256(wire.observationSHA256),
+              Self.isSHA256(wire.planSHA256),
+              !wire.projectName.isEmpty,
+              wire.projectName.utf8.count <= 128,
+              URL(fileURLWithPath: manifestPath).standardizedFileURL.path == manifestPath else {
+            throw DesktopControlFailure(
+                code: "lifecycle.invalidPlan",
+                message: "The daemon returned an invalid lifecycle plan."
+            )
+        }
+        return DesktopLifecyclePlanReview(
+            action: action,
+            manifestPath: manifestPath,
+            manifestSHA256: wire.manifestSHA256,
+            observationSHA256: wire.observationSHA256,
+            planSHA256: wire.planSHA256,
+            projectName: wire.projectName,
+            nodes: wire.nodes.map {
+                DesktopLifecyclePlanNode(
+                    key: $0.key,
+                    action: $0.action,
+                    serviceName: $0.serviceName,
+                    resourceIdentifier: $0.resourceIdentifier
+                )
+            }
+        )
+    }
+
+    public func executeLifecycle(
+        plan: DesktopLifecyclePlanReview,
+        cancellation: PersistentControlRequestCancellation
+    ) throws -> DesktopLifecycleExecutionResult {
+        let result = try lifecycleCLIResult(
+            arguments: [
+                plan.action.rawValue,
+                plan.manifestPath,
+                "--confirm-plan", plan.planSHA256,
+                "--output", "json",
+            ],
+            cancellation: cancellation,
+            prefix: "lifecycle-execute"
+        )
+        let wire: DesktopLifecycleResultWire
+        do {
+            wire = try JSONDecoder().decode(
+                DesktopLifecycleResultWire.self,
+                from: Data(result.standardOutput.utf8)
+            )
+        } catch {
+            throw DesktopControlFailure(
+                code: "lifecycle.invalidResult",
+                message: "The daemon returned an invalid lifecycle result."
+            )
+        }
+        guard wire.kind == "lifecycle-result",
+              wire.status == "succeeded",
+              wire.checkpoint == "verified",
+              wire.planSHA256 == plan.planSHA256,
+              Self.isUUID(wire.groupID),
+              wire.completedNodeKeys.count <= 1_024 else {
+            throw DesktopControlFailure(
+                code: "lifecycle.invalidResult",
+                message: "The daemon returned an invalid lifecycle result."
+            )
+        }
+        return DesktopLifecycleExecutionResult(
+            action: plan.action,
+            groupID: wire.groupID,
+            planSHA256: wire.planSHA256,
+            completedNodeKeys: wire.completedNodeKeys
+        )
+    }
+
+    private func lifecycleCLIResult(
+        arguments: [String],
+        cancellation: PersistentControlRequestCancellation,
+        prefix: String
+    ) throws -> DesktopLifecycleCLIResult {
+        let route = try CLIControlRoute.classify(arguments: arguments)
+        guard route.transport == .persistentControlAPI else {
+            throw DesktopControlFailure(
+                code: "lifecycle.invalidRoute",
+                message: "The lifecycle action is unavailable through the local control endpoint."
+            )
+        }
+        let request = makeRequest(
+            operation: route.operation,
+            body: route.requestBody(),
+            timeoutMilliseconds: ControlPlaneContract.maximumUnaryDeadlineMilliseconds,
+            prefix: prefix
+        )
+        let response = try transport.send(request, cancellation: cancellation)
+        let result = try CLIControlResultContract.result(
+            from: checkedResponse(response, for: request)
+        )
+        guard result.exitCode == 0 else {
+            throw DesktopControlFailure(
+                code: "lifecycle.requestFailed",
+                message: DesktopModelBoundary.redactedMessage(
+                    result.standardError,
+                    fallback: "The lifecycle request failed safely."
+                )
+            )
+        }
+        return DesktopLifecycleCLIResult(
+            standardOutput: result.standardOutput,
+            standardError: result.standardError,
+            exitCode: result.exitCode
+        )
+    }
+
+    private static func isSHA256(_ value: String) -> Bool {
+        value.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil
+    }
+
+    private static func isUUID(_ value: String) -> Bool {
+        value.range(
+            of: "^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$",
+            options: .regularExpression
+        ) != nil
+    }
+
     private func checkedResponse(
         _ response: ControlResponseEnvelope,
         for request: ControlRequestEnvelope
@@ -203,6 +383,7 @@ public final class DesktopOperationsModel: ObservableObject {
     @Published public private(set) var lastFailure: DesktopControlFailure?
     @Published public private(set) var isEventStreamRunning = false
     @Published public private(set) var isLogStreamRunning = false
+    @Published public private(set) var lifecycleState: DesktopLifecycleState = .idle
 
     public let endpoint: DesktopControlEndpoint?
     private let api: DesktopControlAPIClient
@@ -215,6 +396,9 @@ public final class DesktopOperationsModel: ObservableObject {
     private var eventID: UUID?
     private var logTask: Task<Void, Never>?
     private var logID: UUID?
+    private var lifecycleTask: Task<Void, Never>?
+    private var lifecycleID: UUID?
+    private var lifecycleCancellation: PersistentControlRequestCancellation?
 
     public init(
         endpoint: DesktopControlEndpoint? = nil,
@@ -266,6 +450,7 @@ public final class DesktopOperationsModel: ObservableObject {
     }
 
     public func connect() {
+        invalidateLifecycleForConnectionChange()
         cancelStatusRefresh()
         reconnectTask?.cancel()
         let connectionID = UUID()
@@ -283,6 +468,7 @@ public final class DesktopOperationsModel: ObservableObject {
     }
 
     public func reconnect() {
+        invalidateLifecycleForConnectionChange()
         cancelStatusRefresh()
         reconnectTask?.cancel()
         let connectionID = UUID()
@@ -318,6 +504,7 @@ public final class DesktopOperationsModel: ObservableObject {
     }
 
     public func disconnect() {
+        invalidateLifecycleForConnectionChange()
         reconnectTask?.cancel()
         connectionID = nil
         cancelStatusRefresh()
@@ -325,6 +512,149 @@ public final class DesktopOperationsModel: ObservableObject {
         cancelLogStream()
         reconnectTask = nil
         connectionState = .disconnected
+    }
+
+    public func previewLifecycle(
+        _ action: DesktopLifecycleAction,
+        manifestPath: String
+    ) {
+        guard case .connected = connectionState else {
+            record(error: DesktopControlFailure(
+                code: "lifecycle.disconnected",
+                message: "Connect to the local daemon before reviewing a lifecycle action."
+            ))
+            return
+        }
+        guard lifecycleTask == nil else { return }
+        switch lifecycleState {
+        case .awaitingConfirmation, .executing, .previewing:
+            return
+        case .idle, .succeeded, .cancelled:
+            break
+        }
+        guard let project = projects.first(where: {
+            $0.manifestPath == manifestPath && $0.manifestIsValid
+        }) else {
+            record(error: DesktopControlFailure(
+                code: "lifecycle.invalidManifestSelection",
+                message: "Select the daemon's current valid manifest before reviewing this action."
+            ))
+            return
+        }
+
+        let lifecycleID = UUID()
+        let cancellation = PersistentControlRequestCancellation()
+        let api = self.api
+        self.lifecycleID = lifecycleID
+        self.lifecycleCancellation = cancellation
+        lifecycleState = .previewing(action)
+        lastFailure = nil
+        lifecycleTask = Task { [weak self] in
+            let request = Task.detached {
+                try api.lifecyclePreview(
+                    action: action,
+                    manifestPath: project.manifestPath,
+                    cancellation: cancellation
+                )
+            }
+            defer {
+                request.cancel()
+                if let self, self.lifecycleID == lifecycleID {
+                    self.lifecycleTask = nil
+                    self.lifecycleCancellation = nil
+                }
+            }
+            do {
+                let plan = try await withTaskCancellationHandler(operation: {
+                    try await request.value
+                }, onCancel: {
+                    cancellation.cancel()
+                    request.cancel()
+                })
+                guard !Task.isCancelled, let self, self.lifecycleID == lifecycleID,
+                      case .connected = self.connectionState else { return }
+                self.lifecycleState = .awaitingConfirmation(plan)
+            } catch {
+                guard !Task.isCancelled, let self, self.lifecycleID == lifecycleID else { return }
+                self.lifecycleState = .idle
+                self.record(error: Self.failure(from: error))
+            }
+        }
+    }
+
+    public func confirmLifecycle(planSHA256: String) {
+        guard case .connected = connectionState,
+              case .awaitingConfirmation(let plan) = lifecycleState,
+              plan.planSHA256 == planSHA256,
+              projects.contains(where: {
+                  $0.manifestPath == plan.manifestPath && $0.manifestIsValid
+              }),
+              lifecycleTask == nil else {
+            if case .awaitingConfirmation = lifecycleState {
+                lifecycleState = .idle
+                record(error: DesktopControlFailure(
+                    code: "lifecycle.staleConfirmation",
+                    message: "The lifecycle plan is stale. Review a fresh plan before confirming."
+                ))
+            }
+            return
+        }
+
+        let lifecycleID = UUID()
+        let cancellation = PersistentControlRequestCancellation()
+        let api = self.api
+        self.lifecycleID = lifecycleID
+        self.lifecycleCancellation = cancellation
+        lifecycleState = .executing(plan)
+        lastFailure = nil
+        lifecycleTask = Task { [weak self] in
+            let request = Task.detached {
+                try api.executeLifecycle(plan: plan, cancellation: cancellation)
+            }
+            defer {
+                request.cancel()
+                if let self, self.lifecycleID == lifecycleID {
+                    self.lifecycleTask = nil
+                    self.lifecycleCancellation = nil
+                }
+            }
+            do {
+                let result = try await withTaskCancellationHandler(operation: {
+                    try await request.value
+                }, onCancel: {
+                    cancellation.cancel()
+                    request.cancel()
+                })
+                guard !Task.isCancelled, let self, self.lifecycleID == lifecycleID,
+                      case .connected = self.connectionState else { return }
+                self.lifecycleState = .succeeded(result)
+                self.refreshStatus()
+            } catch {
+                guard !Task.isCancelled, let self, self.lifecycleID == lifecycleID else { return }
+                self.lifecycleState = .idle
+                self.record(error: Self.failure(from: error))
+            }
+        }
+    }
+
+    public func cancelLifecycle() {
+        let action: DesktopLifecycleAction?
+        switch lifecycleState {
+        case .previewing(let value), .cancelled(let value): action = value
+        case .awaitingConfirmation(let plan), .executing(let plan): action = plan.action
+        case .succeeded(let result): action = result.action
+        case .idle: action = nil
+        }
+        lifecycleCancellation?.cancel()
+        lifecycleTask?.cancel()
+        lifecycleTask = nil
+        lifecycleID = nil
+        lifecycleCancellation = nil
+        lifecycleState = action.map(DesktopLifecycleState.cancelled) ?? .idle
+    }
+
+    var lifecycleTaskForTesting: Task<Void, Never>? {
+        lifecycleTask
     }
 
     public func refreshStatus() {
@@ -535,8 +865,21 @@ public final class DesktopOperationsModel: ObservableObject {
     }
 
     private func apply(project: DesktopProjectStatus) {
+        if case .awaitingConfirmation(let plan) = lifecycleState,
+           plan.manifestPath != project.manifestPath {
+            lifecycleState = .idle
+        }
         projects = [project]
         lastFailure = nil
+    }
+
+    private func invalidateLifecycleForConnectionChange() {
+        lifecycleCancellation?.cancel()
+        lifecycleTask?.cancel()
+        lifecycleTask = nil
+        lifecycleID = nil
+        lifecycleCancellation = nil
+        lifecycleState = .idle
     }
 
     private func cancelStatusRefresh() {

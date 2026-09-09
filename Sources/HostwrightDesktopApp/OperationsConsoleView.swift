@@ -203,6 +203,11 @@ private struct OverviewView: View {
             }
             .padding(.horizontal)
 
+            if let project = model.projects.first {
+                LifecycleCommandBar(project: project)
+                    .padding(.horizontal)
+            }
+
             if let failure = model.lastFailure {
                 FailureBanner(failure: failure)
             }
@@ -246,6 +251,151 @@ private struct OverviewView: View {
         .padding(.vertical)
         .navigationTitle("Overview")
         .accessibilityIdentifier(DesktopAccessibilityIdentifier.overview)
+        .sheet(item: lifecycleReviewBinding) { plan in
+            LifecycleReviewView(plan: plan)
+                .environmentObject(model)
+        }
+    }
+
+    private var lifecycleReviewBinding: Binding<DesktopLifecyclePlanReview?> {
+        Binding(
+            get: { model.lifecycleState.reviewPlan },
+            set: { if $0 == nil { model.cancelLifecycle() } }
+        )
+    }
+}
+
+private struct LifecycleCommandBar: View {
+    @EnvironmentObject private var model: DesktopOperationsModel
+    let project: DesktopProjectStatus
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(DesktopLifecycleAction.allCases, id: \.rawValue) { action in
+                Button(action.label, systemImage: action.systemImage) {
+                    model.previewLifecycle(action, manifestPath: project.manifestPath)
+                }
+                .disabled(
+                    model.actionAvailability(
+                        for: identifier(for: action),
+                        context: DesktopActionAvailabilityContext(projectID: project.id)
+                    ).state != .available
+                )
+                .accessibilityIdentifier(identifier(for: action))
+                .help("Review the exact \(action.rawValue) plan for \(project.name)")
+            }
+            Spacer()
+            lifecycleStatus
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .controlSize(.regular)
+    }
+
+    @ViewBuilder
+    private var lifecycleStatus: some View {
+        switch model.lifecycleState {
+        case .idle:
+            EmptyView()
+        case .previewing(let action):
+            Label("Reviewing \(action.rawValue)…", systemImage: "hourglass")
+        case .awaitingConfirmation(let plan):
+            Label("\(plan.action.label) ready for review", systemImage: "checkmark.circle")
+        case .executing(let plan):
+            Label("Running \(plan.action.rawValue)…", systemImage: "progress.indicator")
+        case .succeeded(let result):
+            Label("\(result.action.label) completed", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+        case .cancelled(let action):
+            Label("\(action.label) cancelled", systemImage: "xmark.circle")
+        }
+    }
+
+    private func identifier(for action: DesktopLifecycleAction) -> String {
+        switch action {
+        case .up: DesktopAccessibilityIdentifier.lifecycleUp
+        case .down: DesktopAccessibilityIdentifier.lifecycleDown
+        case .restart: DesktopAccessibilityIdentifier.lifecycleRestart
+        }
+    }
+}
+
+private struct LifecycleReviewView: View {
+    @EnvironmentObject private var model: DesktopOperationsModel
+    let plan: DesktopLifecyclePlanReview
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Review \(plan.action.rawValue) plan")
+                        .font(.title2.weight(.semibold))
+                    Text(plan.projectName)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("\(plan.nodes.count) change\(plan.nodes.count == 1 ? "" : "s")")
+                    .font(.callout.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+
+            Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 8) {
+                reviewRow("Manifest", plan.manifestPath)
+                reviewRow("Manifest SHA-256", plan.manifestSHA256)
+                reviewRow("Observation SHA-256", plan.observationSHA256)
+                reviewRow("Plan SHA-256", plan.planSHA256)
+            }
+            .textSelection(.enabled)
+
+            Table(plan.nodes) {
+                TableColumn("Action") { node in Text(node.action) }
+                TableColumn("Service") { node in Text(node.serviceName) }
+                TableColumn("Resource") { node in
+                    Text(node.resourceIdentifier)
+                        .font(.system(.body, design: .monospaced))
+                        .lineLimit(1)
+                }
+            }
+            .tableStyle(.inset(alternatesRowBackgrounds: true))
+            .frame(minHeight: 180)
+
+            HStack {
+                Button("Cancel", role: .cancel) {
+                    model.cancelLifecycle()
+                }
+                .keyboardShortcut(.cancelAction)
+                .accessibilityIdentifier(DesktopAccessibilityIdentifier.lifecycleCancel)
+                Spacer()
+                if model.lifecycleState.isExecuting {
+                    ProgressView()
+                        .controlSize(.small)
+                        .accessibilityLabel("Lifecycle action in progress")
+                }
+                Button("Confirm \(plan.action.label)") {
+                    model.confirmLifecycle(planSHA256: plan.planSHA256)
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(
+                    model.actionAvailability(
+                        for: DesktopAccessibilityIdentifier.lifecycleConfirm
+                    ).state != .available
+                )
+                .accessibilityIdentifier(DesktopAccessibilityIdentifier.lifecycleConfirm)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 680, idealWidth: 760, minHeight: 430)
+        .accessibilityIdentifier(DesktopAccessibilityIdentifier.lifecycleReview)
+    }
+
+    private func reviewRow(_ label: String, _ value: String) -> some View {
+        GridRow {
+            Text(label)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.system(.caption, design: .monospaced))
+                .lineLimit(1)
+        }
     }
 }
 

@@ -11,6 +11,7 @@ public struct DistributionAssemblyRequest: Sendable {
     public let hostwrightStorageHelperBinary: URL
     public let hostwrightDistributionBinary: URL
     public let hostwrightDaemonBinary: URL
+    public let hostwrightDesktopBinary: URL
     public let containerizationAssets: DistributionContainerizationAssetBundle
     public let exampleManifestFile: URL
     public let licenseFile: URL
@@ -34,6 +35,7 @@ public struct DistributionAssemblyRequest: Sendable {
         hostwrightStorageHelperBinary: URL,
         hostwrightDistributionBinary: URL,
         hostwrightDaemonBinary: URL,
+        hostwrightDesktopBinary: URL,
         containerizationAssets: DistributionContainerizationAssetBundle,
         exampleManifestFile: URL,
         licenseFile: URL,
@@ -57,6 +59,7 @@ public struct DistributionAssemblyRequest: Sendable {
         self.hostwrightStorageHelperBinary = hostwrightStorageHelperBinary
         self.hostwrightDistributionBinary = hostwrightDistributionBinary
         self.hostwrightDaemonBinary = hostwrightDaemonBinary
+        self.hostwrightDesktopBinary = hostwrightDesktopBinary
         self.containerizationAssets = containerizationAssets
         self.exampleManifestFile = exampleManifestFile
         self.licenseFile = licenseFile
@@ -235,6 +238,12 @@ public struct DistributionAssembler: Sendable {
             cancellation: cancellation,
             commands: &commands
         )
+        try validateArchitecture(
+            request.hostwrightDesktopBinary,
+            label: "validate Hostwright desktop architecture",
+            cancellation: cancellation,
+            commands: &commands
+        )
 
         let timestamp = DistributionTimestamp.string(Date())
         let artifactID = "hostwright-\(request.packageVersion)-macos-arm64-\(request.sourceCommit.prefix(12))"
@@ -264,6 +273,7 @@ public struct DistributionAssembler: Sendable {
             ("bin/hostwright-storage-helper", request.hostwrightStorageHelperBinary),
             ("bin/hostwright-dist", request.hostwrightDistributionBinary),
             ("bin/hostwrightd", request.hostwrightDaemonBinary),
+            (DistributionLayout.desktopExecutablePath, request.hostwrightDesktopBinary),
             ("share/hostwright/examples/hostwright.yaml", request.exampleManifestFile),
             ("share/doc/hostwright/LICENSE", request.licenseFile),
             ("share/doc/hostwright/README.md", request.readmeFile)
@@ -282,6 +292,46 @@ public struct DistributionAssembler: Sendable {
                 mode: DistributionLayout.payloadModes[path]!
             )
         }
+        let desktopBundleVersion = try DistributionPackageVersion.make(
+            from: request.packageVersion
+        )
+        let desktopShortVersion = request.packageVersion
+            .split(separator: "-", maxSplits: 1).first.map(String.init)
+            ?? request.packageVersion
+        let desktopInfoPlist = Data("""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+          <key>CFBundleDevelopmentRegion</key><string>en</string>
+          <key>CFBundleDisplayName</key><string>Hostwright</string>
+          <key>CFBundleExecutable</key><string>hostwright-desktop</string>
+          <key>CFBundleIdentifier</key><string>dev.hostwright.desktop</string>
+          <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+          <key>CFBundleName</key><string>Hostwright</string>
+          <key>CFBundlePackageType</key><string>APPL</string>
+          <key>CFBundleShortVersionString</key><string>\(desktopShortVersion)</string>
+          <key>CFBundleVersion</key><string>\(desktopBundleVersion)</string>
+          <key>LSMinimumSystemVersion</key><string>14.0</string>
+          <key>NSHighResolutionCapable</key><true/>
+        </dict>
+        </plist>
+
+        """.utf8)
+        try DistributionFileSystem.writeNewFile(
+            desktopInfoPlist,
+            to: artifactRoot.appendingPathComponent(DistributionLayout.desktopInfoPlistPath),
+            mode: 0o644
+        )
+        let desktopBundle = artifactRoot.appendingPathComponent(DistributionLayout.desktopAppPath)
+        let adHocSign = try runner.run(
+            executablePath: "/usr/bin/codesign",
+            arguments: ["--force", "--sign", "-", desktopBundle.path],
+            label: "seal deterministic ad-hoc desktop bundle",
+            timeoutSeconds: 60,
+            cancellation: cancellation
+        )
+        commands.append(command("seal deterministic ad-hoc desktop bundle", result: adHocSign))
         let cleanedInputPaths = request.inputCleanupPaths.map { $0.standardizedFileURL.path }.sorted()
         for path in request.inputCleanupPaths {
             let start = DispatchTime.now().uptimeNanoseconds
@@ -965,6 +1015,7 @@ public struct DistributionCleanBuilder: Sendable {
             .appendingPathComponent("hostwright-storage-helper")
         let distribution = backingBinPath.appendingPathComponent("hostwright-dist")
         let daemon = backingBinPath.appendingPathComponent("hostwrightd")
+        let desktop = backingBinPath.appendingPathComponent("hostwright-desktop")
         let containerizationAssets = try configuredContainerizationAssets ??
             DistributionContainerizationAssets.load(
                 root: DistributionContainerizationAssets.configuredRoot(),
@@ -1024,6 +1075,7 @@ public struct DistributionCleanBuilder: Sendable {
                 hostwrightStorageHelperBinary: storageHelper,
                 hostwrightDistributionBinary: distribution,
                 hostwrightDaemonBinary: daemon,
+                hostwrightDesktopBinary: desktop,
                 containerizationAssets: containerizationAssets,
                 exampleManifestFile: sourceRoot.appendingPathComponent("examples/single-service/hostwright.yaml"),
                 licenseFile: sourceRoot.appendingPathComponent("LICENSE"),

@@ -601,10 +601,8 @@ final class ReleaseQualificationRegistryTests: XCTestCase {
             "Package.resolved": try Data(
                 contentsOf: source.appendingPathComponent("Package.resolved")
             ),
-            ReleaseQualificationLicensePolicy.relativePath: try Data(
-                contentsOf: source.appendingPathComponent(
-                    ReleaseQualificationLicensePolicy.relativePath
-                )
+            ReleaseQualificationLicensePolicy.relativePath: Data(
+                #"{"entries":[],"kind":"hostwright.release-qualification.license-policy","schemaVersion":1}"#.utf8
             ),
         ]
         let missingPolicyFiles = committedEmptyFiles.filter {
@@ -1263,9 +1261,9 @@ final class ReleaseQualificationRegistryTests: XCTestCase {
         )
     }
 
-    func testCommittedEmptyLicensePolicyBlocksWithExactMissingIdentities() throws {
+    func testCommittedLicensePolicyPassesWithExactDirectReceipts() throws {
         let source = ReleaseQualificationTestSupport.repositoryRoot()
-        let files: [String: Data] = [
+        var files: [String: Data] = [
             "Package.swift": try Data(
                 contentsOf: source.appendingPathComponent("Package.swift")
             ),
@@ -1278,16 +1276,20 @@ final class ReleaseQualificationRegistryTests: XCTestCase {
                 )
             ),
         ]
+        let policy = try ReleaseQualificationJSON.decode(
+            ReleaseQualificationLicensePolicy.self,
+            from: try XCTUnwrap(files[ReleaseQualificationLicensePolicy.relativePath])
+        )
+        for entry in policy.entries {
+            files[entry.licenseTextPath] = try Data(
+                contentsOf: source.appendingPathComponent(entry.licenseTextPath)
+            )
+        }
 
         let execution = try licensePolicyLaneExecution(files: files)
 
-        XCTAssertEqual(execution.status, .blocked)
-        XCTAssertEqual(execution.blockers.map(\.reason), [.licenseMetadataUnavailable])
-        XCTAssertEqual(
-            execution.blockers[0].detail,
-            "committed license-policy receipts are missing for identities: " +
-                "containerization, swift-certificates, swift-crypto, wasmkit, yams"
-        )
+        XCTAssertEqual(execution.status, .passed)
+        XCTAssertTrue(execution.blockers.isEmpty)
         XCTAssertTrue(execution.failures.isEmpty)
     }
 
@@ -1632,7 +1634,7 @@ final class ReleaseQualificationRegistryTests: XCTestCase {
             $0 == "feec8f5d501dcce89dcc6ee2b5b155dfd9b1dbb4408efb02399f9b2adfebf588"
         })
         XCTAssertTrue(validators[1].identity.arguments.contains {
-            $0 == "211b1e1716334b11aeac5d399ec99d68834ece7151f9dc0da05cb76f358dcfd4"
+            $0 == "96aad63aa30b08f3749a98901370d9c5cab7bc3acff380f886fbb959f1fe2d1d"
         })
         XCTAssertEqual(validators[0].durationMilliseconds, 42)
         XCTAssertEqual(validators[0].standardOutputBytes, 22)

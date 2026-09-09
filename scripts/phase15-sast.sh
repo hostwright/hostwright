@@ -48,7 +48,12 @@ receipt = {
     "semgrepVersion": version,
     "findingCount": 0,
     "warningCount": len(errors),
-    "warningTypes": sorted({str(item.get("type")) for item in errors}),
+    "warningTypes": sorted({
+        str(item.get("type", ["unknown"])[0])
+        if isinstance(item.get("type"), list)
+        else str(item.get("type", "unknown"))
+        for item in errors
+    }),
     "resultSHA256": hashlib.sha256(result_bytes).hexdigest(),
 }
 (root / "complete.json").write_text(

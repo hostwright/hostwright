@@ -13,15 +13,18 @@ enum HostwrightControlIdentityBootstrap {
     }
 
     static func bootstrapAPIProcesses() throws {
+        let installerProcessID = getppid()
         try bootstrap(
-            installerIdentity: DarwinCurrentControlCodeIdentity.inspect(processID: getppid()),
-            companionIdentity: DarwinCurrentControlCodeIdentity.inspect()
+            installerIdentity: DarwinCurrentControlCodeIdentity.inspect(processID: installerProcessID),
+            companionIdentity: DarwinCurrentControlCodeIdentity.inspect(),
+            desktopIdentity: try discoverDesktopIdentity(installerProcessID: installerProcessID)
         )
     }
 
     private static func bootstrap(
         installerIdentity: CodeIdentity,
-        companionIdentity: CodeIdentity?
+        companionIdentity: CodeIdentity?,
+        desktopIdentity: CodeIdentity? = nil
     ) throws {
         let resolution = try HostwrightLocalPathResolver.resolve()
         let store = SQLiteStateStore(
@@ -33,6 +36,7 @@ enum HostwrightControlIdentityBootstrap {
             userID: UInt32(geteuid()),
             codeIdentity: installerIdentity,
             companionIdentity: companionIdentity,
+            desktopIdentity: desktopIdentity,
             timestamp: ISO8601DateFormatter().string(from: Date())
         )
     }
@@ -42,11 +46,13 @@ enum HostwrightControlIdentityBootstrap {
         userID: UInt32,
         codeIdentity: CodeIdentity,
         companionIdentity: CodeIdentity? = nil,
+        desktopIdentity: CodeIdentity? = nil,
         timestamp: String
     ) throws {
         try validateBootstrapPair(
             installer: codeIdentity,
-            companion: companionIdentity
+            companion: companionIdentity,
+            desktop: desktopIdentity
         )
         let identities = try store.controlIdentities.listIdentities()
         if identities.isEmpty {
@@ -78,6 +84,21 @@ enum HostwrightControlIdentityBootstrap {
                     )
                 )
             }
+            if let desktopIdentity {
+                let desktop = try declareCompanion(
+                    store: store,
+                    userID: userID,
+                    identity: desktopIdentity,
+                    declaringSubjectID: subjectID,
+                    timestamp: timestamp
+                )
+                try ensureDesktopOperatorBinding(
+                    store: store,
+                    desktop: desktop,
+                    ownerSubjectID: subjectID,
+                    timestamp: timestamp
+                )
+            }
             return
         }
         let current = try resolveOrRotate(
@@ -102,11 +123,28 @@ enum HostwrightControlIdentityBootstrap {
                 timestamp: timestamp
             )
         }
+        if let desktopIdentity {
+            let desktop = try resolveOrRotate(
+                store: store,
+                identities: try store.controlIdentities.listIdentities(),
+                userID: userID,
+                currentIdentity: desktopIdentity,
+                declaringSubjectID: current.subjectID,
+                timestamp: timestamp
+            )
+            try ensureDesktopOperatorBinding(
+                store: store,
+                desktop: desktop,
+                ownerSubjectID: current.subjectID,
+                timestamp: timestamp
+            )
+        }
     }
 
     private static func validateBootstrapPair(
         installer: CodeIdentity,
-        companion: CodeIdentity?
+        companion: CodeIdentity?,
+        desktop: CodeIdentity?
     ) throws {
         try installer.validate()
         let installerIdentifierAllowed: Bool
@@ -123,17 +161,18 @@ enum HostwrightControlIdentityBootstrap {
                 "The bootstrap installer code identity is not Hostwright CLI."
             )
         }
-        guard let companion else { return }
-        try companion.validate()
-        let companionIdentifierAllowed = companion.validationMode == .installedRequirement
-            ? companion.signingIdentifier == "hostwright-control"
-            : adHocIdentifier(companion.signingIdentifier, base: "hostwright-control")
-        guard companionIdentifierAllowed,
-              companion.validationMode == installer.validationMode,
-              companion.teamIdentifier == installer.teamIdentifier else {
-            throw StateStoreError.invalidRecord(
-                "The bootstrap companion code identity does not match the installer trust domain."
-            )
+        if let companion {
+            try companion.validate()
+            let companionIdentifierAllowed = companion.validationMode == .installedRequirement
+                ? companion.signingIdentifier == "hostwright-control"
+                : adHocIdentifier(companion.signingIdentifier, base: "hostwright-control")
+            guard companionIdentifierAllowed,
+                  companion.validationMode == installer.validationMode,
+                  companion.teamIdentifier == installer.teamIdentifier else {
+                throw StateStoreError.invalidRecord(
+                    "The bootstrap companion code identity does not match the installer trust domain."
+                )
+            }
         }
         if installer.validationMode == .installedRequirement {
             guard installer.teamIdentifier == ControlPeerTrustPolicy.installedTeamIdentifier else {
@@ -142,6 +181,89 @@ enum HostwrightControlIdentityBootstrap {
                 )
             }
         }
+        guard let desktop else { return }
+        try desktop.validate()
+        let desktopIdentifierAllowed = desktop.validationMode == .installedRequirement
+            ? desktop.signingIdentifier == "dev.hostwright.desktop"
+            : adHocIdentifier(desktop.signingIdentifier, base: "hostwright-desktop")
+        guard desktopIdentifierAllowed,
+              desktop.validationMode == installer.validationMode,
+              desktop.teamIdentifier == installer.teamIdentifier else {
+            throw StateStoreError.invalidRecord(
+                "The bootstrap desktop identity does not match the installer trust domain."
+            )
+        }
+    }
+
+    private static func declareCompanion(
+        store: SQLiteStateStore,
+        userID: UInt32,
+        identity: CodeIdentity,
+        declaringSubjectID: String,
+        timestamp: String
+    ) throws -> ControlPeerIdentityRecord {
+        let record = ControlPeerIdentityRecord(
+            subjectID: "bootstrap-companion-\(userID)-\(identity.codeDirectoryHash.prefix(16))",
+            userID: userID,
+            codeIdentity: identity,
+            declaredBySubjectID: declaringSubjectID,
+            declaredAt: timestamp,
+            updatedAt: timestamp
+        )
+        try store.controlIdentities.declare(record)
+        return record
+    }
+
+    private static func ensureDesktopOperatorBinding(
+        store: SQLiteStateStore,
+        desktop: ControlPeerIdentityRecord,
+        ownerSubjectID: String,
+        timestamp: String
+    ) throws {
+        let bindingID = "desktop-operator-\(desktop.subjectID)"
+        let expected = RBACBindingRecord(
+            bindingID: bindingID,
+            subjectID: desktop.subjectID,
+            roleID: DefaultRole.operator.rawValue,
+            scope: RBACScope(kind: .global),
+            createdBySubjectID: ownerSubjectID,
+            createdAt: timestamp,
+            updatedAt: timestamp
+        )
+        if let existing = try store.rbac.binding(id: bindingID) {
+            guard existing.subjectID == expected.subjectID,
+                  existing.roleID == expected.roleID,
+                  existing.scope == expected.scope,
+                  existing.createdBySubjectID == expected.createdBySubjectID else {
+                throw StateStoreError.transactionInvariantViolation(
+                    message: "The desktop operator binding differs from the trusted bootstrap record."
+                )
+            }
+            return
+        }
+        _ = try store.rbac.createBinding(expected)
+    }
+
+    private static func discoverDesktopIdentity(installerProcessID: pid_t) throws -> CodeIdentity? {
+        var buffer = [CChar](repeating: 0, count: 4_096)
+        let count = proc_pidpath(installerProcessID, &buffer, UInt32(buffer.count))
+        guard count > 0 else { throw ControlPeerAuthenticationError.codeUnavailable }
+        let pathBytes = buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
+        let installerURL = URL(
+            fileURLWithPath: String(decoding: pathBytes, as: UTF8.self)
+        ).standardizedFileURL
+        let directory = installerURL.deletingLastPathComponent()
+        let candidate = directory.lastPathComponent == "bin"
+            ? directory.deletingLastPathComponent().appendingPathComponent(
+                "libexec/hostwright/Hostwright.app/Contents/MacOS/hostwright-desktop"
+            )
+            : directory.appendingPathComponent("hostwright-desktop")
+        var status = stat()
+        guard lstat(candidate.path, &status) == 0 else {
+            if errno == ENOENT { return nil }
+            throw ControlPeerAuthenticationError.codeUnavailable
+        }
+        return try DarwinCurrentControlCodeIdentity.inspect(executablePath: candidate.path)
     }
 
     private static func adHocIdentifier(_ value: String, base: String) -> Bool {

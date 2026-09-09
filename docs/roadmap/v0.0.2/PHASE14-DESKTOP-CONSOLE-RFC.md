@@ -17,6 +17,8 @@ The first usable surface is:
 
 The desktop sends the same classified lifecycle route used by the CLI. Duplicate preview or confirmation clicks are ignored while a request is active. Closing the review, explicit cancellation, disconnect, manifest replacement, or reconnect invalidates the review and closes the request socket so the daemon's connection-scoped cancellation reaches the lifecycle coordinator. A late response is fenced by the request UUID and cannot update the new connection state.
 
+The daemon bootstrap discovers the desktop executable only beside the trusted CLI payload, validates its exact static code signature, and declares or rotates that identity in the same installed trust domain. The desktop receives the built-in global `operator` role, which includes observation and reviewed lifecycle execution without owner, security-administration, or maintenance authority. A missing desktop remains compatible with older payload layouts; an invalid or mismatched desktop fails bootstrap before identity mutation.
+
 Team, cloud, MDM, multi-Mac, Kubernetes, accelerator, and automatic in-app update workflows remain outside this release.
 
 ## UI direction

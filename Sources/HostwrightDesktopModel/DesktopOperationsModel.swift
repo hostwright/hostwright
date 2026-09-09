@@ -3,6 +3,7 @@ import Foundation
 import HostwrightCommandTransport
 import HostwrightControlPlane
 import HostwrightControlTransport
+import HostwrightCore
 import HostwrightDaemonCore
 import HostwrightRuntime
 
@@ -159,10 +160,12 @@ public struct DesktopControlAPIClient: Sendable {
     public func lifecyclePreview(
         action: DesktopLifecycleAction,
         manifestPath: String,
+        authorizationProjectID: String,
         cancellation: PersistentControlRequestCancellation
     ) throws -> DesktopLifecyclePlanReview {
         let result = try lifecycleCLIResult(
             arguments: [action.rawValue, manifestPath, "--dry-run", "--output", "json"],
+            authorizationProjectID: authorizationProjectID,
             cancellation: cancellation,
             prefix: "lifecycle-preview"
         )
@@ -212,6 +215,7 @@ public struct DesktopControlAPIClient: Sendable {
 
     public func executeLifecycle(
         plan: DesktopLifecyclePlanReview,
+        authorizationProjectID: String,
         cancellation: PersistentControlRequestCancellation
     ) throws -> DesktopLifecycleExecutionResult {
         let result = try lifecycleCLIResult(
@@ -221,6 +225,7 @@ public struct DesktopControlAPIClient: Sendable {
                 "--confirm-plan", plan.planSHA256,
                 "--output", "json",
             ],
+            authorizationProjectID: authorizationProjectID,
             cancellation: cancellation,
             prefix: "lifecycle-execute"
         )
@@ -257,10 +262,15 @@ public struct DesktopControlAPIClient: Sendable {
 
     private func lifecycleCLIResult(
         arguments: [String],
+        authorizationProjectID: String,
         cancellation: PersistentControlRequestCancellation,
         prefix: String
     ) throws -> DesktopLifecycleCLIResult {
         let route = try CLIControlRoute.classify(arguments: arguments)
+            .withAuthorizationScope(.init(
+                projectIdentifier: authorizationProjectID,
+                resourceIdentifier: nil
+            ))
         guard route.transport == .persistentControlAPI else {
             throw DesktopControlFailure(
                 code: "lifecycle.invalidRoute",
@@ -271,7 +281,8 @@ public struct DesktopControlAPIClient: Sendable {
             operation: route.operation,
             body: route.requestBody(),
             timeoutMilliseconds: ControlPlaneContract.maximumUnaryDeadlineMilliseconds,
-            prefix: prefix
+            prefix: prefix,
+            mutating: route.mutating
         )
         let response = try transport.send(request, cancellation: cancellation)
         let result = try CLIControlResultContract.result(
@@ -352,12 +363,15 @@ public struct DesktopControlAPIClient: Sendable {
         operation: String,
         body: ControlPlaneJSONValue? = nil,
         timeoutMilliseconds: Int,
-        prefix: String
+        prefix: String,
+        mutating: Bool = false
     ) -> ControlRequestEnvelope {
-        ControlRequestEnvelope(
-            requestID: "desktop-\(prefix)-\(UUID().uuidString.lowercased())",
+        let requestID = "desktop-\(prefix)-\(UUID().uuidString.lowercased())"
+        return ControlRequestEnvelope(
+            requestID: requestID,
             operation: operation,
             timeoutMilliseconds: timeoutMilliseconds,
+            idempotencyKey: mutating ? requestID : nil,
             body: body
         )
     }
@@ -554,6 +568,7 @@ public final class DesktopOperationsModel: ObservableObject {
                 try api.lifecyclePreview(
                     action: action,
                     manifestPath: project.manifestPath,
+                    authorizationProjectID: Self.authorizationProjectID(for: project),
                     cancellation: cancellation
                 )
             }
@@ -603,13 +618,28 @@ public final class DesktopOperationsModel: ObservableObject {
         let lifecycleID = UUID()
         let cancellation = PersistentControlRequestCancellation()
         let api = self.api
+        guard let project = projects.first(where: {
+            $0.manifestPath == plan.manifestPath && $0.manifestIsValid
+        }) else {
+            lifecycleState = .idle
+            record(error: DesktopControlFailure(
+                code: "lifecycle.staleConfirmation",
+                message: "The lifecycle plan is stale. Review a fresh plan before confirming."
+            ))
+            return
+        }
+        let authorizationProjectID = Self.authorizationProjectID(for: project)
         self.lifecycleID = lifecycleID
         self.lifecycleCancellation = cancellation
         lifecycleState = .executing(plan)
         lastFailure = nil
         lifecycleTask = Task { [weak self] in
             let request = Task.detached {
-                try api.executeLifecycle(plan: plan, cancellation: cancellation)
+                try api.executeLifecycle(
+                    plan: plan,
+                    authorizationProjectID: authorizationProjectID,
+                    cancellation: cancellation
+                )
             }
             defer {
                 request.cancel()
@@ -890,6 +920,12 @@ public final class DesktopOperationsModel: ObservableObject {
         }
         projects = [project]
         lastFailure = nil
+    }
+
+    nonisolated private static func authorizationProjectID(
+        for project: DesktopProjectStatus
+    ) -> String {
+        HostwrightResourceUUID.legacy(kind: "project", identifier: project.id)
     }
 
     private func invalidateLifecycleForConnectionChange() {

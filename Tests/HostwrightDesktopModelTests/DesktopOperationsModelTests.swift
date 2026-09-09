@@ -649,10 +649,12 @@ final class DesktopOperationsModelTests: XCTestCase {
         let api = DesktopControlAPIClient(transport: transport)
         let cancellation = PersistentControlRequestCancellation()
         let manifest = "/Users/tester/project.yml"
+        let authorizationProjectID = "6842e97d-8bc8-8119-92c6-6af3d6c16104"
 
         let plan = try api.lifecyclePreview(
             action: .up,
             manifestPath: manifest,
+            authorizationProjectID: authorizationProjectID,
             cancellation: cancellation
         )
         XCTAssertEqual(plan.action, .up)
@@ -662,7 +664,11 @@ final class DesktopOperationsModelTests: XCTestCase {
         XCTAssertEqual(plan.planSHA256, hashC)
         XCTAssertEqual(plan.nodes.map(\.action), ["create"])
 
-        let result = try api.executeLifecycle(plan: plan, cancellation: cancellation)
+        let result = try api.executeLifecycle(
+            plan: plan,
+            authorizationProjectID: authorizationProjectID,
+            cancellation: cancellation
+        )
         XCTAssertEqual(result.groupID, group)
         XCTAssertEqual(result.planSHA256, hashC)
         XCTAssertEqual(result.completedNodeKeys, ["create-web"])
@@ -673,6 +679,17 @@ final class DesktopOperationsModelTests: XCTestCase {
                 ["up", manifest, "--confirm-plan", hashC, "--output", "json"],
             ]
         )
+        for request in transport.requests {
+            XCTAssertEqual(request.idempotencyKey, request.requestID)
+            guard case .object(let body)? = request.body else {
+                return XCTFail("Expected a scoped lifecycle request body.")
+            }
+            XCTAssertEqual(
+                body["authorizationProjectID"],
+                .string(authorizationProjectID)
+            )
+            XCTAssertEqual(body["authorizationResourceID"], .null)
+        }
     }
 
     func testLifecycleModelRejectsDuplicateAndStaleConfirmationThenExecutesExactPlan() async throws {
@@ -741,6 +758,20 @@ final class DesktopOperationsModelTests: XCTestCase {
             transport.requests.filter { Self.arguments(from: $0).contains("--confirm-plan") }.count,
             1
         )
+        let lifecycleRequests = transport.requests.filter {
+            ["up", "down", "restart"].contains($0.operation)
+        }
+        XCTAssertFalse(lifecycleRequests.isEmpty)
+        for request in lifecycleRequests {
+            guard case .object(let body)? = request.body else {
+                return XCTFail("Expected a scoped lifecycle request body.")
+            }
+            XCTAssertEqual(
+                body["authorizationProjectID"],
+                .string("6842e97d-8bc8-8119-92c6-6af3d6c16104")
+            )
+            XCTAssertEqual(request.idempotencyKey, request.requestID)
+        }
     }
 
     func testLifecycleCancellationAndDisconnectCloseTheActiveControlRequest() async {

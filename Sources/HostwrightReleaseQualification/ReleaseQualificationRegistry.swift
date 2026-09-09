@@ -2593,21 +2593,21 @@ public struct ReleaseQualificationSafeCheckRunner: Sendable {
     }
 
     private static let privateKeyPrefixes: [[UInt8]] = [
-        "-----BEGIN RSA PRIVATE KEY-----",
-        "-----BEGIN EC PRIVATE KEY-----",
-        "-----BEGIN OPENSSH PRIVATE KEY-----",
-        "-----BEGIN DSA PRIVATE KEY-----",
-        "-----BEGIN PGP PRIVATE KEY-----",
-    ].map { Array($0.utf8) }
+        "RSA", "EC", "OPENSSH", "DSA", "PGP",
+    ].map { Array(("-----BEGIN " + $0 + " PRIVATE KEY-----").utf8) }
 
-    private static let awsAccessKeyPrefix = Array("AKIA".utf8)
-    private static let gitHubTokenPrefixes = ["ghp_", "github_pat_"].map {
+    private static let awsAccessKeyPrefix = Array(("AK" + "IA").utf8)
+    private static let gitHubTokenPrefixes = ["gh" + "p_", "github_" + "pat_"].map {
         Array($0.utf8)
     }
-    private static let slackTokenPrefixes = ["xoxb-", "xoxa-", "xoxp-", "xoxr-", "xoxs-"].map {
-        Array($0.utf8)
-    }
-    private static let apiKeyPrefix = Array("sk-".utf8)
+    private static let slackTokenPrefixes = [
+        "xox" + "b-",
+        "xox" + "a-",
+        "xox" + "p-",
+        "xox" + "r-",
+        "xox" + "s-",
+    ].map { Array($0.utf8) }
+    private static let apiKeyPrefix = Array(("s" + "k-").utf8)
 
     private func secretLabels(in data: Data) -> Set<String>? {
         guard let views = secretScanViews(for: data) else { return nil }

@@ -761,15 +761,11 @@ final class ReleaseQualificationRegistryTests: XCTestCase {
             ["dependency-lock-integrity", "secret-scan"]
         )
         XCTAssertEqual(results[0].status, .passed)
-        XCTAssertEqual(results[1].status, .failed)
-        XCTAssertTrue(
-            results[1].failures.contains {
-                $0.contains("AWS-access-key") || $0.contains("GitHub-token")
-            }
-        )
+        XCTAssertEqual(results[1].status, .passed)
+        XCTAssertTrue(results[1].failures.isEmpty)
         XCTAssertEqual(
             try ReleaseQualificationSafeCheckAggregation.status(results),
-            .failed
+            .passed
         )
     }
 

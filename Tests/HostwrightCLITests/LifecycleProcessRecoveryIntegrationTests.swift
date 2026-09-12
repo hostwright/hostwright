@@ -65,6 +65,7 @@ final class LifecycleProcessRecoveryIntegrationTests: XCTestCase {
         let parentEnvironment = ProcessInfo.processInfo.environment
         let sanitizerRuntime = parentEnvironment["DYLD_INSERT_LIBRARIES"]
             ?? parentEnvironment["HOSTWRIGHT_TEST_DYLD_INSERT_LIBRARIES"]
+            ?? loadedSanitizerRuntime()
         let testSelector = "HostwrightCLITests.LifecycleProcessRecoveryIntegrationTests/testLifecycleSagaRecoversAfterSIGKILLAtDurableBoundaries"
         if sanitizerRuntime != nil {
             let developerDirectory = ProcessInfo.processInfo.environment["DEVELOPER_DIR"]
@@ -115,6 +116,20 @@ final class LifecycleProcessRecoveryIntegrationTests: XCTestCase {
         process.standardError = Pipe()
         try process.run()
         return process
+    }
+
+    private func loadedSanitizerRuntime() -> String? {
+        for index in 0..<_dyld_image_count() {
+            guard let name = _dyld_get_image_name(index) else {
+                continue
+            }
+            let path = String(cString: name)
+            if path.hasSuffix("libclang_rt.asan_osx_dynamic.dylib") ||
+                path.hasSuffix("libclang_rt.tsan_osx_dynamic.dylib") {
+                return path
+            }
+        }
+        return nil
     }
 
     private func assertKillBoundary(

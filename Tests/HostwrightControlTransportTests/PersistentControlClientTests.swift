@@ -2,11 +2,36 @@ import Darwin
 import Foundation
 import HostwrightControlPlane
 import HostwrightControlSecurity
-import HostwrightControlTransport
+@testable import HostwrightControlTransport
 import HostwrightState
 import XCTest
 
 final class PersistentControlClientTests: XCTestCase {
+  func testCancellationPinsDescriptorUntilShutdownCompletes() {
+    let shutdownStarted = DispatchSemaphore(value: 0)
+    let allowShutdown = DispatchSemaphore(value: 0)
+    let unbindCompleted = DispatchSemaphore(value: 0)
+    let cancellation = PersistentControlRequestCancellation { _ in
+      shutdownStarted.signal()
+      allowShutdown.wait()
+    }
+    XCTAssertTrue(cancellation.bind(descriptor: 42))
+
+    DispatchQueue.global(qos: .userInitiated).async {
+      cancellation.cancel()
+    }
+    XCTAssertEqual(shutdownStarted.wait(timeout: .now() + 1), .success)
+    DispatchQueue.global(qos: .userInitiated).async {
+      cancellation.unbind(descriptor: 42)
+      unbindCompleted.signal()
+    }
+    XCTAssertEqual(unbindCompleted.wait(timeout: .now() + 0.1), .timedOut)
+
+    allowShutdown.signal()
+    XCTAssertEqual(unbindCompleted.wait(timeout: .now() + 1), .success)
+    XCTAssertTrue(cancellation.isCancelled)
+  }
+
   func testLiveConcurrentClientsAndDurableReplayAcrossListenerRestart() throws {
     let root = try makeOwnedRoot()
     defer { removeOwnedRoot(root) }

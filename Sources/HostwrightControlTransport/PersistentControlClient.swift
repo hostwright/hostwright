@@ -16,11 +16,20 @@ public enum PersistentControlClientError: Error, Equatable, Sendable {
 }
 
 public final class PersistentControlRequestCancellation: @unchecked Sendable {
+  private let shutdownDescriptor: @Sendable (Int32) -> Void
   private let lock = NSLock()
   private var descriptor: Int32?
   private var cancelled = false
 
-  public init() {}
+  public convenience init() {
+    self.init { descriptor in
+      _ = shutdown(descriptor, SHUT_RDWR)
+    }
+  }
+
+  init(shutdownDescriptor: @escaping @Sendable (Int32) -> Void) {
+    self.shutdownDescriptor = shutdownDescriptor
+  }
 
   public var isCancelled: Bool {
     lock.lock()
@@ -30,15 +39,14 @@ public final class PersistentControlRequestCancellation: @unchecked Sendable {
 
   public func cancel() {
     lock.lock()
+    defer { lock.unlock() }
     cancelled = true
-    let descriptor = descriptor
-    lock.unlock()
     if let descriptor {
-      _ = shutdown(descriptor, SHUT_RDWR)
+      shutdownDescriptor(descriptor)
     }
   }
 
-  fileprivate func bind(descriptor: Int32) -> Bool {
+  func bind(descriptor: Int32) -> Bool {
     lock.lock()
     defer { lock.unlock() }
     guard !cancelled else { return false }
@@ -46,7 +54,7 @@ public final class PersistentControlRequestCancellation: @unchecked Sendable {
     return true
   }
 
-  fileprivate func unbind(descriptor: Int32) {
+  func unbind(descriptor: Int32) {
     lock.lock()
     if self.descriptor == descriptor {
       self.descriptor = nil

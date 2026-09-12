@@ -982,90 +982,90 @@ final class DistributionDurableLifecycleTests: XCTestCase {
                 version: "0.0.2",
                 commit: String(repeating: "2", count: 40)
             )
-            let prefix = root.appendingPathComponent(
-                "schema-two-prefix",
-                isDirectory: true
-            )
-            try FileManager.default.createDirectory(
-                at: prefix,
-                withIntermediateDirectories: false
-            )
             let lifecycle = DistributionInstalledLifecycle()
-            let initial = try lifecycle.install(
-                artifact: baseline,
-                prefix: prefix
-            )
-
-            let priorFiles = baseline.manifest.files.filter {
-                DistributionLayout.legacyPayloadModesV2[$0.path] != nil
-            }
-            let priorPaths = Set(priorFiles.map(\.path))
-            let priorCreatedDirectories = initial.installedManifest.createdDirectories.filter {
-                directory in
-                priorPaths.contains { path in
-                    path.hasPrefix("\(directory)/")
+            func makeSchemaTwoPrefix(_ name: String) throws -> URL {
+                let prefix = root.appendingPathComponent(name, isDirectory: true)
+                try FileManager.default.createDirectory(
+                    at: prefix,
+                    withIntermediateDirectories: false
+                )
+                let initial = try lifecycle.install(
+                    artifact: baseline,
+                    prefix: prefix
+                )
+                let priorFiles = baseline.manifest.files.filter {
+                    DistributionLayout.legacyPayloadModesV2[$0.path] != nil
                 }
-            }
-            let priorManifest = DistributionInstallManifest(
-                schemaVersion: 2,
-                artifactID: baseline.manifest.artifactID,
-                sourceCommit: baseline.manifest.sourceCommit,
-                packageVersion: baseline.manifest.packageVersion,
-                files: priorFiles,
-                createdDirectories: priorCreatedDirectories
-            )
-            try priorManifest.validate()
-            for file in baseline.manifest.files where !priorPaths.contains(file.path) {
-                try FileManager.default.removeItem(
-                    at: prefix.appendingPathComponent(file.path)
+                let priorPaths = Set(priorFiles.map(\.path))
+                let priorCreatedDirectories = initial.installedManifest.createdDirectories.filter {
+                    directory in
+                    priorPaths.contains { path in
+                        path.hasPrefix("\(directory)/")
+                    }
+                }
+                let priorManifest = DistributionInstallManifest(
+                    schemaVersion: 2,
+                    artifactID: baseline.manifest.artifactID,
+                    sourceCommit: baseline.manifest.sourceCommit,
+                    packageVersion: baseline.manifest.packageVersion,
+                    files: priorFiles,
+                    createdDirectories: priorCreatedDirectories
                 )
-            }
-            for directory in initial.installedManifest.createdDirectories
-                .filter({ !priorCreatedDirectories.contains($0) })
-                .sorted(by: { $0.split(separator: "/").count > $1.split(separator: "/").count }) {
-                try FileManager.default.removeItem(
-                    at: prefix.appendingPathComponent(directory, isDirectory: true)
+                try priorManifest.validate()
+                for file in baseline.manifest.files where !priorPaths.contains(file.path) {
+                    try FileManager.default.removeItem(
+                        at: prefix.appendingPathComponent(file.path)
+                    )
+                }
+                for directory in initial.installedManifest.createdDirectories
+                    .filter({ !priorCreatedDirectories.contains($0) })
+                    .sorted(by: { $0.split(separator: "/").count > $1.split(separator: "/").count }) {
+                    try FileManager.default.removeItem(
+                        at: prefix.appendingPathComponent(directory, isDirectory: true)
+                    )
+                }
+                let installManifestURL = prefix.appendingPathComponent(
+                    DistributionLayout.installManifestFileName
                 )
+                try FileManager.default.removeItem(at: installManifestURL)
+                try DistributionFileSystem.writeNewFile(
+                    try DistributionJSON.encode(priorManifest),
+                    to: installManifestURL,
+                    mode: 0o644
+                )
+                let priorStatus = DistributionInstallationStatus(
+                    installationID: initial.installationID,
+                    generation: initial.generation,
+                    prefix: initial.prefix,
+                    installedManifest: priorManifest,
+                    stateDatabasePath: initial.stateDatabasePath,
+                    service: initial.service,
+                    rollbackOperationID: nil,
+                    updatedAt: initial.updatedAt
+                )
+                let statusURL = prefix
+                    .appendingPathComponent(
+                        DistributionLayout.lifecycleDirectoryName,
+                        isDirectory: true
+                    )
+                    .appendingPathComponent(
+                        DistributionLayout.lifecycleStatusFileName
+                    )
+                try FileManager.default.removeItem(at: statusURL)
+                try DistributionFileSystem.writeNewFile(
+                    try DistributionJSON.encode(priorStatus),
+                    to: statusURL,
+                    mode: 0o600
+                )
+                XCTAssertEqual(
+                    try lifecycle.inspect(prefix: prefix).status?.installedManifest
+                        .schemaVersion,
+                    2
+                )
+                return prefix
             }
-            let installManifestURL = prefix.appendingPathComponent(
-                DistributionLayout.installManifestFileName
-            )
-            try FileManager.default.removeItem(at: installManifestURL)
-            try DistributionFileSystem.writeNewFile(
-                try DistributionJSON.encode(priorManifest),
-                to: installManifestURL,
-                mode: 0o644
-            )
 
-            let priorStatus = DistributionInstallationStatus(
-                installationID: initial.installationID,
-                generation: initial.generation,
-                prefix: initial.prefix,
-                installedManifest: priorManifest,
-                stateDatabasePath: initial.stateDatabasePath,
-                service: initial.service,
-                rollbackOperationID: nil,
-                updatedAt: initial.updatedAt
-            )
-            let statusURL = prefix
-                .appendingPathComponent(
-                    DistributionLayout.lifecycleDirectoryName,
-                    isDirectory: true
-                )
-                .appendingPathComponent(
-                    DistributionLayout.lifecycleStatusFileName
-                )
-            try FileManager.default.removeItem(at: statusURL)
-            try DistributionFileSystem.writeNewFile(
-                try DistributionJSON.encode(priorStatus),
-                to: statusURL,
-                mode: 0o600
-            )
-            XCTAssertEqual(
-                try lifecycle.inspect(prefix: prefix).status?.installedManifest
-                    .schemaVersion,
-                2
-            )
+            let prefix = try makeSchemaTwoPrefix("schema-two-prefix")
 
             let upgraded = try lifecycle.install(
                 artifact: candidate,
@@ -1098,6 +1098,40 @@ final class DistributionDurableLifecycleTests: XCTestCase {
             XCTAssertEqual(
                 try FileManager.default.contentsOfDirectory(
                     atPath: prefix.path
+                ),
+                []
+            )
+
+            let interruptedPrefix = try makeSchemaTwoPrefix(
+                "schema-two-interrupted-prefix"
+            )
+            XCTAssertThrowsError(
+                try DistributionInstalledLifecycle(
+                    interruptAfter: .payloadPublished
+                ).install(
+                    artifact: candidate,
+                    prefix: interruptedPrefix
+                )
+            ) { error in
+                XCTAssertEqual(
+                    error as? DistributionLifecycleInterruption,
+                    .after(.payloadPublished)
+                )
+            }
+            XCTAssertEqual(
+                try lifecycle.inspect(prefix: interruptedPrefix).readiness,
+                .recoveryRequired
+            )
+            let recovered = try lifecycle.recover(prefix: interruptedPrefix)
+            XCTAssertEqual(recovered.action, .restoredPriorGeneration)
+            XCTAssertEqual(recovered.status?.installedManifest.schemaVersion, 2)
+            _ = try lifecycle.uninstall(
+                prefix: interruptedPrefix,
+                dataPolicy: .preserve
+            )
+            XCTAssertEqual(
+                try FileManager.default.contentsOfDirectory(
+                    atPath: interruptedPrefix.path
                 ),
                 []
             )

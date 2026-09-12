@@ -641,8 +641,10 @@ public struct DistributionInstalledLifecycle: Sendable {
             replacingServiceState(in: $0, with: serviceState)
         }
 
-        let createdDirectories = existingManifest?.createdDirectories
-            ?? directoriesCreatedByFirstInstall(prefix: prefix)
+        let createdDirectories = Array(
+            Set(existingManifest?.createdDirectories ?? [])
+                .union(directoriesCreatedByInstalling(manifest.files, prefix: prefix))
+        ).sorted()
         let targetManifest = DistributionInstallManifest(
             artifact: manifest,
             createdDirectories: createdDirectories
@@ -1548,7 +1550,7 @@ public struct DistributionInstalledLifecycle: Sendable {
             try writeJournal(journal, prefix: prefix)
             try checkpointReached(.payloadPublishing, cancellation: cancellation)
 
-            for path in payloadDirectories().sorted() {
+            for path in payloadDirectories(for: toManifest.files).sorted() {
                 let directory = prefix.appendingPathComponent(path, isDirectory: true)
                 if !DistributionFileSystem.entryExists(directory) {
                     try DistributionFileSystem.createExclusiveDirectory(directory, mode: 0o755)
@@ -1574,6 +1576,13 @@ public struct DistributionInstalledLifecycle: Sendable {
                     }
                     try removeExactOwnedFile(destination)
                 }
+                let targetDirectories = Set(toManifest.createdDirectories)
+                try removeCreatedDirectoriesIfEmpty(
+                    fromManifest.createdDirectories.filter {
+                        !targetDirectories.contains($0)
+                    },
+                    prefix: prefix
+                )
             }
             try atomicMoveReplacing(
                 from: staged.appendingPathComponent(DistributionLayout.installManifestFileName),
@@ -1740,7 +1749,7 @@ public struct DistributionInstalledLifecycle: Sendable {
                         }
                     }
                 }
-                for path in payloadDirectories().sorted() {
+                for path in payloadDirectories(for: fromManifest.files).sorted() {
                     let directory = prefix.appendingPathComponent(path, isDirectory: true)
                     if !DistributionFileSystem.entryExists(directory) {
                         try DistributionFileSystem.createExclusiveDirectory(directory, mode: 0o755)
@@ -1787,6 +1796,15 @@ public struct DistributionInstalledLifecycle: Sendable {
                 guard restoredManifest == fromManifest else {
                     throw DistributionError.installOwnershipMismatch(
                         DistributionLayout.installManifestFileName
+                    )
+                }
+                if let toManifest = journal.toManifest {
+                    let restoredDirectories = Set(fromManifest.createdDirectories)
+                    try removeCreatedDirectoriesIfEmpty(
+                        toManifest.createdDirectories.filter {
+                            !restoredDirectories.contains($0)
+                        },
+                        prefix: prefix
                     )
                 }
             } else if let toManifest = journal.toManifest {
@@ -3005,14 +3023,25 @@ public struct DistributionInstalledLifecycle: Sendable {
         }
     }
 
-    private func directoriesCreatedByFirstInstall(prefix: URL) -> [String] {
-        payloadDirectories().filter {
+    private func directoriesCreatedByInstalling(
+        _ files: [DistributionFileRecord],
+        prefix: URL
+    ) -> [String] {
+        payloadDirectories(for: files).filter {
             !DistributionFileSystem.entryExists(prefix.appendingPathComponent($0))
         }.sorted()
     }
 
+    private func payloadDirectories(for files: [DistributionFileRecord]) -> [String] {
+        payloadDirectories(forPaths: files.map(\.path))
+    }
+
     private func payloadDirectories() -> [String] {
-        Array(Set(DistributionLayout.payloadModes.keys.flatMap { path -> [String] in
+        payloadDirectories(forPaths: Array(DistributionLayout.payloadModes.keys))
+    }
+
+    private func payloadDirectories(forPaths paths: [String]) -> [String] {
+        Array(Set(paths.flatMap { path -> [String] in
             let components = path.split(separator: "/").map(String.init)
             var directories: [String] = []
             var current = ""

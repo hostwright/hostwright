@@ -999,20 +999,34 @@ final class DistributionDurableLifecycleTests: XCTestCase {
             let priorFiles = baseline.manifest.files.filter {
                 DistributionLayout.legacyPayloadModesV2[$0.path] != nil
             }
+            let priorPaths = Set(priorFiles.map(\.path))
+            let priorCreatedDirectories = initial.installedManifest.createdDirectories.filter {
+                directory in
+                priorPaths.contains { path in
+                    path.hasPrefix("\(directory)/")
+                }
+            }
             let priorManifest = DistributionInstallManifest(
                 schemaVersion: 2,
                 artifactID: baseline.manifest.artifactID,
                 sourceCommit: baseline.manifest.sourceCommit,
                 packageVersion: baseline.manifest.packageVersion,
                 files: priorFiles,
-                createdDirectories: initial.installedManifest.createdDirectories
+                createdDirectories: priorCreatedDirectories
             )
             try priorManifest.validate()
-            try FileManager.default.removeItem(
-                at: prefix.appendingPathComponent(
-                    "bin/hostwright-storage-helper"
+            for file in baseline.manifest.files where !priorPaths.contains(file.path) {
+                try FileManager.default.removeItem(
+                    at: prefix.appendingPathComponent(file.path)
                 )
-            )
+            }
+            for directory in initial.installedManifest.createdDirectories
+                .filter({ !priorCreatedDirectories.contains($0) })
+                .sorted(by: { $0.split(separator: "/").count > $1.split(separator: "/").count }) {
+                try FileManager.default.removeItem(
+                    at: prefix.appendingPathComponent(directory, isDirectory: true)
+                )
+            }
             let installManifestURL = prefix.appendingPathComponent(
                 DistributionLayout.installManifestFileName
             )

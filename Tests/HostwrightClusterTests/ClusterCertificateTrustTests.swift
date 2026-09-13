@@ -620,7 +620,7 @@ final class ClusterCertificateTrustTests: XCTestCase {
         }
         let certificate = try Certificate(
             version: .v3,
-            serialNumber: Certificate.SerialNumber(),
+            serialNumber: Certificate.SerialNumber(bytes: [0x01] + [UInt8](repeating: 0x42, count: 19)),
             publicKey: key.certificateKey.publicKey,
             notValidBefore: now.addingTimeInterval(-3_600),
             notValidAfter: now.addingTimeInterval(86_400),
@@ -656,7 +656,7 @@ final class ClusterCertificateTrustTests: XCTestCase {
         let usages = extendedKeyUsages ?? keyUsages(for: identity.role)
         let certificate = try Certificate(
             version: .v3,
-            serialNumber: Certificate.SerialNumber(),
+            serialNumber: Certificate.SerialNumber(bytes: [0x01] + [UInt8](repeating: 0x43, count: 19)),
             publicKey: key.certificateKey.publicKey,
             notValidBefore: notValidBefore ?? now.addingTimeInterval(-60),
             notValidAfter: notValidAfter ?? now.addingTimeInterval(3_600),

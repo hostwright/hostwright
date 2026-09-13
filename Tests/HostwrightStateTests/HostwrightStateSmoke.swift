@@ -1790,14 +1790,17 @@ final class HostwrightStateTests: XCTestCase {
             DispatchQueue.concurrentPerform(iterations: 16) { index in
                 do {
                     let suffix = String(format: "%012x", index + 1)
-                    let released = try store.restartPolicies.releaseHold(
-                        projectID: targetProjectID,
-                        serviceName: "api",
-                        expectedHoldToken: holdToken,
-                        timestamp: "2026-08-01T12:01:00Z",
-                        historyID: "11111111-1111-4111-8111-\(suffix)",
-                        eventID: "22222222-2222-4222-8222-\(suffix)"
-                    )
+                    let released = try StateUpgradeService(store: store)
+                        .withBoundedStateAccessWait(lockWaitMilliseconds: 5_000) {
+                            try store.restartPolicies.releaseHold(
+                                projectID: targetProjectID,
+                                serviceName: "api",
+                                expectedHoldToken: holdToken,
+                                timestamp: "2026-08-01T12:01:00Z",
+                                historyID: "11111111-1111-4111-8111-\(suffix)",
+                                eventID: "22222222-2222-4222-8222-\(suffix)"
+                            )
+                        }
                     if released != nil { outcome.withLock { $0.winners += 1 } }
                 } catch {
                     outcome.withLock { $0.failures.append(String(describing: error)) }

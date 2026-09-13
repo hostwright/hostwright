@@ -1106,22 +1106,26 @@ public struct DistributionCleanBuilder: Sendable {
               let dependencies = object["dependencies"] as? [Any] else {
             throw DistributionError.invalidArtifact("SwiftPM dependency inventory is malformed")
         }
+        let pins = try dependencyPins(resolvedFile: resolvedFile)
         var observed: [String: (url: String, version: String)] = [:]
         func visit(_ values: [Any]) throws {
             for value in values {
                 guard let dependency = value as? [String: Any],
                       let identity = dependency["identity"] as? String,
                       let url = dependency["url"] as? String,
-                      let version = dependency["version"] as? String,
+                      let reportedVersion = dependency["version"] as? String,
+                      let pin = pins[identity],
                       !identity.isEmpty,
                       url.hasPrefix("https://github.com/"),
                       url.hasSuffix(".git"),
-                      version.range(
-                        of: "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$",
-                        options: .regularExpression
-                      ) != nil,
                       let children = dependency["dependencies"] as? [Any] else {
                     throw DistributionError.invalidArtifact("SwiftPM dependency inventory is not exact")
+                }
+                let expectedVersion = try dependencyVersion(pin)
+                let version = reportedVersion == "unspecified" && pin.state.version == nil
+                    ? expectedVersion : reportedVersion
+                guard version == expectedVersion else {
+                    throw DistributionError.invalidArtifact("SwiftPM dependency differs from Package.resolved")
                 }
                 if let current = observed[identity],
                    current.url != url || current.version != version {
@@ -1133,7 +1137,6 @@ public struct DistributionCleanBuilder: Sendable {
         }
         try visit(dependencies)
 
-        let pins = try dependencyPins(resolvedFile: resolvedFile)
         guard Set(observed.keys) == Set(pins.keys),
               let containerization = pins["containerization"],
               containerization.location == "https://github.com/apple/containerization.git",
@@ -1146,7 +1149,7 @@ public struct DistributionCleanBuilder: Sendable {
             guard let dependency = observed[identity],
                   let pin = pins[identity],
                   pin.location == dependency.url,
-                  pin.state.version == dependency.version else {
+                  try dependencyVersion(pin) == dependency.version else {
                 throw DistributionError.invalidArtifact("SwiftPM dependency differs from Package.resolved")
             }
             return [identity, dependency.url, dependency.version, pin.state.revision]
@@ -1172,15 +1175,37 @@ public struct DistributionCleanBuilder: Sendable {
         guard pin.kind == "remoteSourceControl",
               pin.location.hasPrefix("https://github.com/"),
               pin.location.hasSuffix(".git"),
-              let version = pin.state.version,
-              version.range(
-                of: "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$",
-                options: .regularExpression
-              ) != nil,
               pin.state.revision.range(of: "^[a-f0-9]{40}$", options: .regularExpression) != nil else {
             throw DistributionError.invalidArtifact("Package.resolved contains an unpinned dependency")
         }
+        _ = try dependencyVersion(pin)
         return (pin.identity, pin)
+    }
+
+    private func dependencyVersion(_ pin: DistributionResolvedPackagePin) throws -> String {
+        if pin.identity == "swift-crypto" {
+            guard pin.location == HostwrightSecurityDependencyPins.swiftCryptoLocation,
+                  pin.state.revision == HostwrightSecurityDependencyPins.swiftCryptoRevision,
+                  pin.state.version == nil else {
+                throw DistributionError.invalidArtifact("Crypto must use the qualified security-fix revision")
+            }
+            return HostwrightSecurityDependencyPins.swiftCryptoVersion
+        }
+        guard let version = pin.state.version,
+              version.range(
+                of: "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$",
+                options: .regularExpression
+              ) != nil else {
+            throw DistributionError.invalidArtifact("Package.resolved contains an unpinned dependency")
+        }
+        if pin.identity == "swift-nio-http2" {
+            guard pin.location == HostwrightSecurityDependencyPins.swiftNIOHTTP2Location,
+                  pin.state.revision == HostwrightSecurityDependencyPins.swiftNIOHTTP2Revision,
+                  version == HostwrightSecurityDependencyPins.swiftNIOHTTP2Version else {
+                throw DistributionError.invalidArtifact("HTTP/2 must use the qualified security-fix revision")
+            }
+        }
+        return version
     }
 
     private func requireOnlyUnusedBuildDirectory(_ status: String) throws {
@@ -1215,6 +1240,21 @@ private struct DistributionResolvedPackagePin: Decodable {
     struct State: Decodable {
         let revision: String
         let version: String?
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.singleValueContainer()
+            let values = try container.decode([String: String].self)
+            guard let revision = values["revision"],
+                  Set(values.keys) == Set(["revision"]) ||
+                    Set(values.keys) == Set(["revision", "version"]) else {
+                throw DecodingError.dataCorruptedError(
+                    in: container,
+                    debugDescription: "Dependency state must contain only an immutable revision and optional version"
+                )
+            }
+            self.revision = revision
+            self.version = values["version"]
+        }
     }
 
     let identity: String

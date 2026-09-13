@@ -179,7 +179,8 @@ let package = Package(
         ),
         .package(
             url: "https://github.com/apple/swift-crypto.git",
-            exact: "3.15.1"
+            // Crypto 4.5.2 fixes RSA parsing while overriding Containerization's 3.x range.
+            revision: "da9d28d69ebe3894b18376c8f2395c2f37b8448f"
         ),
         .package(
             url: "https://github.com/swiftwasm/WasmKit.git",
@@ -990,7 +991,8 @@ let package = Package(
             name: "HostwrightNetworkHelperTests",
             dependencies: [
                 "HostwrightNetworkHelperCore",
-                "HostwrightRuntime"
+                "HostwrightRuntime",
+                .product(name: "_CryptoExtras", package: "swift-crypto")
             ]
         ),
         .testTarget(

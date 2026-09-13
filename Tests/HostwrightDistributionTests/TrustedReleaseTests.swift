@@ -580,6 +580,84 @@ final class TrustedReleaseTests: XCTestCase {
         )
     }
 
+    func testCleanBuildInventoryRequiresQualifiedSecurityRevisions() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-security-dependency-inventory-\(UUID().uuidString)", isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let resolved = root.appendingPathComponent("Package.resolved")
+        let builder = DistributionCleanBuilder()
+        let pins: [[String: Any]] = [
+            [
+                "identity": "containerization", "kind": "remoteSourceControl",
+                "location": "https://github.com/apple/containerization.git",
+                "state": [
+                    "version": "0.35.0",
+                    "revision": DistributionContainerizationAssets.frameworkRevision,
+                ],
+            ],
+            [
+                "identity": "swift-crypto", "kind": "remoteSourceControl",
+                "location": HostwrightSecurityDependencyPins.swiftCryptoLocation,
+                "state": ["revision": HostwrightSecurityDependencyPins.swiftCryptoRevision],
+            ],
+            [
+                "identity": "swift-nio-http2", "kind": "remoteSourceControl",
+                "location": HostwrightSecurityDependencyPins.swiftNIOHTTP2Location,
+                "state": [
+                    "version": HostwrightSecurityDependencyPins.swiftNIOHTTP2Version,
+                    "revision": HostwrightSecurityDependencyPins.swiftNIOHTTP2Revision,
+                ],
+            ],
+        ]
+        let graph: [[String: Any]] = pins.map { pin in
+            let state = pin["state"] as? [String: String]
+            return [
+                "identity": pin["identity"] as Any, "url": pin["location"] as Any,
+                "version": state?["version"] ?? "unspecified", "dependencies": [],
+            ]
+        }
+        func inventory(_ pins: [[String: Any]], _ graph: [[String: Any]]) throws -> [String] {
+            try JSONSerialization.data(withJSONObject: ["pins": pins, "version": 3])
+                .write(to: resolved)
+            let data = try JSONSerialization.data(withJSONObject: ["dependencies": graph])
+            return try builder.requirePinnedExternalDependencies(
+                String(decoding: data, as: UTF8.self), resolvedFile: resolved
+            )
+        }
+        let valid = try inventory(pins, graph)
+        XCTAssertTrue(valid.contains(
+            "swift-crypto|\(HostwrightSecurityDependencyPins.swiftCryptoLocation)|4.5.2|\(HostwrightSecurityDependencyPins.swiftCryptoRevision)"
+        ))
+        for scenario in ["crypto-revision", "crypto-version", "crypto-branch", "http2-downgrade", "reported-version"] {
+            var changedPins = pins
+            var changedGraph = graph
+            switch scenario {
+            case "crypto-revision":
+                changedPins[1]["state"] = ["revision": String(repeating: "a", count: 40)]
+            case "crypto-version":
+                changedPins[1]["state"] = [
+                    "revision": HostwrightSecurityDependencyPins.swiftCryptoRevision,
+                    "version": "4.5.2",
+                ]
+            case "crypto-branch":
+                changedPins[1]["state"] = [
+                    "revision": HostwrightSecurityDependencyPins.swiftCryptoRevision,
+                    "branch": "main",
+                ]
+            case "http2-downgrade":
+                changedPins[2]["state"] = [
+                    "revision": "61d1b44f6e4e118792be1cff88ee2bc0267c6f9a",
+                    "version": "1.44.0",
+                ]
+            default:
+                changedGraph[1]["version"] = "4.5.1"
+            }
+            XCTAssertThrowsError(try inventory(changedPins, changedGraph), scenario)
+        }
+    }
+
     func testTrustedSPDXInventoriesArchiveAndPackageWithLicense() throws {
         let trusted = makeManifest()
         let payload = DistributionArtifactManifest(

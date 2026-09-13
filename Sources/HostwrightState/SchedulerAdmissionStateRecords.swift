@@ -1150,7 +1150,7 @@ private enum SchedulerAdmissionRecordCoding {
         }
         if let runtimeOwnership {
             guard runtimeOwnership.projectUUID == projectUUID.lowercased(),
-                  runtimeOwnership.resourceUUID == workloadID.uuidString.lowercased() else {
+                  runtimeOwnership.matches(workloadID: workloadID) else {
                 throw SchedulerAdmissionError.stateInvariant(
                     "scheduler-runtime-ownership-binding"
                 )
@@ -1838,6 +1838,17 @@ public struct SchedulerRuntimeOwnershipBinding:
         self.fencingToken = fencingToken.lowercased()
     }
 
+    public var lifecycleWorkloadID: UUID {
+        UUID(uuidString: HostwrightResourceUUID.legacy(
+            kind: "local-scheduler-workload",
+            identifier: "\(resourceUUID):\(resourceGeneration)"
+        ))!
+    }
+
+    public func matches(workloadID: UUID) -> Bool {
+        resourceUUID == workloadID.uuidString.lowercased() || lifecycleWorkloadID == workloadID
+    }
+
     private static func isName(_ value: String) -> Bool {
         value.utf8.count <= RuntimeManagedResourceIdentity.maximumIdentifierLength &&
             value.range(
@@ -1863,6 +1874,7 @@ public struct SchedulerDecisionWorkloadBinding:
     public let ownerSubjectID: String
     public let projectUUID: String
     public let runtimeOwnership: SchedulerRuntimeOwnershipBinding?
+    public let lifecycleWorkload: SchedulerWorkload?
 
     public init(
         workloadID: UUID,
@@ -1872,7 +1884,8 @@ public struct SchedulerDecisionWorkloadBinding:
         capacityGeneration: Int64,
         ownerSubjectID: String,
         projectUUID: String,
-        runtimeOwnership: SchedulerRuntimeOwnershipBinding? = nil
+        runtimeOwnership: SchedulerRuntimeOwnershipBinding? = nil,
+        lifecycleWorkload: SchedulerWorkload? = nil
     ) throws {
         try SchedulerAdmissionValidation.digest(
             capacityDigest,
@@ -1892,12 +1905,22 @@ public struct SchedulerDecisionWorkloadBinding:
         }
         if let runtimeOwnership {
             guard runtimeOwnership.projectUUID == projectUUID.lowercased(),
-                  runtimeOwnership.resourceUUID == workloadID.uuidString.lowercased() else {
+                  runtimeOwnership.matches(workloadID: workloadID) else {
                 throw SchedulerAdmissionError.invalidBinding(
                     field: "decision-binding-runtime-ownership"
                 )
             }
         }
+        if let lifecycleWorkload {
+            guard runtimeOwnership?.lifecycleWorkloadID == workloadID,
+                  lifecycleWorkload.workloadID == workloadID,
+                  lifecycleWorkload.request == resources,
+                  lifecycleWorkload.subjectID == ownerSubjectID,
+                  lifecycleWorkload.projectID == projectUUID.lowercased() else {
+                throw SchedulerAdmissionError.invalidBinding(field: "decision-binding-lifecycle-workload")
+            }
+        }
+        self.lifecycleWorkload = lifecycleWorkload
         self.workloadID = workloadID
         self.nodeID = nodeID
         self.resources = resources
@@ -1917,6 +1940,7 @@ public struct SchedulerDecisionWorkloadBinding:
         case ownerSubjectID
         case projectUUID
         case runtimeOwnership
+        case lifecycleWorkload
     }
 
     public init(from decoder: Decoder) throws {
@@ -1935,7 +1959,8 @@ public struct SchedulerDecisionWorkloadBinding:
             runtimeOwnership: values.decodeIfPresent(
                 SchedulerRuntimeOwnershipBinding.self,
                 forKey: .runtimeOwnership
-            )
+            ),
+            lifecycleWorkload: values.decodeIfPresent(SchedulerWorkload.self, forKey: .lifecycleWorkload)
         )
     }
 
@@ -1949,6 +1974,7 @@ public struct SchedulerDecisionWorkloadBinding:
         try values.encode(ownerSubjectID, forKey: .ownerSubjectID)
         try values.encode(projectUUID, forKey: .projectUUID)
         try values.encodeIfPresent(runtimeOwnership, forKey: .runtimeOwnership)
+        try values.encodeIfPresent(lifecycleWorkload, forKey: .lifecycleWorkload)
     }
 }
 

@@ -312,7 +312,7 @@ public struct LifecycleMutationCheckpointRecord: Codable, Equatable, Sendable {
             classified = (.interruption, .resume)
         case "ambiguous-after-resume", "ambiguous-effect",
              "accepted-without-effect", "context-stale",
-             "irreversible-effect-safe-hold":
+             "irreversible-effect-safe-hold", "cancelled-during-effect":
             classified = (.safeHold, .safeHold)
         default: classified = nil
         }
@@ -594,13 +594,15 @@ public struct LifecycleSagaExecutor: Sendable {
         while completed != planNodeKeys {
             if Task.isCancelled {
                 let pendingKey = plan.nodes.first { !completed.contains($0.key) }?.key ?? "lifecycle"
-                return try interrupt(
-                    plan: plan,
-                    group: group,
-                    completed: completed,
-                    checkpoint: "\(pendingKey):cancelled-before-effect",
-                    hint: "Resume the exact fenced operation after inspecting current runtime state."
-                )
+                return try await Task {
+                    try interrupt(
+                        plan: plan,
+                        group: group,
+                        completed: completed,
+                        checkpoint: "\(pendingKey):cancelled-before-effect",
+                        hint: "Resume the exact fenced operation after inspecting current runtime state."
+                    )
+                }.value
             }
             let ready = plan.nodes.filter { node in
                 !completed.contains(node.key) &&
@@ -822,13 +824,15 @@ public struct LifecycleSagaExecutor: Sendable {
             if Task.isCancelled {
                 let node = activeNodes[0]
                 return .terminal(
-                    try interrupt(
-                        plan: plan,
-                        group: group,
-                        completed: completed.union(advanced),
-                        checkpoint: "\(node.key):cancelled-before-effect",
-                        hint: "Resume the exact fenced operation after inspecting current runtime state."
-                    )
+                    try await Task {
+                        try interrupt(
+                            plan: plan,
+                            group: group,
+                            completed: completed.union(advanced),
+                            checkpoint: "\(node.key):cancelled-before-effect",
+                            hint: "Resume the exact fenced operation after inspecting current runtime state."
+                        )
+                    }.value
                 )
             }
 
@@ -879,13 +883,15 @@ public struct LifecycleSagaExecutor: Sendable {
             if Task.isCancelled {
                 let node = activeNodes[0]
                 return .terminal(
-                    try interrupt(
-                        plan: plan,
-                        group: group,
-                        completed: completed.union(advanced),
-                        checkpoint: "\(node.key):cancelled-before-effect",
-                        hint: "Resume the exact fenced operation after inspecting current runtime state."
-                    )
+                    try await Task {
+                        try interrupt(
+                            plan: plan,
+                            group: group,
+                            completed: completed.union(advanced),
+                            checkpoint: "\(node.key):cancelled-before-effect",
+                            hint: "Resume the exact fenced operation after inspecting current runtime state."
+                        )
+                    }.value
                 )
             }
 
@@ -916,6 +922,29 @@ public struct LifecycleSagaExecutor: Sendable {
                 plan: plan,
                 group: group
             )
+            if Task.isCancelled {
+                let completedAfterAttempts = completed.union(advanced)
+                return .terminal(
+                    try await Task {
+                        try safeHold(
+                            plan: plan,
+                            group: group,
+                            completed: completedAfterAttempts,
+                            checkpoint: "lifecycle:cancelled-during-effect",
+                            hint:
+                                "The control connection closed while an effect was pending. " +
+                                "Re-observe the exact fenced operation before resuming.",
+                            reasonCode:
+                                LifecycleRecoverySafeHoldReason.ambiguousEffect.rawValue
+                        )
+                    }.value
+                )
+            }
+            guard attemptResults.count == attemptInputs.count else {
+                throw LifecycleSagaError.stateFailure(
+                    "Lifecycle effect execution returned an incomplete result set."
+                )
+            }
             var retryNodes: [LifecyclePlanNode] = []
             var definitiveFailures: [LifecyclePlanNode] = []
             var cancelledNodes: [LifecyclePlanNode] = []
@@ -1083,13 +1112,15 @@ public struct LifecycleSagaExecutor: Sendable {
             }
             if let cancelled = cancelledNodes.sorted(by: { $0.key < $1.key }).first {
                 return .terminal(
-                    try interrupt(
-                        plan: plan,
-                        group: group,
-                        completed: completedAfterAttempts,
-                        checkpoint: "\(cancelled.key):cancelled-no-effect",
-                        hint: "No effect was observed; resume the exact fenced operation when ready."
-                    )
+                    try await Task {
+                        try interrupt(
+                            plan: plan,
+                            group: group,
+                            completed: completedAfterAttempts,
+                            checkpoint: "\(cancelled.key):cancelled-no-effect",
+                            hint: "No effect was observed; resume the exact fenced operation when ready."
+                        )
+                    }.value
                 )
             }
             activeNodes = retryNodes

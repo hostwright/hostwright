@@ -335,12 +335,12 @@ Phase 8A is a required preflight before this mutation gate. It proves real read-
 
 ## Phase 28 Gate: Stack-File Import And Migration Tooling
 
-> **Current Manifest v3 boundary:** this retained Phase 28 target does not permit inferred or translated resource capacity. An input without a complete manually authored v3 request/limit mapping fails closed with diagnostics and no `hostwright.yaml` text.
+> **Current Manifest v3 boundary:** complete Compose CPU/memory reservations and limits map to explicit v3 requests and limits. Missing or unrepresentable capacity fails closed with diagnostics and no `hostwright.yaml` text; other deployment semantics remain rejected.
 
 | Requirement IDs | Acceptance criteria | Verification type | Verification command or review |
 | --- | --- | --- | --- |
 | HW-CLI-010, HW-COMPAT-008 | `hostwright import-stack` assesses only the reviewed safe subset and emits deterministic `hostwright.yaml` text only after current manifest validation; it does not write files, observe runtime, touch state, contact registries, or mutate resources. | Automated + manual | CLI import text/JSON tests, import validation-gate tests, and diff review. |
-| HW-COMPAT-005, HW-COMPAT-008, HW-SAFE-008 | Unsupported networking, discovery, build, deploy, secret, config, named-volume, shell-healthcheck, lifecycle, cloud, and tunnel semantics fail closed with stable diagnostics and policy reason codes where applicable. | Automated | Import unsupported-field XCTest cases and CLI JSON error tests. |
+| HW-COMPAT-005, HW-COMPAT-008, HW-SAFE-008 | Unsupported networking, discovery, build, unsupported deploy, secret, config, named-volume, shell-healthcheck, lifecycle, cloud, and tunnel semantics fail closed with stable diagnostics and policy reason codes where applicable. | Automated | Import unsupported-field XCTest cases and CLI JSON error tests. |
 | HW-VALID-001, HW-VALID-002, HW-VALID-003, HW-VALID-004, HW-VALID-005 | Converted output still passes through normal Hostwright manifest validation before success is reported. | Automated | Import validation-gate XCTest cases and `ManifestValidator.validated` golden-output assertion. |
 | HW-DOCS-002, HW-COMPAT-005 | Docs describe import as conversion-only and do not claim Docker Compose parity, runtime compatibility, scheduler compatibility, DNS/tunnel/cloud behavior, or current external orchestrator support. | Automated + manual | Core docs XCTest plus CLI, manifest, limitations, policy, import guide, requirements, and acceptance docs review. |
 | HW-RUNTIME-001, HW-RUNTIME-002, HW-STATE-001 | Import work does not add RuntimeAdapter calls, direct Apple container shell-out, SQLite access outside `HostwrightState`, undocumented or unsafe default state paths, image pulls, registry calls, runtime mutation, or release artifacts. | Automated + manual | Full local gate plus targeted boundary scans and diff review. |

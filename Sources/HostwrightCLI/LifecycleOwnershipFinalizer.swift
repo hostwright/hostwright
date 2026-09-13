@@ -20,11 +20,25 @@ struct LifecycleOwnershipFinalizer: LifecycleSagaFinalizing {
 
     func finalize(context: LifecycleSagaContext) async throws {
         let operationGroup = try exactOperationGroup(context: context)
+        let rollbackSteps = context.direction == .rollback
+            ? try store.operationGroupSteps.load(groupID: operationGroup.id)
+            : []
         let deletingUUIDs = Set(
-            context.plan.nodes.compactMap { node in
-                node.action == .delete || node.action == .retire
-                    ? node.resourceUUID
-                    : nil
+            context.plan.nodes.compactMap { node -> String? in
+                if context.direction == .forward {
+                    return node.action == .delete || node.action == .retire
+                        ? node.resourceUUID : nil
+                }
+                guard let action = node.compensation?.action,
+                      action == .delete || action == .retire,
+                      let step = rollbackSteps.last(where: { $0.stepKey == node.key }),
+                      step.direction == .rollback,
+                      step.status == .succeeded,
+                      step.plannedActionType == action.rawValue,
+                      step.resourceIdentifier == node.resourceIdentifier else {
+                    return nil
+                }
+                return node.resourceUUID
             }
         )
         let records = try store.ownership.loadAll().filter {
@@ -82,6 +96,7 @@ struct LifecycleOwnershipFinalizer: LifecycleSagaFinalizing {
                     runtimeAdapter: record.runtimeAdapter,
                     expectedResourceUUID: record.resourceUUID,
                     expectedFencingToken: record.fencingToken,
+                    expectedOperationFencingToken: operationGroup.fencingToken,
                     expectedOperationGroupID: operationGroup.id,
                     expectedLeaseOwner: leaseOwner,
                     expectedLeaseExpiresAt: leaseExpiry,

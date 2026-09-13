@@ -11,6 +11,7 @@ public struct DistributionAssemblyRequest: Sendable {
     public let hostwrightStorageHelperBinary: URL
     public let hostwrightDistributionBinary: URL
     public let hostwrightDaemonBinary: URL
+    public let hostwrightDesktopBinary: URL
     public let containerizationAssets: DistributionContainerizationAssetBundle
     public let exampleManifestFile: URL
     public let licenseFile: URL
@@ -34,6 +35,7 @@ public struct DistributionAssemblyRequest: Sendable {
         hostwrightStorageHelperBinary: URL,
         hostwrightDistributionBinary: URL,
         hostwrightDaemonBinary: URL,
+        hostwrightDesktopBinary: URL,
         containerizationAssets: DistributionContainerizationAssetBundle,
         exampleManifestFile: URL,
         licenseFile: URL,
@@ -57,6 +59,7 @@ public struct DistributionAssemblyRequest: Sendable {
         self.hostwrightStorageHelperBinary = hostwrightStorageHelperBinary
         self.hostwrightDistributionBinary = hostwrightDistributionBinary
         self.hostwrightDaemonBinary = hostwrightDaemonBinary
+        self.hostwrightDesktopBinary = hostwrightDesktopBinary
         self.containerizationAssets = containerizationAssets
         self.exampleManifestFile = exampleManifestFile
         self.licenseFile = licenseFile
@@ -235,6 +238,12 @@ public struct DistributionAssembler: Sendable {
             cancellation: cancellation,
             commands: &commands
         )
+        try validateArchitecture(
+            request.hostwrightDesktopBinary,
+            label: "validate Hostwright desktop architecture",
+            cancellation: cancellation,
+            commands: &commands
+        )
 
         let timestamp = DistributionTimestamp.string(Date())
         let artifactID = "hostwright-\(request.packageVersion)-macos-arm64-\(request.sourceCommit.prefix(12))"
@@ -264,6 +273,7 @@ public struct DistributionAssembler: Sendable {
             ("bin/hostwright-storage-helper", request.hostwrightStorageHelperBinary),
             ("bin/hostwright-dist", request.hostwrightDistributionBinary),
             ("bin/hostwrightd", request.hostwrightDaemonBinary),
+            (DistributionLayout.desktopExecutablePath, request.hostwrightDesktopBinary),
             ("share/hostwright/examples/hostwright.yaml", request.exampleManifestFile),
             ("share/doc/hostwright/LICENSE", request.licenseFile),
             ("share/doc/hostwright/README.md", request.readmeFile)
@@ -282,6 +292,46 @@ public struct DistributionAssembler: Sendable {
                 mode: DistributionLayout.payloadModes[path]!
             )
         }
+        let desktopBundleVersion = try DistributionPackageVersion.make(
+            from: request.packageVersion
+        )
+        let desktopShortVersion = request.packageVersion
+            .split(separator: "-", maxSplits: 1).first.map(String.init)
+            ?? request.packageVersion
+        let desktopInfoPlist = Data("""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+          <key>CFBundleDevelopmentRegion</key><string>en</string>
+          <key>CFBundleDisplayName</key><string>Hostwright</string>
+          <key>CFBundleExecutable</key><string>hostwright-desktop</string>
+          <key>CFBundleIdentifier</key><string>dev.hostwright.desktop</string>
+          <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+          <key>CFBundleName</key><string>Hostwright</string>
+          <key>CFBundlePackageType</key><string>APPL</string>
+          <key>CFBundleShortVersionString</key><string>\(desktopShortVersion)</string>
+          <key>CFBundleVersion</key><string>\(desktopBundleVersion)</string>
+          <key>LSMinimumSystemVersion</key><string>14.0</string>
+          <key>NSHighResolutionCapable</key><true/>
+        </dict>
+        </plist>
+
+        """.utf8)
+        try DistributionFileSystem.writeNewFile(
+            desktopInfoPlist,
+            to: artifactRoot.appendingPathComponent(DistributionLayout.desktopInfoPlistPath),
+            mode: 0o644
+        )
+        let desktopBundle = artifactRoot.appendingPathComponent(DistributionLayout.desktopAppPath)
+        let adHocSign = try runner.run(
+            executablePath: "/usr/bin/codesign",
+            arguments: ["--force", "--sign", "-", desktopBundle.path],
+            label: "seal deterministic ad-hoc desktop bundle",
+            timeoutSeconds: 60,
+            cancellation: cancellation
+        )
+        commands.append(command("seal deterministic ad-hoc desktop bundle", result: adHocSign))
         let cleanedInputPaths = request.inputCleanupPaths.map { $0.standardizedFileURL.path }.sorted()
         for path in request.inputCleanupPaths {
             let start = DispatchTime.now().uptimeNanoseconds
@@ -965,6 +1015,7 @@ public struct DistributionCleanBuilder: Sendable {
             .appendingPathComponent("hostwright-storage-helper")
         let distribution = backingBinPath.appendingPathComponent("hostwright-dist")
         let daemon = backingBinPath.appendingPathComponent("hostwrightd")
+        let desktop = backingBinPath.appendingPathComponent("hostwright-desktop")
         let containerizationAssets = try configuredContainerizationAssets ??
             DistributionContainerizationAssets.load(
                 root: DistributionContainerizationAssets.configuredRoot(),
@@ -1024,6 +1075,7 @@ public struct DistributionCleanBuilder: Sendable {
                 hostwrightStorageHelperBinary: storageHelper,
                 hostwrightDistributionBinary: distribution,
                 hostwrightDaemonBinary: daemon,
+                hostwrightDesktopBinary: desktop,
                 containerizationAssets: containerizationAssets,
                 exampleManifestFile: sourceRoot.appendingPathComponent("examples/single-service/hostwright.yaml"),
                 licenseFile: sourceRoot.appendingPathComponent("LICENSE"),
@@ -1054,22 +1106,26 @@ public struct DistributionCleanBuilder: Sendable {
               let dependencies = object["dependencies"] as? [Any] else {
             throw DistributionError.invalidArtifact("SwiftPM dependency inventory is malformed")
         }
+        let pins = try dependencyPins(resolvedFile: resolvedFile)
         var observed: [String: (url: String, version: String)] = [:]
         func visit(_ values: [Any]) throws {
             for value in values {
                 guard let dependency = value as? [String: Any],
                       let identity = dependency["identity"] as? String,
                       let url = dependency["url"] as? String,
-                      let version = dependency["version"] as? String,
+                      let reportedVersion = dependency["version"] as? String,
+                      let pin = pins[identity],
                       !identity.isEmpty,
                       url.hasPrefix("https://github.com/"),
                       url.hasSuffix(".git"),
-                      version.range(
-                        of: "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$",
-                        options: .regularExpression
-                      ) != nil,
                       let children = dependency["dependencies"] as? [Any] else {
                     throw DistributionError.invalidArtifact("SwiftPM dependency inventory is not exact")
+                }
+                let expectedVersion = try dependencyVersion(pin)
+                let version = reportedVersion == "unspecified" && pin.state.version == nil
+                    ? expectedVersion : reportedVersion
+                guard version == expectedVersion else {
+                    throw DistributionError.invalidArtifact("SwiftPM dependency differs from Package.resolved")
                 }
                 if let current = observed[identity],
                    current.url != url || current.version != version {
@@ -1081,7 +1137,6 @@ public struct DistributionCleanBuilder: Sendable {
         }
         try visit(dependencies)
 
-        let pins = try dependencyPins(resolvedFile: resolvedFile)
         guard Set(observed.keys) == Set(pins.keys),
               let containerization = pins["containerization"],
               containerization.location == "https://github.com/apple/containerization.git",
@@ -1094,7 +1149,7 @@ public struct DistributionCleanBuilder: Sendable {
             guard let dependency = observed[identity],
                   let pin = pins[identity],
                   pin.location == dependency.url,
-                  pin.state.version == dependency.version else {
+                  try dependencyVersion(pin) == dependency.version else {
                 throw DistributionError.invalidArtifact("SwiftPM dependency differs from Package.resolved")
             }
             return [identity, dependency.url, dependency.version, pin.state.revision]
@@ -1120,15 +1175,37 @@ public struct DistributionCleanBuilder: Sendable {
         guard pin.kind == "remoteSourceControl",
               pin.location.hasPrefix("https://github.com/"),
               pin.location.hasSuffix(".git"),
-              let version = pin.state.version,
-              version.range(
-                of: "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$",
-                options: .regularExpression
-              ) != nil,
               pin.state.revision.range(of: "^[a-f0-9]{40}$", options: .regularExpression) != nil else {
             throw DistributionError.invalidArtifact("Package.resolved contains an unpinned dependency")
         }
+        _ = try dependencyVersion(pin)
         return (pin.identity, pin)
+    }
+
+    private func dependencyVersion(_ pin: DistributionResolvedPackagePin) throws -> String {
+        if pin.identity == "swift-crypto" {
+            guard pin.location == HostwrightSecurityDependencyPins.swiftCryptoLocation,
+                  pin.state.revision == HostwrightSecurityDependencyPins.swiftCryptoRevision,
+                  pin.state.version == nil else {
+                throw DistributionError.invalidArtifact("Crypto must use the qualified security-fix revision")
+            }
+            return HostwrightSecurityDependencyPins.swiftCryptoVersion
+        }
+        guard let version = pin.state.version,
+              version.range(
+                of: "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$",
+                options: .regularExpression
+              ) != nil else {
+            throw DistributionError.invalidArtifact("Package.resolved contains an unpinned dependency")
+        }
+        if pin.identity == "swift-nio-http2" {
+            guard pin.location == HostwrightSecurityDependencyPins.swiftNIOHTTP2Location,
+                  pin.state.revision == HostwrightSecurityDependencyPins.swiftNIOHTTP2Revision,
+                  version == HostwrightSecurityDependencyPins.swiftNIOHTTP2Version else {
+                throw DistributionError.invalidArtifact("HTTP/2 must use the qualified security-fix revision")
+            }
+        }
+        return version
     }
 
     private func requireOnlyUnusedBuildDirectory(_ status: String) throws {
@@ -1163,6 +1240,21 @@ private struct DistributionResolvedPackagePin: Decodable {
     struct State: Decodable {
         let revision: String
         let version: String?
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.singleValueContainer()
+            let values = try container.decode([String: String].self)
+            guard let revision = values["revision"],
+                  Set(values.keys) == Set(["revision"]) ||
+                    Set(values.keys) == Set(["revision", "version"]) else {
+                throw DecodingError.dataCorruptedError(
+                    in: container,
+                    debugDescription: "Dependency state must contain only an immutable revision and optional version"
+                )
+            }
+            self.revision = revision
+            self.version = values["version"]
+        }
     }
 
     let identity: String

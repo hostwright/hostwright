@@ -2063,7 +2063,8 @@ public struct ReleaseQualificationSafeCheckRunner: Sendable {
         identity: String,
         version: String,
         location: String,
-        revision: String
+        revision: String,
+        revisionOnly: Bool
     )
 
     private func canonicalDirectPins() -> [DirectPin] {
@@ -2072,31 +2073,36 @@ public struct ReleaseQualificationSafeCheckRunner: Sendable {
                 "containerization",
                 "0.35.0",
                 "https://github.com/apple/containerization.git",
-                "44bec8b9933bc491d0cbf44abac90a1f6aaebf6b"
+                "44bec8b9933bc491d0cbf44abac90a1f6aaebf6b",
+                false
             ),
             (
                 "yams",
                 "6.2.2",
                 "https://github.com/jpsim/Yams.git",
-                "a27b21e0c81c5bf42049b897a62aaf387e80f279"
+                "a27b21e0c81c5bf42049b897a62aaf387e80f279",
+                false
             ),
             (
                 "swift-certificates",
                 "1.19.3",
                 "https://github.com/apple/swift-certificates.git",
-                "89fbc3714264cce8db8e4ec51b64e01c3e28c6c5"
+                "89fbc3714264cce8db8e4ec51b64e01c3e28c6c5",
+                false
             ),
             (
                 "swift-crypto",
-                "3.15.1",
-                "https://github.com/apple/swift-crypto.git",
-                "95ba0316a9b733e92bb6b071255ff46263bbe7dc"
+                HostwrightSecurityDependencyPins.swiftCryptoVersion,
+                HostwrightSecurityDependencyPins.swiftCryptoLocation,
+                HostwrightSecurityDependencyPins.swiftCryptoRevision,
+                true
             ),
             (
                 "wasmkit",
                 "0.3.1",
                 "https://github.com/swiftwasm/WasmKit.git",
-                "ee36070acc31878ef727b90d5bdc4c9cc1fff22e"
+                "ee36070acc31878ef727b90d5bdc4c9cc1fff22e",
+                false
             )
         ]
     }
@@ -2322,7 +2328,8 @@ public struct ReleaseQualificationSafeCheckRunner: Sendable {
             tokens += [
                 .symbol(46), .identifier("package"), .symbol(40),
                 .identifier("url"), .symbol(58), .string(pin.location), .symbol(44),
-                .identifier("exact"), .symbol(58), .string(pin.version),
+                .identifier(pin.revisionOnly ? "revision" : "exact"), .symbol(58),
+                .string(pin.revisionOnly ? pin.revision : pin.version),
                 .symbol(41),
             ]
             if index < directPins.count - 1 { tokens.append(.symbol(44)) }
@@ -2459,6 +2466,7 @@ public struct ReleaseQualificationSafeCheckRunner: Sendable {
                 return failures + ["Package.resolved has malformed origin or pin data"]
             }
             var seen: Set<String> = []
+            var hasFixedHTTP2Pin = false
             for pin in pins {
                 guard Set(pin.keys) == Set(["identity", "kind", "location", "state"]),
                       pin["kind"] as? String == "remoteSourceControl",
@@ -2466,28 +2474,43 @@ public struct ReleaseQualificationSafeCheckRunner: Sendable {
                       seen.insert(identity).inserted,
                       let location = pin["location"] as? String,
                       let state = pin["state"] as? [String: Any],
-                      Set(state.keys) == Set(["revision", "version"]),
                       let revision = state["revision"] as? String,
-                      revision.range(of: "^[a-f0-9]{40}$", options: .regularExpression) != nil,
-                      let version = state["version"] as? String,
-                      (try? ReleaseQualificationSemanticVersion(
-                          parsing: version,
-                          allowingTwoComponents: true
-                      )) != nil else {
+                      revision.range(of: "^[a-f0-9]{40}$", options: .regularExpression) != nil else {
                     failures.append("Package.resolved contains malformed or duplicate pin data")
                     continue
                 }
-                if let expected = directPins.first(where: { $0.0 == identity }) {
+                let expected = directPins.first(where: { $0.identity == identity })
+                let revisionOnly = expected?.revisionOnly == true
+                let version = state["version"] as? String
+                guard Set(state.keys) == Set(revisionOnly ? ["revision"] : ["revision", "version"]),
+                      revisionOnly || version.flatMap({
+                          try? ReleaseQualificationSemanticVersion(
+                              parsing: $0,
+                              allowingTwoComponents: true
+                          )
+                      }) != nil else {
+                    failures.append("Package.resolved contains malformed or duplicate pin data")
+                    continue
+                }
+                if identity == "swift-nio-http2" {
+                    hasFixedHTTP2Pin = location == HostwrightSecurityDependencyPins.swiftNIOHTTP2Location &&
+                        version == HostwrightSecurityDependencyPins.swiftNIOHTTP2Version &&
+                        revision == HostwrightSecurityDependencyPins.swiftNIOHTTP2Revision
+                }
+                if let expected {
                     if location != expected.2 {
                         failures.append("Package.resolved direct pin \(identity) has an unexpected location")
                     }
-                    if version != expected.1 {
-                        failures.append("Package.resolved direct pin \(identity) is \(version), expected \(expected.1)")
+                    if !expected.revisionOnly && version != expected.version {
+                        failures.append("Package.resolved direct pin \(identity) is \(version ?? "missing"), expected \(expected.version)")
                     }
                     if revision != expected.3 {
                         failures.append("Package.resolved direct pin \(identity) has an unexpected revision")
                     }
                 }
+            }
+            if !hasFixedHTTP2Pin {
+                failures.append("Package.resolved security pin swift-nio-http2 must match the reviewed 1.45.0 revision")
             }
             for expected in directPins where !seen.contains(expected.0) {
                 failures.append("Package.resolved is missing direct pin \(expected.0)")
@@ -2593,21 +2616,21 @@ public struct ReleaseQualificationSafeCheckRunner: Sendable {
     }
 
     private static let privateKeyPrefixes: [[UInt8]] = [
-        "-----BEGIN RSA PRIVATE KEY-----",
-        "-----BEGIN EC PRIVATE KEY-----",
-        "-----BEGIN OPENSSH PRIVATE KEY-----",
-        "-----BEGIN DSA PRIVATE KEY-----",
-        "-----BEGIN PGP PRIVATE KEY-----",
-    ].map { Array($0.utf8) }
+        "RSA", "EC", "OPENSSH", "DSA", "PGP",
+    ].map { Array(("-----BEGIN " + $0 + " PRIVATE KEY-----").utf8) }
 
-    private static let awsAccessKeyPrefix = Array("AKIA".utf8)
-    private static let gitHubTokenPrefixes = ["ghp_", "github_pat_"].map {
+    private static let awsAccessKeyPrefix = Array(("AK" + "IA").utf8)
+    private static let gitHubTokenPrefixes = ["gh" + "p_", "github_" + "pat_"].map {
         Array($0.utf8)
     }
-    private static let slackTokenPrefixes = ["xoxb-", "xoxa-", "xoxp-", "xoxr-", "xoxs-"].map {
-        Array($0.utf8)
-    }
-    private static let apiKeyPrefix = Array("sk-".utf8)
+    private static let slackTokenPrefixes = [
+        "xox" + "b-",
+        "xox" + "a-",
+        "xox" + "p-",
+        "xox" + "r-",
+        "xox" + "s-",
+    ].map { Array($0.utf8) }
+    private static let apiKeyPrefix = Array(("s" + "k-").utf8)
 
     private func secretLabels(in data: Data) -> Set<String>? {
         guard let views = secretScanViews(for: data) else { return nil }

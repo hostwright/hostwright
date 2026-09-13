@@ -18,7 +18,20 @@ public protocol DesktopControlSession: AnyObject, Sendable {
 
 public protocol DesktopControlTransport: Sendable {
     func send(_ request: ControlRequestEnvelope) throws -> ControlResponseEnvelope
+    func send(
+        _ request: ControlRequestEnvelope,
+        cancellation: PersistentControlRequestCancellation
+    ) throws -> ControlResponseEnvelope
     func connectSession() throws -> any DesktopControlSession
+}
+
+public extension DesktopControlTransport {
+    func send(
+        _ request: ControlRequestEnvelope,
+        cancellation: PersistentControlRequestCancellation
+    ) throws -> ControlResponseEnvelope {
+        try send(request)
+    }
 }
 
 public struct DesktopControlEndpoint: Equatable, Sendable {
@@ -68,6 +81,13 @@ public struct PersistentDesktopControlTransport: DesktopControlTransport, Sendab
 
     public func send(_ request: ControlRequestEnvelope) throws -> ControlResponseEnvelope {
         try client.send(request)
+    }
+
+    public func send(
+        _ request: ControlRequestEnvelope,
+        cancellation: PersistentControlRequestCancellation
+    ) throws -> ControlResponseEnvelope {
+        try client.send(request, cancellation: cancellation)
     }
 
     public func connectSession() throws -> any DesktopControlSession {

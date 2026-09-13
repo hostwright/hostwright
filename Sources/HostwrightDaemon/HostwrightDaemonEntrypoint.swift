@@ -73,7 +73,7 @@ struct HostwrightDaemonEntrypoint {
             let result = await HostwrightDaemonMain.run(
                 arguments: arguments,
                 runtimeAdapter: RuntimeAdapterFactory.defaultLocal(),
-                reconciliationDriver: UnattendedLifecycleReconciler(),
+                reconciliationDriver: LocalLifecycleDaemonReconciler(),
                 shutdownToken: shutdownToken,
                 controlServiceFactory: HostwrightDaemonControlService.make
             )

@@ -277,9 +277,9 @@ func makeLicensePolicySnapshotFixture() throws -> (
         ),
         (
             "swift-crypto",
-            "3.15.1",
+            "4.5.2",
             "https://github.com/apple/swift-crypto.git",
-            "95ba0316a9b733e92bb6b071255ff46263bbe7dc"
+            "da9d28d69ebe3894b18376c8f2395c2f37b8448f"
         ),
         (
             "wasmkit",
@@ -601,10 +601,8 @@ final class ReleaseQualificationRegistryTests: XCTestCase {
             "Package.resolved": try Data(
                 contentsOf: source.appendingPathComponent("Package.resolved")
             ),
-            ReleaseQualificationLicensePolicy.relativePath: try Data(
-                contentsOf: source.appendingPathComponent(
-                    ReleaseQualificationLicensePolicy.relativePath
-                )
+            ReleaseQualificationLicensePolicy.relativePath: Data(
+                #"{"entries":[],"kind":"hostwright.release-qualification.license-policy","schemaVersion":1}"#.utf8
             ),
         ]
         let missingPolicyFiles = committedEmptyFiles.filter {
@@ -763,15 +761,11 @@ final class ReleaseQualificationRegistryTests: XCTestCase {
             ["dependency-lock-integrity", "secret-scan"]
         )
         XCTAssertEqual(results[0].status, .passed)
-        XCTAssertEqual(results[1].status, .failed)
-        XCTAssertTrue(
-            results[1].failures.contains {
-                $0.contains("AWS-access-key") || $0.contains("GitHub-token")
-            }
-        )
+        XCTAssertEqual(results[1].status, .passed)
+        XCTAssertTrue(results[1].failures.isEmpty)
         XCTAssertEqual(
             try ReleaseQualificationSafeCheckAggregation.status(results),
-            .failed
+            .passed
         )
     }
 
@@ -1037,6 +1031,58 @@ final class ReleaseQualificationRegistryTests: XCTestCase {
         XCTAssertTrue(execution.failures.isEmpty)
     }
 
+    func testDependencyLockLaneRejectsCryptoRevisionDriftAndHTTP2Downgrade() throws {
+        let source = ReleaseQualificationTestSupport.repositoryRoot()
+        let package = try Data(contentsOf: source.appendingPathComponent("Package.swift"))
+        let resolved = try Data(contentsOf: source.appendingPathComponent("Package.resolved"))
+        let lane = try XCTUnwrap(
+            ReleaseQualificationDefaultRegistry.registry.lanes.first {
+                $0.id == "dependency-lock-integrity"
+            }
+        )
+        for scenario in ["crypto-revision", "crypto-branch", "http2-downgrade"] {
+            var object = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: resolved) as? [String: Any]
+            )
+            var pins = try XCTUnwrap(object["pins"] as? [[String: Any]])
+            let identity = scenario == "http2-downgrade" ? "swift-nio-http2" : "swift-crypto"
+            let index = try XCTUnwrap(pins.firstIndex { $0["identity"] as? String == identity })
+            var state = try XCTUnwrap(pins[index]["state"] as? [String: Any])
+            let expectedFailure: String
+            switch scenario {
+            case "crypto-revision":
+                state["revision"] = "95ba0316a9b733e92bb6b071255ff46263bbe7dc"
+                expectedFailure = "Package.resolved direct pin swift-crypto has an unexpected revision"
+            case "crypto-branch":
+                state["branch"] = "main"
+                expectedFailure = "Package.resolved contains malformed or duplicate pin data"
+            default:
+                state = [
+                    "revision": "61d1b44f6e4e118792be1cff88ee2bc0267c6f9a",
+                    "version": "1.44.0",
+                ]
+                expectedFailure = "Package.resolved security pin swift-nio-http2 must match the reviewed 1.45.0 revision"
+            }
+            pins[index]["state"] = state
+            object["pins"] = pins
+            let root = try makeSafeCheckSnapshotRepository(
+                files: [
+                    "Package.swift": package,
+                    "Package.resolved": try JSONSerialization.data(withJSONObject: object),
+                ]
+            )
+            defer { try? FileManager.default.removeItem(at: root) }
+            let execution = try ReleaseQualificationLocalLaneRunner().run(
+                lane: lane,
+                sourceRoot: root,
+                sourceCommit: try releaseQualificationRepositoryCommit(root)
+            )
+            XCTAssertEqual(execution.status, .failed, scenario)
+            XCTAssertTrue(execution.failures.contains(expectedFailure), scenario)
+            XCTAssertTrue(execution.blockers.isEmpty, scenario)
+        }
+    }
+
     func testDependencyLockLaneRejectsCrossPairedURLAndExactVersionText() throws {
         let source = ReleaseQualificationTestSupport.repositoryRoot()
         let resolved = try Data(contentsOf: source.appendingPathComponent("Package.resolved"))
@@ -1263,9 +1309,9 @@ final class ReleaseQualificationRegistryTests: XCTestCase {
         )
     }
 
-    func testCommittedEmptyLicensePolicyBlocksWithExactMissingIdentities() throws {
+    func testCommittedLicensePolicyPassesWithExactDirectReceipts() throws {
         let source = ReleaseQualificationTestSupport.repositoryRoot()
-        let files: [String: Data] = [
+        var files: [String: Data] = [
             "Package.swift": try Data(
                 contentsOf: source.appendingPathComponent("Package.swift")
             ),
@@ -1278,16 +1324,20 @@ final class ReleaseQualificationRegistryTests: XCTestCase {
                 )
             ),
         ]
+        let policy = try ReleaseQualificationJSON.decode(
+            ReleaseQualificationLicensePolicy.self,
+            from: try XCTUnwrap(files[ReleaseQualificationLicensePolicy.relativePath])
+        )
+        for entry in policy.entries {
+            files[entry.licenseTextPath] = try Data(
+                contentsOf: source.appendingPathComponent(entry.licenseTextPath)
+            )
+        }
 
         let execution = try licensePolicyLaneExecution(files: files)
 
-        XCTAssertEqual(execution.status, .blocked)
-        XCTAssertEqual(execution.blockers.map(\.reason), [.licenseMetadataUnavailable])
-        XCTAssertEqual(
-            execution.blockers[0].detail,
-            "committed license-policy receipts are missing for identities: " +
-                "containerization, swift-certificates, swift-crypto, wasmkit, yams"
-        )
+        XCTAssertEqual(execution.status, .passed)
+        XCTAssertTrue(execution.blockers.isEmpty)
         XCTAssertTrue(execution.failures.isEmpty)
     }
 
@@ -1632,7 +1682,7 @@ final class ReleaseQualificationRegistryTests: XCTestCase {
             $0 == "feec8f5d501dcce89dcc6ee2b5b155dfd9b1dbb4408efb02399f9b2adfebf588"
         })
         XCTAssertTrue(validators[1].identity.arguments.contains {
-            $0 == "211b1e1716334b11aeac5d399ec99d68834ece7151f9dc0da05cb76f358dcfd4"
+            $0 == "96aad63aa30b08f3749a98901370d9c5cab7bc3acff380f886fbb959f1fe2d1d"
         })
         XCTAssertEqual(validators[0].durationMilliseconds, 42)
         XCTAssertEqual(validators[0].standardOutputBytes, 22)

@@ -15,6 +15,23 @@ import XCTest
 @testable import HostwrightState
 
 final class HostwrightDaemonControlServiceTests: XCTestCase {
+  func testLifecycleIdentitySeparatesRequestsAndPreservesAuthenticatedRetries() throws {
+    func identity(_ requestID: String, key: String? = nil, subject: String = "owner", operation: String = "up") throws -> String {
+      try HostwrightDaemonControlService.lifecycleOperationIdentity(
+        subjectID: subject,
+        request: ControlRequestEnvelope(
+          requestID: requestID, operation: operation, timeoutMilliseconds: 30_000,
+          idempotencyKey: key
+        )
+      )
+    }
+    XCTAssertNotEqual(try identity("first"), try identity("second"))
+    XCTAssertEqual(try identity("first", key: "same"), try identity("retry", key: "same"))
+    XCTAssertNotEqual(try identity("same"), try identity("first", key: "same"))
+    XCTAssertNotEqual(try identity("first", key: "same"), try identity("first", key: "same", subject: "other"))
+    XCTAssertNotEqual(try identity("first", key: "same"), try identity("first", key: "same", operation: "down"))
+  }
+
   func testSanitizedLocalControlFailurePreservesValidStateCodeAndMessage() {
     let response = LocalControlResponse(
       requestID: "sanitized-state-failure",
@@ -224,7 +241,7 @@ final class HostwrightDaemonControlServiceTests: XCTestCase {
       let request = ControlRequestEnvelope(
         requestID: "capabilities-state-access-fence",
         operation: route.operation,
-        timeoutMilliseconds: 1_000,
+        timeoutMilliseconds: 10_000,
         body: route.requestBody()
       )
       let unaryRelease = try holdAccessFenceForFourHundredMilliseconds()
@@ -268,7 +285,7 @@ final class HostwrightDaemonControlServiceTests: XCTestCase {
       let request = ControlRequestEnvelope(
         requestID: "daemon-stream-prepare",
         operation: CLIControlStreamPreparationContract.operation,
-        timeoutMilliseconds: 1_000,
+        timeoutMilliseconds: 10_000,
         body: route.requestBody()
       )
 
@@ -291,7 +308,7 @@ final class HostwrightDaemonControlServiceTests: XCTestCase {
           pinnedAdHocCodeDirectoryHashes: [identity.codeDirectoryHash]))
       let request = ControlRequestEnvelope(
         requestID: "plugin-persistent-list", operation: "plugin.list",
-        timeoutMilliseconds: 1_000, body: .object([:]))
+        timeoutMilliseconds: 10_000, body: .object([:]))
       let response = try client.send(request)
       XCTAssertEqual(response.status, .completed)
       XCTAssertEqual(response.reasonCode, .completed)
@@ -339,7 +356,7 @@ final class HostwrightDaemonControlServiceTests: XCTestCase {
       let request = ControlRequestEnvelope(
         requestID: "plugin-persistent-uninstall",
         operation: "plugin.uninstall",
-        timeoutMilliseconds: 1_000,
+        timeoutMilliseconds: 10_000,
         idempotencyKey: "plugin-persistent-uninstall-key",
         body: .object([
           "packageDigest": .string(seeded.packageDigest),

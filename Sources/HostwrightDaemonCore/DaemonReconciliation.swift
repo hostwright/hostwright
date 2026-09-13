@@ -1,5 +1,7 @@
+import CryptoKit
 import Foundation
 import HostwrightCore
+import HostwrightManifest
 import HostwrightRuntime
 import HostwrightState
 
@@ -210,7 +212,10 @@ public struct DaemonReconciliationRequest: Codable, Equatable, Sendable {
                   ) != nil
               }) ?? true,
               schedulerAuthorityBinding.map({ binding in
-                  binding.reservations.allSatisfy {
+                  if let local = binding.localLifecycleAuthority {
+                      return local.sourceManifestSHA256 == manifestSHA256
+                  }
+                  return binding.reservations.allSatisfy {
                       $0.configDigest == manifestSHA256 &&
                           $0.lifecyclePlanDigest == manifestSHA256
                   }
@@ -335,11 +340,13 @@ public struct DaemonSchedulerAuthorityBinding: Codable, Equatable, Sendable {
     public let schemaVersion: Int
     public let projectResourceUUID: String
     public let reservations: [SchedulerReservationRecord]
+    public let localLifecycleAuthority: DaemonLocalLifecycleAuthority?
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion
         case projectResourceUUID
         case reservations
+        case localLifecycleAuthority
     }
 
     public init(
@@ -380,10 +387,27 @@ public struct DaemonSchedulerAuthorityBinding: Codable, Equatable, Sendable {
         self.schemaVersion = schemaVersion
         self.projectResourceUUID = projectResourceUUID.lowercased()
         self.reservations = orderedReservations
+        self.localLifecycleAuthority = nil
+    }
+
+    public init(localLifecycleAuthority: DaemonLocalLifecycleAuthority) {
+        self.schemaVersion = 2
+        self.projectResourceUUID = localLifecycleAuthority.projectUUID
+        self.reservations = localLifecycleAuthority.entries.map(\.reservation)
+        self.localLifecycleAuthority = localLifecycleAuthority
     }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
+        if try values.decode(Int.self, forKey: .schemaVersion) == 2 {
+            let local = try values.decode(DaemonLocalLifecycleAuthority.self, forKey: .localLifecycleAuthority)
+            guard try values.decode(String.self, forKey: .projectResourceUUID) == local.projectUUID,
+                  try values.decode([SchedulerReservationRecord].self, forKey: .reservations) == local.entries.map(\.reservation) else {
+                throw HostwrightDiagnostic(code: .daemonInvalid, message: "Local lifecycle authority does not match its scheduler binding.")
+            }
+            self.init(localLifecycleAuthority: local)
+            return
+        }
         try self.init(
             schemaVersion: values.decode(Int.self, forKey: .schemaVersion),
             projectResourceUUID: values.decode(
@@ -402,6 +426,7 @@ public struct DaemonSchedulerAuthorityBinding: Codable, Equatable, Sendable {
         try values.encode(schemaVersion, forKey: .schemaVersion)
         try values.encode(projectResourceUUID, forKey: .projectResourceUUID)
         try values.encode(reservations, forKey: .reservations)
+        try values.encodeIfPresent(localLifecycleAuthority, forKey: .localLifecycleAuthority)
     }
 
     private static func isSHA256(_ value: String) -> Bool {
@@ -509,6 +534,8 @@ public struct DaemonReconciliationResult: Codable, Equatable, Sendable {
 }
 
 public protocol DaemonReconciliationDriving: Sendable {
+    func lifecycleManifestSHA256(text: String, manifest: HostwrightManifest) throws -> String
+
     func reconcile(
         request: DaemonReconciliationRequest
     ) async throws -> DaemonReconciliationResult
@@ -520,6 +547,17 @@ public protocol DaemonReconciliationDriving: Sendable {
 }
 
 public extension DaemonReconciliationDriving {
+    func lifecycleManifestSHA256(text: String, manifest: HostwrightManifest) throws -> String {
+        guard manifest.imageTrust == nil, manifest.imageSBOM == nil,
+              manifest.imageVulnerability == nil, manifest.imageProvenance == nil else {
+            throw HostwrightDiagnostic(
+                code: .unsafeExposure,
+                message: "The reconciliation driver cannot resolve this manifest's image policy material."
+            )
+        }
+        return SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
     func reconcileAuthorized(
         request: DaemonReconciliationRequest,
         schedulerAuthorityBinding: DaemonSchedulerAuthorityBinding

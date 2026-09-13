@@ -18,6 +18,10 @@ public enum DistributionLayout {
     public static let packageIdentifier = "dev.hostwright.cli"
     public static let packageStagingPath = "/Library/Application Support/Hostwright/InstallerPayload"
     public static let packageInstallPrefix = "/usr/local"
+    public static let desktopAppPath = "libexec/hostwright/Hostwright.app"
+    public static let desktopExecutablePath = "\(desktopAppPath)/Contents/MacOS/hostwright-desktop"
+    public static let desktopInfoPlistPath = "\(desktopAppPath)/Contents/Info.plist"
+    public static let desktopCodeResourcesPath = "\(desktopAppPath)/Contents/_CodeSignature/CodeResources"
     public static let shippedExecutableNames = [
         "hostwright",
         "hostwright-control",
@@ -26,9 +30,12 @@ public enum DistributionLayout {
         "hostwright-network-provider-worker",
         "hostwright-storage-helper",
         "hostwright-dist",
-        "hostwrightd"
+        "hostwrightd",
+        "hostwright-desktop"
     ]
-    public static let shippedBinaryPaths = shippedExecutableNames.map { "bin/\($0)" }
+    public static let shippedBinaryPaths = shippedExecutableNames.map {
+        $0 == "hostwright-desktop" ? desktopExecutablePath : "bin/\($0)"
+    }
     static let legacyTrustedExecutableNamesV1 = [
         "hostwright",
         "hostwright-control",
@@ -77,6 +84,21 @@ public enum DistributionLayout {
     ].merging(DistributionContainerizationAssets.payloadModes) { _, _ in
         preconditionFailure("duplicate legacy distribution payload path")
     }
+    static let legacyPayloadModesV4: [String: Int] = [
+        "bin/hostwright": 0o755,
+        "bin/hostwright-control": 0o755,
+        "bin/hostwright-containerization-helper": 0o755,
+        "bin/hostwright-network-helper": 0o755,
+        "bin/hostwright-network-provider-worker": 0o755,
+        "bin/hostwright-storage-helper": 0o755,
+        "bin/hostwright-dist": 0o755,
+        "bin/hostwrightd": 0o755,
+        "share/hostwright/examples/hostwright.yaml": 0o644,
+        "share/doc/hostwright/LICENSE": 0o644,
+        "share/doc/hostwright/README.md": 0o644
+    ].merging(DistributionContainerizationAssets.payloadModes) { _, _ in
+        preconditionFailure("duplicate legacy distribution payload path")
+    }
 
     public static let payloadModes: [String: Int] = [
         "bin/hostwright": 0o755,
@@ -87,6 +109,9 @@ public enum DistributionLayout {
         "bin/hostwright-storage-helper": 0o755,
         "bin/hostwright-dist": 0o755,
         "bin/hostwrightd": 0o755,
+        desktopExecutablePath: 0o755,
+        desktopInfoPlistPath: 0o644,
+        desktopCodeResourcesPath: 0o644,
         "share/hostwright/examples/hostwright.yaml": 0o644,
         "share/doc/hostwright/LICENSE": 0o644,
         "share/doc/hostwright/README.md": 0o644
@@ -106,18 +131,25 @@ public enum DistributionLayout {
                 legacyPayloadModesV3
             ].first { Set($0.keys) == paths }
         case 2:
-            return Set(payloadModes.keys) == paths ? payloadModes : nil
+            return [legacyPayloadModesV4, payloadModes]
+                .first { Set($0.keys) == paths }
         default:
             return nil
         }
     }
 
-    static func trustedPayloadModes(schemaVersion: Int) -> [String: Int]? {
+    static func trustedPayloadModes(
+        schemaVersion: Int,
+        paths: Set<String>
+    ) -> [String: Int]? {
         switch schemaVersion {
         case 1:
-            legacyTrustedPayloadModesV1
+            Set(legacyTrustedPayloadModesV1.keys) == paths
+                ? legacyTrustedPayloadModesV1
+                : nil
         case 2:
-            payloadModes
+            [legacyPayloadModesV4, payloadModes]
+                .first { Set($0.keys) == paths }
         default:
             nil
         }
@@ -141,6 +173,18 @@ public enum DistributionLayout {
                 "hostwright",
                 "hostwright-control",
                 "hostwright-containerization-helper",
+                "hostwright-storage-helper",
+                "hostwright-dist",
+                "hostwrightd"
+            ]
+        }
+        if payloadPaths == Set(legacyPayloadModesV4.keys) {
+            return [
+                "hostwright",
+                "hostwright-control",
+                "hostwright-containerization-helper",
+                "hostwright-network-helper",
+                "hostwright-network-provider-worker",
                 "hostwright-storage-helper",
                 "hostwright-dist",
                 "hostwrightd"

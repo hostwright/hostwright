@@ -336,6 +336,7 @@ public struct MultiServiceReconciliationPlanner: Sendable {
                         key: key,
                         action: .start,
                         desiredService: service,
+                        resourceIdentifier: needsCreate ? nil : observed?.resourceIdentifier,
                         dependencies: createDependency,
                         preconditions: [],
                         postconditions: [
@@ -360,6 +361,7 @@ public struct MultiServiceReconciliationPlanner: Sendable {
                             key: hookKey,
                             action: .runHook,
                             desiredService: service,
+                            resourceIdentifier: needsCreate ? nil : observed?.resourceIdentifier,
                             dependencies: probeDependency.map { [$0] } ?? [],
                             preconditions: [],
                             postconditions: [
@@ -385,6 +387,7 @@ public struct MultiServiceReconciliationPlanner: Sendable {
                         key: startupKey,
                         action: .verify,
                         desiredService: service,
+                        resourceIdentifier: needsCreate ? nil : observed?.resourceIdentifier,
                         dependencies: probeDependency.map { [$0] } ?? [],
                         preconditions: [],
                         postconditions: [
@@ -414,6 +417,7 @@ public struct MultiServiceReconciliationPlanner: Sendable {
                         key: livenessKey,
                         action: .verify,
                         desiredService: service,
+                        resourceIdentifier: needsCreate ? nil : observed?.resourceIdentifier,
                         dependencies: probeDependency.map { [$0] } ?? [],
                         preconditions: [],
                         postconditions: [
@@ -438,6 +442,7 @@ public struct MultiServiceReconciliationPlanner: Sendable {
                         key: readinessKey,
                         action: .verify,
                         desiredService: service,
+                        resourceIdentifier: needsCreate ? nil : observed?.resourceIdentifier,
                         dependencies: probeDependency.map { [$0] } ?? [],
                         preconditions: [],
                         postconditions: [
@@ -512,6 +517,9 @@ public struct MultiServiceReconciliationPlanner: Sendable {
                                     key: verifyKey,
                                     action: .verify,
                                     desiredService: dependencyService,
+                                    resourceIdentifier: observedByIdentity[dependencyService.identity].flatMap {
+                                        $0.lifecycleState == .missing ? nil : $0.resourceIdentifier
+                                    },
                                     dependencies: verifyDependencies,
                                     preconditions: [],
                                     postconditions: [gate]

@@ -15,6 +15,9 @@ import HostwrightStorage
 private let lifecycleSchedulerAuthorityUnavailableMessage =
     "scheduler-authority-unavailable: lifecycle mutation requires a persisted Control 2.2 scheduler placement decision and fenced reservation; manifest-only admission is not executable. No runtime mutation was attempted."
 
+private let lifecycleSchedulerActivationRejected =
+    "Scheduler activation was rejected before runtime mutation."
+
 private func requireLifecycleSchedulerAuthority(
     for options: LifecycleCLIOptions
 ) throws {
@@ -93,15 +96,17 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
     let environment: CLIEnvironment
     let options: LifecycleCLIOptions
     let schedulerAuthorityValidator: LifecycleSchedulerAuthorityValidator
+    let hasExplicitSchedulerAuthorityValidator: Bool
 
     init(
         environment: CLIEnvironment,
         options: LifecycleCLIOptions,
-        schedulerAuthorityValidator: @escaping LifecycleSchedulerAuthorityValidator = defaultLifecycleSchedulerAuthorityValidator
+        schedulerAuthorityValidator: LifecycleSchedulerAuthorityValidator? = nil
     ) {
         self.environment = environment
         self.options = options
-        self.schedulerAuthorityValidator = schedulerAuthorityValidator
+        self.schedulerAuthorityValidator = schedulerAuthorityValidator ?? defaultLifecycleSchedulerAuthorityValidator
+        hasExplicitSchedulerAuthorityValidator = schedulerAuthorityValidator != nil
     }
 
     func prepare(options: LifecycleCLIOptions) throws -> LifecycleCommandPreparation {
@@ -119,6 +124,10 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             text: manifestText,
             manifest: manifest
         )
+        _ = try ManifestSchedulerAdmissionBridge.admit(
+            manifest: manifest,
+            subjectID: "owner"
+        )
         let store = SQLiteStateStore(
             configuration: try hostwrightStateStoreConfiguration(
                 explicitPath: options.stateDatabasePath,
@@ -134,12 +143,6 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             store: store,
             projectID: projectID,
             fallbackBindings: []
-        )
-        // Placement semantics are admitted by the canonical scheduler bridge;
-        // this mapper only translates the already-admitted runtime boundary.
-        _ = try ManifestSchedulerAdmissionBridge.map(
-            manifest: manifest,
-            subjectID: "owner"
         )
         var mapping = ManifestRuntimeMapper.map(
             manifest,
@@ -228,6 +231,7 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
                     NetworkPortLifecycleCoordinator.occupiedPorts(
                         in: inventory
                     ),
+                allowReleasingForRemoval: options.command == .rm,
                 isAvailable:
                     NetworkPortSocketAvailability.isAvailable,
                 isExposureAvailable: { endpoint, policy in
@@ -308,6 +312,10 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             capabilitySHA256: selectedProvider.selection.capabilitySHA256,
             planFencingToken: planFence,
             resourceBindings: resourceBindings,
+            nextResourceGenerations: try lifecycleNextResourceGenerations(
+                store: store, projectID: projectID, projectUUID: projectResourceUUID,
+                providerID: providerID, desiredState: desiredState, bindings: resourceBindings
+            ),
             unmanagedResourceIdentifiers: lifecycleUnmanagedIdentifiers(
                 inventory: inventory,
                 bindings: resourceBindings
@@ -358,6 +366,7 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
         preparation: LifecycleCommandPreparation,
         options: LifecycleCLIOptions
     ) throws -> LifecycleSagaExecutionResult {
+        let options = options.withOperationIdempotencyKeySHA256(environment.lifecycleOperationIdempotencyKeySHA256)
         let store = SQLiteStateStore(
             configuration: try hostwrightStateStoreConfiguration(
                 explicitPath: options.stateDatabasePath,
@@ -395,12 +404,32 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             store: store,
             manifest: validated.manifest
         )
-        try schedulerAuthorityValidator(
-            validated.manifest,
-            compiled,
-            preparation,
-            options
-        )
+        let schedulerSession: LifecycleSchedulerSession?
+        if let context = environment.lifecycleScheduler {
+            if hasExplicitSchedulerAuthorityValidator {
+                try schedulerAuthorityValidator(validated.manifest, compiled, preparation, options)
+            }
+            let inventory = try hostwrightWaitForAsync { try await adapter.inventory() }
+            try LifecycleSchedulerSession.reconcile(
+                store: store, projectUUID: preparation.projectResourceUUID,
+                providerID: preparation.providerID, inventory: inventory
+            )
+            schedulerSession = try LifecycleSchedulerSession.admit(
+                context: context, store: store, manifest: validated.manifest,
+                compiled: compiled, preparation: preparation, options: options,
+                providerVersion: inventory.machine.runtimeVersion
+            )
+        } else {
+            try schedulerAuthorityValidator(validated.manifest, compiled, preparation, options)
+            schedulerSession = nil
+        }
+        var schedulerReconciled = false
+        defer {
+            if !schedulerReconciled, let schedulerSession,
+               let inventory = try? hostwrightWaitForAsync({ try await adapter.inventory() }) {
+                try? schedulerSession.reconcile(inventory: inventory)
+            }
+        }
         let recoverySnapshot: DesiredStateRecoverySnapshot?
         if compiled.plan.command == .update {
             guard let snapshot = try store.desiredStates.loadRecoverySnapshot(
@@ -564,7 +593,16 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
             state: state,
             store: store,
             probeStore: probeStore,
-            environment: environment
+            environment: environment,
+            schedulerActivationValidator: { node in
+                if let schedulerSession {
+                    try schedulerSession.validate(node: node)
+                } else if hasExplicitSchedulerAuthorityValidator {
+                    try schedulerAuthorityValidator(validated.manifest, compiled, preparation, options)
+                } else {
+                    throw RuntimeAdapterError.mutationUnavailableByPolicy(lifecycleSchedulerAuthorityUnavailableMessage)
+                }
+            }
         )
         let hasPersistedServiceTunnels =
             !(try store.serviceTunnels.listRecoverable(
@@ -800,6 +838,10 @@ struct LifecycleLiveDriver: LifecycleCommandDriving {
                     )
             }
         }
+        if let schedulerSession {
+            try schedulerSession.reconcile(inventory: hostwrightWaitForAsync { try await adapter.inventory() })
+        }
+        schedulerReconciled = true
         return result
     }
 }
@@ -1119,13 +1161,6 @@ private struct LifecycleRecoveryDeadlineEffects:
         plan: LifecyclePlan,
         context: LifecycleSagaContext
     ) async -> LifecycleSagaCompensationVerification {
-        guard plan.command == .update else {
-            return .verified(
-                LifecycleNodeVerification(
-                    summaryRedacted: "No update revision restoration was required."
-                )
-            )
-        }
         guard let verifier = base as? any LifecycleSagaCompensationVerifying else {
             return .safeHold(
                 reasonCode:
@@ -1174,6 +1209,7 @@ private struct LifecycleRecoveryDeadlineEffects:
 
 struct LifecyclePersistedRecoveryDriver {
     let environment: CLIEnvironment
+    var schedulerActivationValidator: (@Sendable (LifecyclePlan, LifecyclePlanNode) throws -> Void)? = nil
 
     func execute(
         _ request: LifecyclePersistedRecoveryRequest
@@ -1224,10 +1260,7 @@ struct LifecyclePersistedRecoveryDriver {
                   sourceGroup.intentJSONRedacted
               ),
               persistedPlan.planSHA256 == sourceGroup.planHash,
-              persistedPlan.projectID == sourceGroup.projectID,
-              persistedPlan.nodes.allSatisfy({
-                  $0.fencingToken == sourceGroup.fencingToken
-              }) else {
+              persistedPlan.projectID == sourceGroup.projectID else {
             throw LifecyclePersistedRecoveryError.confirmationMismatch
         }
         if request.action != .rollback ||
@@ -2406,6 +2439,15 @@ struct LifecyclePersistedRecoveryDriver {
             store: store,
             deadline: deadline
         )
+        defer {
+            if environment.lifecycleScheduler != nil,
+               let inventory = try? hostwrightWaitForAsync({ try await runtime.adapter.inventory() }) {
+                try? LifecycleSchedulerSession.reconcile(
+                    store: store, projectUUID: plan.projectResourceUUID, providerID: plan.providerID,
+                    inventory: inventory
+                )
+            }
+        }
         return try await LifecycleSagaExecutor(
             store: store,
             effects: LifecycleRecoveryDeadlineEffects(
@@ -2533,7 +2575,18 @@ struct LifecyclePersistedRecoveryDriver {
             state: state,
             store: store,
             probeStore: LifecycleProbeCheckpointStore(store: store),
-            environment: environment
+            environment: environment,
+            schedulerActivationValidator: { node in
+                if let context = environment.lifecycleScheduler {
+                    try LifecycleSchedulerSession.validateRecoveryActivation(
+                        context: context, store: store, plan: plan, node: node, environment: environment
+                    )
+                } else if let schedulerActivationValidator {
+                    try schedulerActivationValidator(plan, node)
+                } else {
+                    throw SchedulerAdmissionError.invalidBinding(field: "recovery-local-authority-unavailable")
+                }
+            }
         )
         return LifecycleRecoveryRuntime(
             adapter: adapter,
@@ -3152,8 +3205,7 @@ struct LifecycleLiveValidator: LifecycleSagaContextValidating {
             record.map {
                 $0.resourceIdentifier == node.resourceIdentifier &&
                     $0.resourceUUID == node.resourceUUID &&
-                    $0.resourceGeneration + 1 ==
-                        node.resourceGeneration &&
+                    $0.resourceGeneration < node.resourceGeneration &&
                     $0.projectResourceUUID ==
                         plan.projectResourceUUID &&
                     $0.projectGeneration == plan.projectGeneration &&
@@ -3299,6 +3351,7 @@ struct LifecycleLiveEffects:
     let store: SQLiteStateStore
     let probeStore: LifecycleProbeCheckpointStore
     let environment: CLIEnvironment
+    let schedulerActivationValidator: @Sendable (LifecyclePlanNode) throws -> Void
     let interactiveExecutor: any LifecycleProbeInteractiveExecuting
     let probeNetworkClient: any LifecycleProbeNetworkRequesting
     let nowMilliseconds: @Sendable () -> Int64
@@ -3310,6 +3363,9 @@ struct LifecycleLiveEffects:
         store: SQLiteStateStore,
         probeStore: LifecycleProbeCheckpointStore,
         environment: CLIEnvironment,
+        schedulerActivationValidator: @escaping @Sendable (LifecyclePlanNode) throws -> Void = { _ in
+            throw RuntimeAdapterError.mutationUnavailableByPolicy(lifecycleSchedulerAuthorityUnavailableMessage)
+        },
         interactiveExecutor: any LifecycleProbeInteractiveExecuting =
             AppleContainerLifecycleProbeInteractiveExecutor(),
         probeNetworkClient: any LifecycleProbeNetworkRequesting =
@@ -3330,6 +3386,7 @@ struct LifecycleLiveEffects:
         self.store = store
         self.probeStore = probeStore
         self.environment = environment
+        self.schedulerActivationValidator = schedulerActivationValidator
         self.interactiveExecutor = interactiveExecutor
         self.probeNetworkClient = probeNetworkClient
         self.nowMilliseconds = nowMilliseconds
@@ -3465,8 +3522,17 @@ struct LifecycleLiveEffects:
                     context: context
                 )
             }
-            _ = try await adapter.execute(action, confirmation: confirmation)
+            do {
+                try validateSchedulerActivation(action: action, node: node, fencingToken: context.fencingToken)
+            } catch {
+                await state.recordSpecialEvidence(.noEffect(lifecycleSchedulerActivationRejected), for: node.key)
+                return .failed(normalizedSpecialFailure(error, context: context, effectPossible: false))
+            }
+            _ = try await executeWithActivationAuthority(action, confirmation: confirmation, node: node)
             return .accepted
+        } catch let error as RuntimeActivationAuthorityRejection {
+            await state.recordSpecialEvidence(.noEffect(lifecycleSchedulerActivationRejected), for: node.key)
+            return .failed(normalizedSpecialFailure(error, context: context, effectPossible: false))
         } catch let error as RuntimeAdapterError {
             return .failed(
                 RuntimeNormalizedFailure.normalize(
@@ -3490,6 +3556,53 @@ struct LifecycleLiveEffects:
                 )
             )
         }
+    }
+
+    private func executeWithActivationAuthority(
+        _ action: PlannedRuntimeAction, confirmation: RuntimeMutationConfirmation,
+        node: LifecyclePlanNode
+    ) async throws -> RuntimeEvent {
+        let event = try await RuntimeActivationAuthority.$validator.withValue({
+            try validateSchedulerActivation(action: action, node: node, fencingToken: confirmation.context?.fencingToken)
+        }) {
+            try await adapter.execute(action, confirmation: confirmation)
+        }
+        if environment.lifecycleScheduler != nil, action.kind != .create, let context = confirmation.context {
+            try LifecycleSchedulerSession.reconcile(
+                store: store, projectUUID: context.projectResourceUUID, providerID: context.providerID,
+                inventory: await adapter.inventory(), resourceUUID: context.resourceUUID
+            )
+        }
+        return event
+    }
+
+    private func validateSchedulerActivation(
+        action: PlannedRuntimeAction,
+        node: LifecyclePlanNode, fencingToken: String? = nil
+    ) throws {
+        let activation: LifecyclePlanAction
+        switch action.kind {
+        case .create: activation = .create
+        case .start: activation = .start
+        case .restart: activation = .restart
+        default: return
+        }
+        let activatingNode = try LifecyclePlanNode(
+            key: node.key,
+            action: activation,
+            serviceName: node.serviceName,
+            resourceIdentifier: node.resourceIdentifier,
+            resourceUUID: node.resourceUUID,
+            resourceGeneration: node.resourceGeneration,
+            fencingToken: fencingToken ?? node.fencingToken,
+            dependencies: [],
+            preconditions: node.preconditions,
+            postconditions: node.postconditions,
+            timeoutSeconds: node.timeoutSeconds,
+            compensation: nil,
+            desiredSpecificationJSONRedacted: node.desiredSpecificationJSONRedacted
+        )
+        try schedulerActivationValidator(activatingNode)
     }
 
     private func bindOwnershipMutationLease(
@@ -3520,14 +3633,28 @@ struct LifecycleLiveEffects:
         try prior?.validate(for: current)
         if let prior, prior.deletionTimestamp != nil {
             guard node.action == .delete || node.action == .retire,
-                  prior.operationGroupID == group.id,
-                  prior.leaseOwner == groupOwner,
-                  prior.leaseExpiresAt == groupExpiry else {
+                  Set(prior.finalizers.map(\.state)) == [.releasing] else {
                 throw StateStoreError.invalidRecord(
                     "Lifecycle mutation found ownership already bound to deletion."
                 )
             }
-            return
+            if prior.operationGroupID == group.id,
+               prior.leaseOwner == groupOwner,
+               prior.leaseExpiresAt == groupExpiry {
+                return
+            }
+            guard node.action == .delete, group.plannedActionType == "rm",
+                  let priorID = prior.operationGroupID,
+                  let previous = try store.operationGroups.load(id: priorID),
+                  previous.groupKind == "lifecycle-v1",
+                  previous.projectID == group.projectID,
+                  previous.status == .failed,
+                  previous.lockOwner == nil,
+                  previous.lockExpiresAt == nil else {
+                throw StateStoreError.invalidRecord(
+                    "Lifecycle deletion retry requires a failed operation with no active lease."
+                )
+            }
         }
         if let prior,
            prior.operationGroupID == group.id,
@@ -3540,7 +3667,8 @@ struct LifecycleLiveEffects:
         let bound = try OwnershipAuthorityRecord.lifecycle(
             ownership: current,
             operationGroup: group,
-            finalizerState: .active,
+            finalizerState: prior?.deletionTimestamp == nil ? .active : .releasing,
+            deletionTimestamp: prior?.deletionTimestamp,
             handoffGeneration: handoffGeneration
         )
         let metadata = try OwnershipAuthorityMetadata.encode(
@@ -3829,6 +3957,12 @@ struct LifecycleLiveEffects:
             )
         }
         do {
+            if context.direction == .forward,
+               case .noEffect(let summary) = await state.specialEvidence(for: node.key),
+               summary == lifecycleSchedulerActivationRejected {
+                try await releaseResourceFenceIfNeeded(node: node, context: context)
+                return .noEffect(LifecycleNodeVerification(observationSHA256: nil, summaryRedacted: summary))
+            }
             var desired = await state.desiredStateSnapshot()
             if node.action == .create {
                 let identity = await state.identity(
@@ -4172,8 +4306,7 @@ struct LifecycleLiveEffects:
         group.groupKind == "lifecycle-v1",
         group.projectID == context.plan.projectID,
         group.planHash == context.plan.planSHA256,
-        group.groupIdempotencyKey ==
-            context.plan.planSHA256,
+        group.operationID == context.operationID,
         group.fencingToken == context.fencingToken else {
             throw HostwrightDiagnostic(
                 code: .runtimeUnavailable,
@@ -4504,6 +4637,25 @@ struct LifecycleLiveEffects:
     }
 
     func verifyCompensation(
+        plan: LifecyclePlan,
+        context: LifecycleSagaContext
+    ) async -> LifecycleSagaCompensationVerification {
+        let verification = await verifyRestoredRevision(plan: plan, context: context)
+        guard case .verified = verification else { return verification }
+        do {
+            try await LifecycleOwnershipFinalizer(store: store, adapter: adapter)
+                .finalize(context: context)
+            return verification
+        } catch {
+            return .safeHold(
+                reasonCode: LifecycleRecoverySafeHoldReason.compensationFailed.rawValue,
+                hintRedacted: "Compensated ownership cleanup could not be verified: " +
+                    RuntimeRedactionPolicy.default.redact(String(describing: error))
+            )
+        }
+    }
+
+    private func verifyRestoredRevision(
         plan: LifecyclePlan,
         context: LifecycleSagaContext
     ) async -> LifecycleSagaCompensationVerification {
@@ -5193,7 +5345,14 @@ struct LifecycleLiveEffects:
                 context: context,
                 diagnostic: ""
             )
+            try validateSchedulerActivation(action: action, node: node, fencingToken: context.fencingToken)
         } catch {
+            try? saveCompletionCheckpoint(
+                .unsupported,
+                node: node,
+                context: context,
+                diagnostic: "Completion-aware start was rejected before runtime mutation."
+            )
             await state.recordSpecialEvidence(
                 .noEffect("Completion-aware start was rejected before runtime mutation."),
                 for: node.key
@@ -5208,7 +5367,7 @@ struct LifecycleLiveEffects:
         }
 
         do {
-            _ = try await adapter.execute(action, confirmation: confirmation)
+            _ = try await executeWithActivationAuthority(action, confirmation: confirmation, node: node)
             try saveCompletionCheckpoint(
                 .succeeded,
                 node: node,
@@ -5222,6 +5381,12 @@ struct LifecycleLiveEffects:
                 for: node.key
             )
             return .accepted
+        } catch let error as RuntimeActivationAuthorityRejection {
+            try? saveCompletionCheckpoint(
+                .unsupported, node: node, context: context, diagnostic: lifecycleSchedulerActivationRejected
+            )
+            await state.recordSpecialEvidence(.noEffect(lifecycleSchedulerActivationRejected), for: node.key)
+            return .failed(normalizedSpecialFailure(error, context: context, effectPossible: false))
         } catch {
             let diagnostic = RuntimeRedactionPolicy.default.redact(
                 String(describing: error)
@@ -5877,8 +6042,15 @@ struct LifecycleLiveEffects:
                 manifestHash: context.plan.manifestSHA256,
                 context: mutationContext(node: node, context: context)
             )
-            _ = try await adapter.execute(action, confirmation: confirmation)
+            do {
+                try validateSchedulerActivation(action: action, node: node, fencingToken: context.fencingToken)
+            } catch {
+                return .refused(RuntimeRedactionPolicy.default.redact(String(describing: error)))
+            }
+            _ = try await executeWithActivationAuthority(action, confirmation: confirmation, node: node)
             return .restarted
+        } catch let error as RuntimeActivationAuthorityRejection {
+            return .refused(error.diagnostic)
         } catch {
             return .ambiguous(
                 normalizedSpecialFailure(
@@ -6335,7 +6507,7 @@ struct LifecycleLiveEffects:
                 id: HostwrightResourceUUID.legacy(
                     kind: "image-digest-lock-observed",
                     identifier:
-                        "\(context.plan.planSHA256):\(node.resourceUUID)"
+                        "\(context.groupID):\(node.resourceUUID)"
                 ),
                 projectID: context.plan.projectID,
                 resourceUUID: node.resourceUUID,
@@ -6907,6 +7079,51 @@ private func lifecycleHealthyDesiredState(
         )
     }
     return DesiredRuntimeState(projectName: projectName, services: services)
+}
+
+private func lifecycleNextResourceGenerations(
+    store: SQLiteStateStore, projectID: String, projectUUID: String,
+    providerID: RuntimeProviderID, desiredState: DesiredRuntimeState,
+    bindings: [LifecycleResourceBinding]
+) throws -> [String: Int] {
+    let bound = Dictionary(bindings.map { ($0.identity, $0.resourceUUID) }, uniquingKeysWith: { first, _ in first })
+    let resources = Dictionary(uniqueKeysWithValues: desiredState.services.map {
+        ($0.identity.displayName, bound[$0.identity] ?? HostwrightResourceUUID.legacy(
+            kind: "service", identifier: "\(projectID):\($0.identity.displayName)"
+        ))
+    })
+    guard !resources.isEmpty else { return [:] }
+    var generations: [String: Int] = [:]
+    try store.operationGroups.visitProjectLifecycleHistory(projectID: projectID) { group in
+        let plan = try LifecyclePersistedIntentCodec.decode(group.intentJSONRedacted)
+        guard plan.planSHA256 == group.planHash else {
+            throw StateStoreError.invalidRecord("Lifecycle generation history has an invalid plan digest.")
+        }
+        guard plan.projectResourceUUID == projectUUID,
+              plan.providerID == providerID else { return }
+        for node in plan.nodes {
+            let resourceUUID: String?
+            if node.desiredSpecificationJSONRedacted != "{}" {
+                let desired = try LifecycleRevisionCodec.decodeRedactedDesiredJSON(
+                    node.desiredSpecificationJSONRedacted
+                )
+                guard desired.identity.projectName == desiredState.projectName,
+                      node.serviceName == desired.identity.displayName ||
+                        node.serviceName == desired.logicalServiceName else {
+                    throw StateStoreError.invalidRecord("Lifecycle generation history has an inconsistent service identity.")
+                }
+                resourceUUID = resources[desired.identity.displayName]
+            } else {
+                resourceUUID = resources.values.first { $0 == node.resourceUUID }
+            }
+            guard let resourceUUID else { continue }
+            guard node.resourceGeneration < Int.max else {
+                throw StateStoreError.invalidRecord("Lifecycle resource generation is exhausted.")
+            }
+            generations[resourceUUID] = max(generations[resourceUUID] ?? 1, node.resourceGeneration + 1)
+        }
+    }
+    return generations
 }
 
 private func lifecycleBindings(
@@ -8779,32 +8996,30 @@ func lifecycleManifestSHA256(
     text: String,
     manifest: HostwrightManifest
 ) throws -> String {
-    var bound = text
-    if manifest.imageTrust != nil {
-        let material = try ImageTrustPolicyMapping.map(
-            manifest
-        ).material
-        bound += "\u{1f}imageTrustPolicySHA256=" +
-            material.policySHA256
+    try HostwrightLifecycleManifestDigest.sha256(text: text, manifest: manifest)
+}
+
+public enum HostwrightLifecycleManifestDigest {
+    public static func sha256(text: String, manifest: HostwrightManifest) throws -> String {
+        var bound = text
+        if manifest.imageTrust != nil {
+            let material = try ImageTrustPolicyMapping.map(manifest).material
+            bound += "\u{1f}imageTrustPolicySHA256=" + material.policySHA256
+        }
+        if manifest.imageSBOM != nil {
+            let material = try ImageSBOMPolicyMapping.map(manifest)
+            bound += "\u{1f}imageSBOMPolicySHA256=" + material.policySHA256
+        }
+        if manifest.imageVulnerability != nil {
+            let material = try ImageVulnerabilityPolicyMapping.map(manifest)
+            bound += "\u{1f}imageVulnerabilityPolicySHA256=" + material.policySHA256
+        }
+        if manifest.imageProvenance != nil {
+            let material = try ImageProvenancePolicyMapping.map(manifest).material
+            bound += "\u{1f}imageProvenancePolicySHA256=" + material.policySHA256
+        }
+        return SHA256.hash(data: Data(bound.utf8)).map { String(format: "%02x", $0) }.joined()
     }
-    if manifest.imageSBOM != nil {
-        let material = try ImageSBOMPolicyMapping.map(manifest)
-        bound += "\u{1f}imageSBOMPolicySHA256=" +
-            material.policySHA256
-    }
-    if manifest.imageVulnerability != nil {
-        let material =
-            try ImageVulnerabilityPolicyMapping.map(manifest)
-        bound += "\u{1f}imageVulnerabilityPolicySHA256=" +
-            material.policySHA256
-    }
-    if manifest.imageProvenance != nil {
-        let material =
-            try ImageProvenancePolicyMapping.map(manifest).material
-        bound += "\u{1f}imageProvenancePolicySHA256=" +
-            material.policySHA256
-    }
-    return sha256(bound)
 }
 
 private func lifecycleSHA256(_ data: Data) -> String {

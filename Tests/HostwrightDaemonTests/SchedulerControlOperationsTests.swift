@@ -7,6 +7,37 @@ import XCTest
 @testable import HostwrightState
 
 final class SchedulerControlOperationsTests: XCTestCase {
+  func testLocalReleaseRejectsMultiNodeAndPreemptingRequestsBeforePersistence() throws {
+    let node = try SchedulerNode(snapshot: NodePlacementSnapshot(
+      nodeID: UUID(), capacity: ResourceVector(["cpu": 4, "memory": 4_294_967_296]), allocation: .zero,
+      architecture: "arm64", runtime: "linux-vm", provider: "apple-container-cli"
+    ))
+    let second = try SchedulerNode(snapshot: NodePlacementSnapshot(
+      nodeID: UUID(), capacity: node.capacity, allocation: .zero,
+      architecture: "arm64", runtime: "linux-vm", provider: "apple-container-cli"
+    ))
+    let supported = try SchedulerEngineInput(pendingWorkloads: [], nodes: [node])
+    XCTAssertTrue(LocalLifecycleScheduler.supports(supported))
+    let deferred = try SchedulerEngineInput(pendingWorkloads: [], nodes: [node, second])
+    XCTAssertFalse(LocalLifecycleScheduler.supports(deferred))
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let store = SQLiteStateStore(path: root.appendingPathComponent("state.sqlite").path)
+    let rejected = try XCTUnwrap(LocalLifecycleScheduler.rejection(
+      request: schedulerRequest(operation: "scheduler.plan", input: deferred), repository: store.schedulerAdmissions
+    ))
+    XCTAssertEqual(rejected.error?.code, "schedulerUnsupportedReleaseScope")
+    XCTAssertEqual(rejected.reasonCode, .invalidRequest)
+    XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+    XCTAssertNil(try LocalLifecycleScheduler.rejection(
+      request: schedulerRequest(operation: "scheduler.simulate", input: deferred), repository: store.schedulerAdmissions
+    ))
+    let preempting = try SchedulerWorkload(
+      requirements: WorkloadPlacementRequirements(workloadID: UUID(), request: ResourceVector(["cpu": 1])),
+      priority: 1, subjectID: "owner", projectID: "project-a", preemptionEligibility: .eligible
+    )
+    XCTAssertFalse(LocalLifecycleScheduler.supports(try SchedulerEngineInput(pendingWorkloads: [preempting], nodes: [node])))
+  }
+
   func testPlanAndSimulationArePureAndReplayable() throws {
     let input = try SchedulerEngineInput(pendingWorkloads: [], nodes: [])
     let storeRoot = FileManager.default.temporaryDirectory

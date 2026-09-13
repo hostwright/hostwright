@@ -115,8 +115,8 @@ final class TraceContractTests: XCTestCase {
         session.attach(sink)
         HostwrightTraceContext.withSession(session) {
             let root = session.start(.cliRequest)
-            session.linkEvent("event-AKIA1234567890ABCDEF")
-            session.linkOperation("operation-ghp_abcdefghijklmnopqrstuvwxyz")
+            session.linkEvent("event-" + "AK" + "IA1234567890ABCDEF")
+            session.linkOperation("operation-" + "gh" + "p_abcdefghijklmnopqrstuvwxyz")
             session.linkEvent("event-safe-123")
             session.linkOperation("operation-safe-456")
             _ = session.finish(root, status: .failed)

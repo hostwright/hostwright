@@ -74,6 +74,7 @@ final class DistributionIntegrationTests: XCTestCase {
                 binaries.appendingPathComponent("hostwright-storage-helper").path,
                 "--hostwright-dist-binary", binaries.appendingPathComponent("hostwright-dist").path,
                 "--hostwrightd-binary", binaries.appendingPathComponent("hostwrightd").path,
+                "--hostwright-desktop-binary", binaries.appendingPathComponent("hostwright-desktop").path,
                 "--containerization-asset-root", root.appendingPathComponent("unused-assets").path,
                 "--example-manifest", repository.appendingPathComponent("examples/single-service/hostwright.yaml").path,
                 "--license", repository.appendingPathComponent("LICENSE").path,
@@ -284,6 +285,37 @@ final class DistributionIntegrationTests: XCTestCase {
                 distributionDirectory: root.appendingPathComponent("baseline"),
                 extractionDirectory: extraction
             )
+            let desktopInfoURL = artifact.extractedRoot.appendingPathComponent(
+                DistributionLayout.desktopInfoPlistPath
+            )
+            let desktopInfoData = try Data(contentsOf: desktopInfoURL)
+            let desktopInfo = try XCTUnwrap(
+                PropertyListSerialization.propertyList(
+                    from: desktopInfoData,
+                    options: [],
+                    format: nil
+                ) as? [String: Any]
+            )
+            XCTAssertEqual(desktopInfo["CFBundleIdentifier"] as? String, "dev.hostwright.desktop")
+            XCTAssertEqual(
+                desktopInfo["CFBundleShortVersionString"] as? String,
+                HostwrightIdentity.version.split(separator: "-", maxSplits: 1)
+                    .first.map(String.init)
+            )
+            XCTAssertEqual(
+                desktopInfo["CFBundleVersion"] as? String,
+                try DistributionPackageVersion.make(from: HostwrightIdentity.version)
+            )
+            let desktopBundle = artifact.extractedRoot.appendingPathComponent(
+                DistributionLayout.desktopAppPath
+            )
+            let bundleVerification = try DistributionProcessRunner().run(
+                executablePath: "/usr/bin/codesign",
+                arguments: ["--verify", "--deep", "--strict", desktopBundle.path],
+                label: "verify developer desktop bundle",
+                timeoutSeconds: 30
+            )
+            XCTAssertEqual(bundleVerification.exitStatus, 0)
             let lifecycle = DistributionInstalledLifecycle()
             _ = try lifecycle.install(artifact: artifact, prefix: prefix)
             _ = try lifecycle.install(artifact: artifact, prefix: prefix)
@@ -648,6 +680,8 @@ final class DistributionIntegrationTests: XCTestCase {
             XCTAssertEqual(first.report.manifest.files, second.report.manifest.files)
             let payloadPaths = Set(first.report.manifest.files.map(\.path))
             XCTAssertTrue(Set(DistributionLayout.shippedBinaryPaths).isSubset(of: payloadPaths))
+            XCTAssertTrue(payloadPaths.contains(DistributionLayout.desktopInfoPlistPath))
+            XCTAssertTrue(payloadPaths.contains(DistributionLayout.desktopCodeResourcesPath))
         }
     }
 
@@ -913,6 +947,7 @@ final class DistributionIntegrationTests: XCTestCase {
                     .appendingPathComponent("hostwright-storage-helper"),
                 hostwrightDistributionBinary: binaries.appendingPathComponent("hostwright-dist"),
                 hostwrightDaemonBinary: binaries.appendingPathComponent("hostwrightd"),
+                hostwrightDesktopBinary: binaries.appendingPathComponent("hostwright-desktop"),
                 containerizationAssets: try makeDistributionTestContainerizationAssets(at: root),
                 exampleManifestFile: repository.appendingPathComponent("examples/single-service/hostwright.yaml"),
                 licenseFile: repository.appendingPathComponent("LICENSE"),

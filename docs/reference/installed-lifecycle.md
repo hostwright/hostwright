@@ -30,6 +30,14 @@ Installed lifecycle metadata is private to the prefix:
 
 Unknown prefix content is not adopted, replaced, or deleted. Installer-created directories are removed only when empty.
 
+The v0.0.2 payload includes the native desktop app at
+`libexec/hostwright/Hostwright.app` relative to the managed prefix. For the
+standard `/usr/local` package installation, launch it with
+`open /usr/local/libexec/hostwright/Hostwright.app`. The app bundle, nested
+executable, Info.plist, and code-resource seal are exact manifest-owned files,
+so upgrade, rollback, repair, and uninstall apply the same modification and
+unmanaged-file safeguards as the CLI payload.
+
 ## Artifact Sources
 
 `install`, `upgrade`, and `repair` accept exactly one source:

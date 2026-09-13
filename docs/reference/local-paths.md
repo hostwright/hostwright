@@ -11,7 +11,7 @@ Hostwright uses macOS-native per-user locations. A state-writing command creates
 | Application Support root | `~/Library/Application Support/Hostwright` | Private Hostwright root. |
 | Configuration | `~/Library/Application Support/Hostwright/config` | Reserved for Hostwright-managed configuration; no implicit profile discovery. |
 | SQLite state | `~/Library/Application Support/Hostwright/state/state.sqlite` | Production default for state-backed commands. |
-| Runtime files | `~/Library/Application Support/Hostwright/run` | Contains daemon locks and the reserved local-control socket path. |
+| Runtime files | `~/Library/Application Support/Hostwright/run` | Contains daemon locks and the authenticated local-control socket. |
 | Runtime metadata | `~/Library/Application Support/Hostwright/metadata` | Contains the legacy migration journal, state access/writer fences, pending state-maintenance journal, and private support-bundle file-effect journal. |
 | Daemon lifecycle metadata | `~/Library/Application Support/Hostwright/daemon` | Contains exact schema-v1 ownership, pending lifecycle intent, and one-generation rollback records. |
 | Backups | `~/Library/Application Support/Hostwright/backups` | Verified online state-backup catalogs. |
@@ -20,7 +20,7 @@ Hostwright uses macOS-native per-user locations. A state-writing command creates
 | Logs | `~/Library/Logs/Hostwright` | Private daemon stdout/stderr root. Structured records use system-managed macOS unified logging under `dev.hostwright`; this directory is not an OSLog store. |
 | LaunchAgent | `~/Library/LaunchAgents/dev.hostwright.daemon.plist` | Exact current-user managed plist, created only by explicit `hostwright daemon install`. |
 | Daemon lock | `~/Library/Application Support/Hostwright/run/hostwrightd.lock` | Real `0600` non-symlink lock for the default state database. |
-| Control socket | `~/Library/Application Support/Hostwright/run/control-v2.sock` | Canonical reserved path; the current one-shot control process does not create a socket. |
+| Control socket | `~/Library/Application Support/Hostwright/run/control-v2.sock` | The persistent daemon publishes the authenticated Control API 2.2 Unix socket here; the one-shot bootstrap process opens no listener. |
 
 The directories are created only when a state-writing operation needs them. `hostwright paths` and the read side of `hostwright doctor` do not create files or directories.
 

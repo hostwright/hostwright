@@ -68,7 +68,8 @@
         "distribution-artifact",
         "ux-accessibility",
         "security-assessment"
-      ]
+      ],
+      "stateReason": null
     },
     {
       "marker": "P01",
@@ -101,7 +102,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P02",
@@ -132,7 +134,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P03",
@@ -161,7 +164,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P04",
@@ -194,7 +198,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P05",
@@ -226,7 +231,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P06",
@@ -256,7 +262,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P07",
@@ -286,7 +293,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P08",
@@ -318,7 +326,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P09",
@@ -350,7 +359,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P10",
@@ -393,7 +403,8 @@
         "local-integration",
         "live-runtime",
         "security-assessment"
-      ]
+      ],
+      "stateReason": null
     },
     {
       "marker": "P11",
@@ -403,7 +414,7 @@
       "child": null,
       "parent": 284,
       "title": "Phase 11 \u2014 Multi-Mac consensus, high availability, and remote operations",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/235",
       "labels": [
         "area:ci",
@@ -414,7 +425,6 @@
         "area:storage",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:epic",
         "type:implementation",
         "type:roadmap",
@@ -426,7 +436,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P12",
@@ -436,7 +447,7 @@
       "child": null,
       "parent": 284,
       "title": "Phase 12 \u2014 Kubernetes, CRI, CNI, CSI, and Helm interoperability",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/247",
       "labels": [
         "area:ci",
@@ -447,7 +458,6 @@
         "area:storage",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:docs",
         "type:epic",
         "type:implementation",
@@ -461,7 +471,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P13",
@@ -503,7 +514,8 @@
         "local-integration",
         "live-runtime",
         "security-assessment"
-      ]
+      ],
+      "stateReason": null
     },
     {
       "marker": "P14",
@@ -547,7 +559,8 @@
         "distribution-artifact",
         "ux-accessibility",
         "security-assessment"
-      ]
+      ],
+      "stateReason": null
     },
     {
       "marker": "P15",
@@ -590,7 +603,8 @@
         "distribution-artifact",
         "ux-accessibility",
         "security-assessment"
-      ]
+      ],
+      "stateReason": null
     },
     {
       "marker": "P01-C01",
@@ -619,7 +633,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P01-C02",
@@ -649,7 +664,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P01-C03",
@@ -679,7 +695,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P01-C04",
@@ -709,7 +726,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P01-C05",
@@ -739,7 +757,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P01-C06",
@@ -769,7 +788,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P01-C07",
@@ -799,7 +819,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P02-C01",
@@ -828,7 +849,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P02-C02",
@@ -857,7 +879,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P02-C03",
@@ -886,7 +909,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P02-C04",
@@ -915,7 +939,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P02-C05",
@@ -944,7 +969,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P02-C06",
@@ -974,7 +1000,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P02-C07",
@@ -1003,7 +1030,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P02-C08",
@@ -1032,7 +1060,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P02-C09",
@@ -1061,7 +1090,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P03-C01",
@@ -1088,7 +1118,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P03-C02",
@@ -1115,7 +1146,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P03-C03",
@@ -1142,7 +1174,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P03-C04",
@@ -1169,7 +1202,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P03-C05",
@@ -1196,7 +1230,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P03-C06",
@@ -1223,7 +1258,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P03-C07",
@@ -1250,7 +1286,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P03-C08",
@@ -1277,7 +1314,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P04-C01",
@@ -1308,7 +1346,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P04-C02",
@@ -1339,7 +1378,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P04-C03",
@@ -1370,7 +1410,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P04-C04",
@@ -1401,7 +1442,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P04-C05",
@@ -1432,7 +1474,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P04-C06",
@@ -1463,7 +1506,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P04-C07",
@@ -1494,7 +1538,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P04-C08",
@@ -1525,7 +1570,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P04-C09",
@@ -1556,7 +1602,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P04-C10",
@@ -1587,7 +1634,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P05-C01",
@@ -1617,7 +1665,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P05-C02",
@@ -1647,7 +1696,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P05-C03",
@@ -1677,7 +1727,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P05-C04",
@@ -1707,7 +1758,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P05-C05",
@@ -1737,7 +1789,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P05-C06",
@@ -1767,7 +1820,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P05-C07",
@@ -1797,7 +1851,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P05-C08",
@@ -1827,7 +1882,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P05-C09",
@@ -1857,7 +1913,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P05-C10",
@@ -1887,7 +1944,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P05-C11",
@@ -1917,7 +1975,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P06-C01",
@@ -1945,7 +2004,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P06-C02",
@@ -1973,7 +2033,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P06-C03",
@@ -2001,7 +2062,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P06-C04",
@@ -2029,7 +2091,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P06-C05",
@@ -2057,7 +2120,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P06-C06",
@@ -2085,7 +2149,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P06-C07",
@@ -2113,7 +2178,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P06-C08",
@@ -2141,7 +2207,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P06-C09",
@@ -2169,7 +2236,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P06-C10",
@@ -2197,7 +2265,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P07-C01",
@@ -2225,7 +2294,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P07-C02",
@@ -2253,7 +2323,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P07-C03",
@@ -2281,7 +2352,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P07-C04",
@@ -2309,7 +2381,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P07-C05",
@@ -2337,7 +2410,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P07-C06",
@@ -2365,7 +2439,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P07-C07",
@@ -2393,7 +2468,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P07-C08",
@@ -2421,7 +2497,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P07-C09",
@@ -2449,7 +2526,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P07-C10",
@@ -2477,7 +2555,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P07-C11",
@@ -2505,7 +2584,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P07-C12",
@@ -2533,7 +2613,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P07-C13",
@@ -2561,7 +2642,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P07-C14",
@@ -2589,7 +2671,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P07-C15",
@@ -2617,7 +2700,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P08-C01",
@@ -2647,7 +2731,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P08-C02",
@@ -2677,7 +2762,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P08-C03",
@@ -2707,7 +2793,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P08-C04",
@@ -2737,7 +2824,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P08-C05",
@@ -2767,7 +2855,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P08-C06",
@@ -2797,7 +2886,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P08-C07",
@@ -2827,7 +2917,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P08-C08",
@@ -2857,7 +2948,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P08-C09",
@@ -2887,7 +2979,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P08-C10",
@@ -2917,7 +3010,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P08-C11",
@@ -2947,7 +3041,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P08-C12",
@@ -2977,7 +3072,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P08-C13",
@@ -3007,7 +3103,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P08-C14",
@@ -3037,7 +3134,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P08-C15",
@@ -3067,7 +3165,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P09-C01",
@@ -3096,7 +3195,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P09-C02",
@@ -3125,7 +3225,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P09-C03",
@@ -3154,7 +3255,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P09-C04",
@@ -3183,7 +3285,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P09-C05",
@@ -3212,7 +3315,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P09-C06",
@@ -3241,7 +3345,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P09-C07",
@@ -3270,7 +3375,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P09-C08",
@@ -3299,7 +3405,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P09-C09",
@@ -3328,7 +3435,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P09-C10",
@@ -3357,7 +3465,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P09-C11",
@@ -3386,7 +3495,8 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md"
+      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "stateReason": "completed"
     },
     {
       "marker": "P10-C01",
@@ -3429,7 +3539,8 @@
         "migration-upgrade",
         "security-assessment",
         "resilience-chaos"
-      ]
+      ],
+      "stateReason": null
     },
     {
       "marker": "P10-C02",
@@ -3470,7 +3581,8 @@
         "local-integration",
         "live-runtime",
         "security-assessment"
-      ]
+      ],
+      "stateReason": null
     },
     {
       "marker": "P10-C03",
@@ -3510,7 +3622,8 @@
         "unit-contract",
         "local-integration",
         "hardware-benchmark"
-      ]
+      ],
+      "stateReason": null
     },
     {
       "marker": "P10-C04",
@@ -3520,7 +3633,7 @@
       "child": 4,
       "parent": 219,
       "title": "P10-C04: Implement dominant-resource fairness",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/210",
       "labels": [
         "area:accelerator-research",
@@ -3530,7 +3643,6 @@
         "area:scheduler",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:implementation",
         "type:research",
         "type:security",
@@ -3541,7 +3653,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P10-C05",
@@ -3551,7 +3664,7 @@
       "child": 5,
       "parent": 219,
       "title": "P10-C05: Implement topology, affinity, and anti-affinity scoring",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/211",
       "labels": [
         "area:accelerator-research",
@@ -3561,7 +3674,6 @@
         "area:scheduler",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:implementation",
         "type:research",
         "type:security",
@@ -3572,7 +3684,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P10-C06",
@@ -3582,7 +3695,7 @@
       "child": 6,
       "parent": 219,
       "title": "P10-C06: Implement priority, preemption, and disruption budgets",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/212",
       "labels": [
         "area:accelerator-research",
@@ -3592,7 +3705,6 @@
         "area:scheduler",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:implementation",
         "type:research",
         "type:security",
@@ -3603,7 +3715,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P10-C07",
@@ -3644,7 +3757,8 @@
         "local-integration",
         "live-runtime",
         "resilience-chaos"
-      ]
+      ],
+      "stateReason": null
     },
     {
       "marker": "P10-C08",
@@ -3684,7 +3798,8 @@
         "unit-contract",
         "local-integration",
         "security-assessment"
-      ]
+      ],
+      "stateReason": null
     },
     {
       "marker": "P10-C09",
@@ -3725,7 +3840,8 @@
         "local-integration",
         "live-runtime",
         "resilience-chaos"
-      ]
+      ],
+      "stateReason": null
     },
     {
       "marker": "P10-C10",
@@ -3735,7 +3851,7 @@
       "child": 10,
       "parent": 219,
       "title": "P10-C10: Implement Apple VM memory-reclamation strategy",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/216",
       "labels": [
         "area:accelerator-research",
@@ -3745,7 +3861,6 @@
         "area:scheduler",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:implementation",
         "type:research",
         "type:security",
@@ -3756,7 +3871,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P10-C11",
@@ -3766,7 +3882,7 @@
       "child": 11,
       "parent": 219,
       "title": "P10-C11: Implement accelerator inventory and reservations",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/217",
       "labels": [
         "area:accelerator-research",
@@ -3776,7 +3892,6 @@
         "area:scheduler",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:implementation",
         "type:research",
         "type:security",
@@ -3787,7 +3902,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P10-C12",
@@ -3797,7 +3913,7 @@
       "child": 12,
       "parent": 219,
       "title": "P10-C12: Implement the host-native Metal, Core ML, and MLX service",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/218",
       "labels": [
         "area:accelerator-research",
@@ -3807,7 +3923,6 @@
         "area:scheduler",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:implementation",
         "type:research",
         "type:security",
@@ -3818,7 +3933,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P11-C01",
@@ -3828,7 +3944,7 @@
       "child": 1,
       "parent": 235,
       "title": "P11-C01: Implement cluster bootstrap, join, leave, and membership changes",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/220",
       "labels": [
         "area:ci",
@@ -3839,7 +3955,6 @@
         "area:storage",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:implementation",
         "type:security",
         "type:testing"
@@ -3849,7 +3964,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P11-C02",
@@ -3859,7 +3975,7 @@
       "child": 2,
       "parent": 235,
       "title": "P11-C02: Implement cluster CA and mTLS identity lifecycle",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/221",
       "labels": [
         "area:ci",
@@ -3870,7 +3986,6 @@
         "area:storage",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:implementation",
         "type:security",
         "type:testing"
@@ -3880,7 +3995,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P11-C03",
@@ -3890,7 +4006,7 @@
       "child": 3,
       "parent": 235,
       "title": "P11-C03: Operate a Hostwright-managed pinned etcd 3.7.x ensemble",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/222",
       "labels": [
         "area:ci",
@@ -3901,7 +4017,6 @@
         "area:storage",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:implementation",
         "type:security",
         "type:testing"
@@ -3911,7 +4026,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P11-C04",
@@ -3921,7 +4037,7 @@
       "child": 4,
       "parent": 235,
       "title": "P11-C04: Implement authoritative replicated desired state",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/223",
       "labels": [
         "area:ci",
@@ -3932,7 +4048,6 @@
         "area:storage",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:implementation",
         "type:security",
         "type:testing"
@@ -3942,7 +4057,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P11-C05",
@@ -3952,7 +4068,7 @@
       "child": 5,
       "parent": 235,
       "title": "P11-C05: Implement authenticated node agents",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/224",
       "labels": [
         "area:ci",
@@ -3963,7 +4079,6 @@
         "area:storage",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:implementation",
         "type:security",
         "type:testing"
@@ -3973,7 +4088,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P11-C06",
@@ -3983,7 +4099,7 @@
       "child": 6,
       "parent": 235,
       "title": "P11-C06: Implement fenced remote execution and streaming",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/225",
       "labels": [
         "area:ci",
@@ -3994,7 +4110,6 @@
         "area:storage",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:implementation",
         "type:security",
         "type:testing"
@@ -4004,7 +4119,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P11-C07",
@@ -4014,7 +4130,7 @@
       "child": 7,
       "parent": 235,
       "title": "P11-C07: Enforce cluster fencing tokens on every mutation",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/226",
       "labels": [
         "area:ci",
@@ -4025,7 +4141,6 @@
         "area:storage",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:implementation",
         "type:security",
         "type:testing"
@@ -4035,7 +4150,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P11-C08",
@@ -4045,7 +4161,7 @@
       "child": 8,
       "parent": 235,
       "title": "P11-C08: Extend scheduler placement across Macs",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/227",
       "labels": [
         "area:ci",
@@ -4056,7 +4172,6 @@
         "area:storage",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:implementation",
         "type:security",
         "type:testing"
@@ -4066,7 +4181,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P11-C09",
@@ -4076,7 +4192,7 @@
       "child": 9,
       "parent": 235,
       "title": "P11-C09: Implement cordon, drain, maintenance, and node removal",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/228",
       "labels": [
         "area:ci",
@@ -4087,7 +4203,6 @@
         "area:storage",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:implementation",
         "type:security",
         "type:testing"
@@ -4097,7 +4212,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P11-C10",
@@ -4107,7 +4223,7 @@
       "child": 10,
       "parent": 235,
       "title": "P11-C10: Implement cross-host service discovery",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/229",
       "labels": [
         "area:ci",
@@ -4118,7 +4234,6 @@
         "area:storage",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:implementation",
         "type:security",
         "type:testing"
@@ -4128,7 +4243,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P11-C11",
@@ -4138,7 +4254,7 @@
       "child": 11,
       "parent": 235,
       "title": "P11-C11: Implement safe remote volumes",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/230",
       "labels": [
         "area:ci",
@@ -4149,7 +4265,6 @@
         "area:storage",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:implementation",
         "type:security",
         "type:testing"
@@ -4159,7 +4274,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P11-C12",
@@ -4169,7 +4285,7 @@
       "child": 12,
       "parent": 235,
       "title": "P11-C12: Implement leader election and control-plane leases",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/231",
       "labels": [
         "area:ci",
@@ -4180,7 +4296,6 @@
         "area:storage",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:implementation",
         "type:security",
         "type:testing"
@@ -4190,7 +4305,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P11-C13",
@@ -4200,7 +4316,7 @@
       "child": 13,
       "parent": 235,
       "title": "P11-C13: Implement cluster failover and node-loss recovery",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/232",
       "labels": [
         "area:ci",
@@ -4211,7 +4327,6 @@
         "area:storage",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:implementation",
         "type:security",
         "type:testing"
@@ -4221,7 +4336,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P11-C14",
@@ -4231,7 +4347,7 @@
       "child": 14,
       "parent": 235,
       "title": "P11-C14: Implement mixed-version rolling cluster upgrades",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/233",
       "labels": [
         "area:ci",
@@ -4242,7 +4358,6 @@
         "area:storage",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:implementation",
         "type:security",
         "type:testing"
@@ -4252,7 +4367,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P11-C15",
@@ -4262,7 +4378,7 @@
       "child": 15,
       "parent": 235,
       "title": "P11-C15: Implement cluster disaster recovery",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/234",
       "labels": [
         "area:ci",
@@ -4273,7 +4389,6 @@
         "area:storage",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:implementation",
         "type:security",
         "type:testing"
@@ -4283,7 +4398,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P12-C01",
@@ -4293,7 +4409,7 @@
       "child": 1,
       "parent": 247,
       "title": "P12-C01: Build the Hostwright pod-sandbox VM and guest agent",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/236",
       "labels": [
         "area:ci",
@@ -4304,7 +4420,6 @@
         "area:storage",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:docs",
         "type:implementation",
         "type:research",
@@ -4316,7 +4431,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P12-C02",
@@ -4326,7 +4442,7 @@
       "child": 2,
       "parent": 247,
       "title": "P12-C02: Implement CRI v1 RuntimeService",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/237",
       "labels": [
         "area:ci",
@@ -4337,7 +4453,6 @@
         "area:storage",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:docs",
         "type:implementation",
         "type:research",
@@ -4349,7 +4464,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P12-C03",
@@ -4359,7 +4475,7 @@
       "child": 3,
       "parent": 247,
       "title": "P12-C03: Implement CRI v1 ImageService",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/238",
       "labels": [
         "area:ci",
@@ -4370,7 +4486,6 @@
         "area:storage",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:docs",
         "type:implementation",
         "type:research",
@@ -4382,7 +4497,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P12-C04",
@@ -4392,7 +4508,7 @@
       "child": 4,
       "parent": 247,
       "title": "P12-C04: Implement CRI streaming, logs, and stats APIs",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/239",
       "labels": [
         "area:ci",
@@ -4403,7 +4519,6 @@
         "area:storage",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:docs",
         "type:implementation",
         "type:research",
@@ -4415,7 +4530,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P12-C05",
@@ -4425,7 +4541,7 @@
       "child": 5,
       "parent": 247,
       "title": "P12-C05: Integrate supported kubelet versions",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/240",
       "labels": [
         "area:ci",
@@ -4436,7 +4552,6 @@
         "area:storage",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:docs",
         "type:implementation",
         "type:research",
@@ -4448,7 +4563,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P12-C06",
@@ -4458,7 +4574,7 @@
       "child": 6,
       "parent": 247,
       "title": "P12-C06: Implement CNI in the real pod guest topology",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/241",
       "labels": [
         "area:ci",
@@ -4469,7 +4585,6 @@
         "area:storage",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:docs",
         "type:implementation",
         "type:research",
@@ -4481,7 +4596,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P12-C07",
@@ -4491,7 +4607,7 @@
       "child": 7,
       "parent": 247,
       "title": "P12-C07: Implement CSI controller and node adapters",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/242",
       "labels": [
         "area:ci",
@@ -4502,7 +4618,6 @@
         "area:storage",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:docs",
         "type:implementation",
         "type:research",
@@ -4514,7 +4629,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P12-C08",
@@ -4524,7 +4640,7 @@
       "child": 8,
       "parent": 247,
       "title": "P12-C08: Translate Kubernetes resources into Hostwright desired state",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/243",
       "labels": [
         "area:ci",
@@ -4535,7 +4651,6 @@
         "area:storage",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:docs",
         "type:implementation",
         "type:research",
@@ -4547,7 +4662,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P12-C09",
@@ -4557,7 +4673,7 @@
       "child": 9,
       "parent": 247,
       "title": "P12-C09: Ingest rendered Helm output safely",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/244",
       "labels": [
         "area:ci",
@@ -4568,7 +4684,6 @@
         "area:storage",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:docs",
         "type:implementation",
         "type:research",
@@ -4580,7 +4695,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P12-C10",
@@ -4590,7 +4706,7 @@
       "child": 10,
       "parent": 247,
       "title": "P12-C10: Integrate Kubernetes scheduling and devices",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/245",
       "labels": [
         "area:ci",
@@ -4601,7 +4717,6 @@
         "area:storage",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:docs",
         "type:implementation",
         "type:research",
@@ -4613,7 +4728,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P12-C11",
@@ -4623,7 +4739,7 @@
       "child": 11,
       "parent": 247,
       "title": "P12-C11: Automate Kubernetes interoperability conformance reporting",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/246",
       "labels": [
         "area:ci",
@@ -4634,7 +4750,6 @@
         "area:storage",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:docs",
         "type:implementation",
         "type:research",
@@ -4646,7 +4761,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P13-C01",
@@ -4656,7 +4772,7 @@
       "child": 1,
       "parent": 257,
       "title": "P13-C01: Implement the version-negotiated Docker Engine API",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/248",
       "labels": [
         "area:ci",
@@ -4665,7 +4781,6 @@
         "area:interoperability",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:docs",
         "type:implementation",
         "type:security",
@@ -4676,7 +4791,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P13-C02",
@@ -4686,7 +4802,7 @@
       "child": 2,
       "parent": 257,
       "title": "P13-C02: Implement the authenticated local Docker socket and context",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/249",
       "labels": [
         "area:ci",
@@ -4695,7 +4811,6 @@
         "area:interoperability",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:docs",
         "type:implementation",
         "type:security",
@@ -4706,7 +4821,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P13-C03",
@@ -4747,7 +4863,8 @@
         "live-runtime",
         "interop-conformance",
         "security-assessment"
-      ]
+      ],
+      "stateReason": null
     },
     {
       "marker": "P13-C04",
@@ -4757,7 +4874,7 @@
       "child": 4,
       "parent": 257,
       "title": "P13-C04: Implement supported Podman client compatibility",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/251",
       "labels": [
         "area:ci",
@@ -4766,7 +4883,6 @@
         "area:interoperability",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:docs",
         "type:implementation",
         "type:security",
@@ -4777,7 +4893,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P13-C05",
@@ -4787,7 +4904,7 @@
       "child": 5,
       "parent": 257,
       "title": "P13-C05: Pass Testcontainers Java, Go, Node, Python, and .NET matrices",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/252",
       "labels": [
         "area:ci",
@@ -4796,7 +4913,6 @@
         "area:interoperability",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:docs",
         "type:implementation",
         "type:security",
@@ -4807,7 +4923,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P13-C06",
@@ -4817,7 +4934,7 @@
       "child": 6,
       "parent": 257,
       "title": "P13-C06: Ship GitHub Actions integration",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/253",
       "labels": [
         "area:ci",
@@ -4826,7 +4943,6 @@
         "area:interoperability",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:docs",
         "type:implementation",
         "type:security",
@@ -4837,7 +4953,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P13-C07",
@@ -4847,7 +4964,7 @@
       "child": 7,
       "parent": 257,
       "title": "P13-C07: Ship Xcode workflows",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/254",
       "labels": [
         "area:ci",
@@ -4856,7 +4973,6 @@
         "area:interoperability",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:docs",
         "type:implementation",
         "type:security",
@@ -4867,7 +4983,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P13-C08",
@@ -4877,7 +4994,7 @@
       "child": 8,
       "parent": 257,
       "title": "P13-C08: Ship VS Code workflows",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/255",
       "labels": [
         "area:ci",
@@ -4886,7 +5003,6 @@
         "area:interoperability",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:docs",
         "type:implementation",
         "type:security",
@@ -4897,7 +5013,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P13-C09",
@@ -4907,7 +5024,7 @@
       "child": 9,
       "parent": 257,
       "title": "P13-C09: Ship JetBrains workflows",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/256",
       "labels": [
         "area:ci",
@@ -4916,7 +5033,6 @@
         "area:interoperability",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:docs",
         "type:implementation",
         "type:security",
@@ -4927,7 +5043,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P14-C01",
@@ -4969,7 +5086,8 @@
         "live-runtime",
         "distribution-artifact",
         "ux-accessibility"
-      ]
+      ],
+      "stateReason": null
     },
     {
       "marker": "P14-C02",
@@ -5012,7 +5130,8 @@
         "live-runtime",
         "security-assessment",
         "ux-accessibility"
-      ]
+      ],
+      "stateReason": null
     },
     {
       "marker": "P14-C03",
@@ -5054,7 +5173,8 @@
         "local-integration",
         "live-runtime",
         "ux-accessibility"
-      ]
+      ],
+      "stateReason": null
     },
     {
       "marker": "P14-C04",
@@ -5094,7 +5214,8 @@
       "requiredEvidence": [
         "local-integration",
         "ux-accessibility"
-      ]
+      ],
+      "stateReason": null
     },
     {
       "marker": "P14-C05",
@@ -5137,7 +5258,8 @@
         "distribution-artifact",
         "migration-upgrade",
         "security-assessment"
-      ]
+      ],
+      "stateReason": null
     },
     {
       "marker": "P14-C06",
@@ -5147,7 +5269,7 @@
       "child": 6,
       "parent": 270,
       "title": "P14-C06: Implement team roles, approvals, and change workflow",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/263",
       "labels": [
         "area:ci",
@@ -5157,7 +5279,6 @@
         "area:multi-host",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:docs",
         "type:implementation",
         "type:research",
@@ -5169,7 +5290,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P14-C07",
@@ -5179,7 +5301,7 @@
       "child": 7,
       "parent": 270,
       "title": "P14-C07: Implement MDM deployment, managed policy, and compliance",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/264",
       "labels": [
         "area:ci",
@@ -5189,7 +5311,6 @@
         "area:multi-host",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:docs",
         "type:implementation",
         "type:research",
@@ -5201,7 +5322,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P14-C08",
@@ -5211,7 +5333,7 @@
       "child": 8,
       "parent": 270,
       "title": "P14-C08: Build the optional cloud control service",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/265",
       "labels": [
         "area:ci",
@@ -5221,7 +5343,6 @@
         "area:multi-host",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:docs",
         "type:implementation",
         "type:research",
@@ -5233,7 +5354,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P14-C09",
@@ -5243,7 +5365,7 @@
       "child": 9,
       "parent": 270,
       "title": "P14-C09: Implement PostgreSQL tenant state and data lifecycle",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/266",
       "labels": [
         "area:ci",
@@ -5253,7 +5375,6 @@
         "area:multi-host",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:docs",
         "type:implementation",
         "type:research",
@@ -5265,7 +5386,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P14-C10",
@@ -5275,7 +5397,7 @@
       "child": 10,
       "parent": 270,
       "title": "P14-C10: Implement OIDC and SSO identity lifecycle",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/267",
       "labels": [
         "area:ci",
@@ -5285,7 +5407,6 @@
         "area:multi-host",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:docs",
         "type:implementation",
         "type:research",
@@ -5297,7 +5418,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P14-C11",
@@ -5307,7 +5429,7 @@
       "child": 11,
       "parent": 270,
       "title": "P14-C11: Implement outbound-only fleet agent connections",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/268",
       "labels": [
         "area:ci",
@@ -5317,7 +5439,6 @@
         "area:multi-host",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:docs",
         "type:implementation",
         "type:research",
@@ -5329,7 +5450,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P14-C12",
@@ -5339,7 +5461,7 @@
       "child": 12,
       "parent": 270,
       "title": "P14-C12: Implement remote audit, diagnostics, and consented support",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/269",
       "labels": [
         "area:ci",
@@ -5349,7 +5471,6 @@
         "area:multi-host",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:docs",
         "type:implementation",
         "type:research",
@@ -5361,7 +5482,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     },
     {
       "marker": "P15-C01",
@@ -5401,7 +5523,8 @@
         "local-integration",
         "live-runtime",
         "distribution-artifact"
-      ]
+      ],
+      "stateReason": null
     },
     {
       "marker": "P15-C02",
@@ -5439,7 +5562,8 @@
       ],
       "requiredEvidence": [
         "security-assessment"
-      ]
+      ],
+      "stateReason": null
     },
     {
       "marker": "P15-C03",
@@ -5478,7 +5602,8 @@
       "requiredEvidence": [
         "unit-contract",
         "security-assessment"
-      ]
+      ],
+      "stateReason": null
     },
     {
       "marker": "P15-C04",
@@ -5516,7 +5641,8 @@
       "requiredEvidence": [
         "local-integration",
         "security-assessment"
-      ]
+      ],
+      "stateReason": null
     },
     {
       "marker": "P15-C05",
@@ -5556,7 +5682,8 @@
         "local-integration",
         "security-assessment",
         "distribution-artifact"
-      ]
+      ],
+      "stateReason": null
     },
     {
       "marker": "P15-C06",
@@ -5596,7 +5723,8 @@
         "live-runtime",
         "hardware-benchmark",
         "resilience-chaos"
-      ]
+      ],
+      "stateReason": null
     },
     {
       "marker": "P15-C07",
@@ -5637,7 +5765,8 @@
         "live-runtime",
         "migration-upgrade",
         "resilience-chaos"
-      ]
+      ],
+      "stateReason": null
     },
     {
       "marker": "P15-C08",
@@ -5677,7 +5806,8 @@
         "distribution-artifact",
         "migration-upgrade",
         "resilience-chaos"
-      ]
+      ],
+      "stateReason": null
     },
     {
       "marker": "P15-C09",
@@ -5717,7 +5847,8 @@
         "local-integration",
         "live-runtime",
         "ux-accessibility"
-      ]
+      ],
+      "stateReason": null
     },
     {
       "marker": "P15-C10",
@@ -5756,7 +5887,8 @@
       "requiredEvidence": [
         "local-integration",
         "security-assessment"
-      ]
+      ],
+      "stateReason": null
     },
     {
       "marker": "P15-C11",
@@ -5797,7 +5929,8 @@
         "migration-upgrade",
         "security-assessment",
         "live-runtime"
-      ]
+      ],
+      "stateReason": null
     },
     {
       "marker": "P15-C12",
@@ -5807,7 +5940,7 @@
       "child": 12,
       "parent": 283,
       "title": "P15-C12: Submit the unqualified Homebrew-core formula",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/282",
       "labels": [
         "area:ci",
@@ -5816,7 +5949,6 @@
         "area:release",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:docs",
         "type:implementation",
         "type:release",
@@ -5828,7 +5960,8 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date."
+      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
+      "stateReason": "not_planned"
     }
   ],
   "historicalPhaseSchedule": [

@@ -203,11 +203,15 @@ final class PersistentControlClientTests: XCTestCase {
     defer { listener.closeAndRemoveOwnedSocket() }
     let currentIdentity = try requireCurrentAdHocIdentity()
     let completed = DispatchSemaphore(value: 0)
+    let clientFinished = DispatchSemaphore(value: 0)
     DispatchQueue.global(qos: .userInitiated).async {
       defer { completed.signal() }
       do {
         let descriptor = try listener.accept(timeoutMilliseconds: 5_000)
-        defer { _ = Darwin.close(descriptor) }
+        defer {
+          _ = clientFinished.wait(timeout: .now() + 5)
+          _ = Darwin.close(descriptor)
+        }
         let challenge = try Self.challenge(
           descriptor: descriptor,
           identity: currentIdentity,
@@ -230,8 +234,9 @@ final class PersistentControlClientTests: XCTestCase {
     XCTAssertThrowsError(
       try client(socketPath: listener.path).send(request())
     ) { error in
-      XCTAssertEqual(error as? PersistentControlClientError, .serverBindingMismatch)
+      XCTAssertEqual(error as? PersistentControlClientError, .serverBindingMismatch, "\(error)")
     }
+    clientFinished.signal()
     XCTAssertEqual(completed.wait(timeout: .now() + 5), .success)
   }
 

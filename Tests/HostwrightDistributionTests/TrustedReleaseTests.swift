@@ -16,6 +16,28 @@ final class TrustedReleaseTests: XCTestCase {
         )
     }
 
+    func testPublishedSchemaOneEmptyDependencyInventoryRemainsVerifiable() throws {
+        let manifest = makeManifest(
+            schemaVersion: 1,
+            payloadModes: DistributionLayout.legacyTrustedPayloadModesV1
+        )
+        XCTAssertNoThrow(try provenanceWithEmptyDependencies(manifest: manifest).validate(manifest: manifest))
+    }
+
+    func testCurrentSchemaRejectsEmptyDependencyInventory() throws {
+        let manifest = makeManifest()
+        XCTAssertThrowsError(try provenanceWithEmptyDependencies(manifest: manifest).validate(manifest: manifest))
+        let metadata = TrustedReleaseBuildMetadata(
+            externalSwiftPMDependencies: [],
+            packageLicenseSPDX: "Apache-2.0",
+            reproducibilityBuildCount: 2,
+            byteIdenticalUnsignedPayloads: true,
+            toolVersions: trustedToolVersions()
+        )
+        XCTAssertThrowsError(try metadata.validate())
+        XCTAssertThrowsError(try metadata.validate(manifestSchemaVersion: 3))
+    }
+
     func testDeveloperIDParserSelectsOnlyExactApplicationAndInstallerIdentities() throws {
         let applicationFingerprint = String(repeating: "A", count: 40)
         let installerFingerprint = String(repeating: "B", count: 40)
@@ -1106,6 +1128,28 @@ final class TrustedReleaseTests: XCTestCase {
                     )
                 )
             )
+        )
+    }
+
+    private func provenanceWithEmptyDependencies(
+        manifest: TrustedReleaseManifest
+    ) throws -> TrustedReleaseProvenanceStatement {
+        let data = try JSONEncoder().encode(makeProvenance(manifest: manifest))
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var predicate = try XCTUnwrap(object["predicate"] as? [String: Any])
+        var definition = try XCTUnwrap(predicate["buildDefinition"] as? [String: Any])
+        var parameters = try XCTUnwrap(definition["internalParameters"] as? [String: Any])
+        parameters["externalSwiftPMDependencies"] = [String]()
+        definition["internalParameters"] = parameters
+        definition["resolvedDependencies"] = [[
+            "uri": "git+https://github.com/hostwright/hostwright.git",
+            "digest": ["gitCommit": manifest.sourceCommit],
+        ]]
+        predicate["buildDefinition"] = definition
+        object["predicate"] = predicate
+        return try JSONDecoder().decode(
+            TrustedReleaseProvenanceStatement.self,
+            from: JSONSerialization.data(withJSONObject: object)
         )
     }
 

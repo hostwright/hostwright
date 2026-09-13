@@ -292,15 +292,18 @@ public struct TrustedReleaseBuildMetadata: Equatable, Sendable {
         self.toolVersions = toolVersions
     }
 
-    public func validate() throws {
-        guard packageLicenseSPDX == "Apache-2.0",
+    public func validate(manifestSchemaVersion: Int = 2) throws {
+        guard manifestSchemaVersion == 1 || manifestSchemaVersion == 2,
+              packageLicenseSPDX == "Apache-2.0",
               reproducibilityBuildCount == 2,
               byteIdenticalUnsignedPayloads else {
             throw DistributionError.invalidArtifact(
                 "trusted release dependency, license, or reproducibility evidence is invalid"
             )
         }
-        try Self.validateExternalDependencies(externalSwiftPMDependencies)
+        if manifestSchemaVersion != 1 || !externalSwiftPMDependencies.isEmpty {
+            try Self.validateExternalDependencies(externalSwiftPMDependencies)
+        }
         try Self.validateToolVersions(toolVersions)
     }
 
@@ -400,7 +403,7 @@ public struct TrustedReleaseProvenanceStatement: Codable, Equatable, Sendable {
             byteIdenticalUnsignedPayloads: byteIdenticalUnsignedPayloads,
             toolVersions: toolVersions
         )
-        try recordedBuildMetadata.validate()
+        try recordedBuildMetadata.validate(manifestSchemaVersion: manifest.schemaVersion)
         if let expectedBuildMetadata, recordedBuildMetadata != expectedBuildMetadata {
             throw DistributionError.invalidArtifact(
                 "trusted provenance build evidence differs from the observed release build"

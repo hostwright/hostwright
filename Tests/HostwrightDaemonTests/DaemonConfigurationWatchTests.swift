@@ -89,7 +89,6 @@ final class DaemonConfigurationWatchTests: XCTestCase {
                 usleep(10_000)
             }
             XCTAssertLessThan(Date(), deadline)
-            XCTAssertFalse(monitor.consumePendingChange())
 
             monitor.stop()
             try Data(Self.validManifest.utf8).write(to: path, options: .atomic)

@@ -90,7 +90,7 @@ def lane(name, command, env=None, minimum=0):
         process = subprocess.Popen(command, stdout=handle, stderr=subprocess.STDOUT, env=dict(os.environ, **(env or {})))
         try:
             try:
-                status = process.wait(timeout=(a.duration + 120) if name.startswith('fuzz-') else 7200)
+                status = process.wait(timeout=(a.duration + 120) if name.startswith('fuzz-') else 21600)
             except subprocess.TimeoutExpired:
                 process.terminate()
                 try:

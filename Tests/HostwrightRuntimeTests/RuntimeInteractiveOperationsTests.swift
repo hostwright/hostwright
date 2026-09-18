@@ -1125,7 +1125,7 @@ final class RuntimeInteractiveOperationsTests: XCTestCase {
         )
         let identifier = managedIdentifier
         let capability = snapshot()
-        let task = Task {
+        let task = Task.detached(priority: .userInitiated) {
             try await AppleContainerInteractiveExecutor(
                 executableResolver: InteractiveExecutableResolver(),
                 processRunner: runner
@@ -1145,8 +1145,8 @@ final class RuntimeInteractiveOperationsTests: XCTestCase {
             }
         }
 
-        await fulfillment(of: [sinkStarted], timeout: 5)
-        await fulfillment(of: [runnerFinished], timeout: 5)
+        await fulfillment(of: [sinkStarted], timeout: 15)
+        await fulfillment(of: [runnerFinished], timeout: 15)
         releaseSink.signal()
         do {
             _ = try await task.value

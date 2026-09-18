@@ -10,11 +10,158 @@ final class ContainerizationHelperClientTests: XCTestCase {
     private let projectUUID = "22222222-2222-4222-8222-222222222222"
     private let fencingToken = "33333333-3333-4333-8333-333333333333"
 
-    func testActivationAuthorityExpiresDuringHelperImageAndNegotiationPreparation() async throws {
-        for kind: PlannedRuntimeActionKind in [.create, .start, .restart] {
+    func testSDKObservationRetainsActualAllocationAndDoesNotFillUnavailableEvidenceFromDesiredLimits() async throws {
+        for lifecycle: RuntimeInventoryLifecycleState in [.created, .running, .stopped] {
+            for allocation: RuntimeInventoryAllocation? in [RuntimeInventoryAllocation(cpuCount: 2, memoryBytes: 805_306_368), nil] {
+                let fixture = try ClientFixture()
+                let capability = snapshot()
+                let identity = RuntimeServiceIdentity(projectName: "demo", serviceName: "api")
+                let context = mutationContext(digest: capability.canonicalSHA256)
+                let labels = try RuntimeManagedResourceIdentity.labels(for: identity, context: context)
+                let ownership = try XCTUnwrap(RuntimeManagedResourceIdentity.ownershipEvidence(from: labels, expectedProviderID: .appleContainerization))
+                let container = RuntimeInventoryContainer(
+                    runtimeID: "88888888-8888-4888-8888-888888888888", name: identity.managedResourceIdentifier,
+                    imageReference: "example.local/demo:latest", lifecycle: lifecycle,
+                    health: RuntimeInventoryHealth(availability: .unsupported),
+                    labels: labels.map { RuntimeInventoryLabel(key: $0.key, value: $0.value) }, ownership: ownership,
+                    initConfiguration: RuntimeInventoryInitConfiguration(executable: "/bin/demo", arguments: [], environment: []),
+                    ports: [], mounts: [], networks: [], allocation: allocation, services: []
+                )
+                let source = try RuntimeInventoryBuilder.build(machine: inventory().machine, containers: [container], images: [], networks: [], volumes: [])
+                let helper = ScriptedHelper(snapshot: capability, observationInventory: source)
+                let adapter = AppleContainerizationRuntimeAdapter(client: directClient(fixture: fixture, helper: helper))
+                let desired = DesiredRuntimeState(projectName: "demo",
+                    services: [DesiredRuntimeService(identity: identity, image: "example.local/demo:latest", cpuCount: 1, memoryBytes: 536_870_912)],
+                    ownedResourceHints: [RuntimeOwnedResourceHint(resourceIdentifier: identity.managedResourceIdentifier,
+                        identity: identity, identityVersion: RuntimeManagedResourceIdentity.currentVersion, ownership: ownership)])
+                let observed = try await adapter.observe(desiredState: desired)
+                let service = try XCTUnwrap(observed.services.first)
+                XCTAssertEqual(service.allocation, allocation)
+                XCTAssertEqual(service.resourceIdentifier, identity.managedResourceIdentifier)
+                XCTAssertEqual(service.lifecycleState, lifecycle == .running ? .running : lifecycle == .created ? .created : .stopped)
+                let rawInventory = try await adapter.inventory()
+                XCTAssertEqual(rawInventory.containers.first?.runtimeID, "88888888-8888-4888-8888-888888888888")
+                XCTAssertEqual(service.image, "example.local/demo:latest")
+            }
+        }
+    }
+
+    func testSDKObservationRejectsForgedNameOrOwnershipInsteadOfReportingAbsence() async throws {
+        for mismatch in ["name", "missing-name", "uuid", "project", "resource-generation", "project-generation", "provider-generation", "provider", "fence", "missing-ownership", "labels", "conflicting-hint", "conflicting-runtime-hint", "missing-native-ownership", "cross-project"] {
+            let lifecycle = RuntimeInventoryLifecycleState.running
+            let allocation = RuntimeInventoryAllocation(cpuCount: 2, memoryBytes: 805_306_368)
             let fixture = try ClientFixture()
             let capability = snapshot()
-            let helper = ScriptedHelper(snapshot: capability)
+            let identity = RuntimeServiceIdentity(projectName: "demo", serviceName: "api")
+            let context = mutationContext(digest: capability.canonicalSHA256)
+            let labels = try RuntimeManagedResourceIdentity.labels(for: identity, context: context)
+            let ownership = try XCTUnwrap(RuntimeManagedResourceIdentity.ownershipEvidence(from: labels, expectedProviderID: .appleContainerization))
+            let expected = RuntimeInventoryOwnershipEvidence(
+                resourceUUID: mismatch == "uuid" ? "99999999-9999-4999-8999-999999999999" : ownership.resourceUUID,
+                projectUUID: mismatch == "project" ? "99999999-9999-4999-8999-999999999999" : ownership.projectUUID,
+                resourceGeneration: ownership.resourceGeneration + (mismatch == "resource-generation" ? 1 : 0),
+                projectGeneration: ownership.projectGeneration + (mismatch == "project-generation" ? 1 : 0),
+                providerID: mismatch == "provider" ? .appleContainerCLI : ownership.providerID,
+                providerGeneration: ownership.providerGeneration + (mismatch == "provider-generation" ? 1 : 0),
+                fencingToken: mismatch == "fence" ? "99999999-9999-4999-8999-999999999999" : ownership.fencingToken)
+            let container = RuntimeInventoryContainer(
+                runtimeID: "88888888-8888-4888-8888-888888888888", name: mismatch == "name" ? "foreign" : mismatch == "missing-name" ? "" : identity.managedResourceIdentifier,
+                imageReference: "example.local/demo:latest", lifecycle: lifecycle,
+                health: RuntimeInventoryHealth(availability: .unsupported),
+                labels: mismatch == "labels" ? [] : labels.map { RuntimeInventoryLabel(key: $0.key, value: $0.value) }, ownership: mismatch == "missing-native-ownership" ? nil : ownership,
+                initConfiguration: RuntimeInventoryInitConfiguration(executable: "/bin/demo", arguments: [], environment: []),
+                ports: [], mounts: [], networks: [], allocation: allocation, services: []
+            )
+            if ["missing-name", "labels", "missing-native-ownership"].contains(mismatch) {
+                XCTAssertThrowsError(try RuntimeInventoryBuilder.build(machine: inventory().machine, containers: [container], images: [], networks: [], volumes: [])) { error in
+                    XCTAssertEqual(error as? RuntimeInventoryError,
+                        mismatch == "missing-name" ? .malformedRecord : .invalidOwnershipEvidence)
+                }
+                continue
+            }
+            let source = try RuntimeInventoryBuilder.build(machine: inventory().machine, containers: [container], images: [], networks: [], volumes: [])
+            let helper = ScriptedHelper(snapshot: capability, observationInventory: source)
+            let adapter = AppleContainerizationRuntimeAdapter(client: directClient(fixture: fixture, helper: helper))
+            var hints = [RuntimeOwnedResourceHint(resourceIdentifier: identity.managedResourceIdentifier,
+                identity: mismatch == "cross-project" ? RuntimeServiceIdentity(projectName: "foreign", serviceName: "api") : identity, identityVersion: RuntimeManagedResourceIdentity.currentVersion,
+                ownership: mismatch == "missing-ownership" ? nil : expected)]
+            if mismatch == "conflicting-hint" || mismatch == "conflicting-runtime-hint" {
+                hints.append(RuntimeOwnedResourceHint(resourceIdentifier: mismatch == "conflicting-runtime-hint" ? "88888888-8888-4888-8888-888888888888" : "foreign", identity: identity,
+                    identityVersion: RuntimeManagedResourceIdentity.currentVersion, ownership: ownership))
+            }
+            let desired = DesiredRuntimeState(projectName: "demo",
+                services: [DesiredRuntimeService(identity: identity, image: "example.local/demo:latest", cpuCount: 1, memoryBytes: 536_870_912)],
+                ownedResourceHints: hints)
+            do {
+                _ = try await adapter.observe(desiredState: desired)
+                XCTFail("Expected malformed exact-owned inventory to fail: \(mismatch)")
+            } catch {
+                guard case RuntimeAdapterError.outputParseFailed = error else {
+                    return XCTFail("Unexpected rejection: \(error)")
+                }
+            }
+        }
+    }
+
+    func testInstalledHelperConfigurationPreservesDefaultPrivatePaths() throws {
+        let configuration = try ContainerizationHelperClientConfiguration.installed(
+            hostExecutableURL: URL(fileURLWithPath: "/tmp/bin/hostwright"),
+            homeDirectoryURL: URL(fileURLWithPath: "/tmp/hw", isDirectory: true),
+            environment: [:]
+        )
+        XCTAssertEqual(configuration.executableURL.path, "/tmp/bin/hostwright-containerization-helper")
+        XCTAssertEqual(configuration.configurationURL.path, "/tmp/hw/Library/Application Support/Hostwright/config/containerization-helper.json")
+        XCTAssertEqual(configuration.runtimeDirectoryURL.path, "/tmp/hw/Library/Application Support/Hostwright/run/helper")
+        XCTAssertEqual(configuration.socketURL.path, configuration.runtimeDirectoryURL.appendingPathComponent(ContainerizationHelperClientConfiguration.socketName).path)
+    }
+
+    func testInstalledHelperConfigurationUsesResolvedPrivatePathOverrides() throws {
+        let environment = [
+            HostwrightLocalPathResolver.applicationSupportOverride: "/tmp/hw-isolated/support",
+            HostwrightLocalPathResolver.cacheOverride: "/tmp/hw-isolated/cache",
+            HostwrightLocalPathResolver.logOverride: "/tmp/hw-isolated/log",
+            HostwrightLocalPathResolver.stateDatabaseOverride: "/tmp/hw-isolated/state.sqlite"
+        ]
+        let configuration = try ContainerizationHelperClientConfiguration.installed(
+            hostExecutableURL: URL(fileURLWithPath: "/tmp/bin/hostwright"),
+            homeDirectoryURL: URL(fileURLWithPath: "/tmp/hw", isDirectory: true),
+            environment: environment
+        )
+        XCTAssertEqual(configuration.configurationURL.path, "/tmp/hw-isolated/support/config/containerization-helper.json")
+        XCTAssertEqual(configuration.runtimeDirectoryURL.path, "/tmp/hw-isolated/support/run/helper")
+        XCTAssertEqual(configuration.executableURL.path, "/tmp/bin/hostwright-containerization-helper")
+    }
+
+    func testInstalledHelperConfigurationRejectsInvalidPrivatePathOverride() {
+        for key in [HostwrightLocalPathResolver.applicationSupportOverride, HostwrightLocalPathResolver.cacheOverride,
+                    HostwrightLocalPathResolver.logOverride, HostwrightLocalPathResolver.stateDatabaseOverride] {
+            XCTAssertThrowsError(try ContainerizationHelperClientConfiguration.installed(
+                hostExecutableURL: URL(fileURLWithPath: "/tmp/bin/hostwright"),
+                homeDirectoryURL: URL(fileURLWithPath: "/tmp/hw", isDirectory: true),
+                environment: [key: "relative/path"]
+            ))
+        }
+    }
+
+    func testActivationAuthorityExpiresDuringHelperImageAndNegotiationPreparation() async throws {
+        let checkpoints: [(PlannedRuntimeActionKind, ContainerizationHelperOperation)] = [
+            (.create, .localImageEvidence), (.start, .negotiate), (.restart, .negotiate),
+            (.start, .observe), (.restart, .observe)
+        ]
+        for (kind, delayedOperation) in checkpoints {
+            let fixture = try ClientFixture()
+            let capability = snapshot()
+            let identity = RuntimeServiceIdentity(projectName: "demo", serviceName: "api")
+            let context = mutationContext(digest: capability.canonicalSHA256)
+            let labels = try RuntimeManagedResourceIdentity.labels(for: identity, context: context)
+            let ownership = try XCTUnwrap(RuntimeManagedResourceIdentity.ownershipEvidence(from: labels, expectedProviderID: .appleContainerization))
+            let native = RuntimeInventoryContainer(runtimeID: "88888888-8888-4888-8888-888888888888", name: identity.managedResourceIdentifier,
+                imageReference: "example.local/demo:latest", lifecycle: kind == .start ? .stopped : .running,
+                health: .init(availability: .unsupported), labels: labels.map { .init(key: $0.key, value: $0.value) }, ownership: ownership,
+                initConfiguration: .init(executable: "/bin/demo", arguments: [], environment: []), ports: [], mounts: [], networks: [],
+                allocation: .init(cpuCount: 1, memoryBytes: 536_870_912), services: [])
+            let actualInventory = try RuntimeInventoryBuilder.build(machine: inventory().machine, containers: [native], images: [], networks: [], volumes: [])
+            let helper = ScriptedHelper(snapshot: capability, observationInventory: kind == .create ? nil : actualInventory)
             let gate = ActivationAuthorityTestGate()
             let client = ContainerizationHelperClient(
                 configuration: fixture.configuration,
@@ -23,7 +170,6 @@ final class ContainerizationHelperClientTests: XCTestCase {
                     let response = try await helper.exchange(frame: frame, peerProcessID: 7)
                     let payload = try ContainerizationHelperFraming.decodeSingleFrame(frame)
                     let request = try JSONDecoder().decode(ActivationPreparationEnvelope.self, from: payload)
-                    let delayedOperation: ContainerizationHelperOperation = kind == .create ? .localImageEvidence : .negotiate
                     if request.operation == delayedOperation {
                         try await Task.sleep(for: .milliseconds(10))
                         gate.deny()
@@ -32,29 +178,28 @@ final class ContainerizationHelperClientTests: XCTestCase {
                 }
             )
             let adapter = AppleContainerizationRuntimeAdapter(client: client)
-            let identity = RuntimeServiceIdentity(projectName: "demo", serviceName: "api")
             let action = PlannedRuntimeAction(
                 kind: kind, identity: identity, resourceIdentifier: identity.managedResourceIdentifier,
                 isDestructive: kind == .restart, summary: kind.rawValue,
-                desiredService: DesiredRuntimeService(identity: identity, image: "example.local/demo:latest")
+                desiredService: DesiredRuntimeService(identity: identity, image: "example.local/demo:latest", cpuCount: 1, memoryBytes: 536_870_912)
             )
             let confirmation = RuntimeMutationConfirmation(
                 confirmed: true, reason: "Confirmed lifecycle", planHash: String(repeating: "a", count: 64),
-                context: mutationContext(digest: capability.canonicalSHA256)
+                context: context
             )
             do {
                 _ = try await RuntimeActivationAuthority.$validator.withValue({ try gate.validate() }) {
                     try RuntimeActivationAuthority.validate()
                     return try await adapter.execute(action, confirmation: confirmation)
                 }
-                XCTFail("Expired provider authority must reject \(kind).")
+                XCTFail("Expired provider authority must reject \(kind) after \(delayedOperation).")
             } catch let error as RuntimeActivationAuthorityRejection {
                 XCTAssertTrue(error.diagnostic.contains("Admission expired"))
             }
             let mutations = await helper.mutationOperationIDs()
             XCTAssertTrue(mutations.isEmpty, "No activating helper RPC may be sent after authority expires.")
             let operations = await helper.operations()
-            XCTAssertEqual(operations, kind == .create ? [.negotiate, .localImageEvidence] : [.negotiate])
+            XCTAssertEqual(operations, kind == .create ? [.negotiate, .localImageEvidence] : [.negotiate, .observe])
             XCTAssertNoThrow(try RuntimeActivationAuthority.validate())
         }
     }
@@ -197,7 +342,9 @@ final class ContainerizationHelperClientTests: XCTestCase {
                     image: image,
                     command: ["/bin/demo"],
                     environment: [],
-                    labels: []
+                    labels: [],
+                    cpuCount: 1,
+                    memoryBytes: 536_870_912
                 ),
                 context: context
             )
@@ -470,6 +617,75 @@ final class ContainerizationHelperClientTests: XCTestCase {
         XCTAssertEqual(operations, [.negotiate])
     }
 
+    func testProbeLeaseReleasePreservesExistingHelperWithoutShutdown() async throws {
+        let fixture = try ClientFixture()
+        let helper = ScriptedHelper(snapshot: snapshot())
+        let state = LockedProcessState()
+        let client = ContainerizationHelperClient(configuration: fixture.configuration,
+            launcher: ContainerizationHelperProcessLauncher { _ in state.lease(processID: state.nextProcessID()) },
+            transport: ContainerizationHelperClientTransport { frame, _, _, _ in
+                try await helper.exchange(frame: frame, peerProcessID: 900)
+            })
+        _ = try await client.negotiate()
+        try await client.releaseProbeOwnedLease()
+        XCTAssertEqual(state.launchCount, 0)
+        let operations = await helper.operations()
+        XCTAssertEqual(operations, [.negotiate])
+    }
+
+    func testProbeLeaseReleaseRequiresVerifiedProcessTermination() async throws {
+        let fixture = try ClientFixture(); let helper = ScriptedHelper(snapshot: snapshot())
+        let client = ContainerizationHelperClient(configuration: fixture.configuration,
+            launcher: ContainerizationHelperProcessLauncher { _ in
+                ContainerizationHelperProcessLease(processID: 800, isRunning: { true }, terminate: {})
+            }, transport: ContainerizationHelperClientTransport { frame, _, _, expectedPID in
+                guard let expectedPID else { throw ContainerizationHelperClientError.socketUnavailable }
+                return try await helper.exchange(frame: frame, peerProcessID: expectedPID)
+            })
+        _ = try await client.negotiate()
+        do { try await client.releaseProbeOwnedLease(); XCTFail("expected termination refusal") }
+        catch { XCTAssertEqual(error as? ContainerizationHelperClientError, .helperExited) }
+        let operations = await helper.operations()
+        XCTAssertEqual(operations, [.negotiate])
+    }
+
+    func testProbeLeaseReleaseRemovesOwnedSocketAndRejectsReplacement() async throws {
+        for replaced in [false, true] {
+            let fixture = try ClientFixture()
+            let runtime = try ContainerizationHelperRuntimeDirectory.prepare(at: fixture.runtimeDirectoryURL)
+            let socket = try runtime.makeListeningSocket()
+            defer { try? socket.closeAndRemove() }
+            var metadata = stat()
+            XCTAssertEqual(lstat(runtime.socketURL.path, &metadata), 0)
+            let device = UInt64(metadata.st_dev); let inode = UInt64(metadata.st_ino)
+            let helper = ScriptedHelper(snapshot: snapshot()); let state = LockedProcessState()
+            let client = ContainerizationHelperClient(configuration: fixture.configuration,
+                launcher: ContainerizationHelperProcessLauncher { _ in state.lease(processID: state.nextProcessID()) },
+                transport: ContainerizationHelperClientTransport { frame, _, _, expectedPID in
+                    guard let expectedPID else { throw ContainerizationHelperClientError.socketUnavailable }
+                    let response = try await helper.exchange(frame: frame, peerProcessID: expectedPID)
+                    return ContainerizationHelperTransportResponse(frame: response.frame, peerProcessID: expectedPID,
+                        socketDevice: device, socketInode: inode)
+                })
+            _ = try await client.negotiate()
+            if replaced {
+                XCTAssertEqual(unlink(runtime.socketURL.path), 0)
+                try Data("replacement".utf8).write(to: runtime.socketURL)
+                XCTAssertEqual(chmod(runtime.socketURL.path, 0o600), 0)
+                do { try await client.releaseProbeOwnedLease(); XCTFail("expected replacement refusal") }
+                catch { XCTAssertEqual(error as? ContainerizationHelperClientError, .socketUnsafe) }
+                XCTAssertEqual(try Data(contentsOf: runtime.socketURL), Data("replacement".utf8))
+            } else {
+                try await client.releaseProbeOwnedLease()
+                XCTAssertFalse(FileManager.default.fileExists(atPath: runtime.socketURL.path))
+                try await client.releaseProbeOwnedLease()
+            }
+            let operations = await helper.operations()
+            XCTAssertEqual(operations, [.negotiate])
+            XCTAssertEqual(state.launchCount, 1)
+        }
+    }
+
     func testShutdownRemovesOnlyTheOwnedSocketBeforeRelaunch() async throws {
         let fixture = try ClientFixture()
         let runtimeDirectory = try ContainerizationHelperRuntimeDirectory.prepare(
@@ -625,6 +841,24 @@ final class ContainerizationHelperClientTests: XCTestCase {
         XCTAssertEqual(errno, ECHILD)
     }
 
+    func testPOSIXLauncherConcurrentTerminationIsIdempotentAcrossLeaderReap() throws {
+        let fixture = try POSIXLauncherFixture(configurationContents: "fork")
+        let lease = try ContainerizationHelperPOSIXLauncher.launchPrepared(configuration: fixture.configuration)
+        defer { lease.terminate() }
+        let evidence = try fixture.waitForEvidence()
+        let childProcessID = try XCTUnwrap(evidence.childProcessID)
+        DispatchQueue.concurrentPerform(iterations: 8) { _ in lease.terminate() }
+        XCTAssertFalse(lease.isRunning)
+        try assertProcessDisappears(lease.processID)
+        try assertProcessDisappears(childProcessID)
+        DispatchQueue.concurrentPerform(iterations: 8) { _ in lease.terminate() }
+        XCTAssertFalse(lease.isRunning)
+        var status: Int32 = 0
+        errno = 0
+        XCTAssertEqual(waitpid(lease.processID, &status, WNOHANG), -1)
+        XCTAssertEqual(errno, ECHILD)
+    }
+
     func testPOSIXLauncherCleansDescendantBeforeReapingNaturallyExitedLeader() throws {
         let fixture = try POSIXLauncherFixture(configurationContents: "fork-exit")
         let lease = try ContainerizationHelperPOSIXLauncher.launchPrepared(
@@ -642,6 +876,29 @@ final class ContainerizationHelperClientTests: XCTestCase {
         errno = 0
         XCTAssertEqual(waitpid(lease.processID, &status, WNOHANG), -1)
         XCTAssertEqual(errno, ECHILD)
+    }
+
+    func testRuntimeAdapterRejectsMissingOrInvalidAllocationBeforeCreateRequest() async throws {
+        let fixture = try ClientFixture()
+        let helper = ScriptedHelper(snapshot: snapshot())
+        let adapter = AppleContainerizationRuntimeAdapter(client: directClient(fixture: fixture, helper: helper))
+        let negotiated = try await adapter.capabilitySnapshot()
+        let identity = RuntimeServiceIdentity(projectName: "demo", serviceName: "api")
+        for (cpus, memory): (Int?, UInt64?) in [(nil, nil), (1, nil), (nil, 1), (0, 1), (1, 0), (1, UInt64.max)] {
+            let service = DesiredRuntimeService(identity: identity, image: "example.local/demo:latest", cpuCount: cpus, memoryBytes: memory)
+            await XCTAssertThrowsErrorAsync(try await adapter.execute(
+                PlannedRuntimeAction(kind: .create, identity: identity, resourceIdentifier: identity.managedResourceIdentifier,
+                    isDestructive: false, summary: "create", desiredService: service),
+                confirmation: RuntimeMutationConfirmation(confirmed: true, reason: "test", planHash: String(repeating: "a", count: 64),
+                    context: mutationContext(digest: negotiated.canonicalSHA256))
+            )) { error in
+                guard case RuntimeAdapterError.commandRejected(classification: .mutating, message: _) = error else {
+                    return XCTFail("Expected allocation rejection, got \(error)")
+                }
+            }
+        }
+        let payload = await helper.lastCreatePayload()
+        XCTAssertNil(payload)
     }
 
     func testRuntimeAdapterBuildsExactOwnedCreateRequestAndSupportsManagedStop() async throws {
@@ -663,6 +920,8 @@ final class ContainerizationHelperClientTests: XCTestCase {
         let service = DesiredRuntimeService(
             identity: identity,
             image: "example.local/demo:latest",
+            cpuCount: 2,
+            memoryBytes: 805_306_368,
             command: ["/bin/demo"],
             environment: [RuntimeEnvironmentValue(name: "MODE", value: "test")],
             networks: [attachment]
@@ -685,6 +944,8 @@ final class ContainerizationHelperClientTests: XCTestCase {
         let createEvent = try await adapter.execute(createAction, confirmation: confirmation)
         let recordedCreatePayload = await helper.lastCreatePayload()
         let createPayload = try XCTUnwrap(recordedCreatePayload)
+        XCTAssertEqual(createPayload.cpuCount, 2)
+        XCTAssertEqual(createPayload.memoryBytes, 805_306_368)
         XCTAssertEqual(createEvent.resourceIdentifier, identity.managedResourceIdentifier)
         XCTAssertEqual(createPayload.resourceUUID, resourceUUID)
         XCTAssertEqual(createPayload.projectUUID, projectUUID)
@@ -694,6 +955,13 @@ final class ContainerizationHelperClientTests: XCTestCase {
         XCTAssertEqual(labels[RuntimeManagedResourceIdentity.providerIDLabel], RuntimeProviderID.appleContainerization.rawValue)
         XCTAssertEqual(labels[RuntimeManagedResourceIdentity.fencingTokenLabel], fencingToken)
 
+        let priorOwnership = try XCTUnwrap(RuntimeManagedResourceIdentity.ownershipEvidence(from: labels, expectedProviderID: .appleContainerization))
+        let actual = RuntimeInventoryContainer(runtimeID: "88888888-8888-4888-8888-888888888888", name: identity.managedResourceIdentifier,
+            imageReference: service.image, lifecycle: .running, health: .init(availability: .unsupported),
+            labels: createPayload.labels, ownership: priorOwnership,
+            initConfiguration: .init(executable: "/bin/demo", arguments: [], environment: []), ports: [], mounts: [], networks: [], services: [])
+        let actualInventory = try RuntimeInventoryBuilder.build(machine: inventory().machine, containers: [actual], images: [], networks: [], volumes: [])
+        await helper.setObservationInventory(actualInventory)
         let stopAction = PlannedRuntimeAction(
             kind: .stop,
             identity: identity,
@@ -704,7 +972,9 @@ final class ContainerizationHelperClientTests: XCTestCase {
         let stopEvent = try await adapter.execute(stopAction, confirmation: confirmation)
         XCTAssertEqual(stopEvent.resourceIdentifier, identity.managedResourceIdentifier)
         let operations = await helper.operations()
-        XCTAssertEqual(Array(operations.suffix(3)), [.localImageEvidence, .create, .stop])
+        XCTAssertEqual(Array(operations.suffix(3)), [.create, .observe, .stop])
+        let recordedStop = await helper.lastMutationPayload()
+        XCTAssertEqual(recordedStop?.expectedOwnership, priorOwnership)
 
         let operationsBeforeCompletionStart = await helper.operations()
         await XCTAssertThrowsErrorAsync(
@@ -761,6 +1031,8 @@ final class ContainerizationHelperClientTests: XCTestCase {
             identity: identity,
             image: resolved,
             imageLock: lock,
+            cpuCount: 1,
+            memoryBytes: 536_870_912,
             command: ["/bin/demo"]
         )
 
@@ -827,7 +1099,9 @@ final class ContainerizationHelperClientTests: XCTestCase {
                     desiredService: DesiredRuntimeService(
                         identity: identity,
                         image: resolved,
-                        imageLock: lock
+                        imageLock: lock,
+                        cpuCount: 1,
+                        memoryBytes: 536_870_912
                     )
                 ),
                 confirmation: RuntimeMutationConfirmation(
@@ -1303,17 +1577,20 @@ private actor ScriptedHelper {
     private struct RoutingEnvelope: Decodable { let operation: ContainerizationHelperOperation }
 
     private let snapshot: RuntimeCapabilitySnapshot
+    private var observationInventory: RuntimeInventory?
     private var recordedOperations: [ContainerizationHelperOperation] = []
     private var recordedIDs: [UUID] = []
     private var recordedDigests: [String] = []
     private var recordedMutationOperationIDs: [String] = []
     private var createPayloads: [ContainerizationHelperCreatePayload] = []
+    private var mutationPayloads: [ContainerizationHelperMutationPayload] = []
     private var failures: [ContainerizationHelperOperation: ContainerizationHelperErrorPayload] = [:]
     private var blocked: Set<ContainerizationHelperOperation> = []
     private var cancellationTargets: [UUID] = []
 
-    init(snapshot: RuntimeCapabilitySnapshot) {
+    init(snapshot: RuntimeCapabilitySnapshot, observationInventory: RuntimeInventory? = nil) {
         self.snapshot = snapshot
+        self.observationInventory = observationInventory
     }
 
     func setFailure(
@@ -1344,6 +1621,8 @@ private actor ScriptedHelper {
     }
     func allRequestIDsWereUnique() -> Bool { Set(recordedIDs).count == recordedIDs.count }
     func lastCreatePayload() -> ContainerizationHelperCreatePayload? { createPayloads.last }
+    func setObservationInventory(_ value: RuntimeInventory) { observationInventory = value }
+    func lastMutationPayload() -> ContainerizationHelperMutationPayload? { mutationPayloads.last }
 
     func exchange(
         frame: Data,
@@ -1358,7 +1637,7 @@ private actor ScriptedHelper {
             return try await respond(request, result: snapshot, peerPID: peerProcessID, responseID: responseRequestID)
         case .observe:
             let request = try request(ContainerizationHelperObservePayload.self, payload)
-            let value = try ContainerizationHelperObservation(inventory: emptyInventory())
+            let value = try ContainerizationHelperObservation(inventory: observationInventory ?? emptyInventory())
             return try await respond(request, result: value, peerPID: peerProcessID, responseID: responseRequestID)
         case .localImageEvidence:
             let request = try request(ContainerizationHelperImageRequest.self, payload)
@@ -1482,6 +1761,7 @@ private actor ScriptedHelper {
             )
         case .start, .stop, .restart, .delete:
             let request = try request(ContainerizationHelperMutationPayload.self, payload)
+            mutationPayloads.append(request.payload)
             let lifecycle: RuntimeInventoryLifecycleState
             switch operation {
             case .start, .restart: lifecycle = .running

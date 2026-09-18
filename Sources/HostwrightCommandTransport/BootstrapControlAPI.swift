@@ -35,7 +35,8 @@ public enum BootstrapControlAPI {
             guard let route = try CLIControlRoute.validate(
                 request: request,
                 expectedTransport: .bootstrapAPI
-            ) else {
+            ), route.transport == .bootstrapAPI,
+               case .daemon = try CLICommand.parse(arguments: route.arguments) else {
                 throw HostwrightDiagnostic(
                     code: .controlAPIInvalid,
                     message: "The Bootstrap API requires one classified daemon command."

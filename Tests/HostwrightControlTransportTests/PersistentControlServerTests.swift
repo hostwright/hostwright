@@ -601,6 +601,114 @@ final class PersistentControlServerTests: XCTestCase {
     XCTAssertEqual(invocations.value, 0)
   }
 
+  func testQueuedRevokedSessionCannotInvokeHandler() throws {
+    try verifySessionInvalidationBoundary(duringPreparation: false, preparedExecution: false)
+  }
+
+  func testQueuedExpiredSessionCannotInvokeHandler() throws {
+    try verifySessionInvalidationBoundary(
+      duringPreparation: false, preparedExecution: false, expireSession: true
+    )
+  }
+
+  func testSessionRevokedDuringPreparationCannotInvokeHandler() throws {
+    try verifySessionInvalidationBoundary(duringPreparation: true, preparedExecution: false)
+  }
+
+  func testSessionRevokedDuringPreparationCannotInvokePreparedExecution() throws {
+    try verifySessionInvalidationBoundary(duringPreparation: true, preparedExecution: true)
+  }
+
+  private func verifySessionInvalidationBoundary(
+    duringPreparation: Bool, preparedExecution: Bool, expireSession: Bool = false
+  ) throws {
+    let root = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = SQLiteStateStore(path: root.appendingPathComponent("state.sqlite").path)
+    try store.migrate()
+    let clock = RevocationTestClock()
+    let adapter = try SQLiteControlIdentitySecurityAdapter(
+      store: store, sessionLifetime: 600, now: { clock.current }
+    )
+    let sessions = ObservedActiveSessionStore(base: adapter)
+    let entered = DispatchSemaphore(value: 0)
+    let release = DispatchSemaphore(value: 0)
+    let processed = expectation(description: "queued request finished")
+    let finished = expectation(description: "connection finished")
+    let invocations = InvocationCounter()
+    let coordinator: PersistentControlConnectionServer.UnaryRequestCoordinator = { _, operation in
+      entered.signal()
+      defer { processed.fulfill() }
+      guard release.wait(timeout: .now() + 10) == .success else {
+        throw PersistentControlServerError.invalidRequest
+      }
+      return try operation()
+    }
+    let server = try minimalServer(
+      root: root, unaryRequestCoordinator: coordinator, sessionStore: sessions,
+      requestPreparer: { peer, request in
+        if duringPreparation {
+          try store.controlIdentities.revoke(ControlIdentityRevocationRecord(
+            revocationID: "revoke-before-execution", targetKind: .session,
+            targetIdentifier: peer.binding.sessionID, reason: "execution boundary regression",
+            actorSubjectID: "control-test-subject", revokedAt: ISO8601DateFormatter().string(from: Date())
+          ))
+        }
+        if preparedExecution {
+          return try PersistentControlPreparedRequest(request: request, execution: { request, _ in
+            invocations.increment()
+            return ControlResponseEnvelope(
+              requestID: request.requestID, status: .completed, reasonCode: .completed
+            )
+          })
+        }
+        return try PersistentControlPreparedRequest(request: request)
+      },
+      handler: { _, request, _ in
+        invocations.increment()
+        return ControlResponseEnvelope(
+          requestID: request.requestID, status: .completed, reasonCode: .completed
+        )
+      }
+    )
+    let pair = try socketPair()
+    defer {
+      release.signal()
+      _ = Darwin.close(pair.client)
+      _ = Darwin.close(pair.server)
+    }
+    try ControlFrameCodec.configureNoSigPipe(descriptor: pair.client)
+    DispatchQueue.global().async {
+      defer { finished.fulfill() }
+      _ = try? server.serve(descriptor: pair.server)
+    }
+    try completeAuthentication(descriptor: pair.client)
+    XCTAssertEqual(sessions.validated.wait(timeout: .now() + 10), .success)
+    let request = ControlRequestEnvelope(
+      requestID: "queued-session-invalidation", operation: "service.start",
+      timeoutMilliseconds: 10_000, idempotencyKey: "queued-session-invalidation"
+    )
+    try writeRequest(try ControlPlaneCanonicalJSON.encode(request), descriptor: pair.client)
+    XCTAssertEqual(entered.wait(timeout: .now() + 10), .success)
+    // The reader has validated and returned to waiting for the next frame.
+    XCTAssertEqual(sessions.validated.wait(timeout: .now() + 10), .success)
+    if expireSession {
+      clock.advance(seconds: 601)
+    } else if !duringPreparation {
+      let session = try XCTUnwrap(store.controlIdentities.listSessions().first)
+      try store.controlIdentities.revoke(ControlIdentityRevocationRecord(
+        revocationID: "revoke-queued-session", targetKind: .session,
+        targetIdentifier: session.sessionID, reason: "queued request regression",
+        actorSubjectID: "control-test-subject", revokedAt: ISO8601DateFormatter().string(from: Date())
+      ))
+    }
+    release.signal()
+    wait(for: [processed], timeout: 10)
+    XCTAssertEqual(invocations.value, 0)
+    _ = Darwin.shutdown(pair.client, SHUT_RDWR)
+    wait(for: [finished], timeout: 10)
+  }
+
   func testUnaryRequestCoordinatorDefaultsToProcessingRequest() throws {
     let root = try temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: root) }
@@ -883,6 +991,8 @@ final class PersistentControlServerTests: XCTestCase {
   private func minimalServer(
     root: URL,
     unaryRequestCoordinator: PersistentControlConnectionServer.UnaryRequestCoordinator? = nil,
+    sessionStore: (any ControlSessionBindingStoring)? = nil,
+    requestPreparer: PersistentControlConnectionServer.RequestPreparer? = nil,
     handler: @escaping PersistentControlConnectionServer.Handler = { _, request, _ in
       ControlResponseEnvelope(
         requestID: request.requestID, status: .completed, reasonCode: .completed)
@@ -915,7 +1025,7 @@ final class PersistentControlServerTests: XCTestCase {
       ),
       credentialReader: FixedCredentialReader(credentials: credentials),
       codeValidator: FixedCodeValidator(identity: identity), subjectResolver: adapter,
-      sessionStore: adapter
+      sessionStore: sessionStore ?? adapter
     )
     return try PersistentControlConnectionServer(
       authenticator: authenticator,
@@ -923,6 +1033,7 @@ final class PersistentControlServerTests: XCTestCase {
       daemonGeneration: 1,
       socketIdentity: ControlSocketIdentity(device: 31, inode: 37),
       mutatingOperations: ["service.start"],
+      requestPreparer: requestPreparer,
       unaryRequestCoordinator: unaryRequestCoordinator,
       auditRecorder: TestControlAuditRecorder(),
       authorizer: allowingTestControlRequestAuthorizer,
@@ -1221,5 +1332,31 @@ private final class ServerResult: @unchecked Sendable {
       storedError = newValue
       lock.unlock()
     }
+  }
+}
+
+private final class ObservedActiveSessionStore: ControlSessionBindingStoring, @unchecked Sendable {
+  let validated = DispatchSemaphore(value: 0)
+  private let base: SQLiteControlIdentitySecurityAdapter
+
+  init(base: SQLiteControlIdentitySecurityAdapter) { self.base = base }
+
+  func persist(_ binding: ControlSessionBinding) throws { try base.persist(binding) }
+
+  func isActive(sessionID: String, daemonGeneration: UInt64) throws -> Bool {
+    let active = try base.isActive(sessionID: sessionID, daemonGeneration: daemonGeneration)
+    if active { validated.signal() }
+    return active
+  }
+}
+
+private final class RevocationTestClock: @unchecked Sendable {
+  private let lock = NSLock()
+  private var instant = Date()
+
+  var current: Date { lock.withLock { instant } }
+
+  func advance(seconds: TimeInterval) {
+    lock.withLock { instant = instant.addingTimeInterval(seconds) }
   }
 }

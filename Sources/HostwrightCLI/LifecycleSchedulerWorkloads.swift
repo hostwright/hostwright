@@ -68,7 +68,8 @@ enum LifecycleSchedulerWorkloads {
             let previousWorkload = compiled.plan.command == .update && !createResources.contains(node.resourceUUID)
                 ? priorWorkloads[workloadID] : nil
             let workload = try bind(
-                workload: previousWorkload ?? admission.workload, workloadID: workloadID,
+                workload: try providerWorkload(previousWorkload ?? admission.workload, providerID: preparation.providerID),
+                workloadID: workloadID,
                 subjectID: subjectID, projectID: preparation.projectResourceUUID
             )
             if let existing = result[workloadID] {
@@ -101,7 +102,36 @@ enum LifecycleSchedulerWorkloads {
             ),
             priority: workload.priority,
             subjectID: subjectID, projectID: projectID,
-            topology: workload.topology
+            topology: workload.topology,
+            locality: workload.locality,
+            disruption: workload.disruption,
+            constraints: workload.constraints,
+            overhead: workload.overhead,
+            safetyMargin: workload.safetyMargin,
+            binClass: workload.binClass,
+            preemptionEligibility: workload.preemptionEligibility
+        )
+    }
+
+    static func providerWorkload(
+        _ workload: SchedulerWorkload, providerID: RuntimeProviderID
+    ) throws -> SchedulerWorkload {
+        guard providerID == .appleContainerization else { return workload }
+        guard ContainerizationRuntimeAssetContract.frameworkVersion == "0.35.0" else {
+            throw SchedulerAdmissionError.invalidBinding(field: "lifecycle-provider-capacity-contract")
+        }
+        // Containerization 0.35 adds these VM allocations beyond the service cgroup limits.
+        let overhead = try ResourceVector([
+            "cpu": max(workload.overhead["cpu"], 1),
+            "memory": max(workload.overhead["memory"], 128 * 1_024 * 1_024)
+        ]).adding(try ResourceVector(workload.overhead.values.filter { !["cpu", "memory"].contains($0.key) }))
+        return try SchedulerWorkload(
+            requirements: workload.requirements, priority: workload.priority,
+            subjectID: workload.subjectID, projectID: workload.projectID,
+            topology: workload.topology, locality: workload.locality,
+            disruption: workload.disruption, constraints: workload.constraints,
+            overhead: overhead, safetyMargin: workload.safetyMargin,
+            binClass: workload.binClass, preemptionEligibility: workload.preemptionEligibility
         )
     }
 

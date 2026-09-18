@@ -48,9 +48,23 @@ struct LifecycleOwnershipFinalizer: LifecycleSagaFinalizing {
                 RuntimeProviderBinding.stableID(for: $0.runtimeAdapter) ==
                     context.plan.providerID
         }
-        let inventory = deletingUUIDs.isEmpty
+        let compensatedCreates = context.direction == .rollback
+            ? context.plan.nodes.filter { $0.action == .create &&
+                ($0.compensation?.action == .delete || $0.compensation?.action == .retire) }
+            : []
+        let pendingCreatePorts = try store.networkPorts.loadProject(
+            projectUUID: context.plan.projectResourceUUID
+        ).filter { port in compensatedCreates.contains { $0.resourceUUID == port.resourceUUID } }
+        let inventory = deletingUUIDs.isEmpty && pendingCreatePorts.isEmpty
             ? nil
             : try await adapter.inventory()
+        if let inventory {
+            for node in compensatedCreates where pendingCreatePorts.contains(where: { $0.resourceUUID == node.resourceUUID }) {
+                _ = try NetworkPortLifecycleCoordinator.confirmCompensatedCreateReleased(
+                    node: node, context: context, inventory: inventory, store: store
+                )
+            }
+        }
         let activePorts = try store.networkPorts.loadProject(
             projectUUID: context.plan.projectResourceUUID
         )

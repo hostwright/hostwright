@@ -481,11 +481,22 @@ enum NetworkPortLifecycleCoordinator {
                     group.fencingToken {
                     existingRecords.append(existing)
                 } else {
-                    guard existing.lifecycleState == .active,
+                    let priorGroup = try store.operationGroups.load(id: existing.operationGroupID)
+                    guard [.reserved, .active].contains(existing.lifecycleState),
+                          let priorGroup,
+                          priorGroup.groupKind == "lifecycle-v1",
+                          priorGroup.projectID == plan.projectID,
+                          priorGroup.fencingToken == existing.fencingToken,
+                          priorGroup.lockOwner == nil,
+                          priorGroup.lockExpiresAt == nil,
+                          (priorGroup.status == .succeeded ||
+                            (priorGroup.status == .failed && priorGroup.checkpoint == "compensated")),
+                          inventory.isAuthoritative,
                           targetContainers(
                             node: node,
                             inventory: inventory
-                          ).isEmpty else {
+                          ).isEmpty,
+                          try isAvailable(endpoint) else {
                         throw conflict(
                             "An earlier port reservation cannot be transferred while its exact runtime owner or operation is still present."
                         )
@@ -829,6 +840,73 @@ enum NetworkPortLifecycleCoordinator {
                     replacing: record.expectedVersion
                 )
             )
+        }
+        return NetworkPortReservationBatch(records: released)
+    }
+
+    @discardableResult
+    static func confirmCompensatedCreateReleased(
+        node: LifecyclePlanNode,
+        context: LifecycleSagaContext,
+        inventory: RuntimeInventory,
+        store: SQLiteStateStore
+    ) throws -> NetworkPortReservationBatch {
+        guard context.direction == .rollback,
+              node.action == .create,
+              node.compensation?.action == .delete || node.compensation?.action == .retire,
+              let group = try store.operationGroups.load(id: context.groupID),
+              group.operationID == context.operationID,
+              group.fencingToken == context.fencingToken,
+              let owner = context.leaseOwner,
+              group.lockOwner == owner,
+              let expiry = group.lockExpiresAt,
+              ISO8601DateFormatter().date(from: expiry).map({ $0 > Date() }) == true else {
+            throw conflict("Compensated create port cleanup requires its exact active finite saga lease.")
+        }
+        try requireAuthority(plan: context.plan, node: node, group: group, store: store)
+        let records = try exactResourceRecords(node: node, plan: context.plan, store: store)
+        guard !records.isEmpty else { return NetworkPortReservationBatch(records: []) }
+        let expectedAuthority: RuntimeInventoryAuthority = context.plan.providerID == .appleContainerCLI
+            ? .appleContainerCLIRuntimeList : .appleContainerizationRuntimeList
+        guard inventory.isAuthoritative,
+              inventory.authority == expectedAuthority,
+              targetContainers(node: node, inventory: inventory).isEmpty,
+              records.allSatisfy({
+                  $0.operationGroupID == group.id && $0.fencingToken == group.fencingToken &&
+                      ($0.lifecycleState == .reserved || $0.lifecycleState == .releasing) &&
+                      $0.observedSHA256 == nil
+              }) else {
+            throw conflict("Compensated create port cleanup could not prove exact unactivated reservations and authoritative provider absence.")
+        }
+        func requireCleanupLease() throws {
+            try requireAuthority(plan: context.plan, node: node, group: group, store: store)
+            guard let current = try store.operationGroups.load(id: group.id),
+                  current.lockOwner == owner, current.lockExpiresAt == expiry,
+                  ISO8601DateFormatter().date(from: expiry).map({ $0 > Date() }) == true else {
+                throw conflict("Compensated create port cleanup lost its exact saga lease.")
+            }
+        }
+        var released: [NetworkPortReservationRecord] = []
+        for record in records {
+            try requireCleanupLease()
+            let releasing: NetworkPortReservationRecord
+            if record.lifecycleState == .reserved {
+                releasing = try store.networkPorts.save(replacing(
+                    record, generation: record.generation + 1,
+                    providerGeneration: Int64(context.plan.providerGeneration), fencingToken: group.fencingToken,
+                    observedSHA256: nil, lifecycleState: .releasing, finalizerState: .releasing,
+                    operationGroupID: group.id
+                ), replacing: record.expectedVersion)
+            } else {
+                releasing = record
+            }
+            try requireCleanupLease()
+            released.append(try store.networkPorts.save(replacing(
+                releasing, generation: releasing.generation,
+                providerGeneration: Int64(context.plan.providerGeneration), fencingToken: group.fencingToken,
+                observedSHA256: inventory.semanticSHA256, lifecycleState: .released, finalizerState: .released,
+                operationGroupID: group.id
+            ), replacing: releasing.expectedVersion))
         }
         return NetworkPortReservationBatch(records: released)
     }

@@ -9,6 +9,41 @@ import HostwrightDaemonCore
 import HostwrightObservability
 
 final class BootstrapControlAPITests: XCTestCase {
+    func testDockerEnvelopeCannotSmuggleCommandsThroughBootstrapTransport() throws {
+        for arguments in [["daemon", "stop"], ["state", "backup"], ["capabilities"]] {
+            let route = try CLIControlRoute.docker(
+                operation: "capabilities", endpoint: "version", arguments: arguments
+            )
+            let request = ControlRequestEnvelope(
+                requestID: "bootstrap-docker-smuggling", operation: route.operation,
+                timeoutMilliseconds: 1_000, body: route.requestBody()
+            )
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+                "hostwright-bootstrap-rejection-\(UUID().uuidString)", isDirectory: true
+            )
+            defer { try? FileManager.default.removeItem(at: root) }
+            var environment = try daemonEnvironment(home: root)
+            let isolatedController = environment.daemonLifecycleController
+            environment.daemonLifecycleController = {
+                XCTFail("A Docker envelope must not reach daemon lifecycle execution")
+                return isolatedController()
+            }
+            environment.localPathResolution = { _ in
+                XCTFail("A Docker envelope must not resolve or access local state")
+                throw HostwrightDiagnostic(code: .daemonDenied, message: "unexpected state access")
+            }
+            XCTAssertThrowsError(try CLIControlRoute.validate(
+                request: request, expectedTransport: .bootstrapAPI
+            ))
+            let response = try decode(BootstrapControlAPI.run(
+                requestData: try ControlPlaneCanonicalJSON.encode(request), environment: environment
+            ))
+            XCTAssertEqual(response.status, .rejected)
+            XCTAssertEqual(response.reasonCode, .invalidRequest)
+            XCTAssertEqual(response.error?.code, "HW-API-001")
+        }
+    }
+
     func testEmptyRequestIsRejectedAndMalformedRequestMapsToSafeInternalFailure() throws {
         let empty = try decode(BootstrapControlAPI.run(requestData: Data()))
         XCTAssertEqual(empty.requestID, "bootstrap-invalid")

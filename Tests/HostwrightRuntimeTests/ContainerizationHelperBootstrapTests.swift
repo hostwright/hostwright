@@ -187,12 +187,88 @@ final class ContainerizationHelperBootstrapTests: XCTestCase {
             try ContainerizationHelperBootstrap.prepare(
                 configuration: invalid,
                 homeDirectoryURL: fixture.homeURL,
+                environment: [:],
                 assetLock: fixture.assetLock
             )
         ) { error in
             XCTAssertEqual(error as? ContainerizationHelperClientError, .helperLaunchFailed)
         }
         XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.supportURL.path))
+    }
+
+    func testPrivateSupportUsesResolvedConfigurationDataAndRuntimeWithoutDefaultState() throws {
+        let fixture = try ContainerizationHelperBootstrapFixture(privateSupport: true)
+        try fixture.prepare()
+        let original = try Data(contentsOf: fixture.configurationURL)
+        let document = try JSONDecoder().decode(BootstrapDocument.self, from: original)
+        XCTAssertEqual(document.dataRootPath, fixture.dataRootURL.path)
+        XCTAssertEqual(document.runtimeDirectoryPath, fixture.runtimeDirectoryURL.path)
+        XCTAssertEqual(document.rootfsSizeBytes, 4 * 1_024 * 1_024 * 1_024)
+        XCTAssertEqual(document.kernelPath, fixture.kernelURL.path)
+        for directory in fixture.privateDirectories { XCTAssertEqual(try mode(directory), 0o700) }
+        XCTAssertEqual(try mode(fixture.configurationURL), 0o600)
+        try fixture.prepare()
+        XCTAssertEqual(try Data(contentsOf: fixture.configurationURL), original)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.homeURL.appendingPathComponent("Library").path))
+    }
+
+    func testPrivateSupportRejectsForeignConfigurationAndRuntimeBeforePersistence() throws {
+        let fixture = try ContainerizationHelperBootstrapFixture(privateSupport: true)
+        for configurationMismatch in [true, false] {
+            let invalid = try ContainerizationHelperClientConfiguration(
+                executableURL: fixture.clientConfiguration.executableURL,
+                configurationURL: configurationMismatch ? fixture.homeURL.appendingPathComponent("foreign.json") : fixture.configurationURL,
+                runtimeDirectoryURL: configurationMismatch ? fixture.runtimeDirectoryURL : fixture.homeURL.appendingPathComponent("foreign-run")
+            )
+            XCTAssertThrowsError(try ContainerizationHelperBootstrap.prepare(
+                configuration: invalid, homeDirectoryURL: fixture.homeURL,
+                environment: fixture.environment, assetLock: fixture.assetLock
+            )) { XCTAssertEqual($0 as? ContainerizationHelperClientError, .unsafeConfiguration) }
+            XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.supportURL.path))
+        }
+    }
+
+    func testPrivateSupportRefusesExistingForeignDocumentAndRuntimeSymlink() throws {
+        let fixture = try ContainerizationHelperBootstrapFixture(privateSupport: true)
+        try fixture.prepare()
+        let foreign = Data(#"{"dataRootPath":"/foreign","rootfsSizeBytes":1}"#.utf8)
+        try foreign.write(to: fixture.configurationURL)
+        XCTAssertEqual(chmod(fixture.configurationURL.path, 0o600), 0)
+        XCTAssertThrowsError(try fixture.prepare()) {
+            XCTAssertEqual($0 as? ContainerizationHelperClientError, .unsafeConfiguration)
+        }
+        XCTAssertEqual(try Data(contentsOf: fixture.configurationURL), foreign)
+        XCTAssertEqual(try fixture.temporaryConfigurationFiles(), [])
+
+        let redirected = try ContainerizationHelperBootstrapFixture(privateSupport: true)
+        try makeDirectory(redirected.supportURL, mode: 0o700)
+        try makeDirectory(redirected.supportURL.appendingPathComponent("run"), mode: 0o700)
+        let target = redirected.homeURL.appendingPathComponent("runtime-target")
+        try makeDirectory(target, mode: 0o700)
+        XCTAssertEqual(symlink(target.path, redirected.runtimeDirectoryURL.path), 0)
+        XCTAssertThrowsError(try redirected.prepare()) {
+            XCTAssertEqual($0 as? ContainerizationHelperClientError, .unsafeConfiguration)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: redirected.configurationURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: redirected.supportURL.appendingPathComponent("config").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: redirected.supportURL.appendingPathComponent("data").path))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: target.path), [])
+    }
+
+    func testPrivateSupportRejectsSymlinkAndUnsafeRootBeforeConfiguration() throws {
+        for symlinkRoot in [true, false] {
+            let fixture = try ContainerizationHelperBootstrapFixture(privateSupport: true)
+            let target = fixture.homeURL.appendingPathComponent("target")
+            if symlinkRoot {
+                try makeDirectory(target, mode: 0o700)
+                XCTAssertEqual(symlink(target.path, fixture.supportURL.path), 0)
+            } else { try makeDirectory(fixture.supportURL, mode: 0o770) }
+            XCTAssertThrowsError(try fixture.prepare()) {
+                XCTAssertEqual($0 as? ContainerizationHelperClientError, .unsafeConfiguration)
+            }
+            XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.configurationURL.path))
+            XCTAssertFalse(FileManager.default.fileExists(atPath: target.appendingPathComponent("config").path))
+        }
     }
 
     private func mode(_ url: URL) throws -> mode_t {
@@ -217,6 +293,7 @@ private final class ContainerizationHelperBootstrapFixture: @unchecked Sendable 
     let guestNetworkPolicyLoaderURL: URL
     let layerURL: URL
     let assetLock: ContainerizationHelperBootstrapAssetLock
+    let environment: [String: String]
     let clientConfiguration: ContainerizationHelperClientConfiguration
 
     var privateDirectories: [URL] {
@@ -230,7 +307,7 @@ private final class ContainerizationHelperBootstrapFixture: @unchecked Sendable 
         ]
     }
 
-    init() throws {
+    init(privateSupport: Bool = false) throws {
         rootURL = URL(fileURLWithPath: "/tmp", isDirectory: true)
             .appendingPathComponent(
                 "hwb-\(UUID().uuidString.lowercased().prefix(8))",
@@ -239,7 +316,8 @@ private final class ContainerizationHelperBootstrapFixture: @unchecked Sendable 
         homeURL = rootURL.appendingPathComponent("home", isDirectory: true)
         prefixURL = rootURL.appendingPathComponent("prefix", isDirectory: true)
         supportURL = homeURL
-            .appendingPathComponent("Library/Application Support/Hostwright", isDirectory: true)
+            .appendingPathComponent(privateSupport ? "private-support" : "Library/Application Support/Hostwright", isDirectory: true)
+        environment = privateSupport ? [HostwrightLocalPathResolver.applicationSupportOverride: supportURL.path] : [:]
         configurationURL = supportURL
             .appendingPathComponent("config/containerization-helper.json")
         runtimeDirectoryURL = supportURL
@@ -361,7 +439,8 @@ private final class ContainerizationHelperBootstrapFixture: @unchecked Sendable 
 
         clientConfiguration = try ContainerizationHelperClientConfiguration.installed(
             hostExecutableURL: hostwright,
-            homeDirectoryURL: homeURL
+            homeDirectoryURL: homeURL,
+            environment: environment
         )
         XCTAssertEqual(clientConfiguration.executableURL, helper)
         XCTAssertEqual(clientConfiguration.configurationURL, configurationURL)
@@ -376,6 +455,7 @@ private final class ContainerizationHelperBootstrapFixture: @unchecked Sendable 
         try ContainerizationHelperBootstrap.prepare(
             configuration: clientConfiguration,
             homeDirectoryURL: homeURL,
+            environment: environment,
             assetLock: assetLock
         )
     }

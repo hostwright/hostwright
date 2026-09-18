@@ -4,6 +4,8 @@ set -euo pipefail
 repository_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$repository_root"
 
+python3 scripts/release/validate-third-party-notices.py --root "$repository_root"
+
 swift package dump-package >/dev/null
 swift build --jobs 1 --product hostwright-release-qualify
 swift test --jobs 1 --filter HostwrightReleaseQualificationTests

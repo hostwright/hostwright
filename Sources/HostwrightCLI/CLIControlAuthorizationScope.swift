@@ -126,7 +126,7 @@ public enum CLIControlAuthorizationScopeResolver {
         var serviceNames = explicitServices
         if serviceNames.isEmpty, case .interactive(let options) = command {
             serviceNames = [try InteractiveOperationBuilder.requestedService(options)]
-        } else if serviceNames.isEmpty, case .logs(let serviceName, _, _, _) = command {
+        } else if serviceNames.isEmpty, case .logs(let serviceName, _, _, _, _) = command {
             serviceNames = [serviceName]
         }
         guard let projectStateID,
@@ -195,7 +195,7 @@ public enum CLIControlAuthorizationScopeResolver {
             return path
         case .lifecycle(let options): return options.manifestPath
         case .interactive(let options): return options.manifestPath
-        case .logs(_, let path, _, _): return path
+        case .logs(_, let path, _, _, _): return path
         case .maintenance(let options):
             if case .preview(let path, _, _) = options.action { return path }
             return nil
@@ -291,7 +291,7 @@ public enum CLIControlAuthorizationScopeResolver {
         switch command {
         case .runtimeMigrate(let options): explicit = options.stateDatabasePath
         case .status(_, let path, _, _), .apply(_, let path, _, _, _, _),
-             .logs(_, _, _, let path), .events(let path, _, _, _, _),
+             .logs(_, _, _, let path, _), .events(let path, _, _, _, _),
              .recovery(_, let path, _, _), .cleanup(_, let path, _, _, _),
              .diagnostics(let path, _, _, _): explicit = path
         case .lifecycle(let options): explicit = options.stateDatabasePath

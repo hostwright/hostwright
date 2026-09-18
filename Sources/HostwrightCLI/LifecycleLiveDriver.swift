@@ -3802,8 +3802,10 @@ struct LifecycleLiveEffects:
         }
         let capability =
             try await imageProvider.imageOperationCapabilities()
+        let runtimeCapability = try await adapter.capabilitySnapshot()
         guard capability.providerID == context.plan.providerID,
-              capability.capabilitySHA256 ==
+              runtimeCapability.descriptor.providerID == context.plan.providerID,
+              runtimeCapability.canonicalSHA256 ==
                 context.plan.capabilitySHA256,
               capability.status(for: .inspect).state == .available,
               capability.status(for: .inspect).reason ==

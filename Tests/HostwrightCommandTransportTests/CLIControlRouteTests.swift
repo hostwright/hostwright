@@ -6,6 +6,29 @@ import HostwrightControlPlane
 import HostwrightCore
 
 final class CLIControlRouteTests: XCTestCase {
+    func testBoundedSDKLogsPreservesAuthenticatedControlStreamRouteAndProviderFlag() throws {
+        let arguments = ["logs", "api", "--runtime-provider", "containerization", "--state-db", "/tmp/sdk-state.sqlite"]
+        let route = try CLIControlRoute.classify(arguments: arguments)
+        XCTAssertEqual(route.transport, .persistentControlAPI)
+        XCTAssertEqual(route.execution, .stream(.logs))
+        XCTAssertEqual(route.arguments, arguments)
+        XCTAssertFalse(route.mutating)
+    }
+
+    func testIdentityBootstrapUsesOnlyTheLocalBootstrapTransport() throws {
+        let route = try CLIControlRoute.classify(arguments: [
+            "daemon", "bootstrap-identities", "--json",
+        ])
+        XCTAssertEqual(route.transport, .bootstrapAPI)
+        XCTAssertEqual(route.execution, .unary)
+        XCTAssertTrue(route.mutating)
+        XCTAssertEqual(
+            try CLIControlRoute.validate(request: request(route: route), expectedTransport: .bootstrapAPI),
+            route
+        )
+        XCTAssertThrowsError(try CLIControlRoute.validate(request: request(route: route)))
+    }
+
     func testLocalBootstrapPersistentAndStreamRoutesAreDisjoint() throws {
         XCTAssertEqual(
             try CLIControlRoute.classify(arguments: ["--version"]).transport,
@@ -419,16 +442,17 @@ private extension CLIControlRouteTests {
             .init(command: "registry", arguments: ["registry", "status", "registry.example"], transport: .persistentControlAPI),
             .init(command: "image", arguments: ["image", "inspect", "alpine:3.20"], transport: .persistentControlAPI),
             .init(command: "volume", arguments: ["volume", "list"], transport: .persistentControlAPI),
-            .init(command: "daemon.status", arguments: ["daemon", "status"], transport: .persistentControlAPI),
+            .init(command: "daemon.bootstrap-identities", arguments: ["daemon", "bootstrap-identities"], transport: .bootstrapAPI),
+            .init(command: "daemon.status", arguments: ["daemon", "status"], transport: .bootstrapAPI),
             .init(command: "daemon.install", arguments: ["daemon", "install", "--daemon-executable", "/usr/local/bin/hostwrightd", "--config", "/etc/hostwrightd.json"], transport: .bootstrapAPI),
-            .init(command: "daemon.validate", arguments: ["daemon", "validate"], transport: .persistentControlAPI),
-            .init(command: "daemon.bootstrap", arguments: ["daemon", "bootstrap"], transport: .persistentControlAPI),
-            .init(command: "daemon.start", arguments: ["daemon", "start"], transport: .persistentControlAPI),
-            .init(command: "daemon.stop", arguments: ["daemon", "stop"], transport: .persistentControlAPI),
-            .init(command: "daemon.kickstart", arguments: ["daemon", "kickstart"], transport: .persistentControlAPI),
-            .init(command: "daemon.upgrade", arguments: ["daemon", "upgrade", "--daemon-executable", "/usr/local/bin/hostwrightd", "--config", "/etc/hostwrightd.json"], transport: .persistentControlAPI),
-            .init(command: "daemon.rollback", arguments: ["daemon", "rollback"], transport: .persistentControlAPI),
-            .init(command: "daemon.disable", arguments: ["daemon", "disable"], transport: .persistentControlAPI),
+            .init(command: "daemon.validate", arguments: ["daemon", "validate"], transport: .bootstrapAPI),
+            .init(command: "daemon.bootstrap", arguments: ["daemon", "bootstrap"], transport: .bootstrapAPI),
+            .init(command: "daemon.start", arguments: ["daemon", "start"], transport: .bootstrapAPI),
+            .init(command: "daemon.stop", arguments: ["daemon", "stop"], transport: .bootstrapAPI),
+            .init(command: "daemon.kickstart", arguments: ["daemon", "kickstart"], transport: .bootstrapAPI),
+            .init(command: "daemon.upgrade", arguments: ["daemon", "upgrade", "--daemon-executable", "/usr/local/bin/hostwrightd", "--config", "/etc/hostwrightd.json"], transport: .bootstrapAPI),
+            .init(command: "daemon.rollback", arguments: ["daemon", "rollback"], transport: .bootstrapAPI),
+            .init(command: "daemon.disable", arguments: ["daemon", "disable"], transport: .bootstrapAPI),
             .init(command: "daemon.repair", arguments: ["daemon", "repair"], transport: .bootstrapAPI),
             .init(command: "daemon.uninstall", arguments: ["daemon", "uninstall"], transport: .bootstrapAPI),
             .init(command: "restart-budget", arguments: ["restart-budget", "status"], transport: .persistentControlAPI),

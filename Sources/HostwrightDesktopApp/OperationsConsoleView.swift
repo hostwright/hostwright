@@ -79,7 +79,8 @@ public struct OperationsConsoleView: View {
                 case "logs": LogsView(selectedServiceID: selectedServiceBinding)
                 default: OverviewView(
                     selectedProjectID: selectedProjectBinding,
-                    selectedServiceID: selectedServiceBinding
+                    selectedServiceID: selectedServiceBinding,
+                    openLogs: { storedSelection = "logs" }
                 )
                 }
             }
@@ -131,7 +132,12 @@ public struct OperationsConsoleView: View {
     private var selectedServiceBinding: Binding<String?> {
         Binding(
             get: { storedServiceID.isEmpty ? nil : storedServiceID },
-            set: { storedServiceID = $0 ?? "" }
+            set: {
+                if storedServiceID != ($0 ?? "") {
+                    model.cancelLogStream(clearBuffer: true)
+                }
+                storedServiceID = $0 ?? ""
+            }
         )
     }
 
@@ -180,6 +186,7 @@ private struct OverviewView: View {
     @EnvironmentObject private var model: DesktopOperationsModel
     @Binding var selectedProjectID: String?
     @Binding var selectedServiceID: String?
+    let openLogs: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -239,7 +246,7 @@ private struct OverviewView: View {
             }
 
             if let project = model.projects.first {
-                ServiceTable(project: project, selectedServiceID: $selectedServiceID)
+                ServiceTable(project: project, selectedServiceID: $selectedServiceID, openLogs: openLogs)
             } else {
                 EmptyStateView(
                     title: "No project status yet",
@@ -288,6 +295,12 @@ private struct LifecycleCommandBar: View {
             lifecycleStatus
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            if case .previewing = model.lifecycleState {
+                Button("Cancel", role: .cancel) { model.cancelLifecycle() }
+                    .keyboardShortcut(.cancelAction)
+                    .accessibilityLabel("Cancel lifecycle preview")
+                    .accessibilityIdentifier(DesktopAccessibilityIdentifier.lifecycleCancel)
+            }
         }
         .controlSize(.regular)
     }
@@ -384,7 +397,7 @@ private struct LifecycleReviewView: View {
             }
         }
         .padding(20)
-        .frame(minWidth: 680, idealWidth: 760, minHeight: 430)
+        .frame(minWidth: 480, idealWidth: 760, minHeight: 430)
         .accessibilityIdentifier(DesktopAccessibilityIdentifier.lifecycleReview)
     }
 
@@ -394,7 +407,7 @@ private struct LifecycleReviewView: View {
                 .foregroundStyle(.secondary)
             Text(value)
                 .font(.system(.caption, design: .monospaced))
-                .lineLimit(1)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
@@ -403,6 +416,7 @@ private struct ServiceTable: View {
     @EnvironmentObject private var model: DesktopOperationsModel
     let project: DesktopProjectStatus
     @Binding var selectedServiceID: String?
+    let openLogs: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -429,6 +443,7 @@ private struct ServiceTable: View {
                         Button("Open", systemImage: "text.alignleft") {
                             selectedServiceID = service.id
                             model.openLogStream(for: service.id)
+                            openLogs()
                         }
                         .labelStyle(.iconOnly)
                         .help("Open finite logs for \(service.id)")

@@ -2332,6 +2332,36 @@ enum Phase10SchedulerQualificationGenerator {
         )
     }
 
+    static func priorityOptimizationGapScenario() throws -> Phase10SchedulerQualification.Scenario {
+        let seed = Phase10SchedulerQualification.defaultSeed
+        let capacity = try node(
+            id: identifier(seed: seed, slot: 1_000),
+            capacity: vector(cpu: 2, memory: 2, disk: 2)
+        )
+        let workloads = try (0..<3).map { index in
+            try exactResourceWorkload(
+                id: identifier(seed: seed, slot: 2_000 + index),
+                cpu: index == 0 ? 2 : 1,
+                memory: index == 0 ? 2 : 1,
+                disk: index == 0 ? 2 : 1,
+                priority: index == 0 ? 100 : 0
+            )
+        }
+        return Phase10SchedulerQualification.Scenario(
+            label: "priority-before-placement-count",
+            seed: seed,
+            input: try SchedulerEngineInput(
+                pendingWorkloads: workloads,
+                nodes: [capacity],
+                scoringWeights: SchedulerScoreWeights(
+                    fragmentation: 1, fairness: 0, topology: 0,
+                    locality: 0, hostPressureEnergy: 0, disruption: 0
+                )
+            ),
+            oracleMode: .feasibility
+        )
+    }
+
     static func statefulFairnessTrace(
         seed: UInt64,
         starvationAges: [Int64]

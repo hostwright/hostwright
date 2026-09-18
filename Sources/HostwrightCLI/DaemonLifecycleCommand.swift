@@ -5,12 +5,20 @@ import HostwrightDaemonCore
 struct DaemonLifecycleCommandRunner {
     let options: DaemonCLIOptions
     let controller: DaemonLifecycleController
-    var controlIdentityBootstrap: () throws -> Void = {}
+    var controlIdentityBootstrap: (Bool) throws -> Void = { _ in }
+    var controlIdentityPathValidation: () throws -> Void = {
+        try HostwrightControlIdentityBootstrap.validateManagedPaths()
+    }
 
     func run() throws -> CLIRunResult {
         do {
             let result: DaemonLifecycleResult
             switch options.action {
+            case .bootstrapIdentities:
+                try controlIdentityBootstrap(false)
+                return CLIRunResult(standardOutput: options.output == .json
+                    ? CLIJSON.codable(IdentityBootstrapResult())
+                    : "Control identities are ready for the selected local state.\n")
             case .status:
                 let status = try controller.status()
                 result = DaemonLifecycleResult(
@@ -20,13 +28,15 @@ struct DaemonLifecycleCommandRunner {
                     status: status
                 )
             case .lifecycle(let operation):
-                if operation == .install {
-                    try controlIdentityBootstrap()
-                }
+                let refreshIdentity = [.install, .upgrade, .repair].contains(operation)
+                if refreshIdentity { try controlIdentityPathValidation() }
                 result = try controller.perform(
                     operation,
                     daemonExecutablePath: options.daemonExecutablePath,
-                    configPath: options.configPath
+                    configPath: options.configPath,
+                    verifiedTransition: refreshIdentity ? { _ in
+                        try controlIdentityBootstrap(true)
+                    } : nil
                 )
             }
             if options.output == .json {
@@ -83,8 +93,15 @@ struct DaemonLifecycleCommandRunner {
 
     private var displayOperation: String {
         switch options.action {
+        case .bootstrapIdentities: "bootstrap-identities"
         case .status: "status"
         case .lifecycle(let operation): operation.rawValue
         }
     }
+}
+
+private struct IdentityBootstrapResult: Encodable {
+    let schemaVersion = 1
+    let operation = "daemon.bootstrap-identities"
+    let status = "succeeded"
 }

@@ -27,11 +27,11 @@ swift_test() {
 
   if [[ -n "${HOSTWRIGHT_TEST_RESULTS_DIR:-}" ]]; then
     mkdir -p "$HOSTWRIGHT_TEST_RESULTS_DIR"
-    swift test "$@" --xunit-output "$HOSTWRIGHT_TEST_RESULTS_DIR/$result_name.xml"
+    swift test --jobs 1 "$@" --xunit-output "$HOSTWRIGHT_TEST_RESULTS_DIR/$result_name.xml"
     return
   fi
 
-  swift test "$@"
+  swift test --jobs 1 "$@"
 }
 
 run_cheap_checks() {
@@ -45,7 +45,7 @@ run_cheap_checks() {
 
 run_full() {
   run_cheap_checks
-  swift build
+  swift build --jobs 1
   swift_test full
   scripts/integration.sh
   scripts/check-docs.sh
@@ -53,7 +53,7 @@ run_full() {
 
 run_pr() {
   run_cheap_checks
-  swift build
+  swift build --jobs 1
   scripts/integration.sh
   swift_test pr-fast --skip "$qualification_filter"
   swift_test pr-durable-lifecycle-sentinels --filter "$durable_lifecycle_sentinel_filter"

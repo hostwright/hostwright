@@ -13,56 +13,84 @@ public struct RBACRepository: Sendable {
     _ = try RBACStateValidation.timestamp(timestamp, named: "bootstrap timestamp")
     try store.withValidatedConnection { connection in
       try connection.transaction {
-        try requireActiveSubject(subjectID, on: connection)
-        let defaults = try Self.defaultRoles(timestamp: timestamp)
-        for expected in defaults {
-          if let stored = try loadRole(expected.roleID, on: connection) {
-            guard Self.matchesFrozenDefault(stored, expected) else {
-              throw StateStoreError.transactionInvariantViolation(
-                message: "Built-in role \(expected.roleID) differs from the frozen default policy."
-              )
-            }
-          } else {
-            try insertRole(expected, on: connection)
-          }
-        }
-        let unknownBuiltIns = try connection.query(
-          "SELECT role_id FROM rbac_roles WHERE built_in = 1 ORDER BY role_id"
-        ).compactMap(\.first)
-        guard unknownBuiltIns == DefaultRole.allCases.map(\.rawValue).sorted() else {
-          throw StateStoreError.transactionInvariantViolation(
-            message: "The persistent built-in role set differs from the frozen default policy."
-          )
-        }
-        let owners = try globalOwnerBindings(on: connection)
-        if owners.isEmpty {
-          let activeSubjects = try connection.query(
-            "SELECT subject_id, declared_by_subject_id FROM peer_identities WHERE revoked_at IS NULL ORDER BY subject_id"
-          )
-          guard activeSubjects.count == 1,
-            activeSubjects[0].count == 2,
-            activeSubjects[0][0] == subjectID,
-            activeSubjects[0][1] == subjectID
-          else {
-            throw StateStoreError.transactionInvariantViolation(
-              message: "Owner bootstrap requires exactly one active self-declared identity."
-            )
-          }
-          try insertBinding(
-            RBACBindingRecord(
-              bindingID: "bootstrap-owner", subjectID: subjectID,
-              roleID: DefaultRole.owner.rawValue, scope: RBACScope(kind: .global),
-              createdBySubjectID: subjectID, createdAt: timestamp, updatedAt: timestamp
-            ), on: connection
-          )
-        }
+        try bootstrapDefaultRolesAndOwner(subjectID: subjectID, timestamp: timestamp, on: connection)
       }
+    }
+  }
+
+  func bootstrapDefaultRolesAndOwner(
+    subjectID: String, timestamp: String, on connection: SQLiteConnection
+  ) throws {
+    try RBACStateValidation.identifier(subjectID, named: "bootstrap subject ID")
+    _ = try RBACStateValidation.timestamp(timestamp, named: "bootstrap timestamp")
+    try requireActiveSubject(subjectID, on: connection)
+    let defaults = try Self.defaultRoles(timestamp: timestamp)
+    for expected in defaults {
+      if let stored = try loadRole(expected.roleID, on: connection) {
+        guard Self.matchesFrozenDefault(stored, expected) else {
+          throw StateStoreError.transactionInvariantViolation(
+            message: "Built-in role \(expected.roleID) differs from the frozen default policy."
+          )
+        }
+      } else {
+        try insertRole(expected, on: connection)
+      }
+    }
+    let unknownBuiltIns = try connection.query(
+      "SELECT role_id FROM rbac_roles WHERE built_in = 1 ORDER BY role_id"
+    ).compactMap(\.first)
+    guard unknownBuiltIns == DefaultRole.allCases.map(\.rawValue).sorted() else {
+      throw StateStoreError.transactionInvariantViolation(
+        message: "The persistent built-in role set differs from the frozen default policy."
+      )
+    }
+    let owners = try globalOwnerBindings(on: connection)
+    if owners.isEmpty {
+      let activeSubjects = try connection.query(
+        "SELECT subject_id, declared_by_subject_id FROM peer_identities WHERE revoked_at IS NULL ORDER BY subject_id"
+      )
+      guard activeSubjects.count == 1,
+        activeSubjects[0].count == 2,
+        activeSubjects[0][0] == subjectID,
+        activeSubjects[0][1] == subjectID
+      else {
+        throw StateStoreError.transactionInvariantViolation(
+          message: "Owner bootstrap requires exactly one active self-declared identity."
+        )
+      }
+      try insertBinding(
+        RBACBindingRecord(
+          bindingID: "bootstrap-owner", subjectID: subjectID,
+          roleID: DefaultRole.owner.rawValue, scope: RBACScope(kind: .global),
+          createdBySubjectID: subjectID, createdAt: timestamp, updatedAt: timestamp
+        ), on: connection
+      )
     }
   }
 
   public func role(id: String) throws -> RBACRoleRecord? {
     try RBACStateValidation.identifier(id, named: "role ID")
     return try store.withValidatedConnection(readOnly: true) { try loadRole(id, on: $0) }
+  }
+
+  func ensureBootstrapOperatorBinding(
+    subjectID: String, ownerSubjectID: String, timestamp: String, on connection: SQLiteConnection
+  ) throws {
+    let expected = RBACBindingRecord(
+      bindingID: "desktop-operator-\(subjectID)", subjectID: subjectID,
+      roleID: DefaultRole.operator.rawValue, scope: RBACScope(kind: .global),
+      createdBySubjectID: ownerSubjectID, createdAt: timestamp, updatedAt: timestamp
+    )
+    if let existing = try loadBinding(expected.bindingID, on: connection) {
+      guard existing.subjectID == expected.subjectID, existing.roleID == expected.roleID,
+        existing.scope == expected.scope, existing.createdBySubjectID == expected.createdBySubjectID else {
+        throw StateStoreError.transactionInvariantViolation(
+          message: "The desktop operator binding differs from the trusted bootstrap record."
+        )
+      }
+      return
+    }
+    _ = try createBinding(expected, on: connection)
   }
 
   public func listRoles() throws -> [RBACRoleRecord] {
@@ -227,25 +255,30 @@ public struct RBACRepository: Sendable {
     let normalized = try binding.canonicalized()
     return try store.withValidatedConnection { connection in
       try connection.transaction {
-        try requireActiveSubject(normalized.subjectID, on: connection)
-        try requireActiveSubject(normalized.createdBySubjectID, on: connection)
-        guard try loadRole(normalized.roleID, on: connection) != nil else {
-          throw StateStoreError.notFound("RBAC binding role \(normalized.roleID) does not exist.")
-        }
-        guard try loadBinding(normalized.bindingID, on: connection) == nil else {
-          throw StateStoreError.invalidRecord("RBAC binding ID is already in use.")
-        }
-        let duplicate = try bindingFor(
-          subjectID: normalized.subjectID, roleID: normalized.roleID, scope: normalized.scope,
-          on: connection
-        )
-        guard duplicate == nil else {
-          throw StateStoreError.invalidRecord("An equivalent RBAC binding already exists.")
-        }
-        try insertBinding(normalized, on: connection)
-        return normalized
+        return try createBinding(normalized, on: connection)
       }
     }
+  }
+
+  func createBinding(_ binding: RBACBindingRecord, on connection: SQLiteConnection) throws -> RBACBindingRecord {
+    let normalized = try binding.canonicalized()
+    try requireActiveSubject(normalized.subjectID, on: connection)
+    try requireActiveSubject(normalized.createdBySubjectID, on: connection)
+    guard try loadRole(normalized.roleID, on: connection) != nil else {
+      throw StateStoreError.notFound("RBAC binding role \(normalized.roleID) does not exist.")
+    }
+    guard try loadBinding(normalized.bindingID, on: connection) == nil else {
+      throw StateStoreError.invalidRecord("RBAC binding ID is already in use.")
+    }
+    let duplicate = try bindingFor(
+      subjectID: normalized.subjectID, roleID: normalized.roleID, scope: normalized.scope,
+      on: connection
+    )
+    guard duplicate == nil else {
+      throw StateStoreError.invalidRecord("An equivalent RBAC binding already exists.")
+    }
+    try insertBinding(normalized, on: connection)
+    return normalized
   }
 
   public func deleteBinding(id: String, expectedGeneration: Int) throws {

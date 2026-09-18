@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly baseline_version="0.0.2-dev.11"
-readonly candidate_version="0.0.2-dev.12"
-readonly baseline_tag="v$baseline_version"
-readonly candidate_tag="v$candidate_version"
+baseline_version=""
+candidate_version=""
+baseline_tag=""
+candidate_tag=""
+qualification_mode=""
+baseline_package_version=""
+candidate_package_version=""
 readonly tap_name="hostwright/tap"
 readonly formula_reference="$tap_name/hostwright"
 readonly hostwright_repository="https://github.com/hostwright/hostwright.git"
@@ -14,7 +17,7 @@ readonly package_prefix="/usr/local"
 readonly package_staging_root="/Library/Application Support/Hostwright/InstallerPayload"
 readonly installer_log="/var/log/install.log"
 readonly package_remove_refusal="Package-managed installations support only --data-policy preserve because Hostwright does not infer or search for per-user state databases."
-readonly package_downgrade_refusal="Downgrade refused: installed version $candidate_version is newer than candidate $baseline_version. Use a verified Hostwright rollback record instead."
+package_downgrade_refusal=""
 readonly -a package_owned_paths=(
   "$package_staging_root"
   "$package_prefix/.hostwright-lifecycle"
@@ -42,7 +45,162 @@ require_sha() {
   [[ "$value" =~ ^[a-f0-9]{40}$ ]] || die "$name must be one exact lowercase commit SHA."
 }
 
+# No version override retains the historical dev.11 -> dev.12 cell.
+configure_versions() {
+  if [[ ${HOSTWRIGHT_BASELINE_VERSION+x}${HOSTWRIGHT_CANDIDATE_VERSION+x}${HOSTWRIGHT_BASELINE_TAG+x}${HOSTWRIGHT_CANDIDATE_TAG+x} == "" ]]; then
+    qualification_mode=historical
+    baseline_version="0.0.2-dev.11"
+    candidate_version="0.0.2-dev.12"
+    baseline_tag="v$baseline_version"
+    candidate_tag="v$candidate_version"
+  else
+    qualification_mode=explicit
+    baseline_version="${HOSTWRIGHT_BASELINE_VERSION:-}"
+    candidate_version="${HOSTWRIGHT_CANDIDATE_VERSION:-}"
+    baseline_tag="${HOSTWRIGHT_BASELINE_TAG:-}"
+    candidate_tag="${HOSTWRIGHT_CANDIDATE_TAG:-}"
+    [[ -n "$baseline_version" && -n "$candidate_version" && -n "$baseline_tag" && -n "$candidate_tag" ]] \
+      || die "Explicit qualification requires both versions and both tags; partial overrides are ambiguous."
+  fi
+  [[ "$baseline_tag" == "v$baseline_version" && "$candidate_tag" == "v$candidate_version" ]] \
+    || die "Qualification tags must exactly match their explicit versions."
+  baseline_package_version="$(receipt_version "$baseline_version")"
+  candidate_package_version="$(receipt_version "$candidate_version")"
+  local baseline_number="${baseline_package_version##*.}" candidate_number="${candidate_package_version##*.}"
+  (( candidate_number > baseline_number )) || die "Candidate must be a strictly newer supported dev -> RC -> stable installer version."
+  package_downgrade_refusal="Downgrade refused: installed version $candidate_version is newer than candidate $baseline_version. Use a verified Hostwright rollback record instead."
+}
+
+receipt_version() {
+  local version="$1" number
+  case "$version" in
+    0.0.2) printf '0.0.2.2000\n' ;;
+    0.0.2-dev.*)
+      number="${version#0.0.2-dev.}"
+      [[ "$number" =~ ^(0|[1-9][0-9]{0,2})$ ]] || die "Unsupported qualification version: $version"
+      printf '0.0.2.%s\n' "$number" ;;
+    0.0.2-rc.*)
+      number="${version#0.0.2-rc.}"
+      [[ "$number" =~ ^[1-9][0-9]?$ ]] || die "Unsupported qualification version: $version"
+      printf '0.0.2.%s\n' "$((1000 + number))" ;;
+    *) die "Unsupported qualification version: $version" ;;
+  esac
+}
+
+inventory_check() {
+  [[ -n "${HOSTWRIGHT_ARTIFACT_INVENTORY:-}" && "${HOSTWRIGHT_ARTIFACT_INVENTORY_SHA256:-}" =~ ^[a-f0-9]{64}$ ]] \
+    || die "A complete SHA256-bound artifact receipt inventory is required."
+  command -v python3 >/dev/null || die "Python 3 is required to verify artifact receipts." 69
+  python3 - "$1" "$HOSTWRIGHT_ARTIFACT_INVENTORY" "$HOSTWRIGHT_ARTIFACT_INVENTORY_SHA256" \
+    "$baseline_version" "$candidate_version" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" "$HOSTWRIGHT_CANDIDATE_RELEASE_COMMIT" \
+    "$HOSTWRIGHT_BASELINE_TAP_COMMIT" "$HOSTWRIGHT_CANDIDATE_TAP_COMMIT" "${@:2}" <<'PYTHON'
+import hashlib,json,os,re,stat,sys
+from pathlib import Path
+mode,receipt_path,receipt_sha,bv,cv,bc,cc,bt,ct,*extra=sys.argv[1:]
+def require(value,message):
+    if not value: raise ValueError(message)
+def pairs(items):
+    result={}
+    for key,value in items:
+        require(key not in result,'Duplicate receipt JSON key');result[key]=value
+    return result
+def decode(raw):
+    return json.loads(raw,object_pairs_hook=pairs,parse_constant=lambda _: (_ for _ in ()).throw(ValueError('Nonfinite receipt JSON')))
+def file_hash(path,private=False):
+    path=Path(path)
+    require(path.is_absolute() and path.resolve()==path and not any(ord(x)<32 or ord(x)==127 for x in str(path)),'Noncanonical receipt/artifact path')
+    fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW)
+    try:
+        before=os.fstat(fd)
+        require(stat.S_ISREG(before.st_mode) and before.st_nlink==1,'Artifact is not one regular file')
+        if private:
+            require(before.st_uid==os.getuid() and stat.S_IMODE(before.st_mode)==0o600 and before.st_size<=8388608,'Receipt inventory must be private bounded 0600')
+        h=hashlib.sha256(); chunks=[]
+        while True:
+            chunk=os.read(fd,1048576)
+            if not chunk:break
+            h.update(chunk)
+            if private: chunks.append(chunk)
+        identity=lambda x:(x.st_dev,x.st_ino,x.st_size,x.st_mtime_ns,x.st_ctime_ns)
+        require(identity(before)==identity(os.fstat(fd))==identity(path.lstat()),'Artifact changed while hashing')
+        return (h.hexdigest(),b''.join(chunks)) if private else h.hexdigest()
+    finally:os.close(fd)
+def version(value):
+    if value=='0.0.2':return '0.0.2.2000'
+    match=re.fullmatch(r'0\.0\.2-(dev|rc)\.(0|[1-9][0-9]*)',value)
+    require(match is not None,'Unsupported receipt version')
+    channel,number=match.group(1),int(match.group(2))
+    require((channel=='dev' and 0<=number<1000) or (channel=='rc' and 1<=number<=99),'Unsupported receipt channel range')
+    return '0.0.2.'+str(number+(1000 if channel=='rc' else 0))
+def hex_sha(value):return isinstance(value,str) and re.fullmatch('[a-f0-9]{64}',value)
+def payload(value):
+    require(isinstance(value,list) and value,'Missing full payload receipt inventory')
+    result={}
+    for item in value:
+        path=item['path'];digest=item['sha256']
+        require(isinstance(path,str) and path and path!='.' and not Path(path).is_absolute() and path==str(Path(path)) and '..' not in Path(path).parts and not any(ord(x)<32 for x in path),'Unsafe payload path')
+        require(path not in result and hex_sha(digest),'Duplicate/invalid payload receipt')
+        result[path]=digest
+    return result
+try:
+    receipt_path=Path(receipt_path)
+    for parent in receipt_path.parents:
+        info=parent.lstat()
+        require(stat.S_ISDIR(info.st_mode) and info.st_uid in (0,os.getuid()) and not info.st_mode&0o022,'Unsafe receipt ancestry')
+    actual_sha,raw=file_hash(receipt_path,True)
+    require(actual_sha==receipt_sha,'Artifact receipt inventory SHA256 mismatch')
+    receipt=decode(raw)
+    require(receipt.get('schemaVersion')==1 and receipt.get('kind')=='hostwright.vendor-tap-inputs.v1','Missing supported artifact receipt inventory')
+    for role,v,c,t in [('baseline',bv,bc,bt),('candidate',cv,cc,ct)]:
+        item=receipt[role]
+        require((item['version'],item['tag'],item['sourceCommit'],item['tapCommit'],item['packageReceiptVersion'])==(v,'v'+v,c,t,version(v)),'Artifact receipt version/tag/source/tap mismatch')
+        for kind,suffix in [('archive','zip'),('package','pkg')]:
+            require(item[kind]['fileName']==f'hostwright-{v}-macos-arm64-{c[:12]}.{suffix}' and hex_sha(item[kind]['sha256']),'Missing exact archive/package artifact binding')
+        require(hex_sha(item['releaseManifestSHA256']) and hex_sha(item['formulaSHA256']),'Missing exact manifest/formula binding')
+        files=payload(item['payloadFiles'])
+        names=['hostwright','hostwright-control','hostwright-dist','hostwrightd']
+        if v not in ('0.0.2-dev.11','0.0.2-dev.12'):
+            names+=['hostwright-containerization-helper','hostwright-network-helper','hostwright-network-provider-worker','hostwright-storage-helper']
+        require({'bin/'+name for name in names}<=files.keys(),'Missing required executable payload inventory')
+    if mode in ('formula','archive','package','installed','recovery'):
+        tested_version=extra[0]
+        require(tested_version in (bv,cv),'Unexpected tested artifact version')
+        item=receipt['baseline' if tested_version==bv else 'candidate']
+        if mode=='formula':require(file_hash(Path(extra[1]).resolve())==item['formulaSHA256'],'Formula exact-byte binding mismatch')
+        if mode=='archive':require(file_hash(Path(extra[1]).resolve())==item['archive']['sha256'],'Homebrew archive exact-byte binding mismatch')
+        if mode=='package':
+            manifest_path=Path(extra[1]).resolve()
+            require(file_hash(manifest_path)==item['releaseManifestSHA256'],'Release manifest exact-byte binding mismatch')
+            manifest=decode(manifest_path.read_bytes())
+            require((manifest['releaseTag'],manifest['packageVersion'],manifest['sourceCommit'])==(item['tag'],tested_version,item['sourceCommit']) and manifest['sourceDirty'] is False,'Release manifest source/version mismatch')
+            require(manifest['archive']==item['archive'] and manifest['package']==item['package'] and payload(manifest['payloadFiles'])==payload(item['payloadFiles']),'Release manifest omits or changes full artifact receipt inventory')
+            require(file_hash(Path(extra[2]).resolve())==item['package']['sha256'],'Installer package exact-byte binding mismatch')
+        if mode=='recovery':require(file_hash(Path(extra[1]).resolve())==payload(item['payloadFiles'])['bin/hostwright-dist'],'Recovery executable exact-byte binding mismatch')
+        if mode=='installed':
+            prefix=Path(extra[1]).resolve()
+            for relative,expected in payload(item['payloadFiles']).items():
+                path=prefix/relative
+                require(path.resolve()==path and prefix in path.parents,'Installed payload escapes exact prefix')
+                require(file_hash(path)==expected,'Installed payload exact-byte binding mismatch: '+relative)
+    elif mode=='summary':
+        print(json.dumps({'schemaVersion':1,'kind':'hostwright.vendor-tap-tested-bindings.v1','inventorySHA256':receipt_sha,'baseline':receipt['baseline'],'candidate':receipt['candidate']},sort_keys=True))
+    else:require(mode=='contract','Unsupported artifact receipt operation')
+except (ValueError,KeyError,TypeError,OSError,json.JSONDecodeError) as error:
+    print('Artifact receipt rejected: '+str(error),file=sys.stderr);sys.exit(64)
+PYTHON
+}
+
 validate_contract() {
+  local name
+  for name in HOSTWRIGHT_APPLICATION_SUPPORT_DIR HOSTWRIGHT_CACHE_DIR HOSTWRIGHT_LOG_DIR HOSTWRIGHT_STATE_DB HOSTWRIGHT_BASELINE_PACKAGE_VERSION HOSTWRIGHT_CANDIDATE_PACKAGE_VERSION; do
+    [[ -z "${!name+x}" ]] || die "Ambiguous qualification environment override: $name"
+  done
+  while IFS= read -r name; do
+    case "$name" in
+      HOSTWRIGHT_BASELINE_RELEASE_COMMIT|HOSTWRIGHT_CANDIDATE_RELEASE_COMMIT|HOSTWRIGHT_BASELINE_TAP_COMMIT|HOSTWRIGHT_CANDIDATE_TAP_COMMIT|HOSTWRIGHT_BASELINE_VERSION|HOSTWRIGHT_CANDIDATE_VERSION|HOSTWRIGHT_BASELINE_TAG|HOSTWRIGHT_CANDIDATE_TAG|HOSTWRIGHT_ARTIFACT_INVENTORY|HOSTWRIGHT_ARTIFACT_INVENTORY_SHA256|HOSTWRIGHT_QUALIFICATION_ROOT) ;;
+      HOSTWRIGHT_*) die "Ambiguous qualification environment override: $name" ;;
+    esac
+  done < <(compgen -e)
   require_sha HOSTWRIGHT_BASELINE_RELEASE_COMMIT
   require_sha HOSTWRIGHT_CANDIDATE_RELEASE_COMMIT
   require_sha HOSTWRIGHT_BASELINE_TAP_COMMIT
@@ -51,6 +209,9 @@ validate_contract() {
     || die "The two release commits must be distinct."
   [[ "$HOSTWRIGHT_BASELINE_TAP_COMMIT" != "$HOSTWRIGHT_CANDIDATE_TAP_COMMIT" ]] \
     || die "The two tap commits must be distinct."
+  if [[ "$qualification_mode" == explicit || ${HOSTWRIGHT_ARTIFACT_INVENTORY+x}${HOSTWRIGHT_ARTIFACT_INVENTORY_SHA256+x} != "" ]]; then
+    inventory_check contract
+  fi
 }
 
 validate_host() {
@@ -60,6 +221,8 @@ validate_host() {
   macos_major="$(sw_vers -productVersion | cut -d. -f1)"
   [[ "$macos_major" =~ ^[0-9]+$ && "$macos_major" -ge 26 ]] \
     || die "Vendor-tap qualification requires macOS 26 or newer." 69
+  command -v python3 >/dev/null || die "Python 3 is required for full qualification artifact bindings." 69
+  inventory_check contract
   command -v brew >/dev/null || die "Homebrew is required." 69
   command -v gh >/dev/null || die "GitHub CLI is required for attestation verification." 69
   [[ "${RELEASE_TEAM_ID:-}" =~ ^[A-Z0-9]{10}$ ]] \
@@ -139,6 +302,11 @@ write_state() {
     printf 'candidateReleaseCommit=%s\n' "$HOSTWRIGHT_CANDIDATE_RELEASE_COMMIT"
     printf 'baselineTapCommit=%s\n' "$HOSTWRIGHT_BASELINE_TAP_COMMIT"
     printf 'candidateTapCommit=%s\n' "$HOSTWRIGHT_CANDIDATE_TAP_COMMIT"
+    printf 'baselineVersion=%s\n' "$baseline_version"
+    printf 'candidateVersion=%s\n' "$candidate_version"
+    printf 'baselineTag=%s\n' "$baseline_tag"
+    printf 'candidateTag=%s\n' "$candidate_tag"
+    printf 'artifactInventorySHA256=%s\n' "$HOSTWRIGHT_ARTIFACT_INVENTORY_SHA256"
     printf 'configPath=%s\n' "$config_path"
     printf 'configDigest=%s\n' "$config_digest"
   } > "$next"
@@ -157,12 +325,26 @@ state_value() {
 
 load_and_verify_state() {
   [[ -f "$state_file" && ! -L "$state_file" ]] || die "No resumable qualification state exists." 66
-  [[ "$(wc -l < "$state_file" | tr -d ' ')" == 8 ]] || die "Qualification state is malformed." 70
+  [[ "$(wc -l < "$state_file" | tr -d ' ')" == 13 ]] || die "Qualification state is malformed or lacks bound version/artifact inventory." 70
+  [[ "$(state_value baselineVersion)" == "$baseline_version" \
+      && "$(state_value candidateVersion)" == "$candidate_version" \
+      && "$(state_value baselineTag)" == "$baseline_tag" \
+      && "$(state_value candidateTag)" == "$candidate_tag" \
+      && "$(state_value artifactInventorySHA256)" == "$HOSTWRIGHT_ARTIFACT_INVENTORY_SHA256" ]] \
+    || die "Qualification version/tag/artifact inventory differs from durable state." 70
   [[ "$(state_value baselineReleaseCommit)" == "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" \
       && "$(state_value candidateReleaseCommit)" == "$HOSTWRIGHT_CANDIDATE_RELEASE_COMMIT" \
       && "$(state_value baselineTapCommit)" == "$HOSTWRIGHT_BASELINE_TAP_COMMIT" \
       && "$(state_value candidateTapCommit)" == "$HOSTWRIGHT_CANDIDATE_TAP_COMMIT" ]] \
     || die "Qualification inputs do not match the durable state." 70
+}
+
+verify_release_pair() {
+  verify_release_ref "$baseline_tag" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT"
+  verify_release_ref "$candidate_tag" "$HOSTWRIGHT_CANDIDATE_RELEASE_COMMIT"
+  local comparison
+  comparison="$(gh api "repos/hostwright/hostwright/compare/${HOSTWRIGHT_BASELINE_RELEASE_COMMIT}...${HOSTWRIGHT_CANDIDATE_RELEASE_COMMIT}" --jq .status)"
+  [[ "$comparison" == ahead ]] || die "Baseline source must be an exact ancestor of candidate source." 70
 }
 
 verify_release_ref() {
@@ -231,6 +413,7 @@ checkout_formula() {
   if grep -Eq '^[[:space:]]*bottle do' "$formula"; then
     die "Qualification formulas must not add a bottle around the signed upstream archive." 70
   fi
+  inventory_check formula "$version" "$formula"
   gh attestation verify "$formula" --repo hostwright/hostwright >/dev/null
 }
 
@@ -258,6 +441,9 @@ verify_installed() {
     || die "Doctor returned an unknown readiness state." 70
   cache="$(brew --cache "$formula_reference")"
   [[ -f "$cache" && ! -L "$cache" ]] || die "The exact Homebrew archive cache is unavailable." 70
+  inventory_check archive "$version" "$cache"
+  inventory_check installed "$version" "$prefix"
+  record "$label-installed version=$version archiveSHA256=$(/usr/bin/shasum -a 256 "$cache" | awk '{ print $1 }')"
   gh attestation verify "$cache" --repo hostwright/hostwright >/dev/null
 }
 
@@ -397,6 +583,9 @@ download_qualified_package() {
   expected_sha="$(plutil -extract package.sha256 raw "$manifest")"
   actual_sha="$(/usr/bin/shasum -a 256 "$downloaded_package" | awk '{ print $1 }')"
   [[ "$expected_sha" == "$actual_sha" ]] || die "$tag package digest differs from its manifest." 70
+  inventory_check package "$version" "$manifest" "$downloaded_package"
+  gh attestation verify "$manifest" --repo hostwright/hostwright >/dev/null
+  record "package-download version=$version source=$commit manifestSHA256=$(/usr/bin/shasum -a 256 "$manifest" | awk '{ print $1 }') packageSHA256=$actual_sha"
   gh attestation verify "$downloaded_package" --repo hostwright/hostwright >/dev/null
   signature="$(/usr/sbin/pkgutil --check-signature "$downloaded_package" 2>&1)" \
     || die "$tag package signature verification failed." 70
@@ -443,6 +632,7 @@ verify_package_state() {
     [[ "$("$package_prefix/bin/$executable" --version)" == "$version" ]] \
       || die "$label installed an unexpected $executable version." 70
   done
+  inventory_check installed "$version" "$package_prefix"
   record "$label-passed generation=$generation version=$version"
 }
 
@@ -515,7 +705,12 @@ installer_log_since() {
 qualify_package_lifecycle() {
   local work baseline_package candidate_package baseline_team candidate_team
   local distribution before after downgrade_output downgrade_log downgrade_log_checkpoint
-  local downgrade_status=0
+  local downgrade_status=0 install_label=install-baseline repair_label=repair-baseline upgrade_label=upgrade-candidate
+  local rollback_label=rollback-baseline repaired_label=repair-after-rollback-baseline upgraded_label=upgrade-again-candidate
+  if [[ "$qualification_mode" == historical ]]; then
+    install_label=install-dev11; repair_label=repair-dev11; upgrade_label=upgrade-dev12
+    rollback_label=rollback-dev11; repaired_label=repair-after-rollback-dev11; upgraded_label=upgrade-again-dev12
+  fi
   require_package_absent "before package qualification"
   umask 077
   work="$(mktemp -d "$HOSTWRIGHT_QUALIFICATION_ROOT/package-lifecycle.XXXXXX")"
@@ -534,30 +729,30 @@ qualify_package_lifecycle() {
     || die "The two qualification packages use different Developer Team IDs." 70
 
   sudo -n /usr/sbin/installer -pkg "$baseline_package" -target /
-  verify_package_state install-dev11 "$baseline_version" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" 1 0.0.2.11 0.0.2.11 0.0.2.11
+  verify_package_state "$install_label" "$baseline_version" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" 1 "$baseline_package_version" "$baseline_package_version" "$baseline_package_version"
   sudo -n /usr/sbin/installer -pkg "$baseline_package" -target /
-  verify_package_state repair-dev11 "$baseline_version" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" 2 0.0.2.11 0.0.2.11 0.0.2.11
+  verify_package_state "$repair_label" "$baseline_version" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" 2 "$baseline_package_version" "$baseline_package_version" "$baseline_package_version"
   sudo -n /usr/sbin/installer -pkg "$candidate_package" -target /
-  verify_package_state upgrade-dev12 "$candidate_version" "$HOSTWRIGHT_CANDIDATE_RELEASE_COMMIT" 3 0.0.2.12 0.0.2.12 0.0.2.12
+  verify_package_state "$upgrade_label" "$candidate_version" "$HOSTWRIGHT_CANDIDATE_RELEASE_COMMIT" 3 "$candidate_package_version" "$candidate_package_version" "$candidate_package_version"
 
   distribution="$package_prefix/bin/hostwright-dist"
   sudo -n "$distribution" rollback --prefix "$package_prefix" --output json \
-    > "$HOSTWRIGHT_QUALIFICATION_ROOT/rollback-dev11-package-result.json"
-  verify_package_state rollback-dev11 "$baseline_version" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" 4 0.0.2.11 0.0.2.12 0.0.2.12
+    > "$HOSTWRIGHT_QUALIFICATION_ROOT/rollback-baseline-package-result.json"
+  verify_package_state "$rollback_label" "$baseline_version" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" 4 "$baseline_package_version" "$candidate_package_version" "$candidate_package_version"
   sudo -n /usr/sbin/installer -pkg "$baseline_package" -target /
-  verify_package_state repair-after-rollback-dev11 "$baseline_version" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" 5 0.0.2.11 0.0.2.11 0.0.2.11
+  verify_package_state "$repaired_label" "$baseline_version" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" 5 "$baseline_package_version" "$baseline_package_version" "$baseline_package_version"
   sudo -n /usr/sbin/installer -pkg "$candidate_package" -target /
-  verify_package_state upgrade-again-dev12 "$candidate_version" "$HOSTWRIGHT_CANDIDATE_RELEASE_COMMIT" 6 0.0.2.12 0.0.2.12 0.0.2.12
+  verify_package_state "$upgraded_label" "$candidate_version" "$HOSTWRIGHT_CANDIDATE_RELEASE_COMMIT" 6 "$candidate_package_version" "$candidate_package_version" "$candidate_package_version"
 
   before="$(package_snapshot_digest "$work")"
   downgrade_log_checkpoint="$(installer_log_checkpoint)"
   downgrade_output="$(sudo -n /usr/sbin/installer -pkg "$baseline_package" -target / 2>&1)" \
     || downgrade_status=$?
-  [[ "$downgrade_status" -eq 1 ]] || die "The dev.11 package downgrade was not refused." 70
+  [[ "$downgrade_status" -eq 1 ]] || die "The baseline package downgrade was not refused." 70
   downgrade_log="$(installer_log_since "$downgrade_log_checkpoint")"
   [[ "$downgrade_output$downgrade_log" == *"$package_downgrade_refusal"* \
       && "$downgrade_log" == *"${baseline_package##*/}"* ]] \
-    || die "The dev.11 package failure did not prove Hostwright's semantic downgrade refusal." 70
+    || die "The baseline package failure did not prove Hostwright's semantic downgrade refusal." 70
   after="$(package_snapshot_digest "$work")"
   [[ "$before" == "$after" ]] || die "The rejected package downgrade changed installed state." 70
   record "package-downgrade-refusal-passed"
@@ -583,8 +778,9 @@ qualify_package_lifecycle() {
 
   /usr/bin/find "$work" -depth -delete
   [[ ! -e "$work" ]] || die "Package qualification downloads were not cleaned up." 70
-  printf '{"schemaVersion":1,"kind":"phase02PackageLifecycle","status":"passed","baselineCommit":"%s","candidateCommit":"%s","teamIdentifier":"%s","transitions":6,"failures":0,"cleanup":"succeeded"}\n' \
-    "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" "$HOSTWRIGHT_CANDIDATE_RELEASE_COMMIT" "$candidate_team" \
+  inventory_check summary > "$HOSTWRIGHT_QUALIFICATION_ROOT/tested-artifact-bindings.json"
+  printf '{"schemaVersion":1,"kind":"phase02PackageLifecycle","status":"passed","baselineVersion":"%s","candidateVersion":"%s","baselineCommit":"%s","candidateCommit":"%s","teamIdentifier":"%s","transitions":6,"failures":0,"cleanup":"succeeded"}\n' \
+    "$baseline_version" "$candidate_version" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT" "$HOSTWRIGHT_CANDIDATE_RELEASE_COMMIT" "$candidate_team" \
     > "$HOSTWRIGHT_QUALIFICATION_ROOT/package-lifecycle-summary.json"
   record "signed-package-lifecycle-and-exact-cleanup-passed"
 }
@@ -626,6 +822,7 @@ cleanup_qualified_package() {
   actual_digest="$(/usr/bin/shasum -a 256 "$distribution" | awk '{ print $1 }')"
   [[ "$expected_digest" =~ ^[a-f0-9]{64}$ && "$actual_digest" == "$expected_digest" ]] \
     || die "Package cleanup executable does not match its exact manifest digest." 70
+  inventory_check recovery "$expected_version" "$distribution"
   /usr/bin/codesign --verify --strict --verbose=2 "$distribution"
   signature="$(/usr/bin/codesign -d --verbose=4 "$distribution" 2>&1)"
   team_id="$(printf '%s\n' "$signature" | awk -F= '$1 == "TeamIdentifier" { print $2 }')"
@@ -635,7 +832,7 @@ cleanup_qualified_package() {
   sudo -n "$distribution" status --prefix "$package_prefix" --output json > "$status_file"
   package_version="$(plutil -extract status.packageVersion raw "$status_file")"
   [[ "$(plutil -extract status.packageIdentifier raw "$status_file")" == "$package_identifier" \
-      && "$package_version" =~ ^0\.0\.2\.1[12]$ \
+      && ( "$package_version" == "$baseline_package_version" || "$package_version" == "$candidate_package_version" ) \
       && "$(plutil -extract status.installedManifest.sourceCommit raw "$status_file")" == "$expected_commit" \
       && "$(plutil -extract status.installedManifest.packageVersion raw "$status_file")" == "$expected_version" ]] \
     || die "Package cleanup status is not owned by this qualification pair." 70
@@ -657,8 +854,7 @@ prepare() {
   config_path="$config_dir/hostwright.yaml"
   log_path="$brew_prefix/var/log/hostwrightd.log"
   error_log_path="$brew_prefix/var/log/hostwrightd.error.log"
-  verify_release_ref "$baseline_tag" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT"
-  verify_release_ref "$candidate_tag" "$HOSTWRIGHT_CANDIDATE_RELEASE_COMMIT"
+  verify_release_pair
   boot="$(boot_epoch)"
   write_state preparing "$boot"
   record "prepare-intent"
@@ -687,6 +883,7 @@ prepare() {
 
 resume() {
   load_and_verify_state
+  verify_release_pair
   [[ "$(state_value phase)" == reboot-required ]] || die "Qualification is not waiting for reboot." 70
   local prior_boot current_boot tap_repository config_path config_digest brew_prefix log_path error_log_path
   prior_boot="$(state_value bootEpoch)"
@@ -716,7 +913,7 @@ resume() {
   verify_installed "$candidate_version" candidate
   brew services restart "$formula_reference"
   wait_for_service
-  record "dev10-to-dev11-brew-upgrade-and-service-restart-passed"
+  record "brew-upgrade-and-service-restart-passed baseline=$baseline_version candidate=$candidate_version"
 
   brew services stop "$formula_reference"
   brew uninstall "$formula_reference"
@@ -783,6 +980,8 @@ cleanup_failed_run() {
 }
 
 command="${1:-}"
+[[ "$#" == 1 ]] || die "One qualification stage is required."
+configure_versions
 validate_contract
 if [[ "$command" == validate-contract ]]; then
   printf 'Phase 02 vendor-tap qualification contract is valid.\n'
@@ -809,6 +1008,7 @@ record_stage_failure() {
   exit "$status"
 }
 trap record_stage_failure EXIT
+record "versions mode=$qualification_mode baseline=$baseline_version baselineTag=$baseline_tag baselineReceipt=$baseline_package_version candidate=$candidate_version candidateTag=$candidate_tag candidateReceipt=$candidate_package_version inventorySHA256=$HOSTWRIGHT_ARTIFACT_INVENTORY_SHA256 inventoryPath=$HOSTWRIGHT_ARTIFACT_INVENTORY"
 record "inputs baselineReleaseCommit=$HOSTWRIGHT_BASELINE_RELEASE_COMMIT candidateReleaseCommit=$HOSTWRIGHT_CANDIDATE_RELEASE_COMMIT baselineTapCommit=$HOSTWRIGHT_BASELINE_TAP_COMMIT candidateTapCommit=$HOSTWRIGHT_CANDIDATE_TAP_COMMIT"
 record "host productVersion=$(sw_vers -productVersion) buildVersion=$(sw_vers -buildVersion) architecture=$(uname -m) model=$(sysctl -n hw.model)"
 record "stage-$command-started"

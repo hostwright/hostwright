@@ -11,6 +11,25 @@ final class ContainerizationHelperProtocolTests: XCTestCase {
     private let digest = String(repeating: "a", count: 64)
     private let requestID = UUID(uuidString: "01234567-89ab-cdef-8123-456789abcdef")!
 
+    func testMutationPriorOwnershipProofRoundTripsAndRemainsPayloadBounded() throws {
+        let ownership = RuntimeInventoryOwnershipEvidence(resourceUUID: "11111111-1111-4111-8111-111111111111",
+            projectUUID: "22222222-2222-4222-8222-222222222222", resourceGeneration: 2, projectGeneration: 1,
+            providerID: .appleContainerization, providerGeneration: 1, fencingToken: "33333333-3333-4333-8333-333333333333")
+        let payload = ContainerizationHelperMutationPayload(resourceIdentifier: "owned", resourceUUID: ownership.resourceUUID,
+            expectedOwnership: ownership)
+        let encoded = try ContainerizationHelperCanonicalJSON.encode(payload)
+        XCTAssertEqual(try ContainerizationHelperCanonicalJSON.decode(ContainerizationHelperMutationPayload.self, from: encoded), payload)
+        let legacy = Data(#"{"resourceIdentifier":"owned","resourceUUID":"11111111-1111-4111-8111-111111111111"}"#.utf8)
+        XCTAssertNil(try ContainerizationHelperCanonicalJSON.decode(ContainerizationHelperMutationPayload.self, from: legacy).expectedOwnership)
+        let oversized = RuntimeInventoryOwnershipEvidence(resourceUUID: ownership.resourceUUID, projectUUID: ownership.projectUUID,
+            resourceGeneration: 2, projectGeneration: 1, providerID: .appleContainerization, providerGeneration: 1,
+            fencingToken: String(repeating: "a", count: ContainerizationHelperProtocolV1.maximumPayloadBytes))
+        XCTAssertThrowsError(try ContainerizationHelperCanonicalJSON.encode(ContainerizationHelperMutationPayload(
+            resourceIdentifier: "owned", resourceUUID: ownership.resourceUUID, expectedOwnership: oversized))) {
+            XCTAssertEqual($0 as? ContainerizationHelperProtocolError, .payloadTooLarge)
+        }
+    }
+
     func testOperationContractIsExact() {
         XCTAssertEqual(
             ContainerizationHelperOperation.allCases.map(\.rawValue),

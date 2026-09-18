@@ -683,7 +683,7 @@ final class ControlPlaneContractTests: XCTestCase {
       commands,
       [
         "version", "help", "capabilities", "observability", "runtime", "paths", "state", "secret",
-        "registry", "image", "volume", "daemon.status", "daemon.install", "daemon.validate",
+        "registry", "image", "volume", "daemon.bootstrap-identities", "daemon.status", "daemon.install", "daemon.validate",
         "daemon.bootstrap", "daemon.start", "daemon.stop", "daemon.kickstart", "daemon.upgrade",
         "daemon.rollback", "daemon.disable", "daemon.repair", "daemon.uninstall", "restart-budget",
         "maintenance", "ownership", "metrics", "traces", "migrate", "init", "import-stack",
@@ -696,8 +696,12 @@ final class ControlPlaneContractTests: XCTestCase {
       ["version", "help"])
     XCTAssertEqual(
       inventory.filter { $0["transport"] == "bootstrap-api" }.map { $0["command"]! },
-      ["daemon.install", "daemon.repair", "daemon.uninstall"])
-    XCTAssertTrue(inventory.filter { $0["transport"] == "persistent-control-api" }.count > 40)
+      [
+        "daemon.bootstrap-identities", "daemon.status", "daemon.install", "daemon.validate",
+        "daemon.bootstrap", "daemon.start", "daemon.stop", "daemon.kickstart", "daemon.upgrade",
+        "daemon.rollback", "daemon.disable", "daemon.repair", "daemon.uninstall",
+      ])
+    XCTAssertEqual(inventory.filter { $0["transport"] == "persistent-control-api" }.count, inventory.count - 15)
   }
 
   private func data(_ file: String) throws -> Data {

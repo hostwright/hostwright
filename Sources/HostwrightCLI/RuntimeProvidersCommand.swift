@@ -62,7 +62,7 @@ public enum RuntimeProviderDiscovery {
         do {
             let configuration = try ContainerizationHelperClientConfiguration.installed()
             let client = ContainerizationHelperClient(configuration: configuration)
-            helper = .available(try await client.negotiate())
+            helper = .available(try await probeHelper(using: client))
         } catch is CancellationError {
             helper = .unavailable(.appleContainerization, reason: .cancelled)
         } catch let error as ContainerizationHelperClientError {
@@ -75,6 +75,17 @@ public enum RuntimeProviderDiscovery {
         }
 
         return [cli, helper]
+    }
+
+    static func probeHelper(using client: ContainerizationHelperClient) async throws -> RuntimeCapabilitySnapshot {
+        do {
+            let snapshot = try await client.negotiate()
+            try await client.releaseProbeOwnedLease()
+            return snapshot
+        } catch {
+            try await client.releaseProbeOwnedLease()
+            throw error
+        }
     }
 
     private static func failureReason(

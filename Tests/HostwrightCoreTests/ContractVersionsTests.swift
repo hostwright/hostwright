@@ -6,9 +6,13 @@ final class ContractVersionsTests: XCTestCase {
     func testReleaseAndBreakingContractVersionsHaveOneAuthority() {
         XCTAssertNotNil(
             HostwrightIdentity.version.range(
-                of: #"^0\.0\.2-dev\.14$"#,
+                of: #"\A0\.0\.2(?:-(?:dev\.[1-9][0-9]{0,2}|rc\.[1-9][0-9]?))?\z"#,
                 options: .regularExpression
             )
+        )
+        XCTAssertEqual(
+            HostwrightIdentity.version.split(separator: "-", maxSplits: 1).first.map { "v\($0)" },
+            HostwrightIdentity.releaseTarget
         )
         XCTAssertEqual(HostwrightIdentity.releaseTarget, "v0.0.2")
         XCTAssertEqual(HostwrightContractVersions.manifest, 3)

@@ -141,6 +141,7 @@ public struct TrustedReleaseBuilder: Sendable {
         guard !cancellation.isCancelled else {
             throw DistributionError.commandCancelled("trusted release preflight")
         }
+        try DistributionThirdPartyNotices.requireQualifiedRuntimeSource(root: request.sourceRoot)
         var commands: [HostwrightEvidenceCommand] = []
         let applicationResolution = try identityResolver.resolve(
             fingerprint: request.applicationIdentityFingerprint,

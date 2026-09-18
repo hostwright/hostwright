@@ -218,7 +218,8 @@ final class ReleaseQualificationCLITests: XCTestCase {
     }
 
     func testDocumentationLaneProducesExactNonPromotableOrPassingEvidence() throws {
-        let root = ReleaseQualificationTestSupport.repositoryRoot()
+        let root = try makeDocumentationSnapshotRepository()
+        defer { try? FileManager.default.removeItem(at: root) }
         let invocation = try ReleaseQualificationCLIInvocation(
             arguments: [
                 "verify", "--lane", "documentation-source-contracts",
@@ -226,39 +227,50 @@ final class ReleaseQualificationCLITests: XCTestCase {
             ]
         )
 
-        let output = try ReleaseQualificationCLIExecutor().execute(
-            invocation,
-            currentDirectory: root
-        )
-        let evidence = try ReleaseQualificationJSON.decode(
-            ReleaseQualificationEvidence.self,
-            from: output
-        )
+        for dirty in [false, true] {
+            if dirty {
+                try Data("bounded untracked source drift\n".utf8).write(
+                    to: root.appendingPathComponent("qualification-source-drift.txt"),
+                    options: .withoutOverwriting
+                )
+            }
+            let output = try ReleaseQualificationCLIExecutor().execute(
+                invocation,
+                currentDirectory: root
+            )
+            let evidence = try ReleaseQualificationJSON.decode(
+                ReleaseQualificationEvidence.self,
+                from: output
+            )
 
-        XCTAssertEqual(evidence.claim.id, "lane.documentation-source-contracts")
-        XCTAssertEqual(evidence.claim.matrixCellID, nil)
-        XCTAssertEqual(evidence.evidenceClass, .localIntegration)
-        let commands = evidence.commands.filter {
-            $0.identity.purpose.hasPrefix("validate ")
-        }
-        XCTAssertEqual(commands.count, 2)
-        guard commands.count == 2 else { return }
-        XCTAssertEqual(commands.map(\.exitStatus), [0, 0])
-        XCTAssertEqual(commands[0].identity.arguments.suffix(2), ["README.md", "docs"])
-        XCTAssertTrue(commands[0].identity.arguments.contains {
-            $0 == root.appendingPathComponent("scripts/check-doc-links.py").path
-        })
-        XCTAssertTrue(commands[1].identity.arguments.contains {
-            $0 == root.appendingPathComponent("scripts/check-current-truth.py").path
-        })
-        XCTAssertTrue(evidence.failures.isEmpty)
-        if evidence.source.dirty == true {
-            XCTAssertEqual(evidence.status, .dirty)
-            XCTAssertTrue(evidence.blockers.contains { $0.reason == .dirtySource })
-            XCTAssertFalse(evidence.satisfiesRequiredGate)
-        } else {
-            XCTAssertEqual(evidence.status, .passed)
-            XCTAssertTrue(evidence.satisfiesRequiredGate)
+            XCTAssertNotNil(evidence.source.commit)
+            XCTAssertEqual(evidence.source.availability.status, .available)
+            XCTAssertEqual(evidence.source.dirty, dirty)
+            XCTAssertEqual(evidence.claim.id, "lane.documentation-source-contracts")
+            XCTAssertEqual(evidence.claim.matrixCellID, nil)
+            XCTAssertEqual(evidence.evidenceClass, .localIntegration)
+            let commands = evidence.commands.filter {
+                $0.identity.purpose.hasPrefix("validate ")
+            }
+            XCTAssertEqual(commands.count, 2)
+            guard commands.count == 2 else { return }
+            XCTAssertEqual(commands.map(\.exitStatus), [0, 0])
+            XCTAssertEqual(commands[0].identity.arguments.suffix(2), ["README.md", "docs"])
+            XCTAssertTrue(commands[0].identity.arguments.contains {
+                $0 == root.appendingPathComponent("scripts/check-doc-links.py").path
+            })
+            XCTAssertTrue(commands[1].identity.arguments.contains {
+                $0 == root.appendingPathComponent("scripts/check-current-truth.py").path
+            })
+            XCTAssertTrue(evidence.failures.isEmpty)
+            if dirty {
+                XCTAssertEqual(evidence.status, .dirty)
+                XCTAssertTrue(evidence.blockers.contains { $0.reason == .dirtySource })
+                XCTAssertFalse(evidence.satisfiesRequiredGate)
+            } else {
+                XCTAssertEqual(evidence.status, .passed)
+                XCTAssertTrue(evidence.satisfiesRequiredGate)
+            }
         }
     }
 

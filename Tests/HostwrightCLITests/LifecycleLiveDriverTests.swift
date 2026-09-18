@@ -11,6 +11,99 @@ import XCTest
 @testable import HostwrightCLI
 
 final class LifecycleLiveDriverTests: XCTestCase {
+    func testCompensatedCreateImmediatelyReleasesReservedPortAfterVerifiedAbsence() throws {
+        try withFixture { fixture in
+            fixture.manifestSource.replace(fixture.manifestSource.value + "    ports: [\"18180:8080\"]\n")
+            try fixture.wait {
+                await fixture.adapter.useAuthoritativeInventory()
+                await fixture.adapter.setPreserveExistingOwnershipFenceOnMutation(true)
+                await fixture.adapter.setCreationFailure(true)
+            }
+            var environment = try fixture.localSchedulerEnvironment()
+            func run(key: Int) throws -> CLIRunResult {
+                environment.lifecycleOperationIdempotencyKeySHA256 = String(format: "%064x", key)
+                let preview = fixture.options(command: .up, dryRun: true)
+                let result = LifecycleCommandRunner(options: preview,
+                    driver: LifecycleLiveDriver(environment: environment, options: preview)).run()
+                XCTAssertEqual(result.exitCode, 0, result.standardError)
+                let plan = try JSONDecoder().decode(LifecyclePlan.self, from: Data(result.standardOutput.utf8))
+                let confirmed = fixture.options(command: .up, dryRun: false, confirmation: plan.planSHA256)
+                return LifecycleCommandRunner(options: confirmed,
+                    driver: LifecycleLiveDriver(environment: environment, options: confirmed)).run()
+            }
+            let failed = try run(key: 1)
+            XCTAssertNotEqual(failed.exitCode, 0)
+            XCTAssertTrue(failed.standardError.contains("compensated"), failed.standardError)
+            let projectUUID = try fixture.store.desiredStates.loadProject(id: fixture.projectID).resourceUUID
+            XCTAssertTrue(try fixture.store.networkPorts.loadProject(projectUUID: projectUUID).isEmpty)
+            let prior = try XCTUnwrap(fixture.store.networkPorts.loadProject(
+                projectUUID: projectUUID, includeReleased: true).first)
+            XCTAssertEqual(prior.lifecycleState, .released)
+            XCTAssertEqual(prior.finalizerState, .released)
+            XCTAssertTrue(try fixture.wait { try await fixture.adapter.inventory() }.containers.isEmpty)
+            XCTAssertTrue(try fixture.store.schedulerAdmissions.activeReservations().isEmpty)
+            try fixture.wait { await fixture.adapter.setCreationFailure(false) }
+            let retried = try run(key: 2)
+            XCTAssertEqual(retried.exitCode, 0, retried.standardError)
+            let renewed = try XCTUnwrap(fixture.store.networkPorts.loadProject(projectUUID: prior.projectUUID).first)
+            XCTAssertEqual(renewed.hostPort, prior.hostPort)
+            XCTAssertEqual(renewed.lifecycleState, .active)
+            XCTAssertEqual(renewed.generation, 1)
+            XCTAssertNotEqual(renewed.id, prior.id)
+            XCTAssertNotEqual(renewed.operationGroupID, prior.operationGroupID)
+        }
+    }
+
+    func testOwnedImageLeaseUsesItsOwnCapabilityContract() throws {
+        try withFixture { fixture in
+            try fixture.wait {
+                await fixture.adapter.useAuthoritativeInventory()
+                await fixture.adapter.setPreserveExistingOwnershipFenceOnMutation(true)
+            }
+            let digest = "sha256:" + String(repeating: "a", count: 64)
+            let reference = "registry.example/api@\(digest)"
+            let timestamp = hostwrightTimestamp()
+            let groupID = UUID().uuidString.lowercased()
+            let group = OperationGroupRecord(
+                id: groupID, operationID: groupID, groupKind: ImageOwnershipLedger.groupKind,
+                projectID: nil, serviceName: nil, plannedActionType: "pull", status: .active,
+                groupIdempotencyKey: groupID, planHash: String(repeating: "a", count: 64),
+                checkpoint: "intent-persisted", lockOwner: "test", lockExpiresAt: nil,
+                rollbackAvailable: true, manualRecoveryHintRedacted: "", createdAt: timestamp,
+                updatedAt: timestamp, metadataJSONRedacted: "{}"
+            )
+            XCTAssertNotNil(try fixture.store.operationGroups.acquire(group).acquired)
+            try fixture.store.operationGroups.finish(
+                groupID: groupID, status: .succeeded, checkpoint: "verified",
+                manualRecoveryHintRedacted: "", updatedAt: timestamp,
+                metadataJSONRedacted: ImageOwnershipMetadataV1(changes: [
+                    try ImageOwnershipChangeV1(action: .add, reference: reference,
+                        digest: digest, providerID: RuntimeProviderID.appleContainerCLI.rawValue)
+                ]).canonicalJSONString()
+            )
+            let environment = try fixture.localSchedulerEnvironment()
+            let preview = fixture.options(command: .up, dryRun: true)
+            let driver = LifecycleLiveDriver(environment: environment, options: preview)
+            let previewResult = LifecycleCommandRunner(options: preview, driver: driver).run()
+            XCTAssertEqual(previewResult.exitCode, 0, previewResult.standardError)
+            let plan = try JSONDecoder().decode(LifecyclePlan.self, from: Data(previewResult.standardOutput.utf8))
+            let imageCapability = try fixture.wait { try await fixture.adapter.imageOperationCapabilities() }
+            XCTAssertNotEqual(imageCapability.capabilitySHA256, plan.capabilitySHA256)
+            let confirmed = fixture.options(command: .up, dryRun: false, confirmation: plan.planSHA256)
+            let result = LifecycleCommandRunner(options: confirmed,
+                driver: LifecycleLiveDriver(environment: environment, options: confirmed)).run()
+            XCTAssertEqual(result.exitCode, 0, result.standardError)
+            XCTAssertEqual(try fixture.adapterSnapshot().mutations, [.create, .start])
+            let cache = try fixture.store.contentCache.snapshot(
+                providerScope: RuntimeProviderID.appleContainerCLI.rawValue,
+                currentTimestamp: hostwrightTimestamp()
+            )
+            XCTAssertEqual(cache.contents.map(\.digest), [digest])
+            XCTAssertTrue(cache.activeLeases.isEmpty)
+            XCTAssertEqual(try fixture.store.schedulerAdmissions.activeReservations().first?.status, .committed)
+        }
+    }
+
     func testFailedRecreateUpdateRestoresOriginalAdmissionAndConstraints() throws {
         try withFixture { fixture in
             try fixture.wait {
@@ -3402,7 +3495,7 @@ struct LifecycleLiveTestResource: Sendable {
 }
 
 actor LifecycleLiveTestAdapter:
-    RuntimeAdapter,
+    RuntimeImageLifecycleProviding,
     RuntimeNetworkProvider
 {
     private var providerSnapshot: RuntimeCapabilitySnapshot
@@ -3418,6 +3511,7 @@ actor LifecycleLiveTestAdapter:
     private var networkCreateAttempts: [LifecycleLiveNetworkCreateAttempt] = []
     private var observationDesiredStates: [DesiredRuntimeState] = []
     private var deletionFailure = false
+    private var creationFailure = false
     private var cancellationMutationIndex: Int?
     private var mutationDelayNanoseconds: UInt64 = 0
     private var inventoryObserver: (@Sendable () throws -> Void)?
@@ -3613,6 +3707,41 @@ actor LifecycleLiveTestAdapter:
         return imageEvidence
     }
 
+    func imageOperationCapabilities() async throws -> RuntimeImageOperationCapabilityContract {
+        try RuntimeImageOperationCapabilityContract(
+            providerID: .appleContainerCLI, capabilitySHA256: String(repeating: "e", count: 64),
+            operations: RuntimeImageLifecycleOperation.allCases.map {
+                RuntimeImageOperationCapability(operation: $0,
+                    state: $0 == .inspect ? .available : .unavailable,
+                    reason: $0 == .inspect ? .implemented : .providerUnsupported)
+            }
+        )
+    }
+
+    func performImageOperation(
+        _ request: RuntimeImageLifecycleRequest,
+        confirmation: RuntimeMutationConfirmation?,
+        progress: @escaping @Sendable (RuntimeImageProgressEvent) async -> Void
+    ) async throws -> RuntimeImageOperationResult {
+        let capability = try await imageOperationCapabilities()
+        try capability.requireAvailable(request.operation)
+        guard request.capabilitySHA256 == capability.capabilitySHA256,
+              request.sourceReferences == [imageEvidence.reference], confirmation == nil else {
+            throw RuntimeImageLifecycleContractError.invalidResult
+        }
+        return try RuntimeImageOperationResult(
+            operation: .inspect, operationID: request.operationID, idempotencyKey: request.idempotencyKey,
+            planSHA256: request.planSHA256(), providerID: .appleContainerCLI, providerVersion: "1.1.0",
+            disposition: .succeeded, images: [RuntimeImageRecord(
+                digest: imageEvidence.descriptorDigest, references: [imageEvidence.reference],
+                mediaType: "application/vnd.oci.image.index.v1+json", sizeBytes: 1024,
+                variants: [RuntimeImageVariantRecord(digest: imageEvidence.variantDigest,
+                    operatingSystem: imageEvidence.operatingSystem, architecture: imageEvidence.architecture,
+                    sizeBytes: 1024)]
+            )]
+        )
+    }
+
     func networkCapabilities()
         async throws -> RuntimeNetworkProviderCapabilities
     {
@@ -3702,6 +3831,10 @@ actor LifecycleLiveTestAdapter:
         }
         if mutationDelayNanoseconds > 0 {
             try await Task.sleep(nanoseconds: mutationDelayNanoseconds)
+        }
+        if action.kind == .create, creationFailure {
+            throw RuntimeAdapterError.commandFailed(exitStatus: 75,
+                message: "injected creation failure before effect", standardError: "")
         }
         if action.kind == .start, shouldFailNextStart {
             shouldFailNextStart = false
@@ -3876,6 +4009,7 @@ actor LifecycleLiveTestAdapter:
     }
 
     func setDeletionFailure(_ enabled: Bool) { deletionFailure = enabled }
+    func setCreationFailure(_ enabled: Bool) { creationFailure = enabled }
 
     func setCompletionStartFailure(_ enabled: Bool) {
         completionStartFails = enabled

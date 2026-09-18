@@ -1914,7 +1914,7 @@ public struct SchedulerDecisionWorkloadBinding:
         if let lifecycleWorkload {
             guard runtimeOwnership?.lifecycleWorkloadID == workloadID,
                   lifecycleWorkload.workloadID == workloadID,
-                  lifecycleWorkload.request == resources,
+                  try lifecycleWorkload.capacityCharge() == resources,
                   lifecycleWorkload.subjectID == ownerSubjectID,
                   lifecycleWorkload.projectID == projectUUID.lowercased() else {
                 throw SchedulerAdmissionError.invalidBinding(field: "decision-binding-lifecycle-workload")

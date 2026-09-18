@@ -57,7 +57,7 @@ public struct CLIEnvironment: @unchecked Sendable {
     public var benchmarkUUID: () -> UUID
     public var benchmarkNotice: (String) -> Void
     public var daemonLifecycleController: () -> DaemonLifecycleController
-    public var controlIdentityBootstrap: () throws -> Void
+    public var controlIdentityBootstrap: (Bool) throws -> Void
     public var observabilitySink: any HostwrightLogSinking
     public var observabilityCorrelationID: () -> String
     public var observabilityStatus: () -> HostwrightObservabilityStatus
@@ -152,7 +152,7 @@ public struct CLIEnvironment: @unchecked Sendable {
         daemonLifecycleController: @escaping () -> DaemonLifecycleController = {
             DaemonLifecycleController()
         },
-        controlIdentityBootstrap: @escaping () throws -> Void = {},
+        controlIdentityBootstrap: @escaping (Bool) throws -> Void = { _ in },
         observabilitySink: any HostwrightLogSinking = DisabledHostwrightLogSink(),
         observabilityCorrelationID: @escaping () -> String = { UUID().uuidString.lowercased() },
         observabilityStatus: @escaping () -> HostwrightObservabilityStatus = {
@@ -288,6 +288,8 @@ public struct CLIEnvironment: @unchecked Sendable {
         return (receipt.outputSHA256, receipt.outputBytes)
     }
 
+    private static let liveContainerizationClient = CLIContainerizationHelperClientLifetime()
+
     public static let live = CLIEnvironment(
         fileExists: { FileManager.default.fileExists(atPath: $0) },
         readTextFile: { try String(contentsOfFile: $0, encoding: .utf8) },
@@ -311,9 +313,8 @@ public struct CLIEnvironment: @unchecked Sendable {
                 return AppleContainerCLIAdapter()
             }
             if providerID == .appleContainerization {
-                let configuration = try ContainerizationHelperClientConfiguration.installed()
                 return AppleContainerizationRuntimeAdapter(
-                    client: ContainerizationHelperClient(configuration: configuration)
+                    client: try CLIEnvironment.liveContainerizationClient.client()
                 )
             }
             throw RuntimeProviderSelectionError.providerUnavailable(providerID)
@@ -323,11 +324,7 @@ public struct CLIEnvironment: @unchecked Sendable {
                 return AppleContainerNetworkAdapter()
             }
             if providerID == .appleContainerization {
-                return ContainerizationHelperClient(
-                    configuration:
-                        try ContainerizationHelperClientConfiguration
-                            .installed()
-                )
+                return try CLIEnvironment.liveContainerizationClient.client()
             }
             throw RuntimeProviderSelectionError
                 .providerUnavailable(providerID)
@@ -381,8 +378,8 @@ public struct CLIEnvironment: @unchecked Sendable {
         benchmarkNotice: { message in
             FileHandle.standardError.write(Data((message + "\n").utf8))
         },
-        controlIdentityBootstrap: {
-            try HostwrightControlIdentityBootstrap.bootstrapAPIProcesses()
+        controlIdentityBootstrap: { managedService in
+            try HostwrightControlIdentityBootstrap.bootstrapAPIProcesses(managedService: managedService)
         },
         observabilitySink: HostwrightOSLogSink(),
         observabilityStatus: { HostwrightObservabilityStatus(configuration: .live) },
@@ -575,4 +572,25 @@ func hostwrightCreateNewTextFile(path: String, text: String) throws {
         throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
     }
     completed = true
+}
+
+final class CLIContainerizationHelperClientLifetime: @unchecked Sendable {
+    private let lock = NSLock()
+    private let makeClient: @Sendable () throws -> ContainerizationHelperClient
+    private var retainedClient: ContainerizationHelperClient?
+
+    init(makeClient: @escaping @Sendable () throws -> ContainerizationHelperClient = {
+        ContainerizationHelperClient(configuration: try .installed())
+    }) {
+        self.makeClient = makeClient
+    }
+
+    func client() throws -> ContainerizationHelperClient {
+        lock.lock()
+        defer { lock.unlock() }
+        if let retainedClient { return retainedClient }
+        let client = try makeClient()
+        retainedClient = client
+        return client
+    }
 }

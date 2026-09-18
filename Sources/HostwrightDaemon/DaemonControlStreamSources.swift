@@ -337,12 +337,13 @@ final class DaemonControlStreamSourceFactory: @unchecked Sendable {
         timeoutMilliseconds: stream.timeoutSeconds * 1_000,
         output: output
       )
-    case .logs(let serviceName, let path, let tail, let stateDatabasePath):
+    case .logs(let serviceName, let path, let tail, let stateDatabasePath, let runtimeProvider):
       let options = InteractiveCLIOptions(
         command: .logsFollow,
         manifestPath: path,
         serviceName: serviceName,
         stateDatabasePath: stateDatabasePath,
+        runtimeProvider: runtimeProvider,
         forwardsStandardInput: false,
         tail: tail
       )

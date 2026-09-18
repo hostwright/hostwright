@@ -123,6 +123,10 @@ public struct DistributionAssembler: Sendable {
             }
         }
 
+        let noticePayload = try DistributionThirdPartyNotices.sourcePayload(
+            root: request.licenseFile.deletingLastPathComponent(), runtimeAssets: request.containerizationAssets
+        )
+
         var commands = request.priorCommands
         try validateBinary(
             request.hostwrightBinary,
@@ -292,7 +296,12 @@ public struct DistributionAssembler: Sendable {
                 mode: DistributionLayout.payloadModes[path]!
             )
         }
-        let desktopBundleVersion = try DistributionPackageVersion.make(
+        for path in noticePayload.keys.sorted() {
+            try DistributionFileSystem.writeNewFile(
+                noticePayload[path]!, to: artifactRoot.appendingPathComponent(path), mode: 0o644
+            )
+        }
+        let desktopBundleVersion = try DistributionDesktopBundleVersion.make(
             from: request.packageVersion
         )
         let desktopShortVersion = request.packageVersion
@@ -312,7 +321,7 @@ public struct DistributionAssembler: Sendable {
           <key>CFBundlePackageType</key><string>APPL</string>
           <key>CFBundleShortVersionString</key><string>\(desktopShortVersion)</string>
           <key>CFBundleVersion</key><string>\(desktopBundleVersion)</string>
-          <key>LSMinimumSystemVersion</key><string>14.0</string>
+          <key>LSMinimumSystemVersion</key><string>26.0</string>
           <key>NSHighResolutionCapable</key><true/>
         </dict>
         </plist>
@@ -354,6 +363,7 @@ public struct DistributionAssembler: Sendable {
                 mode: try DistributionFileSystem.mode(of: url)
             )
         }
+        try DistributionThirdPartyNotices.validatePayload(root: artifactRoot, files: files)
         let manifest = DistributionArtifactManifest(
             artifactID: artifactID,
             packageVersion: request.packageVersion,
@@ -1152,7 +1162,7 @@ public struct DistributionCleanBuilder: Sendable {
                   try dependencyVersion(pin) == dependency.version else {
                 throw DistributionError.invalidArtifact("SwiftPM dependency differs from Package.resolved")
             }
-            return [identity, dependency.url, dependency.version, pin.state.revision]
+            return [identity, dependency.url, pin.state.version ?? "", pin.state.revision]
                 .joined(separator: "|")
         }
         return serializedDependencies.sorted()

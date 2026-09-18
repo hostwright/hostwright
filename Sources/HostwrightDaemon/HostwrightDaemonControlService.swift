@@ -207,6 +207,9 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
     let schedulerRuntimeMutation: SchedulerControlOperations.RuntimeMutation = {
       reservation,
       preemptionIntent in
+      try Self.validateGenericSchedulerRuntimeOwnership(
+        reservation.runtimeOwnership, actualProviderID: schedulerRuntimeMetadata.providerID
+      )
       let result = try Self.waitForSchedulerRuntime {
         try await schedulerLifecycleReconciler
           .executeAuthorizedSchedulerReservation(
@@ -601,7 +604,24 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
     }
   }
 
-  private static func makeSchedulerAuthorityProvider(
+  static func validateGenericSchedulerProvider(_ actualProviderID: RuntimeProviderID) throws {
+    // Generic admission has no authoritative SDK manifest demand or VM capacity proof.
+    guard actualProviderID != .appleContainerization else {
+      throw SchedulerControlOperationError.authorityUnavailable
+    }
+  }
+
+  static func validateGenericSchedulerRuntimeOwnership(
+    _ ownership: SchedulerRuntimeOwnershipBinding?, actualProviderID: RuntimeProviderID
+  ) throws {
+    try validateGenericSchedulerProvider(actualProviderID)
+    guard let ownership, ownership.providerID == actualProviderID,
+          ownership.providerID != .appleContainerization else {
+      throw SchedulerControlOperationError.authorityUnavailable
+    }
+  }
+
+  static func makeSchedulerAuthorityProvider(
     store: SQLiteStateStore,
     repository: SchedulerAdmissionRepository,
     configPath: String,
@@ -610,6 +630,7 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
     runtimeVersion: String
   ) -> SchedulerControlOperations.AuthorityProvider {
     { projectIdentifier, decision, input in
+      try Self.validateGenericSchedulerProvider(runtimeMetadata.providerID)
       let project: SchedulerProjectAuthoritySnapshot
       if HostwrightResourceUUID.isValid(projectIdentifier) {
         guard let resolved = try repository.projectAuthority(
@@ -712,6 +733,11 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
           throw SchedulerControlOperationError.authorityUnavailable
         }
         bindings = artifact.workloadBindings
+        for binding in bindings {
+          try Self.validateGenericSchedulerRuntimeOwnership(
+            binding.runtimeOwnership, actualProviderID: runtimeMetadata.providerID
+          )
+        }
       }
 
       if input == nil {

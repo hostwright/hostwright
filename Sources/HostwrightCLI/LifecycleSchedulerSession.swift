@@ -68,6 +68,9 @@ final class LifecycleSchedulerSession: @unchecked Sendable {
         let snapshot = try context.refresh()
         let repository = store.schedulerAdmissions
         try validate(snapshot: snapshot, context: context, store: store, admissionRequired: !entries.isEmpty)
+        if !entries.isEmpty {
+            try validateActiveProviderCharges(repository: repository, nodeID: snapshot.capacity.nodeID)
+        }
         var retained: [SchedulerReservationRecord] = []
         var pending: [LifecycleSchedulerWorkload] = []
         for entry in entries {
@@ -76,7 +79,7 @@ final class LifecycleSchedulerSession: @unchecked Sendable {
             ) {
                 guard [.pending, .committed].contains(existing.status),
                       existing.runtimeOwnership == entry.ownership,
-                      existing.resources == entry.workload.request,
+                      existing.resources == (try entry.workload.capacityCharge()),
                       existing.nodeID == snapshot.capacity.nodeID else {
                     throw SchedulerAdmissionError.invalidBinding(field: "lifecycle-active-reservation")
                 }
@@ -129,7 +132,7 @@ final class LifecycleSchedulerSession: @unchecked Sendable {
         let bindings = try entries.map { entry in
             try SchedulerDecisionWorkloadBinding(
                 workloadID: entry.workload.workloadID, nodeID: snapshot.capacity.nodeID,
-                resources: entry.workload.request, capacityDigest: snapshot.capacity.capacityDigest,
+                resources: (try entry.workload.capacityCharge()), capacityDigest: snapshot.capacity.capacityDigest,
                 capacityGeneration: snapshot.capacity.generation, ownerSubjectID: context.subjectID,
                 projectUUID: project.resourceUUID, runtimeOwnership: entry.ownership, lifecycleWorkload: entry.workload
             )
@@ -287,7 +290,9 @@ final class LifecycleSchedulerSession: @unchecked Sendable {
         if let persistedWorkload {
             guard artifact?.lifecyclePlanDigest == origin.planSHA256,
                   artifact?.binding(for: previous.workloadID)?.runtimeOwnership == ownership,
-                  persistedWorkload.request == previous.resources else {
+                  try persistedWorkload.capacityCharge() == previous.resources,
+                  try LifecycleSchedulerWorkloads.providerWorkload(persistedWorkload, providerID: plan.providerID)
+                    == persistedWorkload else {
                 throw SchedulerAdmissionError.staleInput(field: "recovery-local-workload")
             }
             if origin.manifestSHA256 != plan.manifestSHA256 {
@@ -296,7 +301,8 @@ final class LifecycleSchedulerSession: @unchecked Sendable {
                         ($0.replicaIndex == 0 ? nil : "replica-\($0.replicaIndex)") == ownership.instanceName }
                 let sameConstraints = try currentAdmission.map {
                     try LifecycleSchedulerWorkloads.bind(
-                        workload: $0.workload, workloadID: previous.workloadID,
+                        workload: try LifecycleSchedulerWorkloads.providerWorkload($0.workload, providerID: plan.providerID),
+                        workloadID: previous.workloadID,
                         subjectID: persistedWorkload.subjectID, projectID: plan.projectResourceUUID
                     ) == persistedWorkload
                 } ?? false
@@ -317,10 +323,11 @@ final class LifecycleSchedulerSession: @unchecked Sendable {
             guard let admission = admissions.first(where: {
                 $0.serviceName == ownership.serviceName &&
                     ($0.replicaIndex == 0 ? nil : "replica-\($0.replicaIndex)") == ownership.instanceName
-            }), admission.workload.request == previous.resources else {
+            }), try LifecycleSchedulerWorkloads.providerWorkload(admission.workload, providerID: plan.providerID)
+                .capacityCharge() == previous.resources else {
                 throw SchedulerAdmissionError.staleInput(field: "recovery-local-workload")
             }
-            sourceWorkload = admission.workload
+            sourceWorkload = try LifecycleSchedulerWorkloads.providerWorkload(admission.workload, providerID: plan.providerID)
         }
         let workload = try LifecycleSchedulerWorkloads.bind(
             workload: sourceWorkload, workloadID: previous.workloadID,
@@ -334,6 +341,22 @@ final class LifecycleSchedulerSession: @unchecked Sendable {
             plan: plan, project: project
         )
         try session.validate(node: node)
+    }
+
+    static func validateActiveProviderCharges(
+        repository: SchedulerAdmissionRepository, nodeID: UUID
+    ) throws {
+        for reservation in try repository.activeReservations()
+            where reservation.nodeID == nodeID && reservation.runtimeOwnership?.providerID == .appleContainerization {
+            guard let binding = try repository.decisionArtifact(id: reservation.decisionID)?.binding(for: reservation.workloadID),
+                  binding.runtimeOwnership == reservation.runtimeOwnership,
+                  let workload = binding.lifecycleWorkload,
+                  try LifecycleSchedulerWorkloads.providerWorkload(workload, providerID: .appleContainerization) == workload,
+                  try workload.capacityCharge() == reservation.resources,
+                  binding.resources == reservation.resources else {
+                throw SchedulerAdmissionError.invalidBinding(field: "lifecycle-active-provider-capacity")
+            }
+        }
     }
 
     private static func activationOwnership(

@@ -602,6 +602,20 @@ final class TrustedReleaseTests: XCTestCase {
         )
     }
 
+    func testRevisionOnlyProvenanceKeepsExactCommitAndRejectsMissingOrDuplicateIdentity() throws {
+        let containerization = "containerization|https://github.com/apple/containerization.git|0.35.0|\(DistributionContainerizationAssets.frameworkRevision)"
+        let crypto = "swift-crypto|\(HostwrightSecurityDependencyPins.swiftCryptoLocation)||\(HostwrightSecurityDependencyPins.swiftCryptoRevision)"
+        XCTAssertNoThrow(try TrustedReleaseBuildMetadata.validateExternalDependencies([containerization, crypto].sorted()))
+        for invalid in ["swift-crypto|https://github.com/apple/swift-crypto.git||",
+                        "swift-crypto|https://github.com/apple/swift-crypto.git||not-a-revision",
+                        "swift-crypto|https://github.com/apple/swift-crypto.git|invented|\(HostwrightSecurityDependencyPins.swiftCryptoRevision)"] {
+            XCTAssertThrowsError(try TrustedReleaseBuildMetadata.validateExternalDependencies([containerization, invalid].sorted()))
+        }
+        XCTAssertThrowsError(try TrustedReleaseBuildMetadata.validateExternalDependencies([
+            containerization, crypto, crypto.replacingOccurrences(of: "||", with: "|4.5.2|")
+        ].sorted()))
+    }
+
     func testCleanBuildInventoryRequiresQualifiedSecurityRevisions() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(
             "hostwright-security-dependency-inventory-\(UUID().uuidString)", isDirectory: true
@@ -650,7 +664,7 @@ final class TrustedReleaseTests: XCTestCase {
         }
         let valid = try inventory(pins, graph)
         XCTAssertTrue(valid.contains(
-            "swift-crypto|\(HostwrightSecurityDependencyPins.swiftCryptoLocation)|4.5.2|\(HostwrightSecurityDependencyPins.swiftCryptoRevision)"
+            "swift-crypto|\(HostwrightSecurityDependencyPins.swiftCryptoLocation)||\(HostwrightSecurityDependencyPins.swiftCryptoRevision)"
         ))
         for scenario in ["crypto-revision", "crypto-version", "crypto-branch", "http2-downgrade", "reported-version"] {
             var changedPins = pins
@@ -705,7 +719,10 @@ final class TrustedReleaseTests: XCTestCase {
         ))
         XCTAssertThrowsError(try archive.validate(manifest: payload, archive: trusted.archive))
         XCTAssertEqual(archive.packages.first?.licenseDeclared, "Apache-2.0")
-        XCTAssertTrue(archive.files.allSatisfy { $0.licenseConcluded == "Apache-2.0" })
+        XCTAssertEqual(archive.packages.first?.licenseConcluded, "NOASSERTION")
+        XCTAssertTrue(archive.files.allSatisfy {
+            $0.licenseConcluded == ($0.fileName == "./" + ContainerizationRuntimeAssetContract.kernelInstallationRelativePath ? "GPL-2.0-only" : "NOASSERTION")
+        })
     }
 
     func testHomebrewFormulaUsesImmutableArtifactAndCompleteInstalledSurface() throws {
@@ -948,10 +965,21 @@ final class TrustedReleaseTests: XCTestCase {
         let formulaArchive = try XCTUnwrap(formulaJSON["archive"] as? [String: Any])
         XCTAssertEqual(formulaArchive["sha256"] as? String, report.manifest.archive.sha256)
 
-        let workflow = try String(
+        let stage = try String(
             contentsOf: packageRoot().appendingPathComponent(".github/workflows/trusted-release.yml"),
             encoding: .utf8
         )
+        let promotion = try String(
+            contentsOf: packageRoot().appendingPathComponent(".github/workflows/promote-release.yml"),
+            encoding: .utf8
+        )
+        XCTAssertFalse(stage.contains("contents: write"))
+        XCTAssertFalse(stage.contains("gh release create"))
+        XCTAssertFalse(promotion.contains("swift build"))
+        XCTAssertFalse(promotion.contains("swift run"))
+        XCTAssertTrue(promotion.contains("--signer-digest"))
+        XCTAssertTrue(promotion.contains("staged-release.py receipt"))
+        let workflow = stage + "\n" + promotion
         XCTAssertEqual(workflow.components(separatedBy: "retention-days: 90").count - 1, 1)
         let runScripts = workflowRunScriptBodies(workflow)
         XCTAssertFalse(runScripts.contains("${{ inputs."))
@@ -999,7 +1027,7 @@ final class TrustedReleaseTests: XCTestCase {
     }
 
     private func makeManifest(
-        schemaVersion: Int = 2,
+        schemaVersion: Int = 3,
         payloadModes: [String: Int] = DistributionLayout.payloadModes
     ) -> TrustedReleaseManifest {
         let version = "0.0.2-dev"

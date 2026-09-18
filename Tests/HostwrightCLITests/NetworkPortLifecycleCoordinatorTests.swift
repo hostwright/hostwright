@@ -9,6 +9,143 @@ import XCTest
 @testable import HostwrightState
 
 final class NetworkPortLifecycleCoordinatorTests: XCTestCase {
+    func testCompensatedCreateCleanupRequiresAuthoritativeAbsenceAndExactLease() throws {
+        let fixture = try makeFixture(ports: [RuntimePortMapping(hostPort: 18_180, containerPort: 8_080)])
+        defer { fixture.cleanup() }
+        let empty = try inventory(fixture: fixture)
+        let reserved = try NetworkPortLifecycleCoordinator.reserve(
+            service: fixture.service, node: fixture.node, plan: fixture.plan,
+            group: fixture.group, inventory: empty, store: fixture.store
+        )
+        let context = LifecycleSagaContext(
+            plan: fixture.plan, operationID: fixture.group.operationID, groupID: fixture.group.id,
+            fencingToken: fixture.group.fencingToken, leaseOwner: fixture.group.lockOwner,
+            attempt: 1, direction: .rollback
+        )
+        let authoritative = try RuntimeInventoryBuilder.markRuntimeListAuthoritative(empty, source: .appleContainerCLIRuntimeList)
+        let collision = try RuntimeInventoryBuilder.markRuntimeListAuthoritative(
+            inventory(fixture: fixture, managed: false, name: fixture.node.resourceIdentifier),
+            source: .appleContainerCLIRuntimeList
+        )
+        let wrongProvider = try RuntimeInventoryBuilder.markRuntimeListAuthoritative(empty, source: .appleContainerizationRuntimeList)
+        for snapshot in [empty, collision, wrongProvider] {
+            XCTAssertThrowsError(try NetworkPortLifecycleCoordinator.confirmCompensatedCreateReleased(
+                node: fixture.node, context: context, inventory: snapshot, store: fixture.store
+            ))
+        }
+        for invalid in [
+            LifecycleSagaContext(plan: fixture.plan, operationID: fixture.group.operationID,
+                groupID: UUID().uuidString.lowercased(), fencingToken: fixture.group.fencingToken,
+                leaseOwner: fixture.group.lockOwner, attempt: 1, direction: .rollback),
+            LifecycleSagaContext(plan: fixture.plan, operationID: fixture.group.operationID,
+                groupID: fixture.group.id, fencingToken: UUID().uuidString.lowercased(),
+                leaseOwner: fixture.group.lockOwner, attempt: 1, direction: .rollback),
+            LifecycleSagaContext(plan: fixture.plan, operationID: fixture.group.operationID,
+                groupID: fixture.group.id, fencingToken: fixture.group.fencingToken,
+                leaseOwner: "wrong-owner", attempt: 1, direction: .rollback),
+            LifecycleSagaContext(plan: fixture.plan, operationID: fixture.group.operationID,
+                groupID: fixture.group.id, fencingToken: fixture.group.fencingToken,
+                leaseOwner: nil, attempt: 1, direction: .rollback),
+            LifecycleSagaContext(plan: fixture.plan, operationID: fixture.group.operationID,
+                groupID: fixture.group.id, fencingToken: fixture.group.fencingToken,
+                leaseOwner: fixture.group.lockOwner, attempt: 1, direction: .forward)
+        ] {
+            XCTAssertThrowsError(try NetworkPortLifecycleCoordinator.confirmCompensatedCreateReleased(
+                node: fixture.node, context: invalid, inventory: authoritative, store: fixture.store
+            ))
+        }
+        XCTAssertEqual(try fixture.store.networkPorts.loadProject(projectUUID: fixture.plan.projectResourceUUID), reserved.records)
+        let released = try NetworkPortLifecycleCoordinator.confirmCompensatedCreateReleased(
+            node: fixture.node, context: context, inventory: authoritative, store: fixture.store
+        )
+        XCTAssertEqual(released.records.map(\.lifecycleState), [.released])
+        XCTAssertEqual(released.records.map(\.finalizerState), [.released])
+        XCTAssertTrue(try fixture.store.networkPorts.loadProject(projectUUID: fixture.plan.projectResourceUUID).isEmpty)
+    }
+
+    func testCompensatedCreateCleanupPreservesUnmanagedRowsAndRefusesAmbiguousReservations() throws {
+        for ambiguous in [false, true] {
+            let fixture = try makeFixture(ports: [RuntimePortMapping(hostPort: 18_180, containerPort: 8_080)])
+            defer { fixture.cleanup() }
+            let empty = try inventory(fixture: fixture)
+            let first = try XCTUnwrap(NetworkPortLifecycleCoordinator.reserve(
+                service: fixture.service, node: fixture.node, plan: fixture.plan,
+                group: fixture.group, inventory: empty, store: fixture.store
+            ).records.first)
+            let second = NetworkPortReservationRecord(
+                id: UUID().uuidString.lowercased(), projectUUID: first.projectUUID,
+                resourceUUID: ambiguous ? first.resourceUUID : UUID().uuidString.lowercased(),
+                serviceName: ambiguous ? first.serviceName : "unmanaged-service", generation: 1,
+                providerID: first.providerID, providerGeneration: first.providerGeneration,
+                fencingToken: first.fencingToken, bindAddress: first.bindAddress,
+                hostPort: 18_181, containerPort: first.containerPort, protocolName: first.protocolName,
+                allocationKind: first.allocationKind, desiredSHA256: first.desiredSHA256,
+                observedSHA256: nil, lifecycleState: .reserved, finalizerState: .active,
+                operationGroupID: first.operationGroupID, createdAt: first.createdAt, updatedAt: first.updatedAt
+            )
+            _ = try fixture.store.networkPorts.save(second)
+            let context = LifecycleSagaContext(plan: fixture.plan, operationID: fixture.group.operationID,
+                groupID: fixture.group.id, fencingToken: fixture.group.fencingToken,
+                leaseOwner: fixture.group.lockOwner, attempt: 1, direction: .rollback)
+            let authoritative = try RuntimeInventoryBuilder.markRuntimeListAuthoritative(empty, source: .appleContainerCLIRuntimeList)
+            if ambiguous {
+                XCTAssertThrowsError(try NetworkPortLifecycleCoordinator.confirmCompensatedCreateReleased(
+                    node: fixture.node, context: context, inventory: authoritative, store: fixture.store
+                ))
+                XCTAssertEqual(try fixture.store.networkPorts.load(id: first.id), first)
+            } else {
+                _ = try NetworkPortLifecycleCoordinator.confirmCompensatedCreateReleased(
+                    node: fixture.node, context: context, inventory: authoritative, store: fixture.store
+                )
+                XCTAssertEqual(try fixture.store.networkPorts.load(id: first.id)?.lifecycleState, .released)
+            }
+            XCTAssertEqual(try fixture.store.networkPorts.load(id: second.id), second)
+        }
+    }
+
+    func testHistoricalCompensatedReservedPortTransfersOnlyAfterVerifiedAbsence() throws {
+        let fixture = try makeFixture(ports: [RuntimePortMapping(hostPort: 18_180, containerPort: 8_080)])
+        defer { fixture.cleanup() }
+        let empty = try inventory(fixture: fixture)
+        let prior = try XCTUnwrap(NetworkPortLifecycleCoordinator.reserve(
+            service: fixture.service, node: fixture.node, plan: fixture.plan,
+            group: fixture.group, inventory: empty, store: fixture.store
+        ).records.first)
+        try fixture.store.operationGroups.finishExactLease(
+            groupID: fixture.group.id, expectedFencingToken: fixture.group.fencingToken,
+            expectedLockOwner: fixture.group.lockOwner!, expectedLockExpiresAt: fixture.group.lockExpiresAt!,
+            status: .failed, checkpoint: "compensated", manualRecoveryHintRedacted: "",
+            updatedAt: hostwrightTimestamp(), metadataJSONRedacted: "{}"
+        )
+        let identifier = UUID().uuidString.lowercased()
+        let group = OperationGroupRecord(
+            id: identifier, operationID: identifier, groupKind: fixture.group.groupKind,
+            projectID: fixture.group.projectID, serviceName: nil,
+            plannedActionType: fixture.group.plannedActionType, status: .active,
+            groupIdempotencyKey: identifier, planHash: fixture.group.planHash, checkpoint: "intent-persisted",
+            lockOwner: fixture.group.lockOwner, lockExpiresAt: fixture.group.lockExpiresAt,
+            rollbackAvailable: true, manualRecoveryHintRedacted: "", createdAt: hostwrightTimestamp(),
+            updatedAt: hostwrightTimestamp(), metadataJSONRedacted: "{}",
+            fencingToken: UUID().uuidString.lowercased(), intentJSONRedacted: fixture.group.intentJSONRedacted,
+            compensationJSONRedacted: fixture.group.compensationJSONRedacted, verificationJSONRedacted: "{}"
+        )
+        XCTAssertNotNil(try fixture.store.operationGroups.acquire(group).acquired)
+        XCTAssertThrowsError(try NetworkPortLifecycleCoordinator.reserve(
+            service: fixture.service, node: fixture.node, plan: fixture.plan, group: group,
+            inventory: empty, store: fixture.store
+        ))
+        let observed = try RuntimeInventoryBuilder.markRuntimeListAuthoritative(empty, source: .appleContainerCLIRuntimeList)
+        let renewed = try XCTUnwrap(NetworkPortLifecycleCoordinator.reserve(
+            service: fixture.service, node: fixture.node, plan: fixture.plan, group: group,
+            inventory: observed, store: fixture.store
+        ).records.first)
+        XCTAssertEqual(renewed.id, prior.id)
+        XCTAssertEqual(renewed.hostPort, prior.hostPort)
+        XCTAssertEqual(renewed.generation, prior.generation + 1)
+        XCTAssertEqual(renewed.lifecycleState, .reserved)
+        XCTAssertEqual(renewed.operationGroupID, group.id)
+    }
+
     func testUpdateCreateNodeReservesForExactLogicalServiceName() throws {
         let fixture = try makeFixture(
             ports: [

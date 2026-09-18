@@ -216,6 +216,7 @@ let package = Package(
                 "HostwrightControlSecurity",
                 "HostwrightCore",
                 "HostwrightDaemonCore",
+                "HostwrightDistribution",
                 "HostwrightExtensions",
                 "HostwrightHealth",
                 "HostwrightImport",
@@ -293,7 +294,8 @@ let package = Package(
                 "HostwrightCore",
                 "HostwrightManifest",
                 "HostwrightRuntime",
-                "HostwrightState"
+                "HostwrightState",
+                .product(name: "Containerization", package: "containerization")
             ]
         ),
         // Qualification-only continuity tooling is intentionally not exposed as a product.
@@ -407,6 +409,8 @@ let package = Package(
         .target(
             name: "HostwrightDistribution",
             dependencies: [
+                "HostwrightControlPlane",
+                "HostwrightControlSecurity",
                 "HostwrightCore",
                 "HostwrightState",
                 "HostwrightStorage"

@@ -413,6 +413,7 @@ public final class DesktopOperationsModel: ObservableObject {
     private var lifecycleTask: Task<Void, Never>?
     private var lifecycleID: UUID?
     private var lifecycleCancellation: PersistentControlRequestCancellation?
+    private var lifecycleProject: DesktopProjectStatus?
 
     public init(
         endpoint: DesktopControlEndpoint? = nil,
@@ -465,6 +466,8 @@ public final class DesktopOperationsModel: ObservableObject {
 
     public func connect() {
         invalidateLifecycleForConnectionChange()
+        cancelEventStream()
+        cancelLogStream()
         cancelStatusRefresh()
         reconnectTask?.cancel()
         let connectionID = UUID()
@@ -483,6 +486,8 @@ public final class DesktopOperationsModel: ObservableObject {
 
     public func reconnect() {
         invalidateLifecycleForConnectionChange()
+        cancelEventStream()
+        cancelLogStream()
         cancelStatusRefresh()
         reconnectTask?.cancel()
         let connectionID = UUID()
@@ -561,6 +566,7 @@ public final class DesktopOperationsModel: ObservableObject {
         let api = self.api
         self.lifecycleID = lifecycleID
         self.lifecycleCancellation = cancellation
+        self.lifecycleProject = project
         lifecycleState = .previewing(action)
         lastFailure = nil
         lifecycleTask = Task { [weak self] in
@@ -588,6 +594,12 @@ public final class DesktopOperationsModel: ObservableObject {
                 })
                 guard !Task.isCancelled, let self, self.lifecycleID == lifecycleID,
                       case .connected = self.connectionState else { return }
+                guard self.projects.contains(where: { Self.matchesLifecycleProject($0, project) }),
+                      plan.projectName == project.name else {
+                    self.lifecycleState = .idle
+                    self.record(error: Self.staleLifecycleFailure)
+                    return
+                }
                 self.lifecycleState = .awaitingConfirmation(plan)
             } catch {
                 guard !Task.isCancelled, let self, self.lifecycleID == lifecycleID else { return }
@@ -601,8 +613,9 @@ public final class DesktopOperationsModel: ObservableObject {
         guard case .connected = connectionState,
               case .awaitingConfirmation(let plan) = lifecycleState,
               plan.planSHA256 == planSHA256,
-              projects.contains(where: {
-                  $0.manifestPath == plan.manifestPath && $0.manifestIsValid
+              projects.contains(where: { project in
+                  project.manifestPath == plan.manifestPath && project.manifestIsValid
+                      && lifecycleProject.map { Self.matchesLifecycleProject(project, $0) } == true
               }),
               lifecycleTask == nil else {
             if case .awaitingConfirmation = lifecycleState {
@@ -680,6 +693,7 @@ public final class DesktopOperationsModel: ObservableObject {
         lifecycleTask = nil
         lifecycleID = nil
         lifecycleCancellation = nil
+        lifecycleProject = nil
         lifecycleState = action.map(DesktopLifecycleState.cancelled) ?? .idle
     }
 
@@ -832,11 +846,12 @@ public final class DesktopOperationsModel: ObservableObject {
         isEventStreamRunning = false
     }
 
-    public func cancelLogStream() {
+    public func cancelLogStream(clearBuffer: Bool = false) {
         logTask?.cancel()
         logTask = nil
         logID = nil
         isLogStreamRunning = false
+        if clearBuffer { logChunks = [] }
     }
 
     var eventStreamTaskForTesting: Task<Void, Never>? {
@@ -914,12 +929,38 @@ public final class DesktopOperationsModel: ObservableObject {
     }
 
     private func apply(project: DesktopProjectStatus) {
-        if case .awaitingConfirmation(let plan) = lifecycleState,
-           plan.manifestPath != project.manifestPath {
-            lifecycleState = .idle
+        let reviewIsStale: Bool
+        if case .awaitingConfirmation = lifecycleState, let lifecycleProject {
+            reviewIsStale = !Self.matchesLifecycleProject(project, lifecycleProject)
+        } else {
+            reviewIsStale = false
+        }
+        if reviewIsStale { invalidateLifecycleForConnectionChange() }
+        if let previous = projects.first,
+           previous.manifestPath != project.manifestPath
+                || previous.services.count != project.services.count
+                || !zip(previous.services, project.services).allSatisfy({ pair in
+                    pair.0.id == pair.1.id && pair.0.resourceIdentifier == pair.1.resourceIdentifier
+                }) {
+            cancelLogStream(clearBuffer: true)
         }
         projects = [project]
-        lastFailure = nil
+        lastFailure = reviewIsStale ? Self.staleLifecycleFailure : nil
+    }
+
+    nonisolated private static func matchesLifecycleProject(
+        _ current: DesktopProjectStatus,
+        _ reviewed: DesktopProjectStatus
+    ) -> Bool {
+        current.id == reviewed.id && current.manifestPath == reviewed.manifestPath
+            && current.manifestIsValid && current.planHash == reviewed.planHash
+    }
+
+    nonisolated private static var staleLifecycleFailure: DesktopControlFailure {
+        DesktopControlFailure(
+            code: "lifecycle.staleConfirmation",
+            message: "The lifecycle plan is stale. Review a fresh plan before confirming."
+        )
     }
 
     nonisolated private static func authorizationProjectID(
@@ -934,6 +975,7 @@ public final class DesktopOperationsModel: ObservableObject {
         lifecycleTask = nil
         lifecycleID = nil
         lifecycleCancellation = nil
+        lifecycleProject = nil
         lifecycleState = .idle
     }
 

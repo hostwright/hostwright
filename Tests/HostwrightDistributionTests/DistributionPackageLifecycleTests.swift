@@ -3,6 +3,35 @@ import Foundation
 import XCTest
 
 final class DistributionPackageLifecycleTests: XCTestCase {
+    func testReleaseCandidateAndStablePackageVersionsFollowPublishedDevelopmentReceipts() throws {
+        let versions = ["0.0.2-dev.11", "0.0.2-dev.12", "0.0.2-rc.1", "0.0.2-rc.2", "0.0.2-rc.99", "0.0.2"]
+        let packages = try versions.map(DistributionPackageVersion.make(from:))
+        XCTAssertEqual(packages, ["0.0.2.11", "0.0.2.12", "0.0.2.1001", "0.0.2.1002", "0.0.2.1099", "0.0.2.2000"])
+        for (earlier, later) in zip(packages, packages.dropFirst()) {
+            XCTAssertEqual(DistributionPackageVersion.compare(earlier, later), .orderedAscending)
+            XCTAssertEqual(DistributionPackageVersion.compare(later, earlier), .orderedDescending)
+        }
+        XCTAssertEqual(try DistributionPackageVersion.make(from: "0.0.1"), "0.0.1")
+        XCTAssertEqual(try DistributionPackageVersion.make(from: "0.0.2+qualification"), "0.0.2.2000")
+    }
+
+    func testReleasePackageChannelsRejectAmbiguousOrOutOfRangeIdentifiers() {
+        for value in ["0.0.2-rc.0", "0.0.2-rc.01", "0.0.2-rc.100", "0.0.2-rc", "0.0.2-dev.1000", "0.0.2-dev.1001", "0.0.2-beta.1", "0.0.3-rc.1"] {
+            XCTAssertThrowsError(try DistributionPackageVersion.make(from: value), value)
+        }
+    }
+
+    func testDesktopBuildVersionsUseThreeComponentsAndPreserveChannelOrder() throws {
+        let versions = ["0.0.2-dev.14", "0.0.2-rc.1", "0.0.2-rc.99", "0.0.2"]
+        let bundles = try versions.map(DistributionDesktopBundleVersion.make(from:))
+        XCTAssertEqual(bundles, ["2.0.14", "2.1.1", "2.1.99", "2.2.0"])
+        XCTAssertTrue(bundles.allSatisfy { $0.split(separator: ".").count == 3 })
+        for (earlier, later) in zip(bundles, bundles.dropFirst()) {
+            XCTAssertEqual(DistributionPackageVersion.compare(earlier, later), .orderedAscending)
+        }
+        XCTAssertEqual(try DistributionDesktopBundleVersion.make(from: "0.0.2-rc.1+qualification"), "2.1.1")
+    }
+
     func testQualificationVersionsMapMonotonicallyToApplePackageVersions() throws {
         XCTAssertEqual(
             try DistributionPackageVersion.make(from: "0.0.2-dev.7"),

@@ -9,18 +9,27 @@ public enum DistributionPackageVersion {
             ?? semanticVersion
         let components = withoutBuild.split(separator: "-", maxSplits: 1).map(String.init)
         let core = components[0]
-        guard components.count == 2 else { return core }
+        guard components.count == 2 else { return core == "0.0.2" ? core + ".2000" : core }
         let prerelease = components[1]
         if prerelease == "dev" { return core + ".0" }
         let identifiers = prerelease.split(separator: ".", omittingEmptySubsequences: false)
         guard identifiers.count == 2,
-              identifiers[0] == "dev",
               let qualification = identifiers.last,
               !qualification.isEmpty,
               qualification.allSatisfy(\.isNumber),
               qualification == "0" || !qualification.hasPrefix("0") else {
             throw DistributionError.invalidArguments(
-                "Installer package versions support stable semantic versions or a dev.N prerelease."
+                "Installer package versions support stable semantic versions, dev.N, or v0.0.2 rc.1 through rc.99."
+            )
+        }
+        if core == "0.0.2", identifiers[0] == "rc",
+           let number = Int(qualification), (1...99).contains(number) {
+            return core + ".\(1000 + number)"
+        }
+        guard identifiers[0] == "dev",
+              core != "0.0.2" || (Int(qualification).map { (0..<1000).contains($0) } ?? false) else {
+            throw DistributionError.invalidArguments(
+                "The release channel or qualification number is outside the supported package version range."
             )
         }
         return core + "." + qualification
@@ -45,6 +54,22 @@ public enum DistributionPackageVersion {
             if l != r { return l < r ? .orderedAscending : .orderedDescending }
         }
         return .orderedSame
+    }
+}
+
+public enum DistributionDesktopBundleVersion {
+    public static func make(from semanticVersion: String) throws -> String {
+        let packageVersion = try DistributionPackageVersion.make(from: semanticVersion)
+        let version = semanticVersion.split(separator: "+", maxSplits: 1)[0]
+        if version == "0.0.2" { return "2.2.0" }
+        if version == "0.0.2-dev" { return "2.0.0" }
+        if version.hasPrefix("0.0.2-rc.") {
+            return "2.1." + version.dropFirst("0.0.2-rc.".count)
+        }
+        if version.hasPrefix("0.0.2-dev.") {
+            return "2.0." + version.dropFirst("0.0.2-dev.".count)
+        }
+        return packageVersion
     }
 }
 

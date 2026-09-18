@@ -416,6 +416,7 @@ public struct AppleContainerReadOnlyAdapter: RuntimeAdapter {
                         runtimeNetwork($0, inventory: networksByID[$0.networkID])
                     },
                     mounts: container.mounts.map(runtimeMount),
+                    allocation: container.allocation,
                     observedAt: nil
                 )
             )

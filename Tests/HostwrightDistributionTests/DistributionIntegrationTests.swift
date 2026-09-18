@@ -304,7 +304,7 @@ final class DistributionIntegrationTests: XCTestCase {
             )
             XCTAssertEqual(
                 desktopInfo["CFBundleVersion"] as? String,
-                try DistributionPackageVersion.make(from: HostwrightIdentity.version)
+                try DistributionDesktopBundleVersion.make(from: HostwrightIdentity.version)
             )
             let desktopBundle = artifact.extractedRoot.appendingPathComponent(
                 DistributionLayout.desktopAppPath

@@ -193,6 +193,7 @@ public struct TrustedReleaseVerifier: Sendable {
             manifest: manifest,
             releaseDirectory: releaseDirectory,
             extractionRoot: verificationRoot.appendingPathComponent("archive", isDirectory: true),
+            expectedDependencies: provenance.predicate.buildDefinition.internalParameters.externalSwiftPMDependencies ?? [],
             cancellation: cancellation,
             commands: &commands
         )
@@ -200,6 +201,7 @@ public struct TrustedReleaseVerifier: Sendable {
             manifest: manifest,
             releaseDirectory: releaseDirectory,
             expansionRoot: verificationRoot.appendingPathComponent("package", isDirectory: true),
+            expectedDependencies: provenance.predicate.buildDefinition.internalParameters.externalSwiftPMDependencies ?? [],
             cancellation: cancellation,
             commands: &commands
         )
@@ -302,10 +304,20 @@ public struct TrustedReleaseVerifier: Sendable {
                 try? DistributionFileSystem.removeOwnedTemporaryItem(extractionDirectory)
             }
         }
+        let retainedProvenanceURL = releaseDirectory.appendingPathComponent(verified.manifest.provenance.fileName)
+        guard try DistributionHash.sha256(fileURL: retainedProvenanceURL) == verified.manifest.provenance.sha256 else {
+            throw DistributionError.invalidArtifact("Verified lifecycle provenance changed before extraction.")
+        }
+        let retainedProvenance = try DistributionJSON.decode(TrustedReleaseProvenanceStatement.self, from: retainedProvenanceURL)
+        try retainedProvenance.validate(manifest: verified.manifest)
+        guard try DistributionHash.sha256(fileURL: retainedProvenanceURL) == verified.manifest.provenance.sha256 else {
+            throw DistributionError.invalidArtifact("Verified lifecycle provenance changed during inspection.")
+        }
         try verifyArchive(
             manifest: verified.manifest,
             releaseDirectory: releaseDirectory,
             extractionRoot: extractionDirectory,
+            expectedDependencies: retainedProvenance.predicate.buildDefinition.internalParameters.externalSwiftPMDependencies ?? [],
             cancellation: cancellation,
             commands: &commands
         )
@@ -337,6 +349,7 @@ public struct TrustedReleaseVerifier: Sendable {
         manifest: TrustedReleaseManifest,
         releaseDirectory: URL,
         extractionRoot: URL,
+        expectedDependencies: [String],
         cancellation: SecureSubprocessCancellation,
         commands: inout [HostwrightEvidenceCommand]
     ) throws {
@@ -402,6 +415,9 @@ public struct TrustedReleaseVerifier: Sendable {
             throw DistributionError.invalidArtifact("trusted ZIP internal manifest differs from the signed release manifest")
         }
         try verifyPayloadFiles(manifest.payloadFiles, under: root, cancellation: cancellation)
+        if manifest.schemaVersion >= 3 {
+            try DistributionThirdPartyNotices.validatePayload(root: root, files: manifest.payloadFiles, expectedDependencies: expectedDependencies, requireQualified: true)
+        }
         try verifyExecutableTrust(
             root: root,
             payloadFiles: manifest.payloadFiles,
@@ -415,6 +431,7 @@ public struct TrustedReleaseVerifier: Sendable {
         manifest: TrustedReleaseManifest,
         releaseDirectory: URL,
         expansionRoot: URL,
+        expectedDependencies: [String],
         cancellation: SecureSubprocessCancellation,
         commands: inout [HostwrightEvidenceCommand]
     ) throws {
@@ -501,6 +518,12 @@ public struct TrustedReleaseVerifier: Sendable {
         guard packageManifest == expectedManifest else {
             throw DistributionError.invalidArtifact(
                 "trusted package staging manifest differs from the signed release manifest"
+            )
+        }
+        if manifest.schemaVersion >= 3 {
+            try DistributionThirdPartyNotices.validatePayload(
+                root: payloadRoot.appendingPathComponent(packageStagingRelativePath), files: manifest.payloadFiles,
+                expectedDependencies: expectedDependencies, requireQualified: true
             )
         }
         let scriptsRoot = expansionRoot.appendingPathComponent("Scripts", isDirectory: true)

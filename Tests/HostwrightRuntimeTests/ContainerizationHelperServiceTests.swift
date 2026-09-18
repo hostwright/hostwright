@@ -108,7 +108,9 @@ final class ContainerizationHelperServiceTests: XCTestCase {
             ),
             command: [],
             environment: [],
-            labels: []
+            labels: [],
+            cpuCount: 1,
+            memoryBytes: 536_870_912
         )
 
         let frame = try requestFrame(
@@ -192,7 +194,8 @@ final class ContainerizationHelperServiceTests: XCTestCase {
         let backend = try TestBackend(
             snapshot: snapshot(),
             inventory: inventory(),
-            blockCreateUntilCancelled: true
+            blockCreateUntilCancelled: true,
+            allowsIdleShutdown: true
         )
         let dispatcher = ContainerizationHelperDispatcher(
             backend: backend,
@@ -218,6 +221,10 @@ final class ContainerizationHelperServiceTests: XCTestCase {
             try await clock.sleep(for: .milliseconds(1))
         }
         XCTAssertTrue(createStarted)
+        let idleDuringCreate = await dispatcher.requestIdleShutdown()
+        XCTAssertFalse(idleDuringCreate)
+        let idleChecksDuringCreate = await backend.idleCheckCount()
+        XCTAssertEqual(idleChecksDuringCreate, 0)
 
         let acknowledgement: ContainerizationHelperAcknowledgement = try await dispatch(
             .cancel,
@@ -311,7 +318,7 @@ final class ContainerizationHelperServiceTests: XCTestCase {
         let runtimeDirectory = try ContainerizationHelperRuntimeDirectory.prepare(
             at: parent.appendingPathComponent("runtime", isDirectory: true)
         )
-        let backend = try TestBackend(snapshot: snapshot(), inventory: inventory())
+        let backend = try TestBackend(snapshot: snapshot(), inventory: inventory(), allowsIdleShutdown: true)
         let dispatcher = ContainerizationHelperDispatcher(
             backend: backend,
             expectedCapabilityDigest: digest
@@ -327,6 +334,192 @@ final class ContainerizationHelperServiceTests: XCTestCase {
         let terminated = await dispatcher.shouldTerminate()
         XCTAssertTrue(terminated)
         XCTAssertFalse(FileManager.default.fileExists(atPath: runtimeDirectory.directoryURL.path))
+    }
+
+    func testIdleDecisionFencesDispatchUntilBackendRefuses() async throws {
+        let backend = try TestBackend(snapshot: snapshot(), inventory: inventory(), blocksIdleDecision: true)
+        let dispatcher = ContainerizationHelperDispatcher(backend: backend, expectedCapabilityDigest: digest)
+        let idleTask = Task { await dispatcher.requestIdleShutdown() }
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .seconds(5))
+        while await backend.idleCheckCount() == 0, clock.now < deadline {
+            try await clock.sleep(for: .milliseconds(1))
+        }
+        let checks = await backend.idleCheckCount()
+        XCTAssertEqual(checks, 1)
+        do {
+            _ = try await dispatcher.dispatch(frame: Data(), nowUnixMilliseconds: 1_000)
+            XCTFail("Idle decision must fence even malformed requests before decoding.")
+        } catch {
+            XCTAssertEqual(error as? ContainerizationHelperServiceError, .shuttingDown)
+        }
+        await backend.releaseIdleDecision()
+        let accepted = await idleTask.value
+        XCTAssertFalse(accepted)
+        let result: RuntimeCapabilitySnapshot = try await dispatch(
+            .negotiate, payload: ContainerizationHelperEmptyPayload(), through: dispatcher
+        )
+        XCTAssertEqual(result, snapshot())
+    }
+
+    func testDisconnectedUnixClientDoesNotShutDownRetainedBackend() async throws {
+        let parent = try makePrivateParent()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let directory = try ContainerizationHelperRuntimeDirectory.prepare(
+            at: parent.appendingPathComponent("runtime", isDirectory: true)
+        )
+        let backend = try TestBackend(snapshot: snapshot(), inventory: inventory())
+        let dispatcher = ContainerizationHelperDispatcher(backend: backend, expectedCapabilityDigest: digest)
+        let server = ContainerizationHelperUnixServer(
+            runtimeDirectory: directory, dispatcher: dispatcher,
+            authenticator: ContainerizationHelperPeerAuthenticator { descriptor in
+                try Self.requireCurrentFixturePeer(descriptor)
+            },
+            idlePolicy: .init(timeoutMilliseconds: 25)
+        )
+        let serverTask = Task { try await server.run() }
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .seconds(5))
+        do {
+            while !FileManager.default.fileExists(atPath: directory.socketURL.path), clock.now < deadline {
+                try await clock.sleep(for: .milliseconds(1))
+            }
+            let requestDeadline = Int64(Date().timeIntervalSince1970 * 1_000) + 5_000
+            let negotiation = try await Self.exchangeWithCurrentFixture(
+                frame: requestFrame(operation: .negotiate, payload: ContainerizationHelperEmptyPayload(),
+                                    deadlineUnixMilliseconds: requestDeadline),
+                socketURL: directory.socketURL, privateParent: parent
+            )
+            let negotiated = try ContainerizationHelperCanonicalJSON.decodeResult(
+                RuntimeCapabilitySnapshot.self,
+                from: ContainerizationHelperFraming.decodeSingleFrame(negotiation)
+            )
+            XCTAssertEqual(negotiated.result, snapshot())
+            let postDisconnectIdleBaseline = await backend.idleCheckCount()
+            while await backend.idleCheckCount() < postDisconnectIdleBaseline + 2, clock.now < deadline {
+                try await clock.sleep(for: .milliseconds(1))
+            }
+            let checks = await backend.idleCheckCount()
+            XCTAssertGreaterThanOrEqual(checks - postDisconnectIdleBaseline, 2)
+            let terminated = await dispatcher.shouldTerminate()
+            XCTAssertFalse(terminated)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: directory.socketURL.path))
+            let shutdown = try await Self.exchangeWithCurrentFixture(
+                frame: requestFrame(operation: .shutdown, payload: ContainerizationHelperEmptyPayload(),
+                                    deadlineUnixMilliseconds: requestDeadline),
+                socketURL: directory.socketURL, privateParent: parent
+            )
+            let acknowledgement = try ContainerizationHelperCanonicalJSON.decodeResult(
+                ContainerizationHelperAcknowledgement.self,
+                from: ContainerizationHelperFraming.decodeSingleFrame(shutdown)
+            )
+            XCTAssertTrue(acknowledgement.result.accepted)
+        } catch {
+            await dispatcher.requestShutdown()
+            _ = try? await serverTask.value
+            throw error
+        }
+        try await serverTask.value
+        let shutdownCalls = await backend.shutdownCount()
+        XCTAssertEqual(shutdownCalls, 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.directoryURL.path))
+    }
+
+    private static func requireCurrentFixturePeer(_ descriptor: Int32) throws {
+        var uid = uid_t.max
+        var gid = gid_t.max
+        var pid = pid_t(0)
+        var size = socklen_t(MemoryLayout<pid_t>.size)
+        guard getpeereid(descriptor, &uid, &gid) == 0, uid == geteuid(),
+              getsockopt(descriptor, SOL_LOCAL, LOCAL_PEERPID, &pid, &size) == 0,
+              size == MemoryLayout<pid_t>.size, pid == getpid() else {
+            throw ContainerizationHelperClientError.peerAuthenticationFailed
+        }
+    }
+
+    // This in-process fixture authenticates its own PID/UID, not the signed product helper.
+    private static func exchangeWithCurrentFixture(
+        frame: Data, socketURL: URL, privateParent: URL
+    ) async throws -> Data {
+        try await Task.detached {
+            guard socketURL.deletingLastPathComponent().deletingLastPathComponent() == privateParent else {
+                throw POSIXError(.EINVAL)
+            }
+            for directory in [privateParent, socketURL.deletingLastPathComponent()] {
+                var metadata = stat()
+                guard lstat(directory.path, &metadata) == 0,
+                      metadata.st_mode & S_IFMT == mode_t(S_IFDIR),
+                      metadata.st_mode & 0o7777 == 0o700, metadata.st_uid == geteuid() else {
+                    throw POSIXError(.EACCES)
+                }
+            }
+            var before = stat()
+            guard lstat(socketURL.path, &before) == 0,
+                  before.st_mode & S_IFMT == mode_t(S_IFSOCK),
+                  before.st_mode & 0o7777 == 0o600, before.st_uid == geteuid() else {
+                throw POSIXError(.EACCES)
+            }
+            let descriptor = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+            guard descriptor >= 0 else { throw POSIXError(.EIO) }
+            defer { Darwin.close(descriptor) }
+            var timeout = timeval(tv_sec: 5, tv_usec: 0)
+            var noSignal: Int32 = 1
+            guard fcntl(descriptor, F_SETFD, FD_CLOEXEC) == 0,
+                  setsockopt(descriptor, SOL_SOCKET, SO_RCVTIMEO, &timeout,
+                             socklen_t(MemoryLayout<timeval>.size)) == 0,
+                  setsockopt(descriptor, SOL_SOCKET, SO_SNDTIMEO, &timeout,
+                             socklen_t(MemoryLayout<timeval>.size)) == 0,
+                  setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &noSignal,
+                             socklen_t(MemoryLayout<Int32>.size)) == 0 else { throw POSIXError(.EIO) }
+            var address = sockaddr_un()
+            address.sun_len = UInt8(MemoryLayout<sockaddr_un>.size)
+            address.sun_family = sa_family_t(AF_UNIX)
+            let bytes = Array(socketURL.path.utf8) + [UInt8(0)]
+            guard bytes.count <= MemoryLayout.size(ofValue: address.sun_path) else {
+                throw POSIXError(.ENAMETOOLONG)
+            }
+            withUnsafeMutableBytes(of: &address.sun_path) { $0.copyBytes(from: bytes) }
+            let connected = withUnsafePointer(to: &address) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    Darwin.connect(descriptor, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+                }
+            }
+            guard connected == 0 else { throw POSIXError(.ECONNREFUSED) }
+            try requireCurrentFixturePeer(descriptor)
+            var after = stat()
+            guard lstat(socketURL.path, &after) == 0,
+                  after.st_dev == before.st_dev, after.st_ino == before.st_ino else {
+                throw POSIXError(.ESTALE)
+            }
+            var offset = 0
+            while offset < frame.count {
+                let written = frame.withUnsafeBytes {
+                    Darwin.write(descriptor, $0.baseAddress!.advanced(by: offset), frame.count - offset)
+                }
+                if written < 0, errno == EINTR { continue }
+                guard written > 0 else { throw POSIXError(.EIO) }
+                offset += written
+            }
+            func readExact(_ count: Int) throws -> Data {
+                var data = Data(count: count)
+                var offset = 0
+                while offset < count {
+                    let received = data.withUnsafeMutableBytes {
+                        Darwin.read(descriptor, $0.baseAddress!.advanced(by: offset), count - offset)
+                    }
+                    if received < 0, errno == EINTR { continue }
+                    guard received > 0 else { throw POSIXError(.EIO) }
+                    offset += received
+                }
+                return data
+            }
+            let header = try readExact(ContainerizationHelperProtocolV1.frameHeaderBytes)
+            let length = header.reduce(UInt32(0)) { ($0 << 8) | UInt32($1) }
+            guard length > 0, length <= UInt32(ContainerizationHelperProtocolV1.maximumPayloadBytes) else {
+                throw ContainerizationHelperProtocolError.frameTooLarge
+            }
+            return header + (try readExact(Int(length)))
+        }.value
     }
 
     private func dispatch<Payload: Codable & Sendable, Result: Codable & Sendable>(
@@ -350,12 +543,13 @@ final class ContainerizationHelperServiceTests: XCTestCase {
         operation: ContainerizationHelperOperation,
         payload: Payload,
         context: RuntimeMutationContext? = nil,
-        capabilityDigest: String? = nil
+        capabilityDigest: String? = nil,
+        deadlineUnixMilliseconds: Int64 = 2_000
     ) throws -> Data {
         let request = ContainerizationHelperRequest(
             requestID: requestID,
             operation: operation,
-            deadlineUnixMilliseconds: 2_000,
+            deadlineUnixMilliseconds: deadlineUnixMilliseconds,
             capabilityDigest: capabilityDigest ?? digest,
             mutationContext: context,
             idempotencyKey: "request-\(requestID.uuidString.lowercased())",
@@ -383,6 +577,27 @@ final class ContainerizationHelperServiceTests: XCTestCase {
         )
     }
 
+    func testCreateAllocationRoundTripsAndDispatcherRejectsMissingOrInvalidLimits() async throws {
+        let backend = try TestBackend(snapshot: snapshot(), inventory: inventory())
+        let dispatcher = ContainerizationHelperDispatcher(backend: backend, expectedCapabilityDigest: digest)
+        let valid = createPayload()
+        let encoded = try JSONEncoder().encode(valid)
+        XCTAssertEqual(try JSONDecoder().decode(ContainerizationHelperCreatePayload.self, from: encoded), valid)
+        for (cpu, memory): (Int?, UInt64?) in [(nil, nil), (0, 1), (1, 0), (1, UInt64.max)] {
+            let payload = ContainerizationHelperCreatePayload(
+                resourceIdentifier: valid.resourceIdentifier, resourceUUID: valid.resourceUUID,
+                projectUUID: valid.projectUUID, image: valid.image, command: valid.command,
+                environment: valid.environment, labels: valid.labels, cpuCount: cpu, memoryBytes: memory
+            )
+            do {
+                let _: ContainerizationHelperMutationResult = try await dispatch(.create, payload: payload, context: mutationContext(), through: dispatcher)
+                XCTFail("Expected allocation rejection")
+            } catch {}
+        }
+        let operations = await backend.recordedOperations()
+        XCTAssertFalse(operations.contains(.create))
+    }
+
     private func createPayload() -> ContainerizationHelperCreatePayload {
         ContainerizationHelperCreatePayload(
             resourceIdentifier: "demo",
@@ -391,7 +606,9 @@ final class ContainerizationHelperServiceTests: XCTestCase {
             image: TestBackend.imageEvidence,
             command: ["/bin/sh", "-c", "true"],
             environment: [],
-            labels: [RuntimeInventoryLabel(key: "dev.hostwright.resource-uuid", value: resourceUUID)]
+            labels: [RuntimeInventoryLabel(key: "dev.hostwright.resource-uuid", value: resourceUUID)],
+            cpuCount: 1,
+            memoryBytes: 536_870_912
         )
     }
 
@@ -484,6 +701,11 @@ private actor TestBackend: ContainerizationHelperBackend {
 
     private let snapshotValue: RuntimeCapabilitySnapshot
     private let observationValue: ContainerizationHelperObservation
+    private let allowsIdleShutdown: Bool
+    private let blocksIdleDecision: Bool
+    private var idleChecks = 0
+    private var shutdownCalls = 0
+    private var idleContinuation: CheckedContinuation<Void, Never>?
     private let blockCreateUntilCancelled: Bool
     private var operations: [ContainerizationHelperOperation] = []
     private var didStartCreate = false
@@ -492,11 +714,15 @@ private actor TestBackend: ContainerizationHelperBackend {
     init(
         snapshot: RuntimeCapabilitySnapshot,
         inventory: RuntimeInventory,
-        blockCreateUntilCancelled: Bool = false
+        blockCreateUntilCancelled: Bool = false,
+        allowsIdleShutdown: Bool = false,
+        blocksIdleDecision: Bool = false
     ) throws {
         self.snapshotValue = snapshot
         self.observationValue = ContainerizationHelperObservation(inventory: inventory)
         self.blockCreateUntilCancelled = blockCreateUntilCancelled
+        self.allowsIdleShutdown = allowsIdleShutdown
+        self.blocksIdleDecision = blocksIdleDecision
     }
 
     func negotiate() async throws -> RuntimeCapabilitySnapshot {
@@ -590,7 +816,25 @@ private actor TestBackend: ContainerizationHelperBackend {
         cancellations.append(requestID)
     }
 
-    func shutdown() async {}
+    func shutdown() async { shutdownCalls += 1 }
+
+    func shutdownIfIdle() async -> Bool {
+        idleChecks += 1
+        if blocksIdleDecision {
+            await withCheckedContinuation { idleContinuation = $0 }
+        }
+        guard allowsIdleShutdown else { return false }
+        await shutdown()
+        return true
+    }
+
+    func releaseIdleDecision() {
+        idleContinuation?.resume()
+        idleContinuation = nil
+    }
+
+    func idleCheckCount() -> Int { idleChecks }
+    func shutdownCount() -> Int { shutdownCalls }
 
     func recordedOperations() -> [ContainerizationHelperOperation] {
         operations

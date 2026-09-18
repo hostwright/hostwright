@@ -519,6 +519,7 @@ public struct PersistentControlConnectionServer: Sendable {
     peer: AuthenticatedControlPeer,
     request originalRequest: ControlRequestEnvelope
   ) throws -> (response: ControlResponseEnvelope, deadline: ControlTransportDeadline) {
+    try authenticator.validateSession(peer.binding, daemonGeneration: daemonGeneration)
     let deadline = try ControlTransportDeadline(
       timeoutMilliseconds: originalRequest.timeoutMilliseconds!,
       monotonicNow: monotonicNow
@@ -860,6 +861,7 @@ public struct PersistentControlConnectionServer: Sendable {
     try deadline.assertActive()
     var response: ControlResponseEnvelope
     do {
+      try authenticator.validateSession(peer.binding, daemonGeneration: daemonGeneration)
       if let execution = preparedExecution {
         response = try execution(effectiveRequest, deadline)
       } else {

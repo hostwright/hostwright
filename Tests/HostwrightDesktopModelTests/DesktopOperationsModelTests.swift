@@ -749,6 +749,7 @@ final class DesktopOperationsModelTests: XCTestCase {
         model.previewLifecycle(.up, manifestPath: "/Users/tester/project.yml")
         await model.lifecycleTaskForTesting?.value
         model.confirmLifecycle(planSHA256: plan.planSHA256)
+        model.confirmLifecycle(planSHA256: plan.planSHA256)
         await model.lifecycleTaskForTesting?.value
         guard case .succeeded(let result) = model.lifecycleState else {
             return XCTFail("Expected exact confirmed lifecycle success.")
@@ -801,6 +802,157 @@ final class DesktopOperationsModelTests: XCTestCase {
         }
     }
 
+    func testStatusRefreshKeepsDistinctActionHashButInvalidatesChangedStatusHash() async {
+        let statuses = LifecycleStatusSequence([
+            Self.statusJSON, Self.statusJSON,
+            Self.statusJSON(projectName: "demo", planHash: "sha256:changed"),
+        ])
+        let actionHash = String(repeating: "c", count: 64)
+        let transport = ScriptedTransport { request in
+            if request.operation == "daemon" {
+                return Self.connectionResponse(request: request, generation: 3, projectName: "demo")
+            }
+            if request.operation == "status" {
+                return Self.completed(request: request, result: statuses.next())
+            }
+            return Self.cliCompleted(request: request, standardOutput: Self.lifecyclePlanJSON(
+                action: "down", manifestSHA256: String(repeating: "a", count: 64),
+                observationSHA256: String(repeating: "b", count: 64), planSHA256: actionHash
+            ))
+        }
+        let model = DesktopOperationsModel(transport: transport)
+        model.connect()
+        await model.connectionTaskForTesting?.value
+        model.previewLifecycle(.down, manifestPath: "/Users/tester/project.yml")
+        await model.lifecycleTaskForTesting?.value
+        guard case .awaitingConfirmation(let plan) = model.lifecycleState else {
+            return XCTFail("Expected a review even though status and action hashes differ.")
+        }
+        XCTAssertNotEqual(model.projects.first?.planHash, plan.planSHA256)
+        model.refreshStatus()
+        await model.statusRefreshTaskForTesting?.value
+        XCTAssertEqual(model.lifecycleState, .awaitingConfirmation(plan))
+        model.refreshStatus()
+        await model.statusRefreshTaskForTesting?.value
+        XCTAssertEqual(model.lifecycleState, .idle)
+        XCTAssertEqual(model.lastFailure?.code, "lifecycle.staleConfirmation")
+        model.confirmLifecycle(planSHA256: actionHash)
+        XCTAssertFalse(transport.requests.contains { Self.arguments(from: $0).contains("--confirm-plan") })
+    }
+
+    func testCancellingExecutingLifecycleClosesRequestAndFencesFailure() async {
+        let hash = String(repeating: "c", count: 64)
+        let transport = CancellableLifecycleTransport(
+            daemonResponse: Self.daemonHealthJSON, statusResponse: Self.statusJSON,
+            previewResponse: Self.lifecyclePlanJSON(
+                action: "up", manifestSHA256: String(repeating: "a", count: 64),
+                observationSHA256: String(repeating: "b", count: 64), planSHA256: hash
+            )
+        )
+        let model = DesktopOperationsModel(transport: transport)
+        model.connect()
+        await model.connectionTaskForTesting?.value
+        model.previewLifecycle(.up, manifestPath: "/Users/tester/project.yml")
+        await model.lifecycleTaskForTesting?.value
+        model.confirmLifecycle(planSHA256: hash)
+        await fulfillment(of: [transport.started], timeout: 1)
+        guard case .executing = model.lifecycleState else {
+            model.cancelLifecycle()
+            return XCTFail("Expected execution before cancellation.")
+        }
+        let executionTask = model.lifecycleTaskForTesting
+        model.cancelLifecycle()
+        await executionTask?.value
+        XCTAssertTrue(transport.observedCancellation)
+        XCTAssertEqual(model.lifecycleState, .cancelled(.up))
+        XCTAssertNil(model.lastFailure)
+    }
+
+    func testCancellingReviewedPlanSendsNoExecutionRequest() async {
+        let hash = String(repeating: "c", count: 64)
+        let transport = ScriptedTransport { request in
+            if ["daemon", "status"].contains(request.operation) {
+                return Self.connectionResponse(request: request, generation: 3, projectName: "demo")
+            }
+            return Self.cliCompleted(request: request, standardOutput: Self.lifecyclePlanJSON(
+                action: "restart", manifestSHA256: String(repeating: "a", count: 64),
+                observationSHA256: String(repeating: "b", count: 64), planSHA256: hash
+            ))
+        }
+        let model = DesktopOperationsModel(transport: transport)
+        model.connect()
+        await model.connectionTaskForTesting?.value
+        model.previewLifecycle(.restart, manifestPath: "/Users/tester/project.yml")
+        await model.lifecycleTaskForTesting?.value
+        guard case .awaitingConfirmation = model.lifecycleState else {
+            return XCTFail("Expected a plan before cancellation.")
+        }
+        model.cancelLifecycle()
+        model.confirmLifecycle(planSHA256: hash)
+        XCTAssertEqual(model.lifecycleState, .cancelled(.restart))
+        XCTAssertFalse(transport.requests.contains { Self.arguments(from: $0).contains("--confirm-plan") })
+    }
+
+    func testLatePreviewCannotPresentReviewForReplacedProject() async {
+        let statuses = LifecycleStatusSequence([Self.statusJSON, Self.statusJSON(projectName: "replacement")])
+        let gate = LifecyclePreviewGate()
+        defer { gate.release() }
+        let transport = ScriptedTransport { request in
+            if request.operation == "daemon" {
+                return Self.connectionResponse(request: request, generation: 3, projectName: "demo")
+            }
+            if request.operation == "status" {
+                return Self.completed(request: request, result: statuses.next())
+            }
+            gate.wait()
+            return Self.cliCompleted(request: request, standardOutput: Self.lifecyclePlanJSON(
+                action: "up", manifestSHA256: String(repeating: "a", count: 64),
+                observationSHA256: String(repeating: "b", count: 64),
+                planSHA256: String(repeating: "c", count: 64)
+            ))
+        }
+        let model = DesktopOperationsModel(transport: transport)
+        model.connect()
+        await model.connectionTaskForTesting?.value
+        model.previewLifecycle(.up, manifestPath: "/Users/tester/project.yml")
+        let previewTask = model.lifecycleTaskForTesting
+        await fulfillment(of: [gate.started], timeout: 1)
+        model.refreshStatus()
+        await model.statusRefreshTaskForTesting?.value
+        gate.release()
+        await previewTask?.value
+        XCTAssertEqual(model.projects.first?.name, "replacement")
+        XCTAssertEqual(model.lifecycleState, .idle)
+        XCTAssertEqual(model.lastFailure?.code, "lifecycle.staleConfirmation")
+    }
+
+    func testReconnectCancelsBothStreamsAndFencesLateSnapshots() async {
+        let streams = ConcurrentStreamHarness()
+        defer { streams.releaseAll() }
+        let model = DesktopOperationsModel(transport: ScriptedTransport(
+            responseProvider: { request in
+                Self.connectionResponse(request: request, generation: 3, projectName: "demo")
+            }, sessionProvider: { streams.makeSession() }
+        ))
+        model.connect()
+        await model.connectionTaskForTesting?.value
+        model.startEventStream()
+        model.openLogStream(for: "web")
+        let eventTask = model.eventStreamTaskForTesting
+        let logTask = model.logStreamTaskForTesting
+        await fulfillment(of: [streams.eventStarted, streams.logStarted], timeout: 1)
+        model.reconnect()
+        XCTAssertFalse(model.isEventStreamRunning)
+        XCTAssertFalse(model.isLogStreamRunning)
+        streams.releaseAll()
+        await eventTask?.value
+        await logTask?.value
+        await model.connectionTaskForTesting?.value
+        XCTAssertEqual(Set(streams.cancelledSources), Set([.events, .logs]))
+        XCTAssertTrue(model.events.isEmpty)
+        XCTAssertTrue(model.logChunks.isEmpty)
+    }
+
     nonisolated private static let daemonHealthJSON = """
     {
       "schemaVersion": 1,
@@ -826,14 +978,16 @@ final class DesktopOperationsModelTests: XCTestCase {
 
     nonisolated private static let statusJSON = statusJSON(projectName: "demo")
 
-    nonisolated private static func statusJSON(projectName: String) -> ControlPlaneJSONValue {
+    nonisolated private static func statusJSON(
+        projectName: String, planHash: String = "sha256:plan"
+    ) -> ControlPlaneJSONValue {
         .object([
             "manifest": .object([
                 "exists": .bool(true),
                 "path": .string("/Users/tester/project.yml"),
                 "valid": .bool(true),
             ]),
-            "planHash": .string("sha256:plan"),
+            "planHash": .string(planHash),
             "project": .string(projectName),
             "services": .array([
                 .object([
@@ -1192,6 +1346,31 @@ private enum ConnectionInvocation: String, CaseIterable, Sendable {
     }
 }
 
+private final class LifecyclePreviewGate: @unchecked Sendable {
+    let started = XCTestExpectation(description: "preview waits for status replacement")
+    private let semaphore = DispatchSemaphore(value: 0)
+
+    func wait() {
+        started.fulfill()
+        _ = semaphore.wait(timeout: .now() + 5)
+    }
+
+    func release() { semaphore.signal() }
+}
+
+private final class LifecycleStatusSequence: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [ControlPlaneJSONValue]
+
+    init(_ values: [ControlPlaneJSONValue]) { self.values = values }
+
+    func next() -> ControlPlaneJSONValue {
+        lock.lock()
+        defer { lock.unlock() }
+        return values.count > 1 ? values.removeFirst() : values[0]
+    }
+}
+
 private final class ScriptedTransport: DesktopControlTransport, @unchecked Sendable {
     typealias ResponseProvider = @Sendable (ControlRequestEnvelope) throws -> ControlResponseEnvelope
 
@@ -1243,12 +1422,14 @@ private final class CancellableLifecycleTransport: DesktopControlTransport, @unc
 
     private let daemonResponse: String
     private let statusResponse: ControlPlaneJSONValue
+    private let previewResponse: String?
     private let lock = NSLock()
     private var didObserveCancellation = false
 
-    init(daemonResponse: String, statusResponse: ControlPlaneJSONValue) {
+    init(daemonResponse: String, statusResponse: ControlPlaneJSONValue, previewResponse: String? = nil) {
         self.daemonResponse = daemonResponse
         self.statusResponse = statusResponse
+        self.previewResponse = previewResponse
     }
 
     var observedCancellation: Bool {
@@ -1283,6 +1464,17 @@ private final class CancellableLifecycleTransport: DesktopControlTransport, @unc
         _ request: ControlRequestEnvelope,
         cancellation: PersistentControlRequestCancellation
     ) throws -> ControlResponseEnvelope {
+        if let previewResponse, case .object(let body)? = request.body,
+           case .array(let arguments)? = body["arguments"],
+           arguments.contains(.string("--dry-run")) {
+            return ControlResponseEnvelope(
+                requestID: request.requestID, status: .completed, reasonCode: .completed,
+                result: .object([
+                    "exitCode": .integer(0), "resultSchemaVersion": .integer(1),
+                    "standardError": .string(""), "standardOutput": .string(previewResponse),
+                ])
+            )
+        }
         started.fulfill()
         while !cancellation.isCancelled {
             usleep(1_000)

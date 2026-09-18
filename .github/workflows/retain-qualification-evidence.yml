@@ -1,0 +1,56 @@
+name: Retain exact qualification evidence
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Exact qualified merged source commit
+        required: true
+        type: string
+      version:
+        description: Exact qualified product version
+        required: true
+        type: string
+      inventory_sha256:
+        description: SHA256 of prepared qualification export inventory
+        required: true
+        type: string
+permissions: {}
+jobs:
+  retain:
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: [self-hosted, macOS, ARM64, hostwright-release]
+    environment: release
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_COMMIT: ${{ inputs.commit }}
+      RELEASE_VERSION: ${{ inputs.version }}
+      INVENTORY_SHA256: ${{ inputs.inventory_sha256 }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate protected main source and exact local export
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = hostwright/hostwright
+          [[ "$RELEASE_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$INVENTORY_SHA256" =~ ^[a-f0-9]{64}$ ]]
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$RELEASE_COMMIT" origin/main
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          gh api "repos/$GITHUB_REPOSITORY/environments/release" > "$RUNNER_TEMP/release-policy.json"
+          gh api "repos/$GITHUB_REPOSITORY/environments/release/deployment-branch-policies" > "$RUNNER_TEMP/release-branches.json"
+          python3 scripts/release/validate-protection.py "$RUNNER_TEMP/release-policy.json" "$RUNNER_TEMP/release-branches.json"
+          python3 scripts/release/retain-evidence.py --sha256 "$INVENTORY_SHA256" --commit "$RELEASE_COMMIT" --version "$RELEASE_VERSION" --output "$RUNNER_TEMP/qualification-evidence-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hostwright-final-qualification-evidence
+          path: ${{ runner.temp }}/qualification-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 90

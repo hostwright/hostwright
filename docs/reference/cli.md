@@ -115,7 +115,7 @@ hostwright extension check --declaration <absolute-path> --executable <absolute-
 hostwright doctor [--state-db <path>] [--json | --output text|json]
 hostwright-control --version
 hostwright-control --manifest <absolute-path> [--state-db <absolute-path>] [--team-profile <absolute-path>]
-hostwright daemon status|install|validate|bootstrap|start|stop|kickstart|upgrade|rollback|disable|repair|uninstall [options]
+hostwright daemon bootstrap-identities|status|install|validate|bootstrap|start|stop|kickstart|upgrade|rollback|disable|repair|uninstall [options]
 hostwrightd --foreground|--service --config <hostwright.yaml> [--state-db <path>] [options]
 hostwright-dist --version
 hostwright-dist install <artifact-source> --prefix <path> [--state-db <path>] --output json
@@ -594,6 +594,8 @@ Reads the last log lines for a declared and observed Hostwright-managed service 
 Rules:
 
 - default tail is 100 lines;
+- `--runtime-provider auto|apple-cli|containerization` selects the project-bound provider for both bounded log reads and `--follow`; observation and ownership hints must match that provider;
+- `--timeout` and output selectors require `--follow`;
 - maximum tail is clamped to 1000 lines;
 - the adapter receives the exact observed runtime identifier rather than recomputing a container name; the selected state path supplies migrated legacy ownership hints;
 - log output is redacted before display;
@@ -836,11 +838,14 @@ Doctor never creates or migrates state. Existing state must be checkpointed and 
 Controls the exact current-user `dev.hostwright.daemon` LaunchAgent. Text is the default; `--json` and `--output text|json` select versioned machine output.
 
 ```text
+hostwright daemon bootstrap-identities --json
 hostwright daemon status
 hostwright daemon install --daemon-executable <absolute-hostwrightd> --config <absolute-hostwright.yaml>
 hostwright daemon validate|bootstrap|start|stop|kickstart|rollback|disable|repair|uninstall
 hostwright daemon upgrade --daemon-executable <absolute-hostwrightd> --config <absolute-hostwright.yaml>
 ```
+
+`bootstrap-identities` declares the actual CLI and control companion through the local bootstrap transport without installing a service. For a private foreground daemon, use identical documented local path environment settings for bootstrap, daemon, and CLI. Managed installation, upgrade and repair reject nondefault local paths before identity or service mutation. All daemon service commands use the trusted local companion so status and recovery remain usable when the daemon socket is absent. Install, upgrade and repair refresh the actual installed CLI, companion and desktop identities. Identity-only bootstrap accepts no executable/config options.
 
 Install/upgrade accept no PATH lookup: both paths must be absolute, canonical, securely owned, and securely revalidated immediately before bootstrap. Other operations accept no executable/config override. Pending durable intent makes every mutation except `repair` fail with recovery-required status.
 

@@ -6,6 +6,102 @@ import HostwrightCore
 import HostwrightDaemonCore
 
 final class DaemonLifecycleCLITests: XCTestCase {
+    func testManagedInstallUpgradeAndRepairValidateIdentityPathsWithoutBootstrapping() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-managed-bootstrap-\(UUID().uuidString)", isDirectory: true
+        )
+        let controller = DaemonLifecycleController(
+            layout: DaemonLifecycleLayout(homeDirectory: root.path, userID: UInt32(geteuid())),
+            dependencies: DaemonLifecycleDependencies(
+                runLaunchctl: { _, _ in
+                    XCTFail("Invalid identity paths must precede launchctl")
+                    return .notFound
+                },
+                processInventory: {
+                    XCTFail("Invalid identity paths must precede service inspection")
+                    return []
+                },
+                timestamp: { "2026-09-13T17:00:00Z" },
+                operationID: { "00000000-0000-4000-8000-000000000001" }
+            )
+        )
+        for operation in [DaemonLifecycleOperation.install, .upgrade, .repair] {
+            var selectedModes: [Bool] = []
+            let runner = DaemonLifecycleCommandRunner(
+                options: DaemonCLIOptions(
+                    action: .lifecycle(operation), daemonExecutablePath: "/opt/hostwright/bin/hostwrightd",
+                    configPath: "/Users/example/hostwright.yaml", output: .json
+                ),
+                controller: controller,
+                controlIdentityBootstrap: { managed in
+                    selectedModes.append(managed)
+                    XCTFail("Rejected paths must not bootstrap identities")
+                },
+                controlIdentityPathValidation: {
+                    throw HostwrightDiagnostic(code: .daemonDenied, message: "isolated path")
+                }
+            )
+            XCTAssertThrowsError(try runner.run()) { error in
+                XCTAssertEqual((error as? HostwrightDiagnostic)?.code, .daemonDenied)
+            }
+            XCTAssertTrue(selectedModes.isEmpty)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+        }
+    }
+
+    func testIdentityBootstrapParsesWithoutManagedServiceInputs() throws {
+        XCTAssertEqual(
+            try CLICommand.parse(arguments: ["daemon", "bootstrap-identities", "--json"]),
+            .daemon(options: DaemonCLIOptions(
+                action: .bootstrapIdentities, daemonExecutablePath: nil,
+                configPath: nil, output: .json
+            ))
+        )
+        for flag in ["--config", "--daemon-executable"] {
+            XCTAssertThrowsError(try CLICommand.parse(arguments: [
+                "daemon", "bootstrap-identities", flag, "/absolute/path",
+            ]))
+        }
+    }
+
+    func testIdentityOnlyBootstrapDoesNotInspectOrMutateManagedService() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-identity-only-\(UUID().uuidString)", isDirectory: true
+        )
+        let controller = DaemonLifecycleController(
+            layout: DaemonLifecycleLayout(homeDirectory: root.path, userID: UInt32(geteuid())),
+            dependencies: DaemonLifecycleDependencies(
+                runLaunchctl: { _, _ in
+                    XCTFail("Identity-only bootstrap must not operate launchctl")
+                    return .notFound
+                },
+                processInventory: {
+                    XCTFail("Identity-only bootstrap must not inspect managed processes")
+                    return []
+                },
+                timestamp: { "2026-09-13T17:00:00Z" },
+                operationID: { "00000000-0000-4000-8000-000000000001" }
+            )
+        )
+        var selectedModes: [Bool] = []
+        let result = try DaemonLifecycleCommandRunner(
+            options: DaemonCLIOptions(
+                action: .bootstrapIdentities, daemonExecutablePath: nil,
+                configPath: nil, output: .json
+            ),
+            controller: controller,
+            controlIdentityBootstrap: { selectedModes.append($0) }
+        ).run()
+        XCTAssertEqual(selectedModes, [false])
+        XCTAssertEqual(result.exitCode, 0)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: Data(result.standardOutput.utf8)
+        ) as? [String: Any])
+        XCTAssertEqual(object["operation"] as? String, "daemon.bootstrap-identities")
+        XCTAssertEqual(object["status"] as? String, "succeeded")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+    }
+
     func testParserExposesExactDaemonLifecycleSurface() throws {
         XCTAssertEqual(
             try CLICommand.parse(arguments: ["daemon", "status", "--json"]),

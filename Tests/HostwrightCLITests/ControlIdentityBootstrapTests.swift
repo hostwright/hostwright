@@ -2,12 +2,53 @@ import Darwin
 import Foundation
 import HostwrightControlPlane
 import HostwrightControlSecurity
+import HostwrightCore
 import HostwrightState
 import XCTest
 
 @testable import HostwrightCLI
 
 final class ControlIdentityBootstrapTests: XCTestCase {
+    func testManagedBootstrapRejectsIsolatedPathsBeforeCreatingState() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-bootstrap-paths-\(UUID().uuidString)", isDirectory: true
+        )
+        XCTAssertNoThrow(try HostwrightControlIdentityBootstrap.validateManagedPaths(
+            homeDirectory: root.path, environment: [:]
+        ))
+        for key in [
+            HostwrightLocalPathResolver.applicationSupportOverride,
+            HostwrightLocalPathResolver.cacheOverride,
+            HostwrightLocalPathResolver.logOverride,
+            HostwrightLocalPathResolver.stateDatabaseOverride,
+        ] {
+            XCTAssertThrowsError(try HostwrightControlIdentityBootstrap.validateManagedPaths(
+                homeDirectory: root.path,
+                environment: [key: root.appendingPathComponent("isolated").path]
+            )) { error in
+                XCTAssertEqual((error as? HostwrightDiagnostic)?.code, .daemonDenied)
+            }
+            XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+        }
+    }
+
+    func testManagedBootstrapAcceptsOverridesThatResolveToManagedPaths() throws {
+        let home = "/Users/hostwright-bootstrap-path-test"
+        let managed = try HostwrightLocalPathResolver.resolve(
+            homeDirectory: home, environment: [:]
+        )
+        XCTAssertNoThrow(try HostwrightControlIdentityBootstrap.validateManagedPaths(
+            homeDirectory: home,
+            environment: [
+                HostwrightLocalPathResolver.applicationSupportOverride:
+                    managed.layout.applicationSupportDirectory,
+                HostwrightLocalPathResolver.cacheOverride: managed.layout.cacheDirectory,
+                HostwrightLocalPathResolver.logOverride: managed.layout.logDirectory,
+                HostwrightLocalPathResolver.stateDatabaseOverride: managed.stateDatabasePath,
+            ]
+        ))
+    }
+
     func testBootstrapDeclaresFirstIdentityAndAcceptsInstalledRequirementRotation() throws {
         try withStore { store in
             let initial = installedIdentity(hash: "a")

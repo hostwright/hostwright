@@ -40,6 +40,9 @@ struct ContainerizationHelperPersistedRecord: Codable, Sendable {
     let projectUUID: String
     let logicalServiceName: String?
     let image: ContainerizationHelperImageEvidence
+    let cpuCount: Int?
+    let memoryBytes: UInt64?
+    var allocationVerified: Bool?
     var command: [String]
     var environment: [RuntimeInventoryEnvironmentEntry]
     var labels: [RuntimeInventoryLabel]
@@ -49,7 +52,8 @@ struct ContainerizationHelperPersistedRecord: Codable, Sendable {
     var networkPolicyGeneration: Int?
     var networkPolicySHA256: String?
     var networkPolicyVerified: Bool?
-    let mutationContext: RuntimeMutationContext
+    var mutationContext: RuntimeMutationContext
+    var previousMutationContexts: [RuntimeMutationContext]?
     var runtimeInstanceID: String?
     var phase: ContainerizationHelperPersistedPhase
     var failureCategory: String?
@@ -63,6 +67,9 @@ struct ContainerizationHelperPersistedRecord: Codable, Sendable {
         projectUUID = request.projectUUID.lowercased()
         logicalServiceName = request.logicalServiceName
         image = request.image
+        cpuCount = request.cpuCount
+        memoryBytes = request.memoryBytes
+        allocationVerified = nil
         command = request.command
         environment = request.environment
         labels = request.labels
@@ -73,6 +80,7 @@ struct ContainerizationHelperPersistedRecord: Codable, Sendable {
         networkPolicySHA256 = nil
         networkPolicyVerified = nil
         mutationContext = context
+        previousMutationContexts = nil
         runtimeInstanceID = UUID().uuidString.lowercased()
         phase = .preparedCreate
         failureCategory = nil
@@ -81,13 +89,17 @@ struct ContainerizationHelperPersistedRecord: Codable, Sendable {
 
 final class ContainerizationHelperStateStore: @unchecked Sendable {
     static let maximumRecordBytes = 1 * 1_024 * 1_024
+    static let maximumPreviousMutationContexts = 1_024
+    static let maximumMutationHistoryBytes = 512 * 1_024
     static let maximumLogBytes = 8 * 1_024 * 1_024
 
+    private let afterRecordRename: @Sendable () throws -> Void
     let rootURL: URL
     let recordsURL: URL
     let logsURL: URL
 
-    init(rootURL: URL) throws {
+    init(rootURL: URL, afterRecordRename: @escaping @Sendable () throws -> Void = {}) throws {
+        self.afterRecordRename = afterRecordRename
         try Self.validateNormalizedAbsolute(rootURL)
         self.rootURL = rootURL
         self.recordsURL = rootURL.appendingPathComponent("records", isDirectory: true)
@@ -95,6 +107,36 @@ final class ContainerizationHelperStateStore: @unchecked Sendable {
         try Self.preparePrivateDirectory(rootURL)
         try Self.preparePrivateDirectory(recordsURL)
         try Self.preparePrivateDirectory(logsURL)
+    }
+
+    private static func validMutationHistory(_ record: ContainerizationHelperPersistedRecord) -> Bool {
+        guard record.mutationContext.validationIssue == nil else { return false }
+        let history = record.previousMutationContexts ?? []
+        guard history.count <= maximumPreviousMutationContexts,
+              Set(history.map(\.fencingToken)).count == history.count,
+              Set(history.map(\.operationID)).count == history.count,
+              history.allSatisfy({
+                  $0.validationIssue == nil && $0.resourceUUID == record.mutationContext.resourceUUID &&
+                      $0.resourceGeneration == record.mutationContext.resourceGeneration &&
+                      $0.projectResourceUUID == record.mutationContext.projectResourceUUID &&
+                      $0.projectGeneration == record.mutationContext.projectGeneration &&
+                      $0.providerID == record.mutationContext.providerID &&
+                      $0.providerGeneration == record.mutationContext.providerGeneration &&
+                      $0.fencingToken != record.mutationContext.fencingToken &&
+                      $0.operationID != record.mutationContext.operationID
+              }),
+              let bytes = try? JSONEncoder().encode(history),
+              bytes.count <= maximumMutationHistoryBytes else { return false }
+        return true
+    }
+
+    private static func validAllocation(_ record: ContainerizationHelperPersistedRecord) -> Bool {
+        if record.cpuCount == nil && record.memoryBytes == nil {
+            return record.allocationVerified != true
+        }
+        return ContainerizationHelperResourceAllocation.isValid(
+            cpuCount: record.cpuCount, memoryBytes: record.memoryBytes
+        )
     }
 
     func loadRecords() throws -> [ContainerizationHelperPersistedRecord] {
@@ -121,7 +163,8 @@ final class ContainerizationHelperStateStore: @unchecked Sendable {
             } catch {
                 throw ContainerizationHelperPersistenceError.invalidRecord
             }
-            guard Self.validResourceIdentifier(record.resourceIdentifier),
+            guard Self.validAllocation(record), Self.validMutationHistory(record),
+                  Self.validResourceIdentifier(record.resourceIdentifier),
                   Self.digest(record.resourceIdentifier) + ".json" == name,
                   seenIdentifiers.insert(record.resourceIdentifier).inserted else {
                 throw ContainerizationHelperPersistenceError.invalidRecord
@@ -132,7 +175,8 @@ final class ContainerizationHelperStateStore: @unchecked Sendable {
     }
 
     func save(_ record: ContainerizationHelperPersistedRecord) throws {
-        guard Self.validResourceIdentifier(record.resourceIdentifier) else {
+        guard Self.validAllocation(record), Self.validMutationHistory(record),
+              Self.validResourceIdentifier(record.resourceIdentifier) else {
             throw ContainerizationHelperPersistenceError.invalidRecord
         }
         let encoder = JSONEncoder()
@@ -176,6 +220,7 @@ final class ContainerizationHelperStateStore: @unchecked Sendable {
             throw ContainerizationHelperPersistenceError.operationFailed
         }
         removeTemporary = false
+        try afterRecordRename()
         try syncDirectory(recordsURL)
     }
 

@@ -369,8 +369,8 @@ public struct ContainerizationHelperUnixServer: Sendable {
         await withTaskGroup(of: Void.self) { group in
             while !Task.isCancelled, !(await dispatcher.shouldTerminate()) {
                 let now = Self.monotonicMilliseconds()
-                if await tracker.shouldShutdown(nowMilliseconds: now) {
-                    await dispatcher.requestShutdown()
+                if await tracker.shouldShutdown(nowMilliseconds: now),
+                   await dispatcher.requestIdleShutdown() {
                     break
                 }
 

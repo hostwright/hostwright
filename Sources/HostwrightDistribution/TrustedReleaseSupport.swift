@@ -224,13 +224,14 @@ public enum TrustedReleaseSPDXFactory {
         artifact: DistributionArtifactDescriptor
     ) -> DistributionSPDXDocument {
         let packageID = "SPDXRef-Package-Hostwright"
+        let concludedLicense = payloadManifest.schemaVersion >= 3 ? "NOASSERTION" : "Apache-2.0"
         let files = payloadManifest.files.enumerated().map { index, file in
             SPDXFileRecord(
                 fileName: "./\(file.path)",
                 SPDXID: "SPDXRef-File-\(index + 1)",
                 checksums: [SPDXChecksum(algorithm: "SHA256", checksumValue: file.sha256)],
                 fileTypes: [file.path.hasPrefix("bin/") ? "BINARY" : "TEXT"],
-                licenseConcluded: "Apache-2.0",
+                licenseConcluded: payloadManifest.schemaVersion >= 3 && file.path == ContainerizationRuntimeAssetContract.kernelInstallationRelativePath ? "GPL-2.0-only" : concludedLicense,
                 copyrightText: "NOASSERTION"
             )
         }
@@ -252,7 +253,7 @@ public enum TrustedReleaseSPDXFactory {
                     downloadLocation: "NOASSERTION",
                     filesAnalyzed: true,
                     checksums: [SPDXChecksum(algorithm: "SHA256", checksumValue: artifact.sha256)],
-                    licenseConcluded: "Apache-2.0",
+                    licenseConcluded: concludedLicense,
                     licenseDeclared: "Apache-2.0",
                     copyrightText: "NOASSERTION"
                 )
@@ -307,6 +308,9 @@ public enum HomebrewFormulaRenderer {
     public static func render(_ request: HomebrewFormulaRequest) throws -> String {
         try request.validate()
         let version = request.manifest.packageVersion
+        let documentation = ["share/doc/hostwright/LICENSE", "share/doc/hostwright/README.md"]
+            + (request.manifest.schemaVersion >= 3 ? DistributionThirdPartyNotices.payloadModes.keys.sorted() : [])
+        let documentationLines = documentation.map { "      " + $0 }.joined(separator: "\n")
         return """
         class Hostwright < Formula
           desc "Mac-native desired-state control plane for Apple container workloads"
@@ -334,7 +338,10 @@ public enum HomebrewFormulaRenderer {
               system "/usr/bin/codesign", "--verify", "--strict", "--verbose=2", "bin/#{name}"
             end
             bin.install executables.map { |name| "bin/#{name}" }
-            doc.install "share/doc/hostwright/LICENSE", "share/doc/hostwright/README.md"
+            documentation = %w[
+        \(documentationLines)
+            ]
+            doc.install documentation
             pkgshare.install "share/hostwright/examples/hostwright.yaml"
             pkgshare.install "share/hostwright/containerization"
           end

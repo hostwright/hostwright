@@ -2,6 +2,7 @@ import Darwin
 import Foundation
 import HostwrightCore
 import HostwrightStorage
+import HostwrightState
 
 struct DistributionInstaller: Sendable {
     private let runner: DistributionProcessRunner
@@ -532,6 +533,10 @@ public struct DistributionLifecycleRunner: Sendable {
             throw DistributionError.lifecycleFailed("candidate must be a strict semantic-version upgrade")
         }
 
+        var evidenceStateDirectory: URL?
+        defer {
+            if let evidenceStateDirectory { try? FileManager.default.removeItem(at: evidenceStateDirectory) }
+        }
         do {
             var stages: [DistributionStageRecord] = []
             var commands = [
@@ -565,10 +570,21 @@ public struct DistributionLifecycleRunner: Sendable {
                 )
             )
 
+            let stateDirectory = prefix.deletingLastPathComponent()
+                .appendingPathComponent("hostwright-lifecycle-state-" + UUID().uuidString.lowercased())
+            try DistributionFileSystem.createExclusiveDirectory(stateDirectory)
+            evidenceStateDirectory = stateDirectory
+            let statePath = stateDirectory.appendingPathComponent("state.sqlite").path
+            let stateConfiguration = StateStoreConfiguration(explicitDatabasePath: statePath)
+            try SQLiteStateStore(configuration: stateConfiguration).migrate()
+            _ = try lifecycle.prepareStateBinding(prefix: prefix, configuration: stateConfiguration)
+            commands.append(HostwrightEvidenceCommand(command: "prepare exact same-owner lifecycle state configuration",
+                exitCode: 0, durationMilliseconds: 0))
             let upgradeStart = DispatchTime.now().uptimeNanoseconds
             _ = try lifecycle.install(
                 artifact: candidate,
                 prefix: prefix,
+                stateDatabasePath: statePath,
                 cancellation: cancellation
             )
             commands.append(HostwrightEvidenceCommand(

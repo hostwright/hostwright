@@ -124,6 +124,9 @@ public struct DistributionVerifier: Sendable {
             manifest: manifest,
             cancellation: cancellation
         )
+        if manifest.schemaVersion >= 3 {
+            try DistributionThirdPartyNotices.validatePayload(root: extractedRoot, files: manifest.files)
+        }
         verified = true
         return VerifiedDistributionArtifact(
             distributionDirectory: distributionDirectory,

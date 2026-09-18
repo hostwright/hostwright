@@ -1,0 +1,3 @@
+# Preserve the exact upstream bytes recorded by the license inventory.
+/THIRD_PARTY_NOTICES -text whitespace=-blank-at-eol,-blank-at-eof
+/ThirdPartyLicenses/** -text whitespace=-blank-at-eol,-blank-at-eof

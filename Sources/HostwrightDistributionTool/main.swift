@@ -3,6 +3,7 @@ import Dispatch
 import Foundation
 import HostwrightCore
 import HostwrightDistribution
+import HostwrightState
 
 @main
 enum HostwrightDistributionCLI {
@@ -296,6 +297,61 @@ enum HostwrightDistributionCLI {
                 prefix: fileURL(options["--prefix"]!)
             )
             return ToolResult(output: try jsonLine(inspection), exitCode: 0)
+        case "prepare-state":
+            let options = try parse(values, required: ["--prefix", "--output"], optional: ["--state-db", "--scope"])
+            try requireJSONOutput(options)
+            let resolution = try HostwrightLocalPathResolver.resolve(explicitStateDatabasePath: options["--state-db"])
+            let scope = options["--scope"] ?? "local"
+            guard ["local", "owner"].contains(scope) else {
+                throw DistributionError.invalidArguments("prepare-state --scope must be local or owner")
+            }
+            if scope == "owner" {
+                let receipt = try DistributionInstalledLifecycle().prepareOwnerStateReceipt(
+                    prefix: fileURL(options["--prefix"]!),
+                    configuration: StateStoreConfiguration(localPathResolution: resolution), cancellation: cancellation)
+                return ToolResult(output: try jsonLine(receipt), exitCode: 0)
+            }
+            let binding = try DistributionInstalledLifecycle().prepareStateBinding(
+                prefix: fileURL(options["--prefix"]!),
+                configuration: StateStoreConfiguration(localPathResolution: resolution),
+                cancellation: cancellation
+            )
+            return ToolResult(output: try jsonLine(binding), exitCode: 0)
+        case "export-state-challenge":
+            let options = try parse(values, required: ["--prefix", "--output"])
+            try requireJSONOutput(options)
+            let challenge = try DistributionInstalledLifecycle().exportStatePreparationChallenge(
+                prefix: fileURL(options["--prefix"]!), cancellation: cancellation)
+            return ToolResult(output: try jsonLine(challenge), exitCode: 0)
+        case "owner-state-session-child":
+            guard values.isEmpty else { throw DistributionError.invalidArguments("owner session child accepts only bounded stdin frames") }
+            try DistributionOwnerStateSessionService.runRootChild()
+            return ToolResult(output: "", exitCode: 0)
+        case "owner-state-probe-child":
+            guard values.isEmpty else { throw DistributionError.invalidArguments("owner probe child accepts no path or UID flags") }
+            var data = Data()
+            while let chunk = try FileHandle.standardInput.read(upToCount: min(65_536, 1_048_577 - data.count)), !chunk.isEmpty {
+                data.append(chunk)
+                if data.count > 1_048_576 { break }
+            }
+            guard !data.isEmpty, data.count <= 1_048_576 else {
+                throw DistributionError.invalidArguments("owner probe descriptor exceeds the bounded input size")
+            }
+            let request = try JSONDecoder().decode(DistributionOwnerStateProbeRequest.self, from: data)
+            let probe = try DistributionOwnerStateProbe.executeRootChild(request)
+            return ToolResult(output: try jsonLine(probe), exitCode: 0)
+        case "probe-owner-state":
+            let options = try parse(values, required: ["--prefix", "--output"])
+            try requireJSONOutput(options)
+            let probe = try DistributionInstalledLifecycle().probeAdoptedOwnerState(
+                prefix: fileURL(options["--prefix"]!), cancellation: cancellation)
+            return ToolResult(output: try jsonLine(probe), exitCode: 0)
+        case "adopt-owner-state":
+            let options = try parse(values, required: ["--prefix", "--owner-receipt", "--output"])
+            try requireJSONOutput(options)
+            let receipt = try DistributionInstalledLifecycle().adoptOwnerStateReceipt(
+                prefix: fileURL(options["--prefix"]!), receiptPath: fileURL(options["--owner-receipt"]!), cancellation: cancellation)
+            return ToolResult(output: try jsonLine(receipt), exitCode: 0)
         case "adopt-legacy":
             let options = try parse(
                 values,
@@ -632,6 +688,10 @@ enum HostwrightDistributionCLI {
       hostwright-dist package-apply --staged-root '/Library/Application Support/Hostwright/InstallerPayload' --prefix /usr/local --package-id dev.hostwright.cli --package-version <version> --team-id <10-char> --output json
       hostwright-dist package-uninstall --prefix /usr/local --data-policy preserve --output json
       hostwright-dist status --prefix <path> --output json
+      hostwright-dist prepare-state --prefix <path> [--state-db <path>] [--scope local|owner] --output json
+      hostwright-dist export-state-challenge --prefix <path> --output json
+      hostwright-dist adopt-owner-state --prefix <path> --owner-receipt <path> --output json
+      hostwright-dist probe-owner-state --prefix <path> --output json
       hostwright-dist adopt-legacy --prefix <path> [--state-db <path>] --output json
       hostwright-dist recover --prefix <path> --output json
       hostwright-dist rollback --prefix <path> --output json

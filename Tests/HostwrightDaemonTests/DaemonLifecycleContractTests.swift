@@ -5,6 +5,79 @@ import XCTest
 @testable import HostwrightDaemonCore
 
 final class DaemonLifecycleContractTests: XCTestCase {
+    func testVerifiedTransitionHookRunsWithExactTargetAndOwnedJournal() throws {
+        try withLifecycleFixture { fixture in
+            let system = ScriptedDaemonLifecycleSystem(layout: fixture.layout)
+            let controller = DaemonLifecycleController(layout: fixture.layout, dependencies: system.dependencies)
+            var calls = 0
+            _ = try controller.perform(
+                .install, daemonExecutablePath: fixture.daemonPath, configPath: fixture.configPath,
+                verifiedTransition: { status in
+                    calls += 1
+                    XCTAssertEqual(status.daemonExecutablePath, fixture.daemonPath)
+                    XCTAssertEqual(status.configPath, fixture.configPath)
+                    XCTAssertEqual(status.readiness, .running)
+                    XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.layout.journalPath))
+                    let object = try XCTUnwrap(JSONSerialization.jsonObject(
+                        with: Data(contentsOf: URL(fileURLWithPath: fixture.layout.journalPath))
+                    ) as? [String: Any])
+                    XCTAssertEqual(object["checkpoint"] as? String, "status-published")
+                }
+            )
+            XCTAssertEqual(calls, 1)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.layout.journalPath))
+        }
+    }
+
+    func testInvalidUpgradeAndPendingJournalNeverInvokeIdentityRefresh() throws {
+        try withLifecycleFixture { fixture in
+            let system = ScriptedDaemonLifecycleSystem(layout: fixture.layout)
+            let controller = DaemonLifecycleController(layout: fixture.layout, dependencies: system.dependencies)
+            _ = try controller.perform(.install, daemonExecutablePath: fixture.daemonPath, configPath: fixture.configPath)
+            XCTAssertThrowsError(try controller.perform(
+                .upgrade, daemonExecutablePath: "/missing/hostwrightd", configPath: fixture.configPath,
+                verifiedTransition: { _ in XCTFail("Invalid upgrade must not refresh identities") }
+            ))
+            let interrupted = DaemonLifecycleController(
+                layout: fixture.layout, dependencies: system.dependencies, cancelAfter: .intentRecorded
+            )
+            XCTAssertThrowsError(try interrupted.perform(.stop))
+            XCTAssertThrowsError(try controller.perform(
+                .upgrade, daemonExecutablePath: fixture.daemonPath, configPath: fixture.configPath,
+                verifiedTransition: { _ in XCTFail("Pending journal must not refresh identities") }
+            ))
+        }
+    }
+
+    func testLaunchdFailureNeverInvokesIdentityRefresh() throws {
+        try withLifecycleFixture { fixture in
+            let system = ScriptedDaemonLifecycleSystem(layout: fixture.layout)
+            system.failCommand = "bootstrap"
+            let controller = DaemonLifecycleController(layout: fixture.layout, dependencies: system.dependencies)
+            XCTAssertThrowsError(try controller.perform(
+                .install, daemonExecutablePath: fixture.daemonPath, configPath: fixture.configPath,
+                verifiedTransition: { _ in XCTFail("Failed launchd transition must not refresh identities") }
+            ))
+            XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.layout.journalPath))
+        }
+    }
+
+    func testIdentityRefreshFailureRetainsVerifiedJournalForRepair() throws {
+        try withLifecycleFixture { fixture in
+            let system = ScriptedDaemonLifecycleSystem(layout: fixture.layout)
+            let controller = DaemonLifecycleController(layout: fixture.layout, dependencies: system.dependencies)
+            XCTAssertThrowsError(try controller.perform(
+                .install, daemonExecutablePath: fixture.daemonPath, configPath: fixture.configPath,
+                verifiedTransition: { _ in throw DaemonLifecycleError.conflict("bootstrap failed") }
+            ))
+            XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.layout.journalPath))
+            XCTAssertEqual(try controller.status().readiness, .recoveryRequired)
+            var refreshed = false
+            _ = try controller.perform(.repair, verifiedTransition: { _ in refreshed = true })
+            XCTAssertTrue(refreshed)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.layout.journalPath))
+        }
+    }
     func testCurrentUserLayoutUsesOneExactPhaseEightLaunchAgent() {
         let layout = DaemonLifecycleLayout(
             homeDirectory: "/Users/example",
@@ -1307,6 +1380,7 @@ private final class ScriptedDaemonLifecycleSystem: @unchecked Sendable {
     var unmanagedDaemonPaths: [String] = []
     var inventoryPIDOverride: Int32?
     var onCommand: (([String]) -> Void)?
+    var failCommand: String?
     var bootoutObservationDelay = 0
     private var bootoutPending = false
 
@@ -1341,6 +1415,7 @@ private final class ScriptedDaemonLifecycleSystem: @unchecked Sendable {
     private func run(_ arguments: [String]) throws -> DaemonLifecycleProcessResult {
         commands.append(arguments)
         onCommand?(arguments)
+        if arguments.first == failCommand { return .failure(69, "scripted command failure") }
         switch arguments.first {
         case "print":
             let target = arguments[1]

@@ -616,6 +616,7 @@ public struct DaemonLifecycleController: @unchecked Sendable {
     private let dependencies: DaemonLifecycleDependencies
     private let cancellation: SecureSubprocessCancellation
     private let cancelAfter: DaemonLifecycleCheckpoint?
+    private var verifiedTransition: ((DaemonLifecycleStatus) throws -> Void)?
 
     public init(
         layout: DaemonLifecycleLayout = .currentUser,
@@ -760,7 +761,22 @@ public struct DaemonLifecycleController: @unchecked Sendable {
     public func perform(
         _ operation: DaemonLifecycleOperation,
         daemonExecutablePath: String? = nil,
-        configPath: String? = nil
+        configPath: String? = nil,
+        verifiedTransition: ((DaemonLifecycleStatus) throws -> Void)? = nil
+    ) throws -> DaemonLifecycleResult {
+        var controller = self
+        controller.verifiedTransition = verifiedTransition
+        return try controller.performOperation(
+            operation,
+            daemonExecutablePath: daemonExecutablePath,
+            configPath: configPath
+        )
+    }
+
+    private func performOperation(
+        _ operation: DaemonLifecycleOperation,
+        daemonExecutablePath: String?,
+        configPath: String?
     ) throws -> DaemonLifecycleResult {
         try requireNotCancelled()
         if operation != .install,
@@ -1192,7 +1208,6 @@ public struct DaemonLifecycleController: @unchecked Sendable {
             journal = try advance(journal, to: .verified)
             try writeCodable(target, to: layout.statusPath)
             journal = try advance(journal, to: .statusPublished)
-            try removeSecureFileIfPresent(layout.journalPath, expectedSHA256: nil)
             let current = makeStatus(
                 record: target,
                 readiness: target.disabled
@@ -1202,6 +1217,11 @@ public struct DaemonLifecycleController: @unchecked Sendable {
                 pendingOperation: nil,
                 reasonCode: reasonCode
             )
+            if let verifiedTransition {
+                try revalidateTargetInputs(target)
+                try verifiedTransition(current)
+            }
+            try removeSecureFileIfPresent(layout.journalPath, expectedSHA256: nil)
             return DaemonLifecycleResult(
                 operation: initialJournal.operation,
                 changed: true,

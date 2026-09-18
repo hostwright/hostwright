@@ -178,3 +178,106 @@ Exit categories are documented in [Error Codes](error-codes.md). Deterministic c
 ## Qualification Boundary
 
 The installed lifecycle is executable and tested with real artifacts, files, subprocesses, SQLite databases, every reachable mid-mutation cancellation checkpoint, a real current-user launchd service, service replacement/recovery, rollback, legacy adoption, and exact ownership refusal. Phase 02 qualification passed real Developer ID signing/notarization, public-byte verification, vendor-tap installation, Gatekeeper and reboot coverage, clean-Mac upgrade/repair/rollback/uninstall, state and doctor checks, abrupt-power recovery, and exact cleanup. Phase 15 repeats the distribution gate for GA.
+
+
+### Prepared owner state and one-generation rollback
+
+A clean archive or package installation may initially have no state binding. Before
+upgrading an existing installation, initialize release A's selected state and prepare
+that exact configuration as its OS user:
+
+```sh
+hostwright-dist prepare-state --prefix /path/to/user-owned/prefix --output json
+hostwright-dist upgrade --trusted-release-dir /path/to/release-B --team-id TEAMIDENT1 --prefix /path/to/user-owned/prefix --output json
+hostwright-dist rollback --prefix /path/to/user-owned/prefix --output json
+```
+
+`prepare-state` without `--state-db` records the actual selected local path resolution,
+including managed default maintenance paths. For a private foreground database, use
+`--state-db /exact/path/state.sqlite` consistently for initialization and preparation.
+The private receipt binds the installation ID, owner UID, prepared generation, database
+and maintenance lock/journal paths. An upgrade requires preparation for the current
+generation. An existing receipt cannot be rebound to another configuration or owner.
+Prepare again before a subsequent upgrade. A bare `--state-db` upgrade argument does
+not prepare state. Identity refresh must use the same configuration; an unrelated
+database does not authorize installed identity rollback.
+
+Verified rollback restores the immediately prior binary payload and application state,
+while retaining release B's identity authority, RBAC, workload and admission policies,
+plugin security records and revocations. Only exact payload-verified native installed
+identities regain their approved A hashes; an independent hash revocation still refuses
+rollback. It retains all current verified audit key metadata, segments, records and
+retention anchors from release B. Audit history therefore remains
+continuous and the external Keychain head is never rewound. New release A sessions can
+be established by the active native OS owner. Existing bearer sessions are revoked;
+credential-bearing peers retain their proof requirement and become revoked. The native
+owner must issue a fresh peer subject with a new credential. This is not an exact byte rollback
+of the audit tables: release B activity remains in the audit trail. Nonempty audit state
+requires compatible current-schema snapshots. Pre-audit snapshots can be restored only
+when no audit records, configured signing key or external head would be lost. Tampered
+current audit data refuses restoration; rollback does not rehabilitate arbitrary retired
+code hashes. Interrupted lifecycle recovery uses the same owner/configuration fence and
+audit-preserving restoration.
+
+For a system prefix, preparation crosses the ownership boundary in three explicit
+steps. First the payload owner exports a public challenge, then the state owner prepares
+its actual configuration, then root adopts the resulting receipt:
+
+```sh
+sudo hostwright-dist export-state-challenge --prefix /usr/local --output json
+hostwright-dist prepare-state --scope owner --prefix /usr/local --output json
+sudo hostwright-dist adopt-owner-state --prefix /usr/local --owner-receipt /exact/receiptPath/from/prepare-output --output json
+```
+
+Owner preparation reads the root-owned public challenge and verifies the installed
+manifest and every payload digest. It never opens the private root lifecycle journal.
+The private owner receipt lives in the selected local runtime directory and binds the
+installation, generation, payload digest, owner UID, actual configuration, maintenance
+paths and verified state revision. Its per-prefix lock prevents concurrent preparation
+from rebinding another initialized database. Installed `hostwright daemon bootstrap-identities` verifies the exact selected
+configuration and loaded native executable identities while retaining the owner registry
+lock and state fence through preparation, migration and identity refresh. Root adoption verifies the explicit receipt against its current
+private installation status and records a private cross-binding; it opens neither the
+user database nor Keychain. After adoption, root can run
+`hostwright-dist probe-owner-state --prefix /usr/local --output json`. This bounded
+preflight pins the installed signed `hostwright-dist`, launches it through
+`launchctl asuser` for the recorded owner audit session, and irreversibly drops root
+UID/GID and supplementary groups before opening state. The child recomputes the actual
+owner resolution, verifies the current SQLite audit chain against that session's
+Keychain head under its state fence, and returns an operation-bound revision and head.
+An unavailable owner session, signature/configuration mismatch or unhealthy head refuses
+before payload mutation. The probe releases its fence when it returns. Preparation,
+adoption and probing alone do not authorize payload mutation or provide the persistent
+owner-session state fence.
+
+The archive/extracted-package path uses one user for payload, state and Keychain.
+System package transitions use a root-owned private payload journal and a persistent
+owner session launched from an exact signed B helper retained in that transaction.
+Stop the owner daemon/service before a system payload transition. The helper holds the
+owner registry lock and actual state fence through the snapshot, payload publication,
+state migration/restoration and paired commit. SQLite snapshots and operation journals
+remain in the private owner runtime directory; root records their exact operation,
+configuration and digest descriptors without opening SQLite or Keychain. The helper
+refreshes the generation receipt after verified publication; root adopts it before
+releasing the owner lease. Identity bootstrap runs afterward against that proof.
+
+Recovery validates both journals, the retained signed helper, generation/configuration
+binding and immutable snapshot digest before completing the committed generation or
+restoring its verified prior payload/state. An interrupted final cleanup retains a
+protected public preparation marker and must be repaired with `recover` before owner
+preparation resumes. Never change state ownership or widen private policies.
+
+The persistent system path still requires signed owner-session and interrupted-recovery
+VM acceptance; source/parse checks do not establish that gate. In particular, actual
+release A state schema 7 requires an additional durable audit/security ledger once B has
+established audit or identity authority. The current compatibility check refuses that
+rollback before payload mutation. Retaining schema 24 for an old A7 binary or clearing
+its externally anchored head is unsupported. Current-schema continuity tests separately
+verify newer audit history, revocations and credential requirements remain enforced.
+
+Root paired publication and compensation persist a private terminal cleanup proof outside
+transaction directories after the owner lease has closed and service restoration has
+completed. If transaction/helper deletion is interrupted, `recover` validates the exact
+completed status, adopted owner receipt and cleanup dispositions, then finishes file
+cleanup without opening state or Keychain or relaunching the deleted helper. A remaining
+terminal proof requires recovery even when the live operation journal is already gone.

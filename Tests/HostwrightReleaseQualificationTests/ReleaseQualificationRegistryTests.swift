@@ -1682,7 +1682,7 @@ final class ReleaseQualificationRegistryTests: XCTestCase {
             $0 == "feec8f5d501dcce89dcc6ee2b5b155dfd9b1dbb4408efb02399f9b2adfebf588"
         })
         XCTAssertTrue(validators[1].identity.arguments.contains {
-            $0 == "96aad63aa30b08f3749a98901370d9c5cab7bc3acff380f886fbb959f1fe2d1d"
+            $0 == "9ef66e62b83c6ad9556c50a70da9d041d1c2acc847dc23b58cd01b7734635b80"
         })
         XCTAssertEqual(validators[0].durationMilliseconds, 42)
         XCTAssertEqual(validators[0].standardOutputBytes, 22)

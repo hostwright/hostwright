@@ -546,6 +546,72 @@ final class SecureSubprocessTests: XCTestCase {
         }
     }
 
+    func testDetachedProcessRecordsExactNaturalExitAndExcludesForcedTermination() throws {
+        for (executable, expectedStatus) in [("/usr/bin/true", Int32(0)), ("/usr/bin/false", Int32(1))] {
+            let process = try SecureSubprocessRunner().launchDetached(SecureSubprocessRequest(executablePath: executable))
+            defer { process.terminate(graceMilliseconds: 50) }
+            let deadline = DispatchTime.now().uptimeNanoseconds + 2_000_000_000
+            while process.isRunning, DispatchTime.now().uptimeNanoseconds < deadline { usleep(1_000) }
+            XCTAssertFalse(process.isRunning)
+            XCTAssertEqual(process.naturalExitStatus, expectedStatus)
+            XCTAssertEqual(process.naturalExitStatus, expectedStatus)
+        }
+        let terminated = try SecureSubprocessRunner().launchDetached(SecureSubprocessRequest(executablePath: "/usr/bin/yes"))
+        XCTAssertNil(terminated.naturalExitStatus)
+        terminated.terminate(graceMilliseconds: 50)
+        XCTAssertFalse(terminated.isRunning)
+        XCTAssertNil(terminated.naturalExitStatus)
+    }
+
+    func testDetachedProcessStreamDescriptorsRoundTripWithoutInheritingExtraPipeEnds() throws {
+        let input = Pipe()
+        let output = Pipe()
+        defer {
+            try? input.fileHandleForReading.close()
+            try? input.fileHandleForWriting.close()
+            try? output.fileHandleForReading.close()
+            try? output.fileHandleForWriting.close()
+        }
+        let process = try SecureSubprocessRunner().launchDetached(
+            SecureSubprocessRequest(executablePath: "/bin/cat"),
+            standardInput: input.fileHandleForReading.fileDescriptor,
+            standardOutput: output.fileHandleForWriting.fileDescriptor
+        )
+        defer { process.terminate(graceMilliseconds: 50) }
+        try input.fileHandleForReading.close()
+        try output.fileHandleForWriting.close()
+        let data = Data("owner-session duplex native stream\n".utf8)
+        try input.fileHandleForWriting.write(contentsOf: data)
+        try input.fileHandleForWriting.close()
+        let deadline = DispatchTime.now().uptimeNanoseconds + 2_000_000_000
+        while process.isRunning, DispatchTime.now().uptimeNanoseconds < deadline { usleep(1_000) }
+        XCTAssertFalse(process.isRunning)
+        guard !process.isRunning else { return }
+        XCTAssertEqual(try output.fileHandleForReading.readToEnd(), data)
+        XCTAssertEqual(process.naturalExitStatus, 0)
+    }
+
+    func testDetachedNaturalLeaderExitCleansOwnedDescendantGroup() throws {
+        let fixture = try makeCompiledFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let pidFile = fixture.root.appendingPathComponent("detached-descendant-pids")
+        let process = try SecureSubprocessRunner().launchDetached(SecureSubprocessRequest(
+            executablePath: fixture.executable.path, arguments: ["fork-exit", pidFile.path]
+        ))
+        defer { process.terminate(graceMilliseconds: 50) }
+        let deadline = DispatchTime.now().uptimeNanoseconds + 5_000_000_000
+        while process.isRunning, DispatchTime.now().uptimeNanoseconds < deadline { usleep(1_000) }
+        XCTAssertFalse(process.isRunning)
+        XCTAssertEqual(process.naturalExitStatus, 0)
+        guard FileManager.default.fileExists(atPath: pidFile.path) else {
+            return XCTFail("detached child did not record its owned group")
+        }
+        let processIDs = try String(contentsOf: pidFile, encoding: .utf8)
+            .split(whereSeparator: \.isWhitespace).compactMap { pid_t($0) }
+        while processIDs.contains(where: processExists), DispatchTime.now().uptimeNanoseconds < deadline { usleep(10_000) }
+        try assertRecordedProcessesAreGone(pidFile)
+    }
+
     private func makeCompiledFixture() throws -> (root: URL, executable: URL) {
         let root = try makePrivateTemporaryDirectory()
         let executable = root.appendingPathComponent("secure-subprocess-fixture")

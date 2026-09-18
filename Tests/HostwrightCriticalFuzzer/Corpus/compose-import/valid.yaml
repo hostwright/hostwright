@@ -1,0 +1,8 @@
+services:
+  api:
+    image: docker.io/library/alpine:latest
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M

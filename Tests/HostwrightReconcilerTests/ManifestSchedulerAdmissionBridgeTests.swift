@@ -11,6 +11,59 @@ final class ManifestSchedulerAdmissionBridgeTests: XCTestCase {
         limits: HostwrightResourceSet(cpus: 1, memory: "512MiB")
     )
 
+    func testDeferredPoliciesRemainMappableButCannotAuthorizeLocalRuntime() throws {
+        let preference = HostwrightSchedulingPreference(
+            weight: 5,
+            match: HostwrightSchedulingSelector(key: "zone", operator: .in, values: ["east"])
+        )
+        let policies: [(HostwrightSchedulingPolicy, String)] = [
+            (.init(preemption: .lowerPriority), "scheduling.preemption"),
+            (.init(disruption: .init(maxUnavailable: 1)), "scheduling.disruption"),
+            (.init(preferredAffinity: [preference]), "scheduling.preferredAffinity"),
+            (.init(preferredAntiAffinity: [preference]), "scheduling.preferredAntiAffinity"),
+            (.init(topologySpread: [.init(
+                topologyKey: "zone", maxSkew: 1, whenUnsatisfiable: .scheduleAnyway
+            )]), "scheduling.topologySpread.scheduleAnyway")
+        ]
+        for (policy, field) in policies {
+            let manifest = HostwrightManifest(version: 3, project: "demo", services: [
+                HostwrightService(
+                    name: "worker", image: "example.invalid/worker:latest",
+                    resources: Self.executableResources, scheduling: policy
+                )
+            ])
+            XCTAssertEqual(
+                try ManifestSchedulerAdmissionBridge.map(manifest: manifest, subjectID: "owner").count,
+                1
+            )
+            XCTAssertThrowsError(
+                try ManifestSchedulerAdmissionBridge.admit(manifest: manifest, subjectID: "owner")
+            ) { error in
+                XCTAssertEqual(
+                    error as? ManifestSchedulerAdmissionError,
+                    .unsupportedRuntimeClaims([field])
+                )
+            }
+        }
+    }
+
+    func testLocalAdmissionPreservesRequiredConstraintsAndPriority() throws {
+        let selector = HostwrightSchedulingSelector(key: "architecture", operator: .in, values: ["arm64"])
+        let manifest = HostwrightManifest(version: 3, project: "demo", services: [
+            HostwrightService(
+                name: "worker", image: "example.invalid/worker:latest",
+                resources: Self.executableResources,
+                scheduling: .init(priority: 7, requiredAffinity: [selector])
+            )
+        ])
+        let admission = try XCTUnwrap(
+            ManifestSchedulerAdmissionBridge.admit(manifest: manifest, subjectID: "owner").first
+        )
+        XCTAssertEqual(admission.workload.priority, 7)
+        XCTAssertEqual(admission.workload.requirements.affinity.requiredSelectors.count, 1)
+        XCTAssertTrue(admission.runtimeAdmissionBlockers.isEmpty)
+    }
+
     func testMissingResourcesCannotBecomeZeroChargeAdmission() {
         let manifest = HostwrightManifest(
             version: 3,

@@ -792,6 +792,65 @@ public struct SchedulerWorkload:
         requirements.request
     }
 
+    public func capacityCharge(
+        overcommitRatios: [String: SchedulerResourceRatio] = [:]
+    ) throws -> ResourceVector {
+        let request = requirements.request
+        let limit = requirements.limit
+        let resources = Set(request.resourceNames)
+            .union(limit?.resourceNames ?? [])
+            .union(overhead.resourceNames)
+            .union(safetyMargin.resourceNames)
+            .sorted()
+        var values: [String: Int64] = [:]
+        for resource in resources {
+            let requested = request[resource]
+            guard let declaredLimit = limit?[resource] else {
+                let base = requested
+                let withOverhead = try SchedulerCheckedMath.add(
+                    base,
+                    overhead[resource],
+                    field: "workload-overhead-charge:\(resource)"
+                )
+                let charge = try SchedulerCheckedMath.add(
+                    withOverhead,
+                    safetyMargin[resource],
+                    field: "workload-safety-charge:\(resource)"
+                )
+                if charge > 0 {
+                    values[resource] = charge
+                }
+                continue
+            }
+            let ratio = overcommitRatios[resource] ?? .one
+            let scaledLimit = try SchedulerCheckedMath.multiply(
+                declaredLimit,
+                ratio.denominator,
+                field: "limit-charge:\(resource)"
+            )
+            let ratioCharge = try SchedulerCheckedMath.ceilDivide(
+                scaledLimit,
+                by: ratio.numerator,
+                field: "limit-charge:\(resource)"
+            )
+            let base = max(requested, ratioCharge)
+            let withOverhead = try SchedulerCheckedMath.add(
+                base,
+                overhead[resource],
+                field: "workload-overhead-charge:\(resource)"
+            )
+            let charge = try SchedulerCheckedMath.add(
+                withOverhead,
+                safetyMargin[resource],
+                field: "workload-safety-charge:\(resource)"
+            )
+            if charge > 0 {
+                values[resource] = charge
+            }
+        }
+        return try ResourceVector(values)
+    }
+
     private enum CodingKeys: String, CodingKey {
         case requirements
         case priority
@@ -2216,60 +2275,7 @@ private extension SchedulerEngine {
         for workload: SchedulerWorkload,
         input: SchedulerEngineInput
     ) throws -> ResourceVector {
-        let request = workload.requirements.request
-        let limit = workload.requirements.limit
-        let resources = Set(request.resourceNames)
-            .union(limit?.resourceNames ?? [])
-            .union(workload.overhead.resourceNames)
-            .union(workload.safetyMargin.resourceNames)
-            .sorted()
-        var values: [String: Int64] = [:]
-        for resource in resources {
-            let requested = request[resource]
-            guard let declaredLimit = limit?[resource] else {
-                let base = requested
-                let withOverhead = try SchedulerCheckedMath.add(
-                    base,
-                    workload.overhead[resource],
-                    field: "workload-overhead-charge:\(resource)"
-                )
-                let charge = try SchedulerCheckedMath.add(
-                    withOverhead,
-                    workload.safetyMargin[resource],
-                    field: "workload-safety-charge:\(resource)"
-                )
-                if charge > 0 {
-                    values[resource] = charge
-                }
-                continue
-            }
-            let ratio = input.overcommitRatios[resource] ?? .one
-            let scaledLimit = try SchedulerCheckedMath.multiply(
-                declaredLimit,
-                ratio.denominator,
-                field: "limit-charge:\(resource)"
-            )
-            let ratioCharge = try SchedulerCheckedMath.ceilDivide(
-                scaledLimit,
-                by: ratio.numerator,
-                field: "limit-charge:\(resource)"
-            )
-            let base = max(requested, ratioCharge)
-            let withOverhead = try SchedulerCheckedMath.add(
-                base,
-                workload.overhead[resource],
-                field: "workload-overhead-charge:\(resource)"
-            )
-            let charge = try SchedulerCheckedMath.add(
-                withOverhead,
-                workload.safetyMargin[resource],
-                field: "workload-safety-charge:\(resource)"
-            )
-            if charge > 0 {
-                values[resource] = charge
-            }
-        }
-        return try ResourceVector(values)
+        try workload.capacityCharge(overcommitRatios: input.overcommitRatios)
     }
 
     func chargedRequirements(

@@ -41,51 +41,51 @@ final class Phase10StateRecoveryQualificationMigrationTests: XCTestCase {
         }
     }
 
-    func testPhase10V22ToV23MigrationReachesPublicLatestSchema() throws {
-        guard MigrationRunner.latestSchemaVersion == 23 else {
-            throw XCTSkip(
-                "Pending prerequisite: this lane requires v23 to be the current public schema checkpoint; the build reports \(MigrationRunner.latestSchemaVersion), so it does not invent a v23 boundary."
-            )
-        }
-
+    func testPhase10V22MigrationReachesPublicLatestSchema() throws {
+        XCTAssertGreaterThanOrEqual(MigrationRunner.latestSchemaVersion, 23)
         try withTemporaryStore(throughVersion: 22) { store, _ in
-            // Setup-only gap: the partial runner is used only to stage v22;
-            // the v23 step itself is qualified through the public migration.
-            try MigrationRunner().apply(to: store, throughVersion: 22)
             try store.migrate()
-            XCTAssertEqual(try store.schemaVersion(), 23)
-
+            XCTAssertEqual(try store.schemaVersion(), MigrationRunner.latestSchemaVersion)
             try store.migrate()
             XCTAssertEqual(try store.schemaVersion(), MigrationRunner.latestSchemaVersion)
             try store.validateSchema()
         }
     }
 
-    func testPhase10SchedulerStateSurvivesV22ToV23Reopen() throws {
-        guard MigrationRunner.latestSchemaVersion == 23 else {
-            throw XCTSkip(
-                "Pending prerequisite: scheduler v22 state must be reopened through the current v23 schema."
-            )
-        }
-
-        try withTemporaryStore(throughVersion: 22) { store, _ in
-            let prepared = try StateUpgradeService(store: store)
-                .migrateToLatestWithVerifiedBackup()
-            XCTAssertEqual(prepared.migration.fromSchemaVersion, 22)
-            XCTAssertEqual(prepared.migration.toSchemaVersion, 23)
-            let backup = try XCTUnwrap(prepared.rollbackSnapshot)
-            XCTAssertEqual(backup.stateSchemaVersion, 22)
-
+    func testPhase10SchedulerStateSurvivesV23UpgradeAndReopen() throws {
+        XCTAssertGreaterThan(MigrationRunner.latestSchemaVersion, 23)
+        try withTemporaryStore(throughVersion: 23) { store, _ in
             let snapshot = try SchedulerNodeCapacitySnapshot(
                 nodeID: UUID(uuidString: "00000000-0000-0000-0000-000000000a31")!,
                 capacity: try ResourceVector(["cpu": 4]),
                 generation: 1,
                 observedAt: "2026-08-05T12:00:00Z"
             )
-            _ = try store.schedulerAdmissions.recordNodeCapacity(snapshot: snapshot)
-
-            XCTAssertEqual(try store.schemaVersion(), 23)
-
+            // The current repository refuses writes to old schemas; stage the v23 row only.
+            let connection = try SQLiteConnection(
+                path: store.path, createIfNeeded: false, profile: .portableArtifact
+            )
+            try connection.run(
+                """
+                INSERT INTO scheduler_node_capacity_snapshots (
+                    node_uuid, capacity_json, capacity_digest, generation, observed_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                bindings: [
+                    .text(snapshot.nodeID.uuidString.lowercased()),
+                    .text(SchedulerAdmissionCanonicalJSON.vectorJSON(snapshot.capacity)),
+                    .text(snapshot.capacityDigest), .int64(snapshot.generation),
+                    .text(snapshot.observedAt), .text(snapshot.observedAt),
+                ]
+            )
+            try connection.close()
+            let prepared = try StateUpgradeService(store: store)
+                .migrateToLatestWithVerifiedBackup()
+            XCTAssertEqual(prepared.migration.fromSchemaVersion, 23)
+            XCTAssertEqual(prepared.migration.toSchemaVersion, MigrationRunner.latestSchemaVersion)
+            let backup = try XCTUnwrap(prepared.rollbackSnapshot)
+            XCTAssertEqual(backup.stateSchemaVersion, 23)
+            XCTAssertEqual(try store.schemaVersion(), MigrationRunner.latestSchemaVersion)
             let reopened = SQLiteStateStore(path: store.path)
             XCTAssertEqual(
                 try reopened.schedulerAdmissions.nodeCapacity(nodeID: snapshot.nodeID),
@@ -93,7 +93,7 @@ final class Phase10StateRecoveryQualificationMigrationTests: XCTestCase {
             )
             try reopened.validateSchema()
             try reopened.migrate()
-            XCTAssertEqual(try reopened.schemaVersion(), 23)
+            XCTAssertEqual(try reopened.schemaVersion(), MigrationRunner.latestSchemaVersion)
         }
     }
 

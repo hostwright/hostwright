@@ -237,6 +237,15 @@ public struct ContainerizationHelperLogChunk: Equatable, Sendable {
     }
 }
 
+public enum ContainerizationHelperResourceAllocation {
+    public static func isValid(cpuCount: Int?, memoryBytes: UInt64?) -> Bool {
+        guard let cpuCount, let memoryBytes else { return false }
+        // The SDK converts CPU quota and memory limits to signed cgroup values.
+        return cpuCount > 0 && cpuCount <= Int.max / 100_000 &&
+            memoryBytes > 0 && memoryBytes <= UInt64(Int64.max)
+    }
+}
+
 public struct ContainerizationHelperCreatePayload: Codable, Equatable, Sendable {
     public let resourceIdentifier: String
     public let resourceUUID: String
@@ -247,6 +256,8 @@ public struct ContainerizationHelperCreatePayload: Codable, Equatable, Sendable 
     public let environment: [RuntimeInventoryEnvironmentEntry]
     public let labels: [RuntimeInventoryLabel]
     public let networks: [RuntimeDesiredNetworkAttachment]
+    public let cpuCount: Int?
+    public let memoryBytes: UInt64?
     public let networkPolicy: HostwrightServiceNetworkPolicy?
 
     public init(
@@ -259,6 +270,8 @@ public struct ContainerizationHelperCreatePayload: Codable, Equatable, Sendable 
         environment: [RuntimeInventoryEnvironmentEntry],
         labels: [RuntimeInventoryLabel],
         networks: [RuntimeDesiredNetworkAttachment] = [],
+        cpuCount: Int? = nil,
+        memoryBytes: UInt64? = nil,
         networkPolicy: HostwrightServiceNetworkPolicy? = nil
     ) {
         self.resourceIdentifier = resourceIdentifier
@@ -270,6 +283,8 @@ public struct ContainerizationHelperCreatePayload: Codable, Equatable, Sendable 
         self.environment = environment
         self.labels = labels
         self.networks = networks
+        self.cpuCount = cpuCount
+        self.memoryBytes = memoryBytes
         self.networkPolicy = networkPolicy
     }
 
@@ -283,6 +298,8 @@ public struct ContainerizationHelperCreatePayload: Codable, Equatable, Sendable 
         case environment
         case labels
         case networks
+        case cpuCount
+        case memoryBytes
         case networkPolicy
     }
 
@@ -315,6 +332,8 @@ public struct ContainerizationHelperCreatePayload: Codable, Equatable, Sendable 
                 [RuntimeDesiredNetworkAttachment].self,
                 forKey: .networks
             ) ?? [],
+            cpuCount: try values.decodeIfPresent(Int.self, forKey: .cpuCount),
+            memoryBytes: try values.decodeIfPresent(UInt64.self, forKey: .memoryBytes),
             networkPolicy: try values.decodeIfPresent(
                 HostwrightServiceNetworkPolicy.self,
                 forKey: .networkPolicy
@@ -332,6 +351,8 @@ public struct ContainerizationHelperCreatePayload: Codable, Equatable, Sendable 
         try values.encode(command, forKey: .command)
         try values.encode(environment, forKey: .environment)
         try values.encode(labels, forKey: .labels)
+        try values.encodeIfPresent(cpuCount, forKey: .cpuCount)
+        try values.encodeIfPresent(memoryBytes, forKey: .memoryBytes)
         if !networks.isEmpty {
             try values.encode(networks, forKey: .networks)
         }
@@ -342,10 +363,13 @@ public struct ContainerizationHelperCreatePayload: Codable, Equatable, Sendable 
 public struct ContainerizationHelperMutationPayload: Codable, Equatable, Sendable {
     public let resourceIdentifier: String
     public let resourceUUID: String
+    public let expectedOwnership: RuntimeInventoryOwnershipEvidence?
 
-    public init(resourceIdentifier: String, resourceUUID: String) {
+    public init(resourceIdentifier: String, resourceUUID: String,
+                expectedOwnership: RuntimeInventoryOwnershipEvidence? = nil) {
         self.resourceIdentifier = resourceIdentifier
         self.resourceUUID = resourceUUID
+        self.expectedOwnership = expectedOwnership
     }
 }
 
@@ -454,9 +478,14 @@ public protocol ContainerizationHelperBackend: Sendable {
     ) async throws -> ContainerizationHelperMutationResult
     func cancel(requestID: UUID) async
     func shutdown() async
+    // True requires atomic admission fencing and completed shutdown with no retained resources.
+    // Unknown resource state or an in-flight operation must return false.
+    func shutdownIfIdle() async -> Bool
 }
 
 public extension ContainerizationHelperBackend {
+    func shutdownIfIdle() async -> Bool { false }
+
     func networkCapabilities() async throws -> RuntimeNetworkProviderCapabilities {
         .appleContainerizationUnavailable
     }
@@ -539,6 +568,8 @@ public actor ContainerizationHelperDispatcher {
     private var acceptedRequestIDs: Set<UUID> = []
     private var activeCancellations: [UUID: @Sendable () -> Void] = [:]
     private var shutdownRequested = false
+    private var idleShutdownPending = false
+    private var activeDispatches = 0
 
     public init(
         backend: any ContainerizationHelperBackend,
@@ -551,6 +582,11 @@ public actor ContainerizationHelperDispatcher {
     }
 
     public func dispatch(frame: Data, nowUnixMilliseconds: Int64) async throws -> Data {
+        guard !shutdownRequested, !idleShutdownPending else {
+            throw ContainerizationHelperServiceError.shuttingDown
+        }
+        activeDispatches += 1
+        defer { activeDispatches -= 1 }
         let payload = try ContainerizationHelperFraming.decodeSingleFrame(frame)
         let operation: ContainerizationHelperOperation
         do {
@@ -861,6 +897,17 @@ public actor ContainerizationHelperDispatcher {
         shutdownRequested
     }
 
+    public func requestIdleShutdown() async -> Bool {
+        guard !shutdownRequested, !idleShutdownPending, activeDispatches == 0,
+              activeCancellations.isEmpty else { return false }
+        idleShutdownPending = true
+        defer { idleShutdownPending = false }
+        // The backend must atomically fence admission before releasing owned state.
+        guard await backend.shutdownIfIdle() else { return false }
+        shutdownRequested = true
+        return true
+    }
+
     public func requestShutdown() async {
         guard !shutdownRequested else { return }
         shutdownRequested = true
@@ -887,6 +934,16 @@ public actor ContainerizationHelperDispatcher {
             validate: { request in
                 _ = try Self.requireMutation(request, resourceUUID: request.payload.resourceUUID)
                 try Self.requireText(request.payload.resourceIdentifier)
+                if let prior = request.payload.expectedOwnership {
+                    guard HostwrightResourceUUID.isValid(prior.resourceUUID),
+                          HostwrightResourceUUID.isValid(prior.projectUUID),
+                          HostwrightResourceUUID.isValid(prior.fencingToken),
+                          prior.providerID == .appleContainerization,
+                          prior.resourceGeneration > 0, prior.projectGeneration > 0,
+                          prior.providerGeneration > 0 else {
+                        throw ContainerizationHelperServiceError.invalidPayload
+                    }
+                }
             },
             action: { request in
                 let context = try Self.requireMutation(request, resourceUUID: request.payload.resourceUUID)
@@ -1017,6 +1074,11 @@ public actor ContainerizationHelperDispatcher {
     }
 
     private static func validateCreate(_ payload: ContainerizationHelperCreatePayload) throws {
+        guard ContainerizationHelperResourceAllocation.isValid(
+            cpuCount: payload.cpuCount, memoryBytes: payload.memoryBytes
+        ) else {
+            throw ContainerizationHelperServiceError.invalidPayload
+        }
         try requireText(payload.resourceIdentifier)
         try requireText(payload.image.reference)
         guard HostwrightResourceUUID.isValid(payload.resourceUUID),

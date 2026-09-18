@@ -72,6 +72,11 @@ public enum ManifestRuntimeAdmissionBlocker:
 {
     case providerClaimUnsupported = "scheduling.provider"
     case acceleratorClaimsUnsupported = "scheduling.acceleratorClaims"
+    case preemptionUnsupported = "scheduling.preemption"
+    case disruptionUnsupported = "scheduling.disruption"
+    case preferredAffinityUnsupported = "scheduling.preferredAffinity"
+    case preferredAntiAffinityUnsupported = "scheduling.preferredAntiAffinity"
+    case topologyOptimizationUnsupported = "scheduling.topologySpread.scheduleAnyway"
 
     public var stableKey: String {
         "runtime-admission-blocker:\(rawValue)"
@@ -355,6 +360,21 @@ public enum ManifestSchedulerAdmissionBridge {
         }
         if !policy.acceleratorClaims.isEmpty {
             blockers.append(.acceleratorClaimsUnsupported)
+        }
+        if policy.preemption != .disabled {
+            blockers.append(.preemptionUnsupported)
+        }
+        if let disruption = policy.disruption, !disruption.isEmpty {
+            blockers.append(.disruptionUnsupported)
+        }
+        if !policy.preferredAffinity.isEmpty {
+            blockers.append(.preferredAffinityUnsupported)
+        }
+        if !policy.preferredAntiAffinity.isEmpty {
+            blockers.append(.preferredAntiAffinityUnsupported)
+        }
+        if policy.topologySpread.contains(where: { $0.whenUnsatisfiable == .scheduleAnyway }) {
+            blockers.append(.topologyOptimizationUnsupported)
         }
         return blockers
     }

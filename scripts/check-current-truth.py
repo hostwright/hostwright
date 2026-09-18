@@ -79,8 +79,8 @@ def main() -> int:
     roadmap = read("docs/roadmap/v0.0.2/IMPLEMENTATION_PLAN.md")
     historical_plan = read("docs/IMPLEMENTATION_PLAN.md")
 
-    version_match = re.search(r'version = "(0\.0\.2-dev\.1[0-4])"', identity)
-    require(version_match is not None, "HostwrightIdentity version is not a supported v0.0.2 development build", errors)
+    version_match = re.search(r'version = "(0\.0\.2(?:-dev\.[1-9][0-9]{0,2}|-rc\.[1-9][0-9]?)?)"', identity)
+    require(version_match is not None, "HostwrightIdentity version is not a supported v0.0.2 release channel", errors)
     if version_match is not None:
         version_golden = json.loads(read("contracts/v0.0.2/versions.json"))
         require(

@@ -44,13 +44,8 @@ public struct CLIControlRoute: Equatable, Sendable {
         case .help, .version:
             transport = .localPresentation
             execution = .unary
-        case .daemon(let options):
-            switch options.action {
-            case .lifecycle(.install), .lifecycle(.repair), .lifecycle(.uninstall):
-                transport = .bootstrapAPI
-            default:
-                transport = .persistentControlAPI
-            }
+        case .daemon:
+            transport = .bootstrapAPI
             execution = .unary
         case .interactive(let options):
             transport = .persistentControlAPI
@@ -192,6 +187,12 @@ public struct CLIControlRoute: Equatable, Sendable {
             return nil
         }
         if fields["dockerSchemaVersion"] != nil || fields["dockerEndpoint"] != nil {
+            guard expectedTransport == .persistentControlAPI else {
+                throw HostwrightDiagnostic(
+                    code: .controlAPIInvalid,
+                    message: "Docker requests require the persistent authenticated Control API."
+                )
+            }
             return try validateDocker(request: request, fields: fields)
         }
         guard Set(fields.keys) == [
@@ -499,7 +500,7 @@ public struct CLIControlRoute: Equatable, Sendable {
         case .daemon(let options):
             switch options.action {
             case .status, .lifecycle(.validate): return false
-            case .lifecycle: return true
+            case .bootstrapIdentities, .lifecycle: return true
             }
         case .restartBudget(let options):
             if case .status = options.action { return false }

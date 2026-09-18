@@ -60,6 +60,7 @@ public struct SecretCLIOptions: Equatable, Sendable {
 
 public enum DaemonCLIAction: Equatable, Sendable {
     case status
+    case bootstrapIdentities
     case lifecycle(DaemonLifecycleOperation)
 }
 
@@ -295,7 +296,7 @@ public enum CLICommand: Equatable, Sendable {
     )
     case lifecycle(options: LifecycleCLIOptions)
     case interactive(options: InteractiveCLIOptions)
-    case logs(serviceName: String, path: String, tail: Int, stateDatabasePath: String?)
+    case logs(serviceName: String, path: String, tail: Int, stateDatabasePath: String?, runtimeProvider: RuntimeProviderSelection = .automatic)
     case events(
         stateDatabasePath: String?,
         projectName: String?,
@@ -421,11 +422,13 @@ public enum CLICommand: Equatable, Sendable {
     private static func daemonCommand(arguments: [String]) throws -> CLICommand {
         guard arguments.count >= 2 else {
             throw CLIUsageError(
-                "daemon requires status, install, validate, bootstrap, start, stop, kickstart, upgrade, rollback, disable, repair, or uninstall."
+                "daemon requires bootstrap-identities, status, install, validate, bootstrap, start, stop, kickstart, upgrade, rollback, disable, repair, or uninstall."
             )
         }
         let action: DaemonCLIAction
-        if arguments[1] == "status" {
+        if arguments[1] == "bootstrap-identities" {
+            action = .bootstrapIdentities
+        } else if arguments[1] == "status" {
             action = .status
         } else if let operation = DaemonLifecycleOperation(rawValue: arguments[1]) {
             action = .lifecycle(operation)
@@ -2009,16 +2012,17 @@ public enum CLICommand: Equatable, Sendable {
                 )
             )
         }
-        guard !runtimeProviderSelected, !timeoutSelected, !outputSelected else {
+        guard !timeoutSelected, !outputSelected else {
             throw CLIUsageError(
-                "logs runtime-provider, timeout, and output selectors require --follow."
+                "logs timeout and output selectors require --follow."
             )
         }
         return .logs(
             serviceName: serviceName,
             path: path ?? HostwrightIdentity.manifestFileName,
             tail: tail,
-            stateDatabasePath: stateDatabasePath
+            stateDatabasePath: stateDatabasePath,
+            runtimeProvider: runtimeProvider
         )
     }
 
@@ -2358,6 +2362,9 @@ public enum CLICommand: Equatable, Sendable {
                 }
                 projectName = arguments[index + 1]
                 index += 2
+            case "--json":
+                output = .json
+                index += 1
             case "--output":
                 output = try parseOutputValue(arguments: arguments, index: index, commandName: "recovery")
                 index += 2

@@ -3,7 +3,49 @@ import Darwin
 import Foundation
 import HostwrightCore
 import HostwrightState
+import HostwrightControlPlane
+import HostwrightControlSecurity
 import HostwrightStorage
+
+public struct DistributionPreparedStateBinding: Codable, Equatable, Sendable {
+    public let schemaVersion: Int
+    public let installationID: String
+    public let preparedGeneration: Int
+    public let ownerUID: UInt32
+    public let databasePath: String
+    public let localPathResolution: HostwrightLocalPathResolution?
+    public let maintenancePaths: StateMaintenancePaths
+
+    public var configuration: StateStoreConfiguration {
+        localPathResolution.map(StateStoreConfiguration.init(localPathResolution:))
+            ?? StateStoreConfiguration(explicitDatabasePath: databasePath)
+    }
+}
+
+public struct DistributionStatePreparationChallenge: Codable, Equatable, Sendable {
+    public let schemaVersion: Int
+    public let installationID: String
+    public let generation: Int
+    public let prefix: String
+    public let installedManifestSHA256: String
+
+    public func validate() throws {
+        guard schemaVersion == 1, let id = UUID(uuidString: installationID),
+              id.uuidString.lowercased() == installationID, generation >= 1,
+              try HostwrightLocalPathResolver.normalizedAbsolutePath(prefix, role: "installation prefix") == prefix,
+              installedManifestSHA256.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil else {
+            throw DistributionError.lifecycleFailed("state preparation challenge is invalid")
+        }
+    }
+}
+
+public struct DistributionOwnerStateReceipt: Codable, Equatable, Sendable {
+    public let schemaVersion: Int
+    public let challenge: DistributionStatePreparationChallenge
+    public let binding: DistributionPreparedStateBinding
+    public let preparedRevision: StateUpgradeRevision
+    public let receiptPath: String
+}
 
 public enum DistributionLifecycleReadiness: String, Codable, Equatable, Sendable {
     case notInstalled = "not-installed"
@@ -379,6 +421,584 @@ public struct DistributionInstalledLifecycle: Sendable {
         self.interruptAfterPublishedTransactionCleanup = interruptAfterPublishedTransactionCleanup
     }
 
+    public func exportStatePreparationChallenge(
+        prefix: URL,
+        cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation()
+    ) throws -> DistributionStatePreparationChallenge {
+        try validatePrefix(prefix)
+        try validateFoundation(prefix)
+        let lock = try DistributionLifecycleFileLock(prefix: prefix, cancellation: cancellation)
+        defer { lock.release() }
+        try refusePendingJournal(prefix)
+        let status = try requiredStatus(prefix)
+        try verifyOwnedFiles(status.installedManifest, prefix: prefix, cancellation: cancellation)
+        let challenge = DistributionStatePreparationChallenge(schemaVersion: 1,
+            installationID: status.installationID, generation: status.generation, prefix: prefix.path,
+            installedManifestSHA256: try DistributionHash.sha256(fileURL: installManifestURL(prefix)))
+        try challenge.validate()
+        try writeCanonicalReplacing(challenge, to: statePreparationChallengeURL(prefix), mode: 0o644)
+        return challenge
+    }
+
+    public func prepareOwnerStateReceipt(
+        prefix: URL,
+        configuration: StateStoreConfiguration,
+        requireEmptyIdentityAuthority: Bool = false,
+        cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation()
+    ) throws -> DistributionOwnerStateReceipt {
+        guard geteuid() != 0 else {
+            throw DistributionError.lifecycleFailed("owner state preparation must run as the state owner")
+        }
+        let challenge = try validatedPublicStateChallenge(prefix: prefix, cancellation: cancellation)
+        try configuration.validateExistingPath()
+        guard configuration.localPathResolution != nil else {
+            throw DistributionError.lifecycleFailed("owner preparation requires actual selected local path resolution")
+        }
+        try configuration.prepareRuntimeSupport()
+        let path = try ownerStateReceiptURL(prefix: prefix, configuration: configuration)
+        let receiptLock = try acquireOwnerStateReceiptLock(path: path.path + ".lock", cancellation: cancellation)
+        defer { _ = flock(receiptLock, LOCK_UN); close(receiptLock) }
+        let service = StateUpgradeService(store: SQLiteStateStore(configuration: configuration))
+        return try service.withExclusiveLifecycleFence {
+            if requireEmptyIdentityAuthority,
+               try SQLiteStateStore(configuration: configuration).controlIdentities.hasEstablishedIdentityAuthority() {
+                throw DistributionError.lifecycleFailed("automatic owner preparation requires empty identity authority")
+            }
+            guard let revision = try service.verifiedRevision() else {
+                throw DistributionError.lifecycleFailed("owner preparation requires initialized same-owner state")
+            }
+            if DistributionFileSystem.entryExists(path) {
+                let previous: DistributionOwnerStateReceipt = try readStateBindingJSON(path, ownerUID: geteuid(), mode: 0o600)
+                guard previous.binding.ownerUID == geteuid(), previous.binding.configuration == configuration,
+                      previous.challenge.installationID == challenge.installationID else {
+                    throw DistributionError.lifecycleFailed("owner receipt cannot replace an installation owner/configuration")
+                }
+            }
+            let binding = DistributionPreparedStateBinding(schemaVersion: 1,
+                installationID: challenge.installationID, preparedGeneration: challenge.generation,
+                ownerUID: geteuid(), databasePath: configuration.databasePath,
+                localPathResolution: configuration.localPathResolution,
+                maintenancePaths: try configuration.maintenancePaths())
+            let receipt = DistributionOwnerStateReceipt(schemaVersion: 1, challenge: challenge,
+                binding: binding, preparedRevision: revision, receiptPath: path.path)
+            guard try validatedPublicStateChallenge(prefix: prefix, cancellation: cancellation) == challenge else {
+                throw DistributionError.lifecycleFailed("installed payload changed during owner preparation")
+            }
+            try writeCanonicalReplacing(receipt, to: path, mode: 0o600)
+            return try preparedOwnerStateReceipt(prefix: prefix, configuration: configuration)
+        }
+    }
+
+    public func withOwnerStateBootstrap<T>(
+        prefix: URL,
+        configuration: StateStoreConfiguration,
+        installerIdentity: CodeIdentity,
+        companionIdentity: CodeIdentity?,
+        desktopIdentity: CodeIdentity?,
+        _ body: (SQLiteStateStore) throws -> T
+    ) throws -> T {
+        guard geteuid() != 0, getuid() == geteuid() else {
+            throw DistributionError.lifecycleFailed("Installed identity bootstrap requires the unprivileged state owner.")
+        }
+        try configuration.validateExistingPath()
+        try configuration.prepareRuntimeSupport()
+        let path = try ownerStateReceiptURL(prefix: prefix, configuration: configuration)
+        let lock = try acquireOwnerStateReceiptLock(path: path.path + ".lock", cancellation: SecureSubprocessCancellation())
+        defer { _ = flock(lock, LOCK_UN); close(lock) }
+        let store = SQLiteStateStore(configuration: configuration)
+        let service = StateUpgradeService(store: store)
+        return try service.withExclusiveLifecycleFence {
+            let challenge = try validatedPublicStateChallenge(prefix: prefix)
+            let manifest: DistributionInstallManifest = try readStateBindingJSON(
+                installManifestURL(prefix), ownerUID: 0, mode: 0o644)
+            let selected: [(String, CodeIdentity?)] = [
+                ("bin/hostwright", installerIdentity),
+                ("bin/hostwright-control", companionIdentity),
+                ("libexec/hostwright/Hostwright.app/Contents/MacOS/hostwright-desktop", desktopIdentity)
+            ]
+            for (relativePath, capturedIdentity) in selected {
+                guard let capturedIdentity else { continue }
+                guard manifest.files.contains(where: { $0.path == relativePath }),
+                      capturedIdentity.validationMode == .installedRequirement,
+                      capturedIdentity.teamIdentifier == ControlPeerTrustPolicy.installedTeamIdentifier,
+                      try DarwinCurrentControlCodeIdentity.inspect(executablePath: prefix.appendingPathComponent(relativePath).path) == capturedIdentity else {
+                    throw DistributionError.lifecycleFailed("Executing bootstrap code differs from the current installed generation.")
+                }
+            }
+            let keys = try MacOSAuditSigningKeyStore(service: MacOSAuditSigningKeyStore.serviceName(stateDatabasePath: store.path))
+            let receiptExists = DistributionFileSystem.entryExists(path)
+            try store.verifyIdentityBootstrapContinuity(keyStore: keys, requireEmptyAuthority: !receiptExists)
+            if receiptExists {
+                _ = try preparedOwnerStateReceipt(prefix: prefix, configuration: configuration)
+            } else {
+                _ = try service.migrateToLatestWithVerifiedBackup()
+                guard let revision = try service.verifiedRevision(),
+                      challenge == (try validatedPublicStateChallenge(prefix: prefix)),
+                      let resolution = configuration.localPathResolution else {
+                    throw DistributionError.lifecycleFailed("Initial owner preparation lost its exact installed state binding.")
+                }
+                let binding = DistributionPreparedStateBinding(schemaVersion: 1,
+                    installationID: challenge.installationID, preparedGeneration: challenge.generation,
+                    ownerUID: geteuid(), databasePath: configuration.databasePath,
+                    localPathResolution: resolution, maintenancePaths: try configuration.maintenancePaths())
+                let receipt = DistributionOwnerStateReceipt(schemaVersion: 1, challenge: challenge,
+                    binding: binding, preparedRevision: revision, receiptPath: path.path)
+                try validateOwnerStateReceipt(receipt, prefix: prefix)
+                try writeCanonicalReplacing(receipt, to: path, mode: 0o600)
+            }
+            _ = try preparedOwnerStateReceipt(prefix: prefix, configuration: configuration)
+            _ = try service.migrateToLatestWithVerifiedBackup()
+            let result = try body(store)
+            guard challenge == (try validatedPublicStateChallenge(prefix: prefix)) else {
+                throw DistributionError.lifecycleFailed("Installed generation changed during identity bootstrap.")
+            }
+            return result
+        }
+    }
+
+    public func preparedOwnerStateReceipt(
+        prefix: URL,
+        configuration: StateStoreConfiguration
+    ) throws -> DistributionOwnerStateReceipt {
+        guard geteuid() != 0 else {
+            throw DistributionError.lifecycleFailed("owner configuration proof must be checked as the owner")
+        }
+        try configuration.validateExistingPath()
+        let path = try ownerStateReceiptURL(prefix: prefix, configuration: configuration)
+        let receipt: DistributionOwnerStateReceipt = try readStateBindingJSON(path, ownerUID: geteuid(), mode: 0o600)
+        try validateOwnerStateReceipt(receipt, prefix: prefix)
+        guard receipt.binding.ownerUID == geteuid(), receipt.binding.configuration == configuration,
+              receipt.receiptPath == path.path,
+              receipt.challenge == (try validatedPublicStateChallenge(prefix: prefix)) else {
+            throw DistributionError.lifecycleFailed("owner configuration proof does not match exact selected state and payload")
+        }
+        return receipt
+    }
+
+    public func adoptOwnerStateReceipt(
+        prefix: URL,
+        receiptPath: URL,
+        cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation()
+    ) throws -> DistributionOwnerStateReceipt {
+        guard geteuid() == 0 else {
+            throw DistributionError.lifecycleFailed("system owner receipt adoption requires root")
+        }
+        try validatePrefix(prefix)
+        try validateFoundation(prefix)
+        let lock = try DistributionLifecycleFileLock(prefix: prefix, cancellation: cancellation)
+        defer { lock.release() }
+        try refusePendingJournal(prefix)
+        let status = try requiredStatus(prefix)
+        var metadata = stat()
+        guard lstat(receiptPath.path, &metadata) == 0, metadata.st_uid != 0 else {
+            throw DistributionError.lifecycleFailed("adoption requires an explicit non-root owner receipt")
+        }
+        let parent = receiptPath.deletingLastPathComponent()
+        var parentMetadata = stat()
+        guard parent.standardizedFileURL.resolvingSymlinksInPath().path == parent.path,
+              lstat(parent.path, &parentMetadata) == 0, parentMetadata.st_mode & S_IFMT == S_IFDIR,
+              parentMetadata.st_uid == metadata.st_uid, parentMetadata.st_mode & 0o777 == 0o700 else {
+            throw DistributionError.lifecycleFailed("owner receipt parent must remain a private owner directory")
+        }
+        try HostwrightLocalFilesystemPolicy.validateNoAccessGrantingACL(atPath: parent.path, role: "owner receipt parent")
+        let receipt: DistributionOwnerStateReceipt = try readStateBindingJSON(receiptPath, ownerUID: metadata.st_uid, mode: 0o600)
+        try validateOwnerStateReceipt(receipt, prefix: prefix)
+        guard receipt.receiptPath == receiptPath.path, receipt.binding.ownerUID == metadata.st_uid,
+              receipt.challenge.installationID == status.installationID,
+              receipt.challenge.generation == status.generation,
+              receipt.challenge == (try validatedPublicStateChallenge(prefix: prefix, cancellation: cancellation)),
+              status.stateDatabasePath == nil || status.stateDatabasePath == receipt.binding.databasePath else {
+            throw DistributionError.lifecycleFailed("owner receipt does not match current root installation generation")
+        }
+        let adoptedURL = lifecycleRoot(prefix).appendingPathComponent("adopted-owner-state-v1.json")
+        if DistributionFileSystem.entryExists(adoptedURL) {
+            let existing: DistributionOwnerStateReceipt = try readStateBindingJSON(adoptedURL, ownerUID: 0, mode: 0o600)
+            guard existing.binding.ownerUID == receipt.binding.ownerUID,
+                  existing.binding.configuration == receipt.binding.configuration,
+                  existing.challenge.installationID == receipt.challenge.installationID else {
+                throw DistributionError.lifecycleFailed("adoption cannot replace recorded owner/configuration")
+            }
+        }
+        // Root records the cross-binding only; SQLite and Keychain remain exclusively owner operations.
+        try writeCanonicalReplacing(receipt, to: adoptedURL, mode: 0o600)
+        return receipt
+    }
+
+    public func probeAdoptedOwnerState(
+        prefix: URL,
+        cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation()
+    ) throws -> DistributionOwnerStateProbeResult {
+        guard geteuid() == 0 else { throw DistributionError.lifecycleFailed("owner audit-session probe requires root") }
+        try validatePrefix(prefix)
+        try validateFoundation(prefix)
+        let lock = try DistributionLifecycleFileLock(prefix: prefix, cancellation: cancellation)
+        defer { lock.release() }
+        try refusePendingJournal(prefix)
+        let status = try requiredStatus(prefix)
+        let receipt: DistributionOwnerStateReceipt = try readStateBindingJSON(
+            lifecycleRoot(prefix).appendingPathComponent("adopted-owner-state-v1.json"), ownerUID: 0, mode: 0o600)
+        try validateOwnerStateReceipt(receipt, prefix: prefix)
+        let ownerReceipt: DistributionOwnerStateReceipt = try readStateBindingJSON(
+            URL(fileURLWithPath: receipt.receiptPath), ownerUID: receipt.binding.ownerUID, mode: 0o600)
+        guard receipt.challenge.installationID == status.installationID, receipt.challenge.generation == status.generation,
+              receipt.challenge == (try validatedPublicStateChallenge(prefix: prefix, cancellation: cancellation)),
+              ownerReceipt == receipt,
+              let file = status.installedManifest.files.first(where: { $0.path == "bin/hostwright-dist" }),
+              try fileMatches(file, at: prefix.appendingPathComponent(file.path)) else {
+            throw DistributionError.lifecycleFailed("owner probe adoption or exact executable inventory changed")
+        }
+        let executable = prefix.appendingPathComponent(file.path)
+        let identity = try DarwinCurrentControlCodeIdentity.inspect(executablePath: executable.path)
+        let request = DistributionOwnerStateProbeRequest(schemaVersion: 1, operationID: UUID().uuidString.lowercased(),
+            receipt: receipt, executablePath: executable.path, executableSHA256: file.sha256, executableCodeIdentity: identity)
+        try request.validate()
+        let result = try SecureSubprocessRunner().run(SecureSubprocessRequest(executablePath: "/bin/launchctl",
+            arguments: ["asuser", String(receipt.binding.ownerUID), executable.path, "owner-state-probe-child"],
+            environment: SecureSubprocessEnvironment.minimal, workingDirectory: "/",
+            standardInput: try DistributionJSON.encode(request), timeoutMilliseconds: 30_000,
+            maximumStandardOutputBytes: 1_048_576, maximumStandardErrorBytes: 65_536), cancellation: cancellation)
+        guard result.exitStatus == 0, result.terminationSignal == nil,
+              !result.standardOutputTruncated, !result.standardErrorTruncated,
+              try fileMatches(file, at: executable) else {
+            throw DistributionError.lifecycleFailed("bounded signed owner audit-session probe failed before payload mutation")
+        }
+        let probe = try JSONDecoder().decode(DistributionOwnerStateProbeResult.self, from: result.standardOutput)
+        guard probe.schemaVersion == 1, probe.operationID == request.operationID,
+              probe.ownerUID == receipt.binding.ownerUID,
+              probe.requestSHA256 == DistributionHash.sha256(data: try DistributionJSON.encode(request)) else {
+            throw DistributionError.lifecycleFailed("owner probe reply does not match the exact root descriptor")
+        }
+        return probe
+    }
+
+    private func requiredRootOwnerReceipt(prefix: URL, status: DistributionInstallationStatus) throws -> DistributionOwnerStateReceipt {
+        let receipt: DistributionOwnerStateReceipt = try readStateBindingJSON(
+            lifecycleRoot(prefix).appendingPathComponent("adopted-owner-state-v1.json"), ownerUID: 0, mode: 0o600)
+        try validateOwnerStateReceipt(receipt, prefix: prefix)
+        guard receipt.challenge.installationID == status.installationID, receipt.challenge.generation == status.generation,
+              receipt.challenge == (try validatedPublicStateChallenge(prefix: prefix)),
+              status.stateDatabasePath == nil || status.stateDatabasePath == receipt.binding.databasePath else {
+            throw DistributionError.lifecycleFailed("root adopted owner receipt does not match current generation")
+        }
+        let current: DistributionOwnerStateReceipt = try readStateBindingJSON(URL(fileURLWithPath: receipt.receiptPath),
+            ownerUID: receipt.binding.ownerUID, mode: 0o600)
+        guard current == receipt else { throw DistributionError.lifecycleFailed("owner receipt changed after root adoption") }
+        return receipt
+    }
+
+    private func rootOwnerSessionKey(_ prefix: URL) -> String {
+        "dev.hostwright.distribution.owner-session." + DistributionHash.sha256(data: Data(prefix.path.utf8))
+    }
+
+    private func activeRootOwnerSession(_ prefix: URL) -> DistributionOwnerStateSessionClient? {
+        guard geteuid() == 0,
+              let client = Thread.current.threadDictionary[rootOwnerSessionKey(prefix)] as? DistributionOwnerStateSessionClient,
+              client.descriptor.receipt.challenge.prefix == prefix.path else { return nil }
+        return client
+    }
+
+    private func rootOwnerPreparationPendingURL(_ prefix: URL) -> URL {
+        prefix.appendingPathComponent(".hostwright-state-preparation-pending-v1.json")
+    }
+
+    private func publishPublicStateChallenge(status: DistributionInstallationStatus, prefix: URL) throws {
+        let challenge = DistributionStatePreparationChallenge(schemaVersion: 1, installationID: status.installationID,
+            generation: status.generation, prefix: prefix.path,
+            installedManifestSHA256: try DistributionHash.sha256(fileURL: installManifestURL(prefix)))
+        try challenge.validate()
+        try writeCanonicalReplacing(challenge, to: statePreparationChallengeURL(prefix), mode: 0o644)
+    }
+
+    func refreshOwnerSessionReceipt(descriptor: DistributionOwnerStateSessionDescriptor,
+                                    revision: StateUpgradeRevision, prior: Bool = false) throws -> DistributionOwnerStateReceipt {
+        guard geteuid() == descriptor.receipt.binding.ownerUID else {
+            throw DistributionError.lifecycleFailed("owner generation refresh must run after privilege drop")
+        }
+        let prefix = URL(fileURLWithPath: descriptor.receipt.challenge.prefix)
+        let challenge = try validatedPublicStateChallenge(prefix: prefix, allowedPendingOperation: descriptor.operationID)
+        let manifest = prior ? descriptor.fromManifest : descriptor.toManifest
+        let generation = prior ? descriptor.fromGeneration : descriptor.toGeneration
+        guard challenge.installationID == descriptor.receipt.challenge.installationID,
+              challenge.generation == generation,
+              challenge.installedManifestSHA256 == DistributionHash.sha256(data: try DistributionJSON.encode(manifest)) else {
+            throw DistributionError.lifecycleFailed("root generation publication differs from owner operation proof")
+        }
+        let original = descriptor.receipt.binding
+        let binding = DistributionPreparedStateBinding(schemaVersion: 1, installationID: original.installationID,
+            preparedGeneration: generation, ownerUID: original.ownerUID, databasePath: original.databasePath,
+            localPathResolution: original.localPathResolution, maintenancePaths: original.maintenancePaths)
+        let receipt = DistributionOwnerStateReceipt(schemaVersion: 1, challenge: challenge, binding: binding,
+            preparedRevision: revision, receiptPath: descriptor.receipt.receiptPath)
+        try validateOwnerStateReceipt(receipt, prefix: prefix)
+        try writeCanonicalReplacing(receipt, to: URL(fileURLWithPath: receipt.receiptPath), mode: 0o600)
+        return receipt
+    }
+
+    private func statePreparationChallengeURL(_ prefix: URL) -> URL {
+        prefix.appendingPathComponent(".hostwright-state-preparation-v1.json")
+    }
+
+    private func ownerStateReceiptURL(prefix: URL, configuration: StateStoreConfiguration) throws -> URL {
+        guard let resolution = configuration.localPathResolution else {
+            throw DistributionError.lifecycleFailed("owner binding requires actual local path resolution")
+        }
+        let parent = URL(fileURLWithPath: resolution.layout.runtimeDirectory, isDirectory: true)
+        let digest = DistributionHash.sha256(data: Data(prefix.path.utf8))
+        return parent.appendingPathComponent(".hostwright-owner-binding-\(digest).json")
+    }
+
+    private func validateOwnerStateReceipt(_ receipt: DistributionOwnerStateReceipt, prefix: URL) throws {
+        try receipt.challenge.validate()
+        let binding = receipt.binding
+        try binding.configuration.validate()
+        guard receipt.schemaVersion == 1, binding.schemaVersion == 1, binding.ownerUID != 0,
+              binding.installationID == receipt.challenge.installationID,
+              binding.preparedGeneration == receipt.challenge.generation,
+              receipt.challenge.prefix == prefix.path,
+              binding.configuration.databasePath == binding.databasePath,
+              try binding.configuration.maintenancePaths() == binding.maintenancePaths,
+              try ownerStateReceiptURL(prefix: prefix, configuration: binding.configuration).path == receipt.receiptPath,
+              receipt.preparedRevision.databaseSHA256.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil,
+              receipt.preparedRevision.databaseBytes > 0,
+              (0...MigrationRunner.latestSchemaVersion).contains(receipt.preparedRevision.stateSchemaVersion) else {
+            throw DistributionError.lifecycleFailed("owner receipt has inconsistent installation/state binding")
+        }
+    }
+
+    private func validatedPublicStateChallenge(
+        prefix: URL,
+        cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation(),
+        allowedPendingOperation: String? = nil
+    ) throws -> DistributionStatePreparationChallenge {
+        try validatePrefix(prefix)
+        var metadata = stat()
+        guard lstat(prefix.path, &metadata) == 0, metadata.st_mode & S_IFMT == S_IFDIR,
+              metadata.st_uid == 0 || metadata.st_uid == geteuid(), metadata.st_mode & 0o022 == 0 else {
+            throw DistributionError.lifecycleFailed("state challenge prefix is not trusted")
+        }
+        if DistributionFileSystem.entryExists(rootOwnerPreparationPendingURL(prefix)) {
+            let pending: DistributionOwnerPreparationPending = try readStateBindingJSON(rootOwnerPreparationPendingURL(prefix),
+                ownerUID: metadata.st_uid, mode: 0o644)
+            guard allowedPendingOperation == pending.operationID,
+                  UUID(uuidString: pending.operationID) != nil, UUID(uuidString: pending.installationID) != nil,
+                  pending.toGeneration >= 2,
+                  pending.toManifestSHA256.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil else {
+                throw DistributionError.lifecycleFailed("owner preparation refuses a pending root payload operation")
+            }
+        }
+        let challenge: DistributionStatePreparationChallenge = try readStateBindingJSON(
+            statePreparationChallengeURL(prefix), ownerUID: metadata.st_uid, mode: 0o644)
+        try challenge.validate()
+        let manifest: DistributionInstallManifest = try readStateBindingJSON(
+            installManifestURL(prefix), ownerUID: metadata.st_uid, mode: 0o644)
+        try manifest.validate()
+        guard challenge.prefix == prefix.path,
+              challenge.installedManifestSHA256 == (try DistributionHash.sha256(fileURL: installManifestURL(prefix))) else {
+            throw DistributionError.lifecycleFailed("state challenge does not match installed public manifest")
+        }
+        try verifyPayload(manifest, root: prefix, cancellation: cancellation)
+        guard challenge.installedManifestSHA256 == (try DistributionHash.sha256(fileURL: installManifestURL(prefix))) else {
+            throw DistributionError.lifecycleFailed("installed manifest changed during state challenge verification")
+        }
+        return challenge
+    }
+
+    private func acquireOwnerStateReceiptLock(path: String, cancellation: SecureSubprocessCancellation) throws -> Int32 {
+        let descriptor = open(path, O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, mode_t(0o600))
+        guard descriptor >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        var metadata = stat()
+        guard fstat(descriptor, &metadata) == 0, metadata.st_mode & S_IFMT == S_IFREG,
+              metadata.st_uid == geteuid(), metadata.st_mode & 0o777 == 0o600, metadata.st_nlink == 1 else {
+            close(descriptor)
+            throw DistributionError.lifecycleFailed("owner binding lock is not an owned private regular file")
+        }
+        let deadline = DispatchTime.now().uptimeNanoseconds + 15_000_000_000
+        while flock(descriptor, LOCK_EX | LOCK_NB) != 0 {
+            let code = errno
+            guard code == EWOULDBLOCK || code == EINTR else {
+                close(descriptor)
+                throw POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO)
+            }
+            if cancellation.isCancelled || DispatchTime.now().uptimeNanoseconds >= deadline {
+                close(descriptor)
+                throw DistributionError.lifecycleFailed("owner binding lock acquisition cancelled or timed out")
+            }
+            usleep(50_000)
+        }
+        return descriptor
+    }
+
+    private func readStateBindingJSON<T: Decodable>(_ url: URL, ownerUID: uid_t, mode: mode_t) throws -> T {
+        try HostwrightLocalFilesystemPolicy.validateNoAccessGrantingACL(atPath: url.path, role: "state binding record")
+        let descriptor = open(url.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+        guard descriptor >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        defer { try? handle.close() }
+        var before = stat()
+        guard fstat(descriptor, &before) == 0, before.st_mode & S_IFMT == S_IFREG,
+              before.st_uid == ownerUID, before.st_mode & 0o777 == mode, before.st_nlink == 1,
+              before.st_size > 0, before.st_size <= 1_048_576 else {
+            throw DistributionError.lifecycleFailed("state binding record is not a bounded owned regular file")
+        }
+        let data = try handle.readToEnd() ?? Data()
+        var after = stat()
+        var named = stat()
+        guard fstat(descriptor, &after) == 0, lstat(url.path, &named) == 0,
+              before.st_dev == after.st_dev, before.st_ino == after.st_ino,
+              before.st_size == after.st_size, before.st_mtimespec.tv_sec == after.st_mtimespec.tv_sec,
+              before.st_mtimespec.tv_nsec == after.st_mtimespec.tv_nsec,
+              after.st_dev == named.st_dev, after.st_ino == named.st_ino,
+              named.st_uid == ownerUID, named.st_mode == before.st_mode, named.st_nlink == 1,
+              data.count == Int(before.st_size) else {
+            throw DistributionError.lifecycleFailed("state binding record changed while reading")
+        }
+        return try JSONDecoder().decode(T.self, from: data)
+    }
+
+    public func prepareStateBinding(
+        prefix: URL,
+        configuration: StateStoreConfiguration,
+        cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation()
+    ) throws -> DistributionPreparedStateBinding {
+        try requireNotCancelled(cancellation, operation: "prepare state binding")
+        try validatePrefix(prefix)
+        try validateFoundation(prefix)
+        let lifecycleLock = try DistributionLifecycleFileLock(prefix: prefix, cancellation: cancellation)
+        defer { lifecycleLock.release() }
+        try refusePendingJournal(prefix)
+        try cleanupCanonicalWriteStages(prefix)
+        let status = try requiredStatus(prefix)
+        guard geteuid() != 0 else {
+            throw DistributionError.lifecycleFailed("state binding must be prepared by the state owner, without root")
+        }
+        try configuration.validateExistingPath()
+        if DistributionFileSystem.entryExists(stateBindingURL(prefix)) {
+            let existing = try DistributionJSON.decode(DistributionPreparedStateBinding.self, from: stateBindingURL(prefix))
+            guard existing.ownerUID == geteuid(), existing.installationID == status.installationID,
+                  existing.configuration == configuration else {
+                throw DistributionError.lifecycleFailed("prepare-state cannot replace an existing owner/configuration binding")
+            }
+        }
+        if let bound = status.stateDatabasePath, bound != configuration.databasePath {
+            throw DistributionError.lifecycleFailed("prepared state cannot change the installed database path")
+        }
+        let service = StateUpgradeService(store: SQLiteStateStore(configuration: configuration))
+        return try service.withExclusiveLifecycleFence {
+            guard try service.verifiedRevision() != nil else {
+                throw DistributionError.lifecycleFailed("prepare-state requires an existing initialized database")
+            }
+            let binding = DistributionPreparedStateBinding(
+                schemaVersion: 1, installationID: status.installationID,
+                preparedGeneration: status.generation, ownerUID: geteuid(),
+                databasePath: configuration.databasePath,
+                localPathResolution: configuration.localPathResolution,
+                maintenancePaths: try configuration.maintenancePaths()
+            )
+            try writeCanonicalReplacing(binding, to: stateBindingURL(prefix), mode: 0o600)
+            let boundStatus = DistributionInstallationStatus(
+                installationID: status.installationID, generation: status.generation,
+                prefix: status.prefix, installedManifest: status.installedManifest,
+                stateDatabasePath: configuration.databasePath, service: status.service,
+                rollbackOperationID: status.rollbackOperationID, packageOrigin: status.packageOrigin,
+                updatedAt: status.updatedAt
+            )
+            try writeCanonicalReplacing(boundStatus, to: statusURL(prefix), mode: 0o600)
+            _ = try preparedStateBinding(prefix: prefix, configuration: configuration)
+            return binding
+        }
+    }
+
+    public func preparedStateBinding(
+        prefix: URL,
+        configuration: StateStoreConfiguration? = nil
+    ) throws -> DistributionPreparedStateBinding {
+        try validatePrefix(prefix)
+        try validateFoundation(prefix)
+        let status = try requiredStatus(prefix)
+        if geteuid() == 0 {
+            let receipt = try requiredRootOwnerReceipt(prefix: prefix, status: status)
+            guard configuration == nil || configuration == receipt.binding.configuration else {
+                throw DistributionError.lifecycleFailed("root owner binding differs from selected configuration")
+            }
+            return receipt.binding
+        }
+        return try validatePreparedStateBinding(prefix: prefix, status: status, configuration: configuration)
+    }
+
+    private func validatePreparedStateBinding(
+        prefix: URL,
+        status: DistributionInstallationStatus,
+        configuration: StateStoreConfiguration? = nil
+    ) throws -> DistributionPreparedStateBinding {
+        try status.validate()
+        guard status.prefix == prefix.path else {
+            throw DistributionError.lifecycleFailed("state binding status belongs to another prefix")
+        }
+        guard try inspectOwnedRegularFile(stateBindingURL(prefix), expectedMode: 0o600, computeDigest: false) != nil else {
+            throw DistributionError.lifecycleFailed("prepared state receipt is not an owned private file")
+        }
+        let binding = try DistributionJSON.decode(DistributionPreparedStateBinding.self, from: stateBindingURL(prefix))
+        guard binding.schemaVersion == 1,
+              binding.ownerUID == geteuid(), binding.ownerUID != 0,
+              binding.installationID == status.installationID,
+              binding.databasePath == status.stateDatabasePath,
+              binding.configuration.databasePath == binding.databasePath,
+              try binding.configuration.maintenancePaths() == binding.maintenancePaths,
+              configuration == nil || configuration == binding.configuration else {
+            throw DistributionError.lifecycleFailed("prepared state binding does not match the exact owner/configuration")
+        }
+        try binding.configuration.validateProspectivePath()
+        return binding
+    }
+
+    private func verifiedNativeRollbackIdentities(root: URL, manifest: DistributionInstallManifest) -> [CodeIdentity] {
+        let paths: [(String, Set<String>)] = [
+            ("bin/hostwright", ["hostwright", "dev.hostwright.cli"]),
+            ("bin/hostwright-control", ["hostwright-control"]),
+            (DistributionLayout.desktopExecutablePath, ["dev.hostwright.desktop"])
+        ]
+        return paths.compactMap { path, identifiers in
+            guard let file = manifest.files.first(where: { $0.path == path }),
+                  (try? fileMatches(file, at: root.appendingPathComponent(path))) == true,
+                  let identity = try? DarwinCurrentControlCodeIdentity.inspect(executablePath: root.appendingPathComponent(path).path),
+                  identity.validationMode == .installedRequirement,
+                  identifiers.contains(identity.signingIdentifier),
+                  (try? fileMatches(file, at: root.appendingPathComponent(path))) == true else { return nil }
+            return identity
+        }
+    }
+
+    private func stateBindingURL(_ prefix: URL) -> URL {
+        lifecycleRoot(prefix).appendingPathComponent("prepared-state-v1.json")
+    }
+
+    private func lifecycleStore(path: String, prefix: URL) throws -> SQLiteStateStore {
+        if DistributionFileSystem.entryExists(stateBindingURL(prefix)) {
+            let status: DistributionInstallationStatus
+            if let journal = try loadOptional(DistributionLifecycleJournal.self, from: journalURL(prefix)),
+               let recorded = try loadOptional(DistributionInstallationStatus.self, from: statusURL(prefix)),
+               let prior = journal.priorStatus,
+               prior.service == journal.serviceBefore,
+               replacingServiceState(in: recorded, with: journal.serviceBefore) == prior {
+                try journal.validate()
+                guard journal.prefix == prefix.path else {
+                    throw DistributionError.lifecycleFailed("state fence journal belongs to another prefix")
+                }
+                status = recorded
+            } else { status = try requiredStatus(prefix) }
+            let binding = try validatePreparedStateBinding(prefix: prefix, status: status)
+            guard binding.databasePath == path else {
+                throw DistributionError.lifecycleFailed("state operation is outside the prepared binding")
+            }
+            return SQLiteStateStore(configuration: binding.configuration)
+        }
+        let resolution = try HostwrightLocalPathResolver.resolve(environment: [:])
+        if resolution.stateDatabasePath == path {
+            return SQLiteStateStore(configuration: StateStoreConfiguration(localPathResolution: resolution))
+        }
+        return SQLiteStateStore(path: path)
+    }
+
     public func adoptLegacyInstallation(
         prefix: URL,
         stateDatabasePath: String? = nil,
@@ -405,7 +1025,7 @@ public struct DistributionInstalledLifecycle: Sendable {
            DistributionFileSystem.entryExists(URL(fileURLWithPath: selectedStatePath)) {
             _ = try withStateLifecycleBoundary("verify the legacy installation state database") {
                 try MigrationRunner().compatibleSchemaVersion(
-                    in: SQLiteStateStore(path: selectedStatePath)
+                    in: lifecycleStore(path: selectedStatePath, prefix: prefix)
                 )
             }
         }
@@ -622,14 +1242,29 @@ public struct DistributionInstalledLifecycle: Sendable {
             }
         }
 
+        let rootReceipt: DistributionOwnerStateReceipt?
+        if geteuid() == 0, let existingStatus,
+           DistributionFileSystem.entryExists(lifecycleRoot(prefix).appendingPathComponent("adopted-owner-state-v1.json")) {
+            rootReceipt = try requiredRootOwnerReceipt(prefix: prefix, status: existingStatus)
+        } else { rootReceipt = nil }
+        if let stateDatabasePath, let rootReceipt, stateDatabasePath != rootReceipt.binding.databasePath {
+            throw DistributionError.lifecycleFailed("root package cannot select another owner database")
+        }
         let selectedStatePath = try selectedStatePath(
-            requested: stateDatabasePath,
+            requested: stateDatabasePath ?? rootReceipt?.binding.databasePath,
             existingStatus: existingStatus
         )
-        if let selectedStatePath, DistributionFileSystem.entryExists(URL(fileURLWithPath: selectedStatePath)) {
+        if operation == .upgrade {
+            let binding = try preparedStateBinding(prefix: prefix)
+            guard binding.preparedGeneration == existingStatus?.generation,
+                  binding.databasePath == selectedStatePath else {
+                throw DistributionError.lifecycleFailed("upgrade requires prepare-state for the current generation")
+            }
+        }
+        if geteuid() != 0, let selectedStatePath, DistributionFileSystem.entryExists(URL(fileURLWithPath: selectedStatePath)) {
             _ = try withStateLifecycleBoundary("verify the installation state database") {
                 try MigrationRunner().compatibleSchemaVersion(
-                    in: SQLiteStateStore(path: selectedStatePath)
+                    in: lifecycleStore(path: selectedStatePath, prefix: prefix)
                 )
             }
         }
@@ -641,8 +1276,10 @@ public struct DistributionInstalledLifecycle: Sendable {
             replacingServiceState(in: $0, with: serviceState)
         }
 
-        let createdDirectories = existingManifest?.createdDirectories
-            ?? directoriesCreatedByFirstInstall(prefix: prefix)
+        let createdDirectories = Array(
+            Set(existingManifest?.createdDirectories ?? [])
+                .union(directoriesCreatedByInstalling(manifest.files, prefix: prefix))
+        ).sorted()
         let targetManifest = DistributionInstallManifest(
             artifact: manifest,
             createdDirectories: createdDirectories
@@ -702,7 +1339,7 @@ public struct DistributionInstalledLifecycle: Sendable {
         if let journal, journal.prefix != prefix.path {
             throw DistributionError.lifecycleFailed("pending lifecycle journal belongs to another prefix")
         }
-        if journal != nil || hasCanonicalWriteStage(prefix) {
+        if journal != nil || hasCanonicalWriteStage(prefix) || DistributionFileSystem.entryExists(terminalCleanupURL(prefix)) {
             return DistributionLifecycleInspection(
                 readiness: .recoveryRequired,
                 status: status,
@@ -756,12 +1393,28 @@ public struct DistributionInstalledLifecycle: Sendable {
         let lifecycleLock = try DistributionLifecycleFileLock(prefix: prefix, cancellation: cancellation)
         defer { lifecycleLock.release() }
         try cleanupCanonicalWriteStages(prefix)
+        if DistributionFileSystem.entryExists(terminalCleanupURL(prefix)) {
+            return try completeTerminalCleanup(prefix: prefix)
+        }
         guard let journal = try loadOptional(
             DistributionLifecycleJournal.self,
             from: journalURL(prefix)
         ) else {
             let status = try loadOptional(DistributionInstallationStatus.self, from: statusURL(prefix))
             try status?.validate()
+            if geteuid() == 0, DistributionFileSystem.entryExists(rootOwnerPreparationPendingURL(prefix)) {
+                let pending: DistributionOwnerPreparationPending = try readStateBindingJSON(rootOwnerPreparationPendingURL(prefix), ownerUID: 0, mode: 0o644)
+                guard let status, pending.installationID == status.installationID else {
+                    throw DistributionError.lifecycleFailed("orphan owner-preparation marker does not match completed root installation")
+                }
+                let manifestSHA256 = DistributionHash.sha256(data: try DistributionJSON.encode(status.installedManifest))
+                guard (status.generation == pending.toGeneration && manifestSHA256 == pending.toManifestSHA256) ||
+                      (status.generation == pending.fromGeneration && manifestSHA256 == pending.fromManifestSHA256) else {
+                    throw DistributionError.lifecycleFailed("orphan owner-preparation marker does not match completed root generation")
+                }
+                try verifyOwnedFiles(status.installedManifest, prefix: prefix)
+                try removeExactOwnedFile(rootOwnerPreparationPendingURL(prefix), expectedMode: 0o644)
+            }
             if status == nil {
                 try removeFoundationIfUninstalled(prefix)
             }
@@ -785,13 +1438,11 @@ public struct DistributionInstalledLifecycle: Sendable {
             )
         }
         if journal.operation == .uninstall, journal.checkpoint == .statusPublished {
-            try withJournalStateFence(journal, operation: "finalize the committed uninstall") {
-                try finalizeCommittedUninstall(
-                    journal: journal,
-                    prefix: prefix,
-                    cancellation: cancellation
-                )
-            }
+            try finalizeCommittedUninstall(
+                journal: journal,
+                prefix: prefix,
+                cancellation: cancellation
+            )
             return DistributionRecoveryResult(
                 action: .completedUninstall,
                 operationID: journal.operationID,
@@ -812,14 +1463,20 @@ public struct DistributionInstalledLifecycle: Sendable {
                     manifest: status.installedManifest,
                     cancellation: cancellation
                 )
-                if status.service != .notInstalled {
+                if status.service != .notInstalled, journal.ownerStateDescriptorSHA256 == nil {
                     try restoreManagedService(
                         to: status.service,
                         prefix: prefix,
                         cancellation: cancellation
                     )
                 }
-                try finalizePublishedTransition(journal: journal, prefix: prefix)
+            }
+            if status.service != .notInstalled, journal.ownerStateDescriptorSHA256 != nil {
+                try restoreManagedService(to: status.service, prefix: prefix, cancellation: cancellation)
+            }
+            try finalizePublishedTransition(journal: journal, prefix: prefix)
+            if geteuid() == 0, DistributionFileSystem.entryExists(rootOwnerPreparationPendingURL(prefix)) {
+                try removeExactOwnedFile(rootOwnerPreparationPendingURL(prefix), expectedMode: 0o644)
             }
             return DistributionRecoveryResult(
                 action: .completedPublishedGeneration,
@@ -851,6 +1508,10 @@ public struct DistributionInstalledLifecycle: Sendable {
         try cleanupCanonicalWriteStages(prefix)
         try refusePendingJournal(prefix)
         let recordedStatus = try requiredStatus(prefix)
+        guard recordedStatus.stateDatabasePath != nil else {
+            throw DistributionError.lifecycleFailed("rollback requires state bound before upgrade; run prepare-state before upgrading")
+        }
+        _ = try preparedStateBinding(prefix: prefix)
         guard let rollbackOperationID = recordedStatus.rollbackOperationID else {
             throw DistributionError.lifecycleFailed("no verified rollback generation is available")
         }
@@ -875,14 +1536,16 @@ public struct DistributionInstalledLifecycle: Sendable {
         if let snapshot = record.stateSnapshot {
             targetSnapshot = StateUpgradeSnapshot(
                 databasePath: snapshot.databasePath,
-                snapshotPath: prefix.appendingPathComponent(snapshot.snapshotRelativePath).path,
+                snapshotPath: snapshot.ownerSnapshotPath ?? prefix.appendingPathComponent(snapshot.snapshotRelativePath).path,
                 databaseSHA256: snapshot.databaseSHA256,
                 databaseBytes: snapshot.databaseBytes,
                 stateSchemaVersion: snapshot.stateSchemaVersion
             )
-            try withStateLifecycleBoundary("verify the rollback state snapshot") {
-                try StateUpgradeService(store: SQLiteStateStore(path: snapshot.databasePath))
-                    .verify(targetSnapshot!)
+            if geteuid() != 0 {
+                try withStateLifecycleBoundary("verify the rollback state snapshot") {
+                    try StateUpgradeService(store: lifecycleStore(path: snapshot.databasePath, prefix: prefix))
+                        .verify(targetSnapshot!)
+                }
             }
         } else {
             targetSnapshot = nil
@@ -948,7 +1611,7 @@ public struct DistributionInstalledLifecycle: Sendable {
         }
         if let statePath = status.stateDatabasePath {
             return try withStateLifecycleBoundary("create the verified uninstall state revision") {
-                let stateService = StateUpgradeService(store: SQLiteStateStore(path: statePath))
+                let stateService = try StateUpgradeService(store: lifecycleStore(path: statePath, prefix: prefix))
                 return try stateService.withExclusiveLifecycleFence {
                     let revision = try stateService.verifiedRevision()
                     return try makeUninstallPlan(
@@ -1054,7 +1717,7 @@ public struct DistributionInstalledLifecycle: Sendable {
                 )
             }
             return try withStateLifecycleBoundary("perform the fenced managed-data uninstall") {
-                let stateService = StateUpgradeService(store: SQLiteStateStore(path: statePath))
+                let stateService = try StateUpgradeService(store: lifecycleStore(path: statePath, prefix: prefix))
                 return try stateService.withExclusiveLifecycleFence {
                     let revision = try stateService.verifiedRevision()
                     let plan = try makeUninstallPlan(
@@ -1393,9 +2056,9 @@ public struct DistributionInstalledLifecycle: Sendable {
                 )
             }
         }
-        if let stateDatabasePath, operation != .install {
+        if geteuid() != 0, let stateDatabasePath, operation != .install {
             return try withStateLifecycleBoundary("hold the lifecycle state fence") {
-                try StateUpgradeService(store: SQLiteStateStore(path: stateDatabasePath))
+                try StateUpgradeService(store: lifecycleStore(path: stateDatabasePath, prefix: prefix))
                     .withExclusiveLifecycleFence {
                         try performTransitionWithStateFenced(
                             operation: operation,
@@ -1481,8 +2144,47 @@ public struct DistributionInstalledLifecycle: Sendable {
         let staged = transaction.appendingPathComponent("staged", isDirectory: true)
         try DistributionFileSystem.createExclusiveDirectory(staged)
 
+        var ownerSession: DistributionOwnerStateSessionClient?
+        defer {
+            if let ownerSession { ownerSession.close(); Thread.current.threadDictionary.removeObject(forKey: rootOwnerSessionKey(prefix)) }
+        }
         var transitionCommitted = false
         do {
+            if geteuid() == 0, let stateDatabasePath, operation != .install,
+               let existingStatus, let fromManifest {
+                let receipt = try requiredRootOwnerReceipt(prefix: prefix, status: existingStatus)
+                guard receipt.binding.databasePath == stateDatabasePath else {
+                    throw DistributionError.lifecycleFailed("root transition differs from prepared owner state")
+                }
+                let helperManifest = operation == .rollback ? fromManifest : toManifest
+                let helperSource = operation == .rollback ? prefix : sourceRoot
+                let helper = transaction.appendingPathComponent("owner-helper/bin/hostwright-dist")
+                try DistributionFileSystem.createExclusiveDirectory(transaction.appendingPathComponent("owner-helper"))
+                try DistributionFileSystem.createExclusiveDirectory(helper.deletingLastPathComponent())
+                guard let helperFile = helperManifest.files.first(where: { $0.path == "bin/hostwright-dist" }),
+                      try fileMatches(helperFile, at: helperSource.appendingPathComponent(helperFile.path)) else {
+                    throw DistributionError.lifecycleFailed("verified payload lacks exact owner-session helper")
+                }
+                try DistributionFileSystem.copyRegularFile(from: helperSource.appendingPathComponent(helperFile.path), to: helper, mode: 0o755)
+                let descriptor = DistributionOwnerStateSessionDescriptor(schemaVersion: 1, operationID: operationID,
+                    receipt: receipt, fromGeneration: existingStatus.generation, toGeneration: existingStatus.generation + 1,
+                    fromManifest: fromManifest, toManifest: toManifest, helperPath: helper.path,
+                    helperSHA256: helperFile.sha256, helperIdentity: try DarwinCurrentControlCodeIdentity.inspect(executablePath: helper.path))
+                try descriptor.validate()
+                try writeCanonicalReplacing(descriptor, to: transaction.appendingPathComponent("owner-session-v1.json"), mode: 0o600)
+                journal = journal.replacing(checkpoint: journal.checkpoint, ownerStateDescriptorSHA256: try descriptor.digest)
+                try writeJournal(journal, prefix: prefix)
+                let client = try DistributionOwnerStateSessionClient(descriptor: descriptor, recovering: false, cancellation: cancellation)
+                ownerSession = client
+                Thread.current.threadDictionary[rootOwnerSessionKey(prefix)] = client
+                try writeCanonicalReplacing(DistributionOwnerPreparationPending(operationID: descriptor.operationID,
+                    installationID: descriptor.receipt.challenge.installationID, toGeneration: descriptor.toGeneration,
+                    toManifestSHA256: DistributionHash.sha256(data: try DistributionJSON.encode(descriptor.toManifest)),
+                    fromGeneration: descriptor.fromGeneration,
+                    fromManifestSHA256: DistributionHash.sha256(data: try DistributionJSON.encode(descriptor.fromManifest))),
+                    to: rootOwnerPreparationPendingURL(prefix), mode: 0o644)
+                if let targetStateSnapshot { _ = try client.command("verify-restore", snapshot: targetStateSnapshot) }
+            }
             for file in toManifest.files {
                 try requireNotCancelled(cancellation, operation: "stage installed lifecycle payload")
                 try DistributionFileSystem.copyRegularFile(
@@ -1519,14 +2221,24 @@ public struct DistributionInstalledLifecycle: Sendable {
                DistributionFileSystem.entryExists(URL(fileURLWithPath: stateDatabasePath)) {
                 let stateDirectory = transaction.appendingPathComponent("state", isDirectory: true)
                 try DistributionFileSystem.createExclusiveDirectory(stateDirectory)
-                let snapshot = try StateUpgradeService(store: SQLiteStateStore(path: stateDatabasePath))
-                    .createVerifiedSnapshot(at: stateDirectory.appendingPathComponent("state.sqlite").path)
+                let snapshot: StateUpgradeSnapshot
+                if let ownerSession {
+                    guard let retained = try ownerSession.command("snapshot").snapshot else {
+                        throw DistributionError.lifecycleFailed("owner session returned no paired snapshot")
+                    }
+                    snapshot = retained
+                } else {
+                    snapshot = try StateUpgradeService(store: lifecycleStore(path: stateDatabasePath, prefix: prefix))
+                        .createVerifiedSnapshot(at: stateDirectory.appendingPathComponent("state.sqlite").path)
+                }
                 let snapshotRecord = DistributionStateSnapshotRecord(
                     databasePath: snapshot.databasePath,
                     snapshotRelativePath: "\(transactionRelativePath(operationID))/state/state.sqlite",
                     databaseSHA256: snapshot.databaseSHA256,
                     databaseBytes: snapshot.databaseBytes,
-                    stateSchemaVersion: snapshot.stateSchemaVersion
+                    stateSchemaVersion: snapshot.stateSchemaVersion,
+                    ownerSnapshotPath: ownerSession == nil ? nil : snapshot.snapshotPath,
+                    ownerUID: ownerSession?.descriptor.receipt.binding.ownerUID
                 )
                 journal = journal.replacing(checkpoint: .stateBackedUp, stateSnapshot: snapshotRecord)
                 try writeJournal(journal, prefix: prefix)
@@ -1548,7 +2260,7 @@ public struct DistributionInstalledLifecycle: Sendable {
             try writeJournal(journal, prefix: prefix)
             try checkpointReached(.payloadPublishing, cancellation: cancellation)
 
-            for path in payloadDirectories().sorted() {
+            for path in payloadDirectories(for: toManifest.files).sorted() {
                 let directory = prefix.appendingPathComponent(path, isDirectory: true)
                 if !DistributionFileSystem.entryExists(directory) {
                     try DistributionFileSystem.createExclusiveDirectory(directory, mode: 0o755)
@@ -1574,6 +2286,13 @@ public struct DistributionInstalledLifecycle: Sendable {
                     }
                     try removeExactOwnedFile(destination)
                 }
+                let targetDirectories = Set(toManifest.createdDirectories)
+                try removeCreatedDirectoriesIfEmpty(
+                    fromManifest.createdDirectories.filter {
+                        !targetDirectories.contains($0)
+                    },
+                    prefix: prefix
+                )
             }
             try atomicMoveReplacing(
                 from: staged.appendingPathComponent(DistributionLayout.installManifestFileName),
@@ -1586,12 +2305,21 @@ public struct DistributionInstalledLifecycle: Sendable {
             journal = journal.replacing(checkpoint: .stateMigrating)
             try writeJournal(journal, prefix: prefix)
             try checkpointReached(.stateMigrating, cancellation: cancellation)
-            if let stateDatabasePath, operation != .install {
-                let stateService = StateUpgradeService(store: SQLiteStateStore(path: stateDatabasePath))
+            if let ownerSession {
                 if operation == .rollback, let targetStateSnapshot {
-                    _ = try stateService.restoreVerifiedSnapshot(
+                    _ = try ownerSession.command("restore", snapshot: targetStateSnapshot,
+                        approved: verifiedNativeRollbackIdentities(root: prefix, manifest: toManifest),
+                        current: fromManifest.map { verifiedNativeRollbackIdentities(root: transaction.appendingPathComponent("backup"), manifest: $0) } ?? [])
+                } else { _ = try ownerSession.command("migrate") }
+            } else if let stateDatabasePath, operation != .install {
+                let stateService = try StateUpgradeService(store: lifecycleStore(path: stateDatabasePath, prefix: prefix))
+                if operation == .rollback, let targetStateSnapshot {
+                    _ = try stateService.restoreVerifiedSnapshotPreservingAudit(
                         targetStateSnapshot,
-                        operationID: operationID
+                        operationID: operationID,
+                        keyStore: MacOSAuditSigningKeyStore(service: MacOSAuditSigningKeyStore.serviceName(stateDatabasePath: stateDatabasePath)),
+                        approvedInstalledCodeIdentities: verifiedNativeRollbackIdentities(root: prefix, manifest: toManifest),
+                        expectedCurrentInstalledCodeIdentities: fromManifest.map { verifiedNativeRollbackIdentities(root: transaction.appendingPathComponent("backup"), manifest: $0) } ?? []
                     )
                 } else if DistributionFileSystem.entryExists(URL(fileURLWithPath: stateDatabasePath)) {
                     _ = try stateService.migrateToLatest()
@@ -1609,7 +2337,7 @@ public struct DistributionInstalledLifecycle: Sendable {
                 manifest: toManifest,
                 cancellation: cancellation
             )
-            if operation != .install, serviceBefore != .notInstalled {
+            if operation != .install, serviceBefore != .notInstalled, ownerSession == nil {
                 try restoreManagedService(
                     to: serviceBefore,
                     prefix: prefix,
@@ -1662,9 +2390,26 @@ public struct DistributionInstalledLifecycle: Sendable {
             }
             journal = journal.replacing(checkpoint: .statusPublished)
             try writeJournal(journal, prefix: prefix)
+            if geteuid() == 0 { try publishPublicStateChallenge(status: status, prefix: prefix) }
+            if let ownerSession {
+                guard let refreshed = try ownerSession.command("commit").receipt else {
+                    throw DistributionError.lifecycleFailed("owner commit returned no refreshed generation binding")
+                }
+                try writeCanonicalReplacing(refreshed, to: lifecycleRoot(prefix).appendingPathComponent("adopted-owner-state-v1.json"), mode: 0o600)
+            }
             transitionCommitted = true
             try checkpointReached(.statusPublished, cancellation: cancellation)
+            if let ownerSession {
+                try ownerSession.finish()
+                Thread.current.threadDictionary.removeObject(forKey: rootOwnerSessionKey(prefix))
+                if serviceBefore != .notInstalled {
+                    try restoreManagedService(to: serviceBefore, prefix: prefix, cancellation: cancellation)
+                }
+            }
             try finalizePublishedTransition(journal: journal, prefix: prefix)
+            if ownerSession != nil, DistributionFileSystem.entryExists(rootOwnerPreparationPendingURL(prefix)) {
+                try removeExactOwnedFile(rootOwnerPreparationPendingURL(prefix), expectedMode: 0o644)
+            }
             return status
         } catch let interruption as DistributionLifecycleInterruption {
             throw interruption
@@ -1675,9 +2420,16 @@ public struct DistributionInstalledLifecycle: Sendable {
             }
             do {
                 try compensate(journal: journal, prefix: prefix)
+                if let ownerSession {
+                    try ownerSession.finish(recovery: true)
+                    Thread.current.threadDictionary.removeObject(forKey: rootOwnerSessionKey(prefix))
+                    if DistributionFileSystem.entryExists(rootOwnerPreparationPendingURL(prefix)) {
+                        try removeExactOwnedFile(rootOwnerPreparationPendingURL(prefix), expectedMode: 0o644)
+                    }
+                }
             } catch {
                 throw DistributionError.lifecycleFailed(
-                    "lifecycle transition failed and exact prior-generation recovery also failed"
+                    "lifecycle transition failed: \(String(describing: primary)); exact prior-generation recovery failed: \(String(describing: error))"
                 )
             }
             throw primary
@@ -1688,6 +2440,7 @@ public struct DistributionInstalledLifecycle: Sendable {
         journal: DistributionLifecycleJournal,
         prefix: URL
     ) throws {
+        let transaction = transactionURL(prefix, operationID: journal.operationID)
         let recoveryCancellation = SecureSubprocessCancellation()
         if journal.serviceBefore != .notInstalled {
             let currentService = try captureManagedServiceState(
@@ -1706,16 +2459,29 @@ public struct DistributionInstalledLifecycle: Sendable {
         if checkpointMayHaveChangedState(journal.checkpoint), let snapshot = journal.stateSnapshot {
             let stateSnapshot = StateUpgradeSnapshot(
                 databasePath: snapshot.databasePath,
-                snapshotPath: prefix.appendingPathComponent(snapshot.snapshotRelativePath).path,
+                snapshotPath: snapshot.ownerSnapshotPath ?? prefix.appendingPathComponent(snapshot.snapshotRelativePath).path,
                 databaseSHA256: snapshot.databaseSHA256,
                 databaseBytes: snapshot.databaseBytes,
                 stateSchemaVersion: snapshot.stateSchemaVersion
             )
-            _ = try StateUpgradeService(store: SQLiteStateStore(path: snapshot.databasePath))
-                .restoreVerifiedSnapshot(
+            if let ownerSession = activeRootOwnerSession(prefix) {
+                guard snapshot.ownerUID == ownerSession.descriptor.receipt.binding.ownerUID else {
+                    throw DistributionError.lifecycleFailed("compensation owner snapshot binding differs")
+                }
+                _ = try ownerSession.command("restore", snapshot: stateSnapshot,
+                    approved: journal.fromManifest.map { verifiedNativeRollbackIdentities(root: transaction.appendingPathComponent("backup"), manifest: $0) } ?? [],
+                    current: journal.toManifest.map { verifiedNativeRollbackIdentities(root: prefix, manifest: $0) } ?? [], recovery: true)
+            } else {
+            _ = try StateUpgradeService(store: lifecycleStore(path: snapshot.databasePath, prefix: prefix))
+                .restoreVerifiedSnapshotPreservingAudit(
                     stateSnapshot,
-                    operationID: journal.operationID
+                    operationID: journal.operationID,
+                    keyStore: MacOSAuditSigningKeyStore(service: MacOSAuditSigningKeyStore.serviceName(stateDatabasePath: snapshot.databasePath)),
+                    approvedInstalledCodeIdentities: journal.fromManifest.map { verifiedNativeRollbackIdentities(root: transaction.appendingPathComponent("backup"), manifest: $0) } ?? [],
+                    expectedCurrentInstalledCodeIdentities: journal.toManifest.map { verifiedNativeRollbackIdentities(root: prefix, manifest: $0) } ?? [],
+                    allowAbsentCurrentStateForUninstallRecovery: journal.operation == .uninstall
                 )
+            }
         }
         if checkpointMayHavePublished(journal.checkpoint) {
             if let fromManifest = journal.fromManifest {
@@ -1740,7 +2506,7 @@ public struct DistributionInstalledLifecycle: Sendable {
                         }
                     }
                 }
-                for path in payloadDirectories().sorted() {
+                for path in payloadDirectories(for: fromManifest.files).sorted() {
                     let directory = prefix.appendingPathComponent(path, isDirectory: true)
                     if !DistributionFileSystem.entryExists(directory) {
                         try DistributionFileSystem.createExclusiveDirectory(directory, mode: 0o755)
@@ -1789,6 +2555,15 @@ public struct DistributionInstalledLifecycle: Sendable {
                         DistributionLayout.installManifestFileName
                     )
                 }
+                if let toManifest = journal.toManifest {
+                    let restoredDirectories = Set(fromManifest.createdDirectories)
+                    try removeCreatedDirectoriesIfEmpty(
+                        toManifest.createdDirectories.filter {
+                            !restoredDirectories.contains($0)
+                        },
+                        prefix: prefix
+                    )
+                }
             } else if let toManifest = journal.toManifest {
                 for file in toManifest.files where DistributionFileSystem.entryExists(
                     prefix.appendingPathComponent(file.path)
@@ -1814,8 +2589,19 @@ public struct DistributionInstalledLifecycle: Sendable {
         }
         if let priorStatus = journal.priorStatus {
             try writeCanonicalReplacing(priorStatus, to: statusURL(prefix), mode: 0o600)
+            if let ownerSession = activeRootOwnerSession(prefix) {
+                try publishPublicStateChallenge(status: priorStatus, prefix: prefix)
+                guard let refreshed = try ownerSession.command("prepare-prior", recovery: true).receipt else {
+                    throw DistributionError.lifecycleFailed("owner prior-generation binding refresh failed")
+                }
+                try writeCanonicalReplacing(refreshed, to: lifecycleRoot(prefix).appendingPathComponent("adopted-owner-state-v1.json"), mode: 0o600)
+            }
         } else if DistributionFileSystem.entryExists(statusURL(prefix)) {
             try removeExactOwnedFile(statusURL(prefix))
+        }
+        if let ownerSession = activeRootOwnerSession(prefix) {
+            try ownerSession.finish(recovery: true)
+            Thread.current.threadDictionary.removeObject(forKey: rootOwnerSessionKey(prefix))
         }
         if journal.serviceBefore != .notInstalled {
             try restoreManagedService(
@@ -1826,12 +2612,17 @@ public struct DistributionInstalledLifecycle: Sendable {
         }
         let completedJournal = journal.replacing(checkpoint: .compensationPublished)
         try writeJournal(completedJournal, prefix: prefix)
+        try recordTerminalCleanupIfPaired(journal: completedJournal, prefix: prefix)
         try removeTransaction(prefix, operationID: journal.operationID)
         if interruptAfterCompensationTransactionRemoved {
             throw DistributionLifecycleInterruption.afterCompensationTransactionRemoved
         }
+        try finishTerminalMetadataIfPresent(prefix: prefix)
         if DistributionFileSystem.entryExists(journalURL(prefix)) {
             try removeExactOwnedFile(journalURL(prefix))
+        }
+        if DistributionFileSystem.entryExists(terminalCleanupURL(prefix)) {
+            try removeExactOwnedFile(terminalCleanupURL(prefix), expectedMode: 0o600)
         }
         if journal.fromManifest == nil, journal.priorStatus == nil {
             try removeFoundationIfUninstalled(prefix)
@@ -2325,10 +3116,89 @@ public struct DistributionInstalledLifecycle: Sendable {
         return status
     }
 
+    private func terminalCleanupURL(_ prefix: URL) -> URL {
+        lifecycleRoot(prefix).appendingPathComponent("terminal-cleanup-v1.json")
+    }
+
+    private func recordTerminalCleanupIfPaired(journal: DistributionLifecycleJournal, prefix: URL) throws {
+        guard geteuid() == 0, let descriptorSHA256 = journal.ownerStateDescriptorSHA256 else { return }
+        guard activeRootOwnerSession(prefix) == nil else {
+            throw DistributionError.lifecycleFailed("terminal cleanup requires released owner session")
+        }
+        let status = try requiredStatus(prefix)
+        try verifyOwnedFiles(status.installedManifest, prefix: prefix)
+        guard try captureManagedServiceState(prefix: prefix, cancellation: SecureSubprocessCancellation()) == status.service else {
+            throw DistributionError.lifecycleFailed("terminal cleanup requires completed service restoration")
+        }
+        let receiptURL = lifecycleRoot(prefix).appendingPathComponent("adopted-owner-state-v1.json")
+        let receipt: DistributionOwnerStateReceipt = try readStateBindingJSON(receiptURL, ownerUID: 0, mode: 0o600)
+        guard receipt.challenge.installationID == status.installationID, receipt.challenge.generation == status.generation,
+              receipt.challenge.installedManifestSHA256 == DistributionHash.sha256(data: try DistributionJSON.encode(status.installedManifest)) else {
+            throw DistributionError.lifecycleFailed("terminal cleanup owner receipt differs from completed generation")
+        }
+        let dispositions = DistributionTerminalCleanup.dispositions(journal)
+        let proof = DistributionTerminalCleanup(schemaVersion: 1, journal: journal, completedStatus: status,
+            adoptedOwnerReceiptSHA256: DistributionHash.sha256(data: try DistributionJSON.encode(receipt)),
+            originalDescriptorSHA256: descriptorSHA256, deleteTransactionRelativePaths: dispositions.delete,
+            retainTransactionRelativePaths: dispositions.retain)
+        try proof.validate()
+        try writeCanonicalReplacing(proof, to: terminalCleanupURL(prefix), mode: 0o600)
+        try finishTerminalMetadataIfPresent(prefix: prefix, remove: false)
+    }
+
+    private func finishTerminalMetadataIfPresent(prefix: URL, remove: Bool = true) throws {
+        guard DistributionFileSystem.entryExists(terminalCleanupURL(prefix)) else { return }
+        if DistributionFileSystem.entryExists(rootOwnerPreparationPendingURL(prefix)) {
+            let proof: DistributionTerminalCleanup = try readStateBindingJSON(terminalCleanupURL(prefix), ownerUID: 0, mode: 0o600)
+            let pending: DistributionOwnerPreparationPending = try readStateBindingJSON(rootOwnerPreparationPendingURL(prefix), ownerUID: 0, mode: 0o644)
+            guard pending.operationID == proof.journal.operationID,
+                  pending.installationID == proof.completedStatus.installationID,
+                  pending.fromGeneration == proof.journal.priorStatus?.generation,
+                  pending.toGeneration == (proof.journal.priorStatus?.generation ?? 0) + 1 else {
+                throw DistributionError.lifecycleFailed("terminal cleanup pending marker belongs to another operation")
+            }
+            if remove { try removeExactOwnedFile(rootOwnerPreparationPendingURL(prefix), expectedMode: 0o644) }
+        }
+    }
+
+    private func completeTerminalCleanup(prefix: URL) throws -> DistributionRecoveryResult {
+        guard geteuid() == 0 else { throw DistributionError.lifecycleFailed("terminal cleanup proof requires root ownership") }
+        let proof: DistributionTerminalCleanup = try readStateBindingJSON(terminalCleanupURL(prefix), ownerUID: 0, mode: 0o600)
+        try proof.validate()
+        guard proof.journal.prefix == prefix.path, try requiredStatus(prefix) == proof.completedStatus else {
+            throw DistributionError.lifecycleFailed("terminal cleanup proof differs from installed status")
+        }
+        if let journal = try loadOptional(DistributionLifecycleJournal.self, from: journalURL(prefix)), journal != proof.journal {
+            throw DistributionError.lifecycleFailed("terminal cleanup proof differs from live journal")
+        }
+        try verifyOwnedFiles(proof.completedStatus.installedManifest, prefix: prefix)
+        let receipt: DistributionOwnerStateReceipt = try readStateBindingJSON(lifecycleRoot(prefix).appendingPathComponent("adopted-owner-state-v1.json"), ownerUID: 0, mode: 0o600)
+        guard DistributionHash.sha256(data: try DistributionJSON.encode(receipt)) == proof.adoptedOwnerReceiptSHA256,
+              try captureManagedServiceState(prefix: prefix, cancellation: SecureSubprocessCancellation()) == proof.completedStatus.service else {
+            throw DistributionError.lifecycleFailed("terminal cleanup completed receipt or service changed")
+        }
+        try finishTerminalMetadataIfPresent(prefix: prefix, remove: false)
+        for relative in proof.retainTransactionRelativePaths {
+            guard try DistributionFileSystem.isDirectoryNonSymlink(prefix.appendingPathComponent(relative)),
+                  try DistributionFileSystem.mode(of: prefix.appendingPathComponent(relative)) == 0o700 else {
+                throw DistributionError.lifecycleFailed("terminal cleanup retained rollback transaction is missing")
+            }
+        }
+        for relative in proof.deleteTransactionRelativePaths {
+            try removeTransaction(prefix, operationID: URL(fileURLWithPath: relative).lastPathComponent)
+        }
+        try finishTerminalMetadataIfPresent(prefix: prefix)
+        if DistributionFileSystem.entryExists(journalURL(prefix)) { try removeExactOwnedFile(journalURL(prefix)) }
+        try removeExactOwnedFile(terminalCleanupURL(prefix), expectedMode: 0o600)
+        return DistributionRecoveryResult(action: proof.journal.checkpoint == .compensationPublished ? .restoredPriorGeneration : .completedPublishedGeneration,
+            operationID: proof.journal.operationID, status: proof.completedStatus)
+    }
+
     private func finalizePublishedTransition(
         journal: DistributionLifecycleJournal,
         prefix: URL
     ) throws {
+        try recordTerminalCleanupIfPaired(journal: journal, prefix: prefix)
         switch journal.operation {
         case .upgrade:
             if let oldRollback = journal.priorStatus?.rollbackOperationID,
@@ -2353,8 +3223,12 @@ public struct DistributionInstalledLifecycle: Sendable {
         if interruptAfterPublishedTransactionCleanup {
             throw DistributionLifecycleInterruption.afterPublishedTransactionCleanup
         }
+        try finishTerminalMetadataIfPresent(prefix: prefix)
         if DistributionFileSystem.entryExists(journalURL(prefix)) {
             try removeExactOwnedFile(journalURL(prefix))
+        }
+        if DistributionFileSystem.entryExists(terminalCleanupURL(prefix)) {
+            try removeExactOwnedFile(terminalCleanupURL(prefix), expectedMode: 0o600)
         }
     }
 
@@ -2657,7 +3531,9 @@ public struct DistributionInstalledLifecycle: Sendable {
     }
 
     private func refusePendingJournal(_ prefix: URL) throws {
-        if DistributionFileSystem.entryExists(journalURL(prefix)) {
+        if DistributionFileSystem.entryExists(journalURL(prefix)) ||
+            DistributionFileSystem.entryExists(terminalCleanupURL(prefix)) ||
+            DistributionFileSystem.entryExists(canonicalStageURL(for: terminalCleanupURL(prefix))) {
             throw DistributionError.lifecycleFailed(
                 "a lifecycle operation is pending; run hostwright-dist recover before another mutation"
             )
@@ -2713,7 +3589,7 @@ public struct DistributionInstalledLifecycle: Sendable {
     }
 
     private func cleanupCanonicalWriteStages(_ prefix: URL) throws {
-        for destination in [statusURL(prefix), journalURL(prefix)] {
+        for destination in [statusURL(prefix), journalURL(prefix), stateBindingURL(prefix), terminalCleanupURL(prefix)] {
             let stage = canonicalStageURL(for: destination)
             if DistributionFileSystem.entryExists(stage) {
                 try removeExactOwnedFile(stage, expectedMode: 0o600)
@@ -2722,7 +3598,7 @@ public struct DistributionInstalledLifecycle: Sendable {
     }
 
     private func hasCanonicalWriteStage(_ prefix: URL) -> Bool {
-        [statusURL(prefix), journalURL(prefix)]
+        [statusURL(prefix), journalURL(prefix), stateBindingURL(prefix), terminalCleanupURL(prefix)]
             .map(canonicalStageURL(for:))
             .contains(where: DistributionFileSystem.entryExists)
     }
@@ -2886,7 +3762,7 @@ public struct DistributionInstalledLifecycle: Sendable {
             [
                 "\(DistributionLayout.lifecycleRollbackFileName)",
                 "\(DistributionLayout.lifecycleBackupInventoryFileName)",
-                "state/state.sqlite"
+                "state/state.sqlite", "owner-session-v1.json", "owner-helper/bin/hostwright-dist"
             ] + ["staged", "backup"].flatMap { root in
                 DistributionLayout.payloadModes.keys.map { "\(root)/\($0)" }
                     + ["\(root)/\(DistributionLayout.installManifestFileName)"]
@@ -2955,7 +3831,8 @@ public struct DistributionInstalledLifecycle: Sendable {
         for file in [
             DistributionLayout.lifecycleStatusFileName,
             DistributionLayout.lifecycleJournalFileName,
-            DistributionLayout.lifecycleLockFileName
+            DistributionLayout.lifecycleLockFileName,
+            "prepared-state-v1.json"
         ] {
             let url = lifecycleRoot(prefix).appendingPathComponent(file)
             if DistributionFileSystem.entryExists(url) { try removeExactOwnedFile(url) }
@@ -3005,14 +3882,25 @@ public struct DistributionInstalledLifecycle: Sendable {
         }
     }
 
-    private func directoriesCreatedByFirstInstall(prefix: URL) -> [String] {
-        payloadDirectories().filter {
+    private func directoriesCreatedByInstalling(
+        _ files: [DistributionFileRecord],
+        prefix: URL
+    ) -> [String] {
+        payloadDirectories(for: files).filter {
             !DistributionFileSystem.entryExists(prefix.appendingPathComponent($0))
         }.sorted()
     }
 
+    private func payloadDirectories(for files: [DistributionFileRecord]) -> [String] {
+        payloadDirectories(forPaths: files.map(\.path))
+    }
+
     private func payloadDirectories() -> [String] {
-        Array(Set(DistributionLayout.payloadModes.keys.flatMap { path -> [String] in
+        payloadDirectories(forPaths: Array(DistributionLayout.payloadModes.keys))
+    }
+
+    private func payloadDirectories(forPaths paths: [String]) -> [String] {
+        Array(Set(paths.flatMap { path -> [String] in
             let components = path.split(separator: "/").map(String.init)
             var directories: [String] = []
             var current = ""
@@ -3102,12 +3990,62 @@ public struct DistributionInstalledLifecycle: Sendable {
         operation: String,
         _ body: () throws -> T
     ) throws -> T {
+        let prefix = URL(fileURLWithPath: journal.prefix)
+        if geteuid() == 0, let expectedDigest = journal.ownerStateDescriptorSHA256 {
+            if activeRootOwnerSession(prefix) != nil { return try body() }
+            let transaction = transactionURL(prefix, operationID: journal.operationID)
+            let descriptor: DistributionOwnerStateSessionDescriptor = try readStateBindingJSON(
+                transaction.appendingPathComponent("owner-session-v1.json"), ownerUID: 0, mode: 0o600)
+            try descriptor.validate()
+            guard try descriptor.digest == expectedDigest, descriptor.operationID == journal.operationID,
+                  descriptor.receipt.challenge.prefix == journal.prefix,
+                  descriptor.receipt.challenge.installationID == journal.priorStatus?.installationID,
+                  descriptor.fromGeneration == journal.priorStatus?.generation,
+                  descriptor.fromManifest == journal.fromManifest, descriptor.toManifest == journal.toManifest,
+                  descriptor.helperPath == transaction.appendingPathComponent("owner-helper/bin/hostwright-dist").path else {
+                throw DistributionError.lifecycleFailed("root and owner recovery journals disagree")
+            }
+            let ownerJournal = URL(fileURLWithPath: descriptor.receipt.binding.localPathResolution!.layout.runtimeDirectory)
+                .appendingPathComponent("distribution-state/\(descriptor.receipt.challenge.installationID)/\(descriptor.operationID)/owner-journal-v1.json")
+            if !DistributionFileSystem.entryExists(ownerJournal), journal.checkpoint == .intentRecorded {
+                return try body()
+            }
+            let client = try DistributionOwnerStateSessionClient(descriptor: descriptor, recovering: true,
+                cancellation: SecureSubprocessCancellation())
+            Thread.current.threadDictionary[rootOwnerSessionKey(prefix)] = client
+            defer { client.close(); Thread.current.threadDictionary.removeObject(forKey: rootOwnerSessionKey(prefix)) }
+            if let snapshot = journal.stateSnapshot {
+                guard snapshot.ownerUID == descriptor.receipt.binding.ownerUID,
+                      snapshot.ownerSnapshotPath == client.ready.snapshot?.snapshotPath,
+                      snapshot.databaseSHA256 == client.ready.snapshot?.databaseSHA256,
+                      snapshot.databaseBytes == client.ready.snapshot?.databaseBytes,
+                      snapshot.stateSchemaVersion == client.ready.snapshot?.stateSchemaVersion else {
+                    throw DistributionError.lifecycleFailed("paired recovery snapshot metadata differs")
+                }
+            }
+            let result = try body()
+            if DistributionFileSystem.entryExists(statusURL(prefix)),
+               let current = try loadOptional(DistributionInstallationStatus.self, from: statusURL(prefix)),
+               current.generation == descriptor.toGeneration {
+                guard let receipt = try client.command("commit").receipt else {
+                    throw DistributionError.lifecycleFailed("owner recovered commit proof missing")
+                }
+                try writeCanonicalReplacing(receipt, to: lifecycleRoot(prefix).appendingPathComponent("adopted-owner-state-v1.json"), mode: 0o600)
+            }
+            try client.finish()
+            if DistributionFileSystem.entryExists(rootOwnerPreparationPendingURL(prefix)) {
+                try removeExactOwnedFile(rootOwnerPreparationPendingURL(prefix), expectedMode: 0o644)
+            }
+            return result
+        }
+        if geteuid() == 0, journal.ownerStateDescriptorSHA256 == nil,
+           !checkpointMayHaveChangedState(journal.checkpoint) { return try body() }
         guard let statePath = journal.stateSnapshot?.databasePath
             ?? journal.priorStatus?.stateDatabasePath else {
             return try body()
         }
         return try withStateLifecycleBoundary(operation) {
-            try StateUpgradeService(store: SQLiteStateStore(path: statePath))
+            try StateUpgradeService(store: lifecycleStore(path: statePath, prefix: URL(fileURLWithPath: journal.prefix)))
                 .withExclusiveLifecycleFence(body)
         }
     }

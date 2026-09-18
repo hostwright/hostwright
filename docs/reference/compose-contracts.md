@@ -1,10 +1,11 @@
 # Compose contracts
 
-This is the bounded Phase 13 source-only Compose contract slice. The
+This is the bounded Phase 13 Compose conversion contract. The
 executable contract is [`phase13-compose-v1.json`](../../contracts/v0.0.2/phase13-compose-v1.json).
 It provides deterministic headless import, export, and update planning around
 the existing `HostwrightManifest` and `StackFileImporter` boundaries. It does
-not claim full Docker Compose compatibility or execute a workload.
+not claim full Docker Compose compatibility. Conversion itself never executes a
+workload; the authenticated lifecycle below executes the resulting Manifest v3.
 
 ## Public boundary
 
@@ -126,3 +127,71 @@ changes, and returns sorted add/remove/update service changes. A resource
 change is reported as `deploy.resources`. The plan is read-only
 (`mutatesRuntime == false`); execution remains a later slice behind the existing
 control and lifecycle boundaries.
+
+## Execute an imported local service
+
+Install the signed CLI, control companion and daemon using the
+[installation guide](install.md). Select a supported local runtime from
+`hostwright runtime providers --json`, ensure it is available, and follow the
+[daemon bootstrap procedure](cli.md#hostwright-daemon-action-options). For an
+isolated foreground daemon, use identical documented local path environment
+settings for every command and `hostwrightd` invocation. Establish identities
+through `hostwright daemon bootstrap-identities --json`; start the signed daemon
+with `hostwrightd --foreground --config <absolute-manifest-path>`. Keep its
+process identifier so it can be stopped after cleanup.
+
+Save this example to a new Compose file after choosing a unique project and
+available host port:
+
+```yaml
+name: compose-local
+services:
+  web:
+    image: docker.io/library/python@sha256:26730869004e2b9c4b9ad09cab8625e81d256d1ce97e72df5520e806b1709f92
+    command: ["python3", "-m", "http.server", "8080", "--bind", "0.0.0.0"]
+    ports:
+      - "18114:8080"
+    deploy:
+      resources:
+        reservations:
+          cpus: "1"
+          memory: "512m"
+        limits:
+          cpus: "1"
+          memory: "512m"
+```
+
+Run `hostwright import-stack compose.yaml --output json`. Require `succeeded:
+true` and an empty error loss report before saving its `manifestText` to a new
+`hostwright.yaml`; preserve the Compose input. Inspect that Manifest v3 contains
+both CPU requests/limits of 1 and both memory requests/limits of 512MiB. Pull the
+exact pinned image through the supported confirmed image procedure if it is not
+already local. Conversion never pulls images.
+
+```sh
+hostwright validate hostwright.yaml
+hostwright up hostwright.yaml --runtime-provider apple-cli --dry-run --output json
+hostwright up hostwright.yaml --runtime-provider apple-cli --confirm-plan <up-planSHA256> --output json
+hostwright status hostwright.yaml --runtime-provider apple-cli --output json
+curl --fail http://127.0.0.1:18114/
+hostwright restart hostwright.yaml --runtime-provider apple-cli --dry-run --output json
+hostwright restart hostwright.yaml --runtime-provider apple-cli --confirm-plan <restart-planSHA256> --output json
+hostwright down hostwright.yaml --runtime-provider apple-cli --dry-run --output json
+hostwright down hostwright.yaml --runtime-provider apple-cli --confirm-plan <down-planSHA256> --output json
+hostwright rm hostwright.yaml --runtime-provider apple-cli --dry-run --output json
+hostwright rm hostwright.yaml --runtime-provider apple-cli --confirm-plan <rm-planSHA256> --output json
+```
+
+For each mutation, copy the exact `planSHA256` from that action's fresh preview;
+keep the manifest, provider and selected state paths identical. Status and a
+successful HTTP response establish application health. Independently inspect the
+exact owned provider resource and verify 1 CPU and 536870912 memory bytes; the
+converted YAML alone does not establish runtime enforcement. After `down`, CPU
+and memory reservations must be released; after `rm`, the exact resource and its
+port reservations must be absent or released, with unmanaged inventory unchanged.
+Stop only the recorded task-owned foreground daemon after cleanup.
+
+Repeated import/export is deterministic. `plan-stack-update` reports capacity
+changes as `deploy.resources` and never applies them. Unsupported fields or
+fractional CPUs must return explicit loss errors before any lifecycle command.
+Clean RC and final artifact qualification remain separate release gates.

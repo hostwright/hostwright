@@ -1941,29 +1941,13 @@ final class Phase10SchedulerQualificationTests: XCTestCase {
     }
 
     func testPhase10SchedulerQualificationReplayStrictDecodeAndSemanticBinding() throws {
-        var selected: (
-            index: Int,
-            scenario: Phase10SchedulerQualification.Scenario,
-            evaluation: Phase10SchedulerQualification.Evaluation,
-            issue: Phase10SchedulerQualification.Issue
-        )?
-        for index in 0..<24 {
-            let candidate = try Phase10SchedulerQualificationGenerator.exactScenario(
-                index: index,
-                seed: Phase10SchedulerQualification.defaultSeed
-            )
-            let candidateEvaluation = Phase10SchedulerQualificationVerifier.evaluate(candidate)
-            if let issue = candidateEvaluation.issues.first {
-                selected = (index, candidate, candidateEvaluation, issue)
-                break
-            }
-        }
-        guard let selected else {
-            throw XCTSkip("No deterministic exact-oracle diagnostic was available for replay binding.")
-        }
-        let scenario = selected.scenario
-        let evaluation = selected.evaluation
-        let issue = selected.issue
+        let scenario = try Phase10SchedulerQualificationGenerator.priorityOptimizationGapScenario()
+        let evaluation = Phase10SchedulerQualificationVerifier.evaluate(scenario)
+        XCTAssertTrue(evaluation.failures.isEmpty)
+        let issue = try XCTUnwrap(evaluation.issues.first {
+            $0.kind == .intentionalOptimizationGap
+        })
+        XCTAssertEqual(evaluation.oracle?.maxPlaced, 2)
         let fixture = Phase10SchedulerQualificationArtifacts.ReplayFixture(
             schema: "hostwright.phase10.scheduler.qualification.replay.v1",
             issue: issue,
@@ -1990,7 +1974,7 @@ final class Phase10SchedulerQualificationTests: XCTestCase {
             severity: issue.severity.rawValue,
             scenarioSeed: scenario.seed,
             inputFingerprint: scenario.input.inputDigest,
-            caseIndex: selected.index,
+            caseIndex: 0,
             oracleDomain: Phase10SchedulerQualificationExactOracle.domain
         )
         XCTAssertNoThrow(
@@ -2036,7 +2020,7 @@ final class Phase10SchedulerQualificationTests: XCTestCase {
         var tampered = try XCTUnwrap(
             JSONSerialization.jsonObject(with: encoded) as? [String: Any]
         )
-        tampered["originalDecision"] = NSNull()
+        tampered.removeValue(forKey: "originalDecision")
         let tamperedFixture = try Phase10SchedulerQualificationArtifacts.ReplayFixture.decodeStrict(
             from: JSONSerialization.data(withJSONObject: tampered, options: [.sortedKeys])
         )

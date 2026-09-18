@@ -496,7 +496,7 @@ public enum HostwrightCLI {
                 options: options,
                 environment: environment
             ).run()
-        case .logs(let serviceName, let path, let tail, let stateDatabasePath):
+        case .logs(let serviceName, let path, let tail, let stateDatabasePath, let runtimeProvider):
             return LogsCommandRunner(
                 serviceName: serviceName,
                 manifestPath: path,
@@ -505,6 +505,7 @@ public enum HostwrightCLI {
                     explicitPath: stateDatabasePath,
                     environment: environment
                 ),
+                runtimeProvider: runtimeProvider,
                 environment: environment
             ).run()
         case .events(let stateDatabasePath, let projectName, let filters, let stream, let output):
@@ -659,7 +660,7 @@ public enum HostwrightCLI {
       hostwright volume backup create|list|inspect|verify|retain|restore|delete ...
       hostwright daemon status [--json|--output text|json]
       hostwright daemon install --daemon-executable <absolute-hostwrightd> --config <absolute-hostwright.yaml> [--json|--output text|json]
-      hostwright daemon validate|bootstrap|start|stop|kickstart|rollback|disable|repair|uninstall [--json|--output text|json]
+      hostwright daemon validate|bootstrap|bootstrap-identities|start|stop|kickstart|rollback|disable|repair|uninstall [--json|--output text|json]
       hostwright daemon upgrade --daemon-executable <absolute-hostwrightd> --config <absolute-hostwright.yaml> [--json|--output text|json]
       hostwright restart-budget status [--project <project-id>] [--state-db <path>] [--json|--output text|json]
       hostwright restart-budget release --project <project-id> --service <name> --confirm-hold <sha256> [--state-db <path>] [--json|--output text|json]

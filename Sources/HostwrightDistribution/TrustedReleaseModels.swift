@@ -156,7 +156,7 @@ public struct TrustedReleaseManifest: Codable, Equatable, Sendable {
     public let packageNotarization: TrustedNotarizationRecord
 
     public init(
-        schemaVersion: Int = 2,
+        schemaVersion: Int = 3,
         artifactID: String,
         packageVersion: String,
         releaseTag: String,
@@ -200,7 +200,7 @@ public struct TrustedReleaseManifest: Codable, Equatable, Sendable {
     }
 
     public func validate() throws {
-        guard schemaVersion == 1 || schemaVersion == 2,
+        guard schemaVersion == 1 || schemaVersion == 2 || schemaVersion == 3,
               packageVersion.range(
                 of: "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$",
                 options: .regularExpression
@@ -224,7 +224,8 @@ public struct TrustedReleaseManifest: Codable, Equatable, Sendable {
             throw DistributionError.invalidManifest("application and installer identities must belong to one Developer ID team")
         }
         guard let expectedModes = DistributionLayout.trustedPayloadModes(
-            schemaVersion: schemaVersion
+            schemaVersion: schemaVersion,
+            paths: Set(payloadFiles.map(\.path))
         ),
               payloadFiles.map(\.path) == payloadFiles.map(\.path).sorted(),
               Set(payloadFiles.map(\.path)) == Set(expectedModes.keys),
@@ -291,15 +292,18 @@ public struct TrustedReleaseBuildMetadata: Equatable, Sendable {
         self.toolVersions = toolVersions
     }
 
-    public func validate() throws {
-        guard packageLicenseSPDX == "Apache-2.0",
+    public func validate(manifestSchemaVersion: Int = 3) throws {
+        guard manifestSchemaVersion == 1 || manifestSchemaVersion == 2 || manifestSchemaVersion == 3,
+              packageLicenseSPDX == "Apache-2.0",
               reproducibilityBuildCount == 2,
               byteIdenticalUnsignedPayloads else {
             throw DistributionError.invalidArtifact(
                 "trusted release dependency, license, or reproducibility evidence is invalid"
             )
         }
-        try Self.validateExternalDependencies(externalSwiftPMDependencies)
+        if manifestSchemaVersion != 1 || !externalSwiftPMDependencies.isEmpty {
+            try Self.validateExternalDependencies(externalSwiftPMDependencies)
+        }
         try Self.validateToolVersions(toolVersions)
     }
 
@@ -312,6 +316,7 @@ public struct TrustedReleaseBuildMetadata: Equatable, Sendable {
             )
         }
         var hasPinnedContainerization = false
+        var identities = Set<String>()
         for dependency in dependencies {
             let fields = dependency.split(
                 separator: "|",
@@ -322,10 +327,11 @@ public struct TrustedReleaseBuildMetadata: Equatable, Sendable {
                   fields[0].range(of: "^[a-z0-9-]+$", options: .regularExpression) != nil,
                   fields[1].hasPrefix("https://github.com/"),
                   fields[1].hasSuffix(".git"),
-                  fields[2].range(
+                  (fields[2].isEmpty || fields[2].range(
                     of: "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$",
                     options: .regularExpression
-                  ) != nil,
+                  ) != nil),
+                  identities.insert(fields[0]).inserted,
                   fields[3].range(of: "^[a-f0-9]{40}$", options: .regularExpression) != nil else {
                 throw DistributionError.invalidArtifact(
                     "trusted release dependency inventory is malformed"
@@ -399,7 +405,7 @@ public struct TrustedReleaseProvenanceStatement: Codable, Equatable, Sendable {
             byteIdenticalUnsignedPayloads: byteIdenticalUnsignedPayloads,
             toolVersions: toolVersions
         )
-        try recordedBuildMetadata.validate()
+        try recordedBuildMetadata.validate(manifestSchemaVersion: manifest.schemaVersion)
         if let expectedBuildMetadata, recordedBuildMetadata != expectedBuildMetadata {
             throw DistributionError.invalidArtifact(
                 "trusted provenance build evidence differs from the observed release build"

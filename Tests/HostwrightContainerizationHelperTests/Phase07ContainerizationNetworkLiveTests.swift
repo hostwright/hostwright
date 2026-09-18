@@ -517,6 +517,8 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
                 networks: try networks.map {
                     try RuntimeDesiredNetworkAttachment(network: $0)
                 },
+                cpuCount: 1,
+                memoryBytes: 536_870_912,
                 networkPolicy: networkPolicy
             )
         )

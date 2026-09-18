@@ -54,6 +54,12 @@ final class DesktopAccessibilityContractTests: XCTestCase {
             DesktopAccessibilityIdentifier.reconnect,
             DesktopAccessibilityIdentifier.disconnect,
             DesktopAccessibilityIdentifier.statusRefresh,
+            DesktopAccessibilityIdentifier.lifecycleUp,
+            DesktopAccessibilityIdentifier.lifecycleDown,
+            DesktopAccessibilityIdentifier.lifecycleRestart,
+            DesktopAccessibilityIdentifier.lifecycleReview,
+            DesktopAccessibilityIdentifier.lifecycleConfirm,
+            DesktopAccessibilityIdentifier.lifecycleCancel,
             DesktopAccessibilityIdentifier.workspaceOverview,
             DesktopAccessibilityIdentifier.workspaceEvents,
             DesktopAccessibilityIdentifier.workspaceLogs,
@@ -88,6 +94,10 @@ final class DesktopAccessibilityContractTests: XCTestCase {
         let source = try String(contentsOf: sourceURL, encoding: .utf8)
         for expected in [
             "for: DesktopAccessibilityIdentifier.statusRefresh",
+            "for: identifier(for: action)",
+            "model.previewLifecycle(action, manifestPath: project.manifestPath)",
+            "model.confirmLifecycle(planSHA256: plan.planSHA256)",
+            "DesktopAccessibilityIdentifier.lifecycleCancel",
             "for: DesktopAccessibilityIdentifier.eventsRefresh",
             ".state != .available",
             "DesktopAccessibilityIdentifier.logsOpen(for: service.id)",

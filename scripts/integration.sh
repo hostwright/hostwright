@@ -4,10 +4,10 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 
-swift build --product hostwright
-swift build --product hostwright-control
-swift build --product hostwright-dist
-swift build --product HostwrightLocalIntegrationTool
+swift build --jobs 1 --product hostwright
+swift build --jobs 1 --product hostwright-control
+swift build --jobs 1 --product hostwright-dist
+swift build --jobs 1 --product HostwrightLocalIntegrationTool
 bin_dir="$(swift build --show-bin-path)"
 hostwright_cli="$bin_dir/hostwright"
 hostwright="$bin_dir/HostwrightLocalIntegrationTool"
@@ -103,7 +103,7 @@ trap cleanup EXIT
 version="$("$hostwright_cli" --version)"
 golden_version="$(plutil -extract productVersion raw contracts/v0.0.2/versions.json)"
 [[ "$version" == "$golden_version" ]]
-[[ "$version" == "0.0.2-dev.14" ]]
+[[ "$version" == "0.0.2-rc.1" ]]
 
 export HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$application_support"
 export HOSTWRIGHT_CACHE_DIR="$cache_directory"

@@ -2,11 +2,36 @@ import Darwin
 import Foundation
 import HostwrightControlPlane
 import HostwrightControlSecurity
-import HostwrightControlTransport
+@testable import HostwrightControlTransport
 import HostwrightState
 import XCTest
 
 final class PersistentControlClientTests: XCTestCase {
+  func testCancellationPinsDescriptorUntilShutdownCompletes() {
+    let shutdownStarted = DispatchSemaphore(value: 0)
+    let allowShutdown = DispatchSemaphore(value: 0)
+    let unbindCompleted = DispatchSemaphore(value: 0)
+    let cancellation = PersistentControlRequestCancellation { _ in
+      shutdownStarted.signal()
+      allowShutdown.wait()
+    }
+    XCTAssertTrue(cancellation.bind(descriptor: 42))
+
+    DispatchQueue.global(qos: .userInitiated).async {
+      cancellation.cancel()
+    }
+    XCTAssertEqual(shutdownStarted.wait(timeout: .now() + 1), .success)
+    DispatchQueue.global(qos: .userInitiated).async {
+      cancellation.unbind(descriptor: 42)
+      unbindCompleted.signal()
+    }
+    XCTAssertEqual(unbindCompleted.wait(timeout: .now() + 0.1), .timedOut)
+
+    allowShutdown.signal()
+    XCTAssertEqual(unbindCompleted.wait(timeout: .now() + 1), .success)
+    XCTAssertTrue(cancellation.isCancelled)
+  }
+
   func testLiveConcurrentClientsAndDurableReplayAcrossListenerRestart() throws {
     let root = try makeOwnedRoot()
     defer { removeOwnedRoot(root) }
@@ -178,11 +203,15 @@ final class PersistentControlClientTests: XCTestCase {
     defer { listener.closeAndRemoveOwnedSocket() }
     let currentIdentity = try requireCurrentAdHocIdentity()
     let completed = DispatchSemaphore(value: 0)
+    let clientFinished = DispatchSemaphore(value: 0)
     DispatchQueue.global(qos: .userInitiated).async {
       defer { completed.signal() }
       do {
         let descriptor = try listener.accept(timeoutMilliseconds: 5_000)
-        defer { _ = Darwin.close(descriptor) }
+        defer {
+          _ = clientFinished.wait(timeout: .now() + 5)
+          _ = Darwin.close(descriptor)
+        }
         let challenge = try Self.challenge(
           descriptor: descriptor,
           identity: currentIdentity,
@@ -205,8 +234,9 @@ final class PersistentControlClientTests: XCTestCase {
     XCTAssertThrowsError(
       try client(socketPath: listener.path).send(request())
     ) { error in
-      XCTAssertEqual(error as? PersistentControlClientError, .serverBindingMismatch)
+      XCTAssertEqual(error as? PersistentControlClientError, .serverBindingMismatch, "\(error)")
     }
+    clientFinished.signal()
     XCTAssertEqual(completed.wait(timeout: .now() + 5), .success)
   }
 

@@ -105,6 +105,12 @@ final class ControlPeerAuthenticatorTests: XCTestCase {
     }
   }
 
+  func testTrustPolicyAcceptsSignedDesktopIdentifier() throws {
+    XCTAssertTrue(
+      ControlPeerTrustPolicy.defaultInstalledIdentifiers.contains("dev.hostwright.desktop")
+    )
+  }
+
   func testRejectsUnpinnedAdHocIdentity() throws {
     let fixture = Fixture()
     fixture.validator.identity = CodeIdentity(

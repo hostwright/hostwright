@@ -626,7 +626,8 @@ public struct OwnershipRepository: Sendable {
                     try validateTransition(
                         from: existing,
                         to: redacted,
-                        incomingAuthority: incomingAuthority
+                        incomingAuthority: incomingAuthority,
+                        connection: connection
                     )
                     try connection.run(
                         """
@@ -691,7 +692,8 @@ public struct OwnershipRepository: Sendable {
     private func validateTransition(
         from existing: OwnershipRecord,
         to incoming: OwnershipRecord,
-        incomingAuthority: OwnershipAuthorityRecord?
+        incomingAuthority: OwnershipAuthorityRecord?,
+        connection: SQLiteConnection
     ) throws {
         let existingAuthority = try OwnershipAuthorityMetadata.decode(
             from: existing.metadataJSONRedacted
@@ -738,8 +740,35 @@ public struct OwnershipRepository: Sendable {
             let changesLeaseAuthority =
                 previous.leaseOwner != next.leaseOwner &&
                 next.leaseOwner != nil
+            var retriesFailedDeletion = false
+            if changesOperation,
+               previous.deletionTimestamp != nil,
+               previous.deletionTimestamp == next.deletionTimestamp,
+               Set(previous.finalizers.map(\.state)) == [.releasing],
+               Set(next.finalizers.map(\.state)) == [.releasing],
+               let priorID = previous.operationGroupID,
+               let nextID = next.operationGroupID,
+               let projectID = incoming.projectID,
+               let leaseOwner = next.leaseOwner,
+               let leaseExpiry = next.leaseExpiresAt {
+                retriesFailedDeletion = try connection.query(
+                    """
+                    SELECT prior.id FROM operation_groups prior JOIN operation_groups next
+                      ON prior.project_id = next.project_id
+                    WHERE prior.id = ? AND prior.group_kind = 'lifecycle-v1'
+                      AND prior.status = 'failed' AND prior.lock_owner IS NULL
+                      AND prior.lock_expires_at IS NULL AND prior.project_id = ?
+                      AND next.id = ? AND next.group_kind = 'lifecycle-v1'
+                      AND next.status = 'active' AND next.lock_owner = ?
+                      AND next.lock_expires_at = ? AND next.fencing_token = ?
+                      AND next.planned_action_type = 'rm'
+                    """,
+                    bindings: [.text(priorID), .text(projectID), .text(nextID),
+                        .text(leaseOwner), .text(leaseExpiry), .text(incoming.fencingToken)]
+                ).count == 1
+            }
             let validAuthorityHandoff = changesOperation
-                ? (beginsDeletion || rebindsLiveLease)
+                ? (beginsDeletion || rebindsLiveLease || retriesFailedDeletion)
                 : (changesLeaseAuthority
                     ? previous.deletionTimestamp == next.deletionTimestamp
                     : true)
@@ -1201,13 +1230,16 @@ public struct OwnershipRepository: Sendable {
         runtimeAdapter: String,
         expectedResourceUUID: String,
         expectedFencingToken: String,
+        expectedOperationFencingToken: String? = nil,
         expectedOperationGroupID: String,
         expectedLeaseOwner: String,
         expectedLeaseExpiresAt: String,
         observedAt: String
     ) throws {
+        let operationFencingToken = expectedOperationFencingToken ?? expectedFencingToken
         guard HostwrightResourceUUID.isValid(expectedResourceUUID),
               HostwrightResourceUUID.isValid(expectedFencingToken),
+              HostwrightResourceUUID.isValid(operationFencingToken),
               HostwrightResourceUUID.isValid(expectedOperationGroupID),
               !expectedLeaseOwner.isEmpty,
               !expectedLeaseExpiresAt.isEmpty else {
@@ -1228,7 +1260,7 @@ public struct OwnershipRepository: Sendable {
                 )
                 guard groups.count == 1,
                       groups[0][0] == OperationGroupStatus.active.rawValue,
-                      groups[0][1] == expectedFencingToken.lowercased(),
+                      groups[0][1] == operationFencingToken.lowercased(),
                       groups[0][2] == expectedLeaseOwner,
                       groups[0][3] == expectedLeaseExpiresAt else {
                     throw StateStoreError.invalidRecord(

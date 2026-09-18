@@ -1094,6 +1094,46 @@ public struct OperationGroupRepository: Sendable {
         }
     }
 
+    public func visitProjectLifecycleHistory(
+        projectID: String, planHash: String? = nil,
+        _ visit: (OperationGroupRecord) throws -> Void
+    ) throws {
+        var visitorError: (any Error)?
+        try store.withValidatedConnection(readOnly: true) { connection in
+            try connection.transaction {
+                var offset = 0
+                while true {
+                    let rows = try connection.query(
+                        """
+                        SELECT id, operation_id, group_kind, project_id, service_name, planned_action_type,
+                               status, group_idempotency_key, plan_hash, checkpoint, lock_owner, lock_expires_at,
+                               rollback_available, manual_recovery_hint_redacted, created_at, updated_at,
+                               metadata_json_redacted, fencing_token, intent_json_redacted,
+                               compensation_json_redacted, verification_json_redacted
+                        FROM operation_groups
+                        WHERE project_id = ? AND group_kind = 'lifecycle-v1'
+                          AND (? IS NULL OR plan_hash = ?)
+                        ORDER BY rowid ASC
+                        LIMIT 256 OFFSET ?
+                        """,
+                        bindings: [
+                            .text(projectID), planHash.map { .text($0) } ?? .null,
+                            planHash.map { .text($0) } ?? .null, .int(offset)
+                        ]
+                    )
+                    for row in rows {
+                        let record = try operationGroupRecord(from: row)
+                        do { try visit(record) }
+                        catch { visitorError = error; return }
+                    }
+                    if rows.count < 256 { return }
+                    offset += rows.count
+                }
+            }
+        }
+        if let visitorError { throw visitorError }
+    }
+
     private func active(groupIdempotencyKey: String, on connection: SQLiteConnection) throws -> OperationGroupRecord? {
         let rows = try connection.query(
             """

@@ -67,7 +67,8 @@ public struct ContainerizationHelperClientConfiguration: Equatable, Sendable {
 
     public static func installed(
         hostExecutableURL: URL? = Bundle.main.executableURL,
-        homeDirectoryURL: URL = FileManager.default.homeDirectoryForCurrentUser
+        homeDirectoryURL: URL = FileManager.default.homeDirectoryForCurrentUser,
+        environment: [String: String] = ProcessInfo.processInfo.environment
     ) throws -> ContainerizationHelperClientConfiguration {
         guard let hostExecutableURL else {
             throw ContainerizationHelperClientError.unsafeExecutable
@@ -75,15 +76,15 @@ public struct ContainerizationHelperClientConfiguration: Equatable, Sendable {
         let helper = hostExecutableURL
             .deletingLastPathComponent()
             .appendingPathComponent("hostwright-containerization-helper", isDirectory: false)
-        let support = homeDirectoryURL
-            .appendingPathComponent("Library/Application Support/Hostwright", isDirectory: true)
+        let paths = try HostwrightLocalPathResolver.resolve(
+            homeDirectory: homeDirectoryURL.path,
+            environment: environment
+        ).layout
         return try ContainerizationHelperClientConfiguration(
             executableURL: helper,
-            configurationURL: support
-                .appendingPathComponent("config", isDirectory: true)
+            configurationURL: URL(fileURLWithPath: paths.configurationDirectory, isDirectory: true)
                 .appendingPathComponent("containerization-helper.json", isDirectory: false),
-            runtimeDirectoryURL: support
-                .appendingPathComponent("run", isDirectory: true)
+            runtimeDirectoryURL: URL(fileURLWithPath: paths.runtimeDirectory, isDirectory: true)
                 .appendingPathComponent("helper", isDirectory: true)
         )
     }
@@ -443,14 +444,16 @@ private final class ContainerizationHelperPOSIXProcessState: @unchecked Sendable
     func terminate() {
         condition.lock()
         let shouldSignal = !reaped && !terminationStarted
-        if shouldSignal { terminationStarted = true }
+        if shouldSignal {
+            terminationStarted = true
+            signalProcessGroupUnlocked(SIGTERM)
+        }
         condition.unlock()
 
-        if shouldSignal {
-            signalProcessGroup(SIGTERM)
-            if !waitUntilReaped(milliseconds: 100) {
-                signalProcessGroup(SIGKILL)
-            }
+        if shouldSignal, !waitUntilReaped(milliseconds: 100) {
+            condition.lock()
+            if !reaped { signalProcessGroupUnlocked(SIGKILL) }
+            condition.unlock()
         }
         _ = waitUntilReaped(milliseconds: 2_000)
     }
@@ -472,12 +475,15 @@ private final class ContainerizationHelperPOSIXProcessState: @unchecked Sendable
             return
         }
 
-        // Keep the exited leader unreaped so its PID and process-group ID cannot
-        // be reused until every descendant has been stopped.
-        _ = kill(-processID, SIGKILL)
+        condition.lock()
+        defer { condition.unlock() }
+        guard !reaped else { return }
+        // Serialize admitted signals and final reap while the exited leader still reserves its PID/PGID.
+        signalProcessGroupUnlocked(SIGKILL)
         var status: Int32 = 0
         while waitpid(processID, &status, 0) < 0, errno == EINTR {}
-        markReaped()
+        reaped = true
+        condition.broadcast()
     }
 
     private func markReaped() {
@@ -496,7 +502,7 @@ private final class ContainerizationHelperPOSIXProcessState: @unchecked Sendable
         return result
     }
 
-    private func signalProcessGroup(_ signal: Int32) {
+    private func signalProcessGroupUnlocked(_ signal: Int32) {
         if kill(-processID, signal) != 0, errno == ESRCH {
             _ = kill(processID, signal)
         }
@@ -1076,6 +1082,26 @@ public actor ContainerizationHelperClient: RuntimeNetworkProvider {
         try await mutation(.delete, payload: payload, context: context)
     }
 
+    public func releaseProbeOwnedLease() async throws {
+        guard let ownedProcess = process else { return }
+        ownedProcess.terminate()
+        guard !ownedProcess.isRunning else { throw ContainerizationHelperClientError.helperExited }
+        if let identity = ownedSocketIdentity {
+            guard identity.processID == ownedProcess.processID else {
+                throw ContainerizationHelperClientError.socketUnsafe
+            }
+            try removeStaleOwnedSocket(processID: ownedProcess.processID)
+        } else {
+            var metadata = stat()
+            guard lstat(configuration.socketURL.path, &metadata) != 0, errno == ENOENT else {
+                throw ContainerizationHelperClientError.socketUnsafe
+            }
+        }
+        process = nil
+        ownedSocketIdentity = nil
+        snapshot = nil
+    }
+
     public func shutdown() async {
         guard let snapshot else {
             process?.terminate()
@@ -1241,7 +1267,10 @@ public actor ContainerizationHelperClient: RuntimeNetworkProvider {
         }
 
         return try await withTaskCancellationHandler {
-            let response = try await exchangeLaunchingIfNeeded(frame: frame, deadline: deadline)
+            let response = try await exchangeLaunchingIfNeeded(
+                frame: frame, deadline: deadline,
+                requiresActivationAuthority: [.create, .start, .restart].contains(operation)
+            )
             return try decode(
                 Result.self,
                 response: response,
@@ -1261,17 +1290,18 @@ public actor ContainerizationHelperClient: RuntimeNetworkProvider {
 
     private func exchangeLaunchingIfNeeded(
         frame: Data,
-        deadline: Int64
+        deadline: Int64,
+        requiresActivationAuthority: Bool = false
     ) async throws -> ContainerizationHelperTransportResponse {
         do {
-            return try await exchange(frame: frame, deadline: deadline)
+            return try await exchange(frame: frame, deadline: deadline, requiresActivationAuthority: requiresActivationAuthority)
         } catch ContainerizationHelperClientError.socketUnavailable {
-            return try await launchAndExchange(frame: frame, deadline: deadline)
+            return try await launchAndExchange(frame: frame, deadline: deadline, requiresActivationAuthority: requiresActivationAuthority)
         } catch ContainerizationHelperClientError.connectionFailed {
             if let process, !process.isRunning {
                 try removeStaleOwnedSocket(processID: process.processID)
                 self.process = nil
-                return try await launchAndExchange(frame: frame, deadline: deadline)
+                return try await launchAndExchange(frame: frame, deadline: deadline, requiresActivationAuthority: requiresActivationAuthority)
             }
             throw ContainerizationHelperClientError.connectionFailed
         } catch is CancellationError {
@@ -1281,7 +1311,8 @@ public actor ContainerizationHelperClient: RuntimeNetworkProvider {
 
     private func launchAndExchange(
         frame: Data,
-        deadline: Int64
+        deadline: Int64,
+        requiresActivationAuthority: Bool = false
     ) async throws -> ContainerizationHelperTransportResponse {
         if let process, !process.isRunning {
             try removeStaleOwnedSocket(processID: process.processID)
@@ -1302,7 +1333,7 @@ public actor ContainerizationHelperClient: RuntimeNetworkProvider {
                 throw ContainerizationHelperClientError.helperExited
             }
             do {
-                return try await exchange(frame: frame, deadline: deadline)
+                return try await exchange(frame: frame, deadline: deadline, requiresActivationAuthority: requiresActivationAuthority)
             } catch ContainerizationHelperClientError.socketUnavailable {
                 try await Task.sleep(for: .milliseconds(25))
             } catch ContainerizationHelperClientError.connectionFailed {
@@ -1316,9 +1347,11 @@ public actor ContainerizationHelperClient: RuntimeNetworkProvider {
 
     private func exchange(
         frame: Data,
-        deadline: Int64
+        deadline: Int64,
+        requiresActivationAuthority: Bool = false
     ) async throws -> ContainerizationHelperTransportResponse {
         let expectedPID = process?.isRunning == true ? process?.processID : nil
+        if requiresActivationAuthority { try RuntimeActivationAuthority.validate() }
         let response = try await transport.exchange(
             frame: frame,
             socketURL: configuration.socketURL,
@@ -1675,6 +1708,10 @@ public struct AppleContainerizationRuntimeAdapter: RuntimeAdapter {
                     "Containerization 0.35.0 create does not execute mounts; remove mounts or select the Apple CLI provider before mutation."
                 )
             }
+            guard ContainerizationHelperResourceAllocation.isValid(cpuCount: service.cpuCount, memoryBytes: service.memoryBytes) else {
+                throw RuntimeAdapterError.commandRejected(classification: .mutating,
+                    message: "Containerization requires explicit positive CPU and memory limits within SDK bounds.")
+            }
             try RuntimeCreateSubsetPolicy.validate(service, providerID: .appleContainerization)
             let image = try await localImageEvidence(for: service.image)
             if let lock = service.imageLock {
@@ -1714,6 +1751,8 @@ public struct AppleContainerizationRuntimeAdapter: RuntimeAdapter {
                         },
                         labels: labels,
                         networks: service.networks,
+                        cpuCount: service.cpuCount,
+                        memoryBytes: service.memoryBytes,
                         networkPolicy: service.networkPolicy
                     ),
                     context: context
@@ -1727,7 +1766,7 @@ public struct AppleContainerizationRuntimeAdapter: RuntimeAdapter {
                 )
             }
             let result = try await translate {
-                try await client.start(mutationPayload(action, context: context), context: context)
+                try await client.start(await mutationPayload(action, context: context), context: context)
             }
             return event(action, result: result, verb: "Started")
         case .restart:
@@ -1738,7 +1777,7 @@ public struct AppleContainerizationRuntimeAdapter: RuntimeAdapter {
                 )
             }
             let result = try await translate {
-                try await client.restart(mutationPayload(action, context: context), context: context)
+                try await client.restart(await mutationPayload(action, context: context), context: context)
             }
             return event(action, result: result, verb: "Restarted")
         case .remove:
@@ -1749,7 +1788,7 @@ public struct AppleContainerizationRuntimeAdapter: RuntimeAdapter {
                 )
             }
             let result = try await translate {
-                try await client.delete(mutationPayload(action, context: context), context: context)
+                try await client.delete(await mutationPayload(action, context: context), context: context)
             }
             return event(action, result: result, verb: "Deleted")
         case .stop:
@@ -1760,7 +1799,7 @@ public struct AppleContainerizationRuntimeAdapter: RuntimeAdapter {
                 )
             }
             let result = try await translate {
-                try await client.stop(mutationPayload(action, context: context), context: context)
+                try await client.stop(await mutationPayload(action, context: context), context: context)
             }
             return event(action, result: result, verb: "Stopped")
         case .update, .noOp:
@@ -1773,15 +1812,37 @@ public struct AppleContainerizationRuntimeAdapter: RuntimeAdapter {
     private func mutationPayload(
         _ action: PlannedRuntimeAction,
         context: RuntimeMutationContext
-    ) throws -> ContainerizationHelperMutationPayload {
+    ) async throws -> ContainerizationHelperMutationPayload {
         guard RuntimeManagedResourceIdentity.isCurrentIdentifier(action.resourceIdentifier) else {
             throw RuntimeAdapterError.mutationUnavailableByPolicy(
                 "Containerization mutation requires an exact v2 Hostwright resource identifier."
             )
         }
+        let inventory = try await self.inventory()
+        let candidates = inventory.containers.filter {
+            $0.name == action.resourceIdentifier || $0.ownership?.resourceUUID == context.resourceUUID
+        }
+        guard candidates.count == 1, let container = candidates.first,
+              container.name == action.resourceIdentifier,
+              let prior = container.ownership,
+              prior.resourceUUID == context.resourceUUID,
+              prior.projectUUID == context.projectResourceUUID,
+              prior.resourceGeneration == context.resourceGeneration,
+              prior.projectGeneration == context.projectGeneration,
+              prior.providerID == context.providerID,
+              prior.providerGeneration == context.providerGeneration else {
+            throw RuntimeAdapterError.outputParseFailed("Containerization mutation requires exact prior ownership evidence.")
+        }
+        let labels = Dictionary(uniqueKeysWithValues: container.labels.map { ($0.key, $0.value) })
+        guard RuntimeManagedResourceIdentity.identity(from: labels) == action.identity,
+              RuntimeManagedResourceIdentity.labelsMatch(labels, identity: action.identity,
+                resourceIdentifier: action.resourceIdentifier) else {
+            throw RuntimeAdapterError.outputParseFailed("Containerization prior ownership identity changed.")
+        }
         return ContainerizationHelperMutationPayload(
             resourceIdentifier: action.resourceIdentifier,
-            resourceUUID: context.resourceUUID
+            resourceUUID: context.resourceUUID,
+            expectedOwnership: prior
         )
     }
 
@@ -1810,12 +1871,30 @@ public struct AppleContainerizationRuntimeAdapter: RuntimeAdapter {
         }
         let networks = Dictionary(uniqueKeysWithValues: inventory.networks.map { ($0.runtimeID, $0) })
         return try inventory.containers.compactMap { container in
-            guard let hint = hints[container.runtimeID] else { return nil }
+            let candidates = hints.values.filter { hint in
+                hint.resourceIdentifier == container.name ||
+                    hint.resourceIdentifier == container.runtimeID ||
+                    (hint.ownership?.resourceUUID != nil &&
+                        hint.ownership?.resourceUUID == container.ownership?.resourceUUID) ||
+                    container.labels.contains { label in
+                        (label.key == RuntimeManagedResourceIdentity.resourceIdentifierLabel &&
+                            label.value == hint.resourceIdentifier) ||
+                            (label.key == RuntimeManagedResourceIdentity.resourceUUIDLabel &&
+                                label.value.lowercased() == hint.ownership?.resourceUUID)
+                    }
+            }
+            guard candidates.count <= 1 else {
+                throw RuntimeAdapterError.outputParseFailed("Containerization inventory matched conflicting ownership hints.")
+            }
+            guard let hint = candidates.first else { return nil }
+            guard container.name == hint.resourceIdentifier else {
+                throw RuntimeAdapterError.outputParseFailed("Containerization inventory did not match its canonical resource name.")
+            }
             let labels = Dictionary(uniqueKeysWithValues: container.labels.map { ($0.key, $0.value) })
             guard hint.identityVersion == RuntimeManagedResourceIdentity.currentVersion,
                   let expected = hint.ownership,
                   expected.providerID == .appleContainerization,
-                  container.ownership == expected,
+                  ownershipMatchesObservation(container.ownership, hint: hint, expected: expected),
                   RuntimeManagedResourceIdentity.identity(from: labels) == hint.identity,
                   RuntimeManagedResourceIdentity.labelsMatch(
                     labels,
@@ -1828,7 +1907,7 @@ public struct AppleContainerizationRuntimeAdapter: RuntimeAdapter {
             }
             return ObservedRuntimeService(
                 identity: hint.identity,
-                resourceIdentifier: container.runtimeID,
+                resourceIdentifier: hint.resourceIdentifier,
                 image: container.imageReference,
                 lifecycleState: lifecycle(container.lifecycle),
                 healthState: health(container.health),
@@ -1861,9 +1940,30 @@ public struct AppleContainerizationRuntimeAdapter: RuntimeAdapter {
                         target: $0.target,
                         access: $0.access == .readOnly ? .readOnly : .readWrite
                     )
-                }
+                },
+                allocation: container.allocation,
+                ownership: container.ownership
             )
         }.sorted { ($0.identity.displayName, $0.resourceIdentifier) < ($1.identity.displayName, $1.resourceIdentifier) }
+    }
+
+    private func ownershipMatchesObservation(
+        _ actual: RuntimeInventoryOwnershipEvidence?,
+        hint: RuntimeOwnedResourceHint,
+        expected: RuntimeInventoryOwnershipEvidence
+    ) -> Bool {
+        guard let alternate = hint.authorizedAlternateOwnership else {
+            return actual == expected
+        }
+        guard alternate.resourceUUID == expected.resourceUUID,
+              alternate.projectUUID == expected.projectUUID,
+              alternate.resourceGeneration == expected.resourceGeneration,
+              alternate.projectGeneration == expected.projectGeneration,
+              alternate.providerID == expected.providerID,
+              alternate.providerGeneration == expected.providerGeneration,
+              UUID(uuidString: alternate.fencingToken) != nil,
+              alternate.fencingToken != expected.fencingToken else { return false }
+        return actual == expected || actual == alternate
     }
 
     private func lifecycle(_ value: RuntimeInventoryLifecycleState) -> RuntimeLifecycleState {

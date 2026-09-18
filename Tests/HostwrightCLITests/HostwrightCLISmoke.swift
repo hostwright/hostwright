@@ -118,6 +118,10 @@ final class HostwrightCLITests: XCTestCase {
             .logs(serviceName: "api", path: "hostwright.yaml", tail: 25, stateDatabasePath: "/tmp/state.sqlite")
         )
         XCTAssertEqual(
+            try CLICommand.parse(arguments: ["logs", "api", "--runtime-provider", "containerization"]),
+            .logs(serviceName: "api", path: "hostwright.yaml", tail: 100, stateDatabasePath: nil, runtimeProvider: .containerization)
+        )
+        XCTAssertEqual(
             try CLICommand.parse(arguments: [
                 "logs", "api", "/tmp/hostwright.yaml", "--follow", "--tail", "25",
                 "--state-db", "/tmp/state.sqlite", "--runtime-provider", "apple-cli",
@@ -2749,6 +2753,67 @@ final class HostwrightCLITests: XCTestCase {
             XCTAssertEqual(adapter.logResourceIdentifiers, [RuntimeServiceIdentity(projectName: "demo", serviceName: "api").managedResourceIdentifier])
             let events = try SQLiteStateStore(path: databasePath).events.loadAll()
             XCTAssertTrue(events.contains { $0.type == "logs.read" })
+        }
+    }
+
+    func testBoundedLogsSelectsSDKProviderAndItsExactOwnershipHints() throws {
+        try withTemporaryDatabase { databasePath in
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
+            let store = SQLiteStateStore(path: databasePath)
+            try store.migrate()
+            try saveDesiredManifest(store: store, manifestText: singleServiceManifest)
+            let identity = RuntimeServiceIdentity(projectName: "demo", serviceName: "api")
+            let resourceIdentifier = identity.managedResourceIdentifier
+            try store.ownership.upsert(OwnershipRecord(
+                id: "ownership-sdk-logs", resourceIdentifier: resourceIdentifier, resourceType: "container",
+                projectID: "project-demo", serviceName: "api", runtimeAdapter: RuntimeProviderID.appleContainerization.rawValue,
+                createdAt: "2026-07-01T00:00:00Z", observedAt: "2026-07-01T00:00:00Z", cleanupEligible: true,
+                metadataJSONRedacted: "{}", identityVersion: RuntimeManagedResourceIdentity.currentVersion))
+            let snapshot = RuntimeCapabilitySnapshot(
+                descriptor: RuntimeProviderDescriptor(providerID: .appleContainerization, components: [
+                    RuntimeProviderComponent(identifier: .appleContainerizationHelper, version: "0.0.2", build: "test", fingerprint: String(repeating: "a", count: 64)),
+                    RuntimeProviderComponent(identifier: .containerizationHelperProtocolV1, version: "1", build: "test", fingerprint: String(repeating: "b", count: 64)),
+                    RuntimeProviderComponent(identifier: .appleContainerizationFramework, version: "0.35.0", build: "test", fingerprint: String(repeating: "c", count: 64))
+                ], minimumMacOSVersion: .init(major: 26), supportedArchitectures: [.arm64]),
+                host: ScriptedApplyRuntimeAdapter.testCapabilitySnapshot.host,
+                features: ScriptedApplyRuntimeAdapter.testCapabilitySnapshot.features)
+            let metadata = RuntimeAdapterMetadata(providerID: .appleContainerization, adapterName: "sdk-unit-fixture",
+                adapterVersion: "test", runtimeName: "sdk-unit-fixture", runtimeVersion: "0.35.0", supportsMutation: true,
+                capabilities: [.readOnlyObservation, .logStreaming])
+            let adapter = ScriptedApplyRuntimeAdapter(observedState: ObservedRuntimeState(projectName: "demo",
+                services: [ObservedRuntimeService(identity: identity, resourceIdentifier: resourceIdentifier, lifecycleState: .running)],
+                adapterMetadata: metadata, capabilitySHA256: snapshot.canonicalSHA256), logsText: "hwq:unit-fixture:2",
+                capabilitySnapshots: [snapshot])
+            var selectedEnvironment = environment(files: files)
+            selectedEnvironment.runtimeProviderProbes = { [.available(snapshot)] }
+            selectedEnvironment.runtimeAdapterForProvider = { provider in
+                XCTAssertEqual(provider, .appleContainerization)
+                return adapter
+            }
+            selectedEnvironment.runtimeAdapter = {
+                XCTFail("Bounded SDK logs must select the provider adapter")
+                return adapter
+            }
+            let result = HostwrightCLI.run(arguments: ["logs", "api", "--runtime-provider", "containerization", "--state-db", databasePath],
+                environment: selectedEnvironment)
+            XCTAssertEqual(result.exitCode, 0, result.standardError)
+            XCTAssertTrue(result.standardOutput.contains("hwq:unit-fixture:2"))
+            XCTAssertEqual(adapter.logResourceIdentifiers, [resourceIdentifier])
+            XCTAssertEqual(adapter.observedDesiredStates.first?.ownedResourceHints.map(\.resourceIdentifier), [resourceIdentifier])
+            XCTAssertEqual(adapter.observedDesiredStates.first?.ownedResourceHints.first?.ownership?.providerID, .appleContainerization)
+        }
+    }
+
+    func testBoundedLogsRejectsSelectedProviderObservationMismatchBeforeLogRead() throws {
+        try withTemporaryDatabase { databasePath in
+            let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
+            let metadata = RuntimeAdapterMetadata(providerID: .appleContainerization, adapterName: "wrong-provider-unit-fixture",
+                adapterVersion: "test", runtimeName: "unit-fixture", runtimeVersion: nil, supportsMutation: false, capabilities: [.readOnlyObservation])
+            let adapter = ScriptedApplyRuntimeAdapter(observedState: ObservedRuntimeState(projectName: "demo", services: [], adapterMetadata: metadata))
+            let result = HostwrightCLI.run(arguments: ["logs", "api", "--runtime-provider", "apple-cli", "--state-db", databasePath],
+                environment: environment(files: files, runtimeAdapter: adapter))
+            XCTAssertNotEqual(result.exitCode, 0)
+            XCTAssertTrue(adapter.logResourceIdentifiers.isEmpty)
         }
     }
 

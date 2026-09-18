@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import HostwrightCore
+import HostwrightControlPlane
 import HostwrightStorage
 @testable import HostwrightState
 @testable import HostwrightDistribution
@@ -9,6 +10,171 @@ import XCTest
 final class DistributionDurableLifecycleTests: XCTestCase {
     private let baselineCommit = String(repeating: "a", count: 40)
     private let candidateCommit = String(repeating: "b", count: 40)
+
+    func testTerminalCleanupProofBindsCompletedGenerationAndExactDispositions() throws {
+        try withTemporaryRoot { root in
+            let artifact = try makeVerifiedArtifact(root: root, name: "terminal-cleanup", version: "0.0.1", commit: baselineCommit)
+            let manifest = DistributionInstallManifest(artifact: artifact.manifest, createdDirectories: [])
+            let prefix = root.appendingPathComponent("terminal-prefix")
+            let installationID = UUID().uuidString.lowercased()
+            let operationID = UUID().uuidString.lowercased()
+            let prior = DistributionInstallationStatus(installationID: installationID, generation: 1,
+                prefix: prefix.path, installedManifest: manifest, stateDatabasePath: nil,
+                service: .notInstalled, rollbackOperationID: nil, updatedAt: DistributionTimestamp.string(Date()))
+            let current = DistributionInstallationStatus(installationID: installationID, generation: 2,
+                prefix: prefix.path, installedManifest: manifest, stateDatabasePath: nil,
+                service: .notInstalled, rollbackOperationID: nil, updatedAt: DistributionTimestamp.string(Date()))
+            let descriptorSHA = String(repeating: "a", count: 64)
+            let journal = DistributionLifecycleJournal(operationID: operationID, operation: .repair,
+                checkpoint: .statusPublished, prefix: prefix.path,
+                transactionRelativePath: "\(DistributionLayout.lifecycleDirectoryName)/\(DistributionLayout.lifecycleTransactionsDirectoryName)/\(operationID)",
+                fromManifest: manifest, toManifest: manifest,
+                stateSnapshot: nil, serviceBefore: .notInstalled, dataPolicy: .preserve,
+                startedAt: DistributionTimestamp.string(Date()), priorStatus: prior,
+                ownerStateDescriptorSHA256: descriptorSHA)
+            func proof(_ selectedJournal: DistributionLifecycleJournal, _ status: DistributionInstallationStatus,
+                       deletes: [String]? = nil, descriptor: String? = nil) -> DistributionTerminalCleanup {
+                let dispositions = DistributionTerminalCleanup.dispositions(selectedJournal)
+                return DistributionTerminalCleanup(schemaVersion: 1, journal: selectedJournal, completedStatus: status,
+                    adoptedOwnerReceiptSHA256: String(repeating: "b", count: 64),
+                    originalDescriptorSHA256: descriptor ?? descriptorSHA,
+                    deleteTransactionRelativePaths: deletes ?? dispositions.delete,
+                    retainTransactionRelativePaths: dispositions.retain)
+            }
+            let published = proof(journal, current)
+            try published.validate()
+            XCTAssertEqual(published.deleteTransactionRelativePaths, [journal.transactionRelativePath])
+            XCTAssertEqual(try JSONDecoder().decode(DistributionTerminalCleanup.self,
+                from: DistributionJSON.encode(published)), published)
+            XCTAssertThrowsError(try proof(journal, prior).validate())
+            XCTAssertThrowsError(try proof(journal, current, deletes: ["../another-installation"]).validate())
+            XCTAssertThrowsError(try proof(journal, current, descriptor: String(repeating: "c", count: 64)).validate())
+            let compensated = journal.replacing(checkpoint: .compensationPublished)
+            try proof(compensated, prior).validate()
+            XCTAssertThrowsError(try proof(compensated, current).validate())
+            XCTAssertThrowsError(try proof(journal.replacing(checkpoint: .stateMigrated), current).validate())
+        }
+    }
+
+    func testOwnerSessionFramesAreBoundedAndRootChildRejectsUnprivilegedEntry() throws {
+        struct Frame: Codable, Equatable { let value: String }
+        let value = Frame(value: "bounded")
+        var buffered = try JSONEncoder().encode(value) + Data([10]) + Data("next-frame".utf8)
+        let decoded = try DistributionOwnerStateSessionClient.readFrame(Frame.self, descriptor: -1,
+            buffered: &buffered, cancellation: SecureSubprocessCancellation())
+        XCTAssertEqual(decoded, value)
+        XCTAssertEqual(buffered, Data("next-frame".utf8))
+        var oversized = Data(repeating: 97, count: 1_048_576) + Data([10])
+        XCTAssertThrowsError(try DistributionOwnerStateSessionClient.readFrame(Frame.self, descriptor: -1,
+            buffered: &oversized, cancellation: SecureSubprocessCancellation()))
+        XCTAssertThrowsError(try DistributionOwnerStateSessionClient.writeFrame(Frame(value: String(repeating: "a", count: 1_048_576)),
+            descriptor: -1, cancellation: SecureSubprocessCancellation()))
+        XCTAssertThrowsError(try DistributionOwnerStateSessionService.runRootChild())
+    }
+
+    func testOwnerPreparationChallengeBindsActualConfigurationWithoutPrivateJournalAccess() throws {
+        try withTemporaryRoot { root in
+            let artifact = try makeVerifiedArtifact(root: root, name: "owner-preparation", version: "0.0.1", commit: baselineCommit)
+            let prefix = root.appendingPathComponent("owner-prefix")
+            try FileManager.default.createDirectory(at: prefix, withIntermediateDirectories: false)
+            let lifecycle = DistributionInstalledLifecycle()
+            let initial = try lifecycle.install(artifact: artifact, prefix: prefix)
+            let challenge = try lifecycle.exportStatePreparationChallenge(prefix: prefix)
+            XCTAssertEqual(challenge.installationID, initial.installationID)
+            XCTAssertEqual(challenge.generation, initial.generation)
+            let stateRoot = root.appendingPathComponent("owner-state")
+            try FileManager.default.createDirectory(at: stateRoot, withIntermediateDirectories: false,
+                attributes: [.posixPermissions: 0o700])
+            let statePath = stateRoot.appendingPathComponent("state.sqlite").path
+            let resolution = try HostwrightLocalPathResolver.resolve(explicitStateDatabasePath: statePath,
+                homeDirectory: root.path, environment: [:])
+            let configuration = StateStoreConfiguration(localPathResolution: resolution)
+            try SQLiteStateStore(configuration: configuration).migrate()
+            let privateRoot = prefix.appendingPathComponent(DistributionLayout.lifecycleDirectoryName)
+            // The preparation path only requires the public challenge/payload, never private status or its lock.
+            let hiddenRoot = prefix.appendingPathComponent("hidden-private-journal")
+            try FileManager.default.moveItem(at: privateRoot, to: hiddenRoot)
+            defer { try? FileManager.default.moveItem(at: hiddenRoot, to: privateRoot) }
+            let receipt = try lifecycle.prepareOwnerStateReceipt(prefix: prefix, configuration: configuration,
+                requireEmptyIdentityAuthority: true)
+            XCTAssertEqual(receipt.challenge, challenge)
+            XCTAssertEqual(receipt.binding.localPathResolution, resolution)
+            XCTAssertEqual(receipt.binding.maintenancePaths, try configuration.maintenancePaths())
+            XCTAssertEqual(try DistributionOwnerStateProbe.validatedOwnerConfiguration(receipt.binding,
+                homeDirectory: root.path), configuration)
+            XCTAssertThrowsError(try DistributionOwnerStateProbe.validatedOwnerConfiguration(receipt.binding,
+                homeDirectory: stateRoot.path))
+            let probeRequest = DistributionOwnerStateProbeRequest(schemaVersion: 1,
+                operationID: "00000000-0000-0000-0000-000000000008", receipt: receipt,
+                executablePath: prefix.appendingPathComponent("bin/hostwright-dist").path,
+                executableSHA256: String(repeating: "a", count: 64),
+                executableCodeIdentity: CodeIdentity(teamIdentifier: "993YC3JY4Q", signingIdentifier: "hostwright-dist",
+                    codeDirectoryHash: String(repeating: "a", count: 64), validationMode: .installedRequirement))
+            try probeRequest.validate()
+            XCTAssertThrowsError(try DistributionOwnerStateProbe.executeRootChild(probeRequest))
+            XCTAssertThrowsError(try lifecycle.probeAdoptedOwnerState(prefix: prefix))
+            let wrongProbe = DistributionOwnerStateProbeRequest(schemaVersion: 1, operationID: probeRequest.operationID,
+                receipt: receipt, executablePath: "/tmp/untrusted-helper", executableSHA256: probeRequest.executableSHA256,
+                executableCodeIdentity: probeRequest.executableCodeIdentity)
+            XCTAssertThrowsError(try wrongProbe.validate())
+
+            XCTAssertEqual(try lifecycle.preparedOwnerStateReceipt(prefix: prefix, configuration: configuration), receipt)
+            XCTAssertThrowsError(try lifecycle.preparedOwnerStateReceipt(prefix: prefix,
+                configuration: StateStoreConfiguration(explicitDatabasePath: statePath)))
+            XCTAssertThrowsError(try lifecycle.prepareOwnerStateReceipt(prefix: prefix,
+                configuration: StateStoreConfiguration(explicitDatabasePath: stateRoot.appendingPathComponent("missing.sqlite").path)))
+            try SQLiteStateStore(configuration: configuration).controlIdentities.bootstrap(ControlPeerIdentityRecord(
+                subjectID: "native-owner", userID: geteuid(), codeIdentity: probeRequest.executableCodeIdentity,
+                declaredBySubjectID: "native-owner", declaredAt: "2026-09-13T20:00:00Z", updatedAt: "2026-09-13T20:00:00Z"))
+            XCTAssertThrowsError(try lifecycle.prepareOwnerStateReceipt(prefix: prefix, configuration: configuration,
+                requireEmptyIdentityAuthority: true))
+            let alternatePath = stateRoot.appendingPathComponent("alternate.sqlite").path
+            let alternateConfiguration = StateStoreConfiguration(localPathResolution:
+                try HostwrightLocalPathResolver.resolve(explicitStateDatabasePath: alternatePath,
+                    homeDirectory: root.path, environment: [:]))
+            try SQLiteStateStore(configuration: alternateConfiguration).migrate()
+            XCTAssertThrowsError(try lifecycle.prepareOwnerStateReceipt(prefix: prefix, configuration: alternateConfiguration))
+            XCTAssertThrowsError(try lifecycle.adoptOwnerStateReceipt(prefix: prefix,
+                receiptPath: URL(fileURLWithPath: receipt.receiptPath)))
+            let manifestURL = prefix.appendingPathComponent(DistributionLayout.installManifestFileName)
+            let bytes = try Data(contentsOf: manifestURL)
+            try (bytes + Data("\n".utf8)).write(to: manifestURL)
+            XCTAssertThrowsError(try lifecycle.preparedOwnerStateReceipt(prefix: prefix, configuration: configuration))
+            try bytes.write(to: manifestURL)
+            try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: receipt.receiptPath)
+            XCTAssertThrowsError(try lifecycle.preparedOwnerStateReceipt(prefix: prefix, configuration: configuration))
+        }
+    }
+
+    func testPreparedExactStateBindingRequiredBeforeUpgrade() throws {
+        try withTemporaryRoot { root in
+            let baseline = try makeVerifiedArtifact(root: root, name: "bound-A", version: "0.0.1", commit: baselineCommit)
+            let candidate = try makeVerifiedArtifact(root: root, name: "bound-B", version: "0.0.2-dev", commit: candidateCommit)
+            let prefix = root.appendingPathComponent("bound-prefix")
+            try FileManager.default.createDirectory(at: prefix, withIntermediateDirectories: false)
+            let lifecycle = DistributionInstalledLifecycle()
+            let initial = try lifecycle.install(artifact: baseline, prefix: prefix)
+            XCTAssertThrowsError(try lifecycle.install(artifact: candidate, prefix: prefix))
+            XCTAssertThrowsError(try lifecycle.rollback(prefix: prefix))
+            XCTAssertEqual(try lifecycle.inspect(prefix: prefix).status, initial)
+            XCTAssertEqual(try runInstalled(prefix.appendingPathComponent("bin/hostwright"), arguments: ["--version"]), "0.0.1\n")
+            let stateDirectory = root.appendingPathComponent("bound-state")
+            try FileManager.default.createDirectory(at: stateDirectory, withIntermediateDirectories: false,
+                attributes: [.posixPermissions: 0o700])
+            let state = SQLiteStateStore(path: stateDirectory.appendingPathComponent("state.sqlite").path)
+            try state.migrate()
+            let receipt = try lifecycle.prepareStateBinding(prefix: prefix, configuration: state.configuration)
+            XCTAssertEqual(receipt.maintenancePaths, try state.configuration.maintenancePaths())
+            XCTAssertThrowsError(try lifecycle.preparedStateBinding(prefix: prefix,
+                configuration: StateStoreConfiguration(explicitDatabasePath: stateDirectory.appendingPathComponent("wrong.sqlite").path)))
+            let upgraded = try lifecycle.install(artifact: candidate, prefix: prefix)
+            XCTAssertEqual(upgraded.stateDatabasePath, state.path)
+            let rolledBack = try lifecycle.rollback(prefix: prefix)
+            XCTAssertEqual(rolledBack.installedManifest.packageVersion, "0.0.1")
+            XCTAssertNil(rolledBack.rollbackOperationID)
+            XCTAssertEqual(try runInstalled(prefix.appendingPathComponent("bin/hostwright"), arguments: ["--version"]), "0.0.1\n")
+        }
+    }
 
     func testPackageLifecycleUsesExistingRepairUpgradeRollbackAndDowngradeRules() throws {
         try withTemporaryRoot { root in
@@ -130,7 +296,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
                 }
             }
 
-            let repaired = try lifecycle.install(
+            let repaired = try installWithPreparedState(lifecycle: lifecycle,
                 artifact: baseline,
                 prefix: prefix,
                 requiredOperation: .repair,
@@ -140,7 +306,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
             XCTAssertEqual(repaired.packageOrigin, baselineOrigin)
 
             XCTAssertThrowsError(
-                try lifecycle.install(
+                try installWithPreparedState(lifecycle: lifecycle,
                     artifact: candidate,
                     prefix: prefix,
                     requiredOperation: .upgrade
@@ -152,6 +318,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
                 XCTAssertTrue(message.contains("hostwright-dist package-apply"))
             }
 
+            try prepareFixtureState(lifecycle: lifecycle, prefix: prefix)
             let upgraded = try lifecycle.installPackage(
                 manifest: candidate.manifest,
                 sourceRoot: candidate.extractedRoot,
@@ -267,6 +434,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
                 .restoredPriorGeneration
             )
 
+            try prepareFixtureState(lifecycle: lifecycle, prefix: prefix)
             let upgradedAgain = try lifecycle.installPackage(
                 manifest: candidate.manifest,
                 sourceRoot: candidate.extractedRoot,
@@ -474,6 +642,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
             }
             try Data("0.0.2.3\n".utf8).write(to: receiptMarker, options: .atomic)
 
+            try prepareFixtureState(lifecycle: lifecycle, prefix: prefix)
             let baselineInspection = try lifecycle.inspect(prefix: prefix)
             let baselinePrefix = try regularFileTreeContents(in: prefix)
             try FileManager.default.removeItem(at: staging)
@@ -663,10 +832,10 @@ final class DistributionDurableLifecycleTests: XCTestCase {
                 ]
             )
             try seed.close()
-            let stateDigestV6 = try fileDigest(URL(fileURLWithPath: state.path))
+            let stateEventsV6 = try eventIDs(state.path)
 
             let lifecycle = DistributionInstalledLifecycle()
-            let installed = try lifecycle.install(
+            let installed = try installWithPreparedState(lifecycle: lifecycle,
                 artifact: baseline,
                 prefix: prefix,
                 stateDatabasePath: state.path
@@ -680,7 +849,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
                 interruptAfter: .payloadPublished
             )
             XCTAssertThrowsError(
-                try interruptedLifecycle.install(
+                try installWithPreparedState(lifecycle: interruptedLifecycle,
                     artifact: candidate,
                     prefix: prefix,
                     stateDatabasePath: state.path
@@ -699,13 +868,13 @@ final class DistributionDurableLifecycleTests: XCTestCase {
             XCTAssertEqual(recovered.action, .restoredPriorGeneration)
             XCTAssertEqual(recovered.status?.installedManifest.packageVersion, "0.0.1")
             XCTAssertEqual(try state.schemaVersion(), 6)
-            XCTAssertEqual(try fileDigest(URL(fileURLWithPath: state.path)), stateDigestV6)
+            XCTAssertEqual(try eventIDs(state.path), stateEventsV6)
             XCTAssertEqual(
                 try runInstalled(prefix.appendingPathComponent("bin/hostwright"), arguments: ["--version"]),
                 "0.0.1\n"
             )
 
-            let upgraded = try lifecycle.install(
+            let upgraded = try installWithPreparedState(lifecycle: lifecycle,
                 artifact: candidate,
                 prefix: prefix,
                 stateDatabasePath: state.path
@@ -716,7 +885,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
             XCTAssertEqual(try state.schemaVersion(), MigrationRunner.latestSchemaVersion)
 
             XCTAssertThrowsError(
-                try lifecycle.install(
+                try installWithPreparedState(lifecycle: lifecycle,
                     artifact: baseline,
                     prefix: prefix,
                     stateDatabasePath: state.path
@@ -775,12 +944,12 @@ final class DistributionDurableLifecycleTests: XCTestCase {
                 path: presentStateDirectory.appendingPathComponent("state.sqlite").path
             )
             try MigrationRunner().apply(to: presentState, throughVersion: 6)
-            _ = try lifecycle.install(
+            _ = try installWithPreparedState(lifecycle: lifecycle,
                 artifact: baseline,
                 prefix: presentPrefix,
                 stateDatabasePath: presentState.path
             )
-            let presentUpgrade = try lifecycle.install(
+            let presentUpgrade = try installWithPreparedState(lifecycle: lifecycle,
                 artifact: candidate,
                 prefix: presentPrefix,
                 stateDatabasePath: presentState.path
@@ -809,27 +978,14 @@ final class DistributionDurableLifecycleTests: XCTestCase {
             let absentState = SQLiteStateStore(
                 path: absentStateDirectory.appendingPathComponent("state.sqlite").path
             )
-            _ = try lifecycle.install(
-                artifact: baseline,
-                prefix: absentPrefix,
-                stateDatabasePath: absentState.path
-            )
-            let absentUpgrade = try lifecycle.install(
-                artifact: candidate,
-                prefix: absentPrefix,
-                stateDatabasePath: absentState.path
-            )
-            try MigrationRunner().apply(to: absentState)
-
-            XCTAssertThrowsError(try lifecycle.rollback(prefix: absentPrefix)) { error in
-                guard case let DistributionError.lifecycleFailed(message) = error else {
-                    return XCTFail("Expected lifecycle failure, received \(error)")
-                }
-                XCTAssertTrue(message.contains("state presence no longer matches"))
-            }
-            let absentInspection = try lifecycle.inspect(prefix: absentPrefix)
-            XCTAssertEqual(absentInspection.readiness, .ready)
-            XCTAssertEqual(absentInspection.status, absentUpgrade)
+            let absentInitial = try lifecycle.install(artifact: baseline, prefix: absentPrefix,
+                stateDatabasePath: absentState.path)
+            XCTAssertThrowsError(try lifecycle.prepareStateBinding(prefix: absentPrefix,
+                configuration: absentState.configuration))
+            XCTAssertThrowsError(try lifecycle.install(artifact: candidate, prefix: absentPrefix,
+                stateDatabasePath: absentState.path))
+            XCTAssertFalse(FileManager.default.fileExists(atPath: absentState.path))
+            XCTAssertEqual(try lifecycle.inspect(prefix: absentPrefix).status, absentInitial)
             _ = try lifecycle.uninstall(prefix: absentPrefix, dataPolicy: .preserve)
         }
     }
@@ -876,7 +1032,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
                 let state = SQLiteStateStore(path: stateDirectory.appendingPathComponent("state.sqlite").path)
                 try MigrationRunner().apply(to: state, throughVersion: 6)
                 let lifecycle = DistributionInstalledLifecycle()
-                _ = try lifecycle.install(
+                _ = try installWithPreparedState(lifecycle: lifecycle,
                     artifact: baseline,
                     prefix: prefix,
                     stateDatabasePath: state.path
@@ -940,7 +1096,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
                 prefix.appendingPathComponent("bin/hostwright-dist")
             ))
 
-            let repaired = try lifecycle.install(artifact: artifact, prefix: prefix)
+            let repaired = try installWithPreparedState(lifecycle: lifecycle, artifact: artifact, prefix: prefix)
             XCTAssertEqual(repaired.generation, 2)
             XCTAssertEqual(repaired.installedManifest.schemaVersion, 4)
             XCTAssertTrue(try DistributionFileSystem.isRegularNonSymlink(
@@ -982,78 +1138,92 @@ final class DistributionDurableLifecycleTests: XCTestCase {
                 version: "0.0.2",
                 commit: String(repeating: "2", count: 40)
             )
-            let prefix = root.appendingPathComponent(
-                "schema-two-prefix",
-                isDirectory: true
-            )
-            try FileManager.default.createDirectory(
-                at: prefix,
-                withIntermediateDirectories: false
-            )
             let lifecycle = DistributionInstalledLifecycle()
-            let initial = try lifecycle.install(
-                artifact: baseline,
-                prefix: prefix
-            )
-
-            let priorFiles = baseline.manifest.files.filter {
-                DistributionLayout.legacyPayloadModesV2[$0.path] != nil
+            func makeSchemaTwoPrefix(_ name: String) throws -> URL {
+                let prefix = root.appendingPathComponent(name, isDirectory: true)
+                try FileManager.default.createDirectory(
+                    at: prefix,
+                    withIntermediateDirectories: false
+                )
+                let initial = try installWithPreparedState(lifecycle: lifecycle,
+                    artifact: baseline,
+                    prefix: prefix
+                )
+                let priorFiles = baseline.manifest.files.filter {
+                    DistributionLayout.legacyPayloadModesV2[$0.path] != nil
+                }
+                let priorPaths = Set(priorFiles.map(\.path))
+                let priorCreatedDirectories = initial.installedManifest.createdDirectories.filter {
+                    directory in
+                    priorPaths.contains { path in
+                        path.hasPrefix("\(directory)/")
+                    }
+                }
+                let priorManifest = DistributionInstallManifest(
+                    schemaVersion: 2,
+                    artifactID: baseline.manifest.artifactID,
+                    sourceCommit: baseline.manifest.sourceCommit,
+                    packageVersion: baseline.manifest.packageVersion,
+                    files: priorFiles,
+                    createdDirectories: priorCreatedDirectories
+                )
+                try priorManifest.validate()
+                for file in baseline.manifest.files where !priorPaths.contains(file.path) {
+                    try FileManager.default.removeItem(
+                        at: prefix.appendingPathComponent(file.path)
+                    )
+                }
+                for directory in initial.installedManifest.createdDirectories
+                    .filter({ !priorCreatedDirectories.contains($0) })
+                    .sorted(by: { $0.split(separator: "/").count > $1.split(separator: "/").count }) {
+                    try FileManager.default.removeItem(
+                        at: prefix.appendingPathComponent(directory, isDirectory: true)
+                    )
+                }
+                let installManifestURL = prefix.appendingPathComponent(
+                    DistributionLayout.installManifestFileName
+                )
+                try FileManager.default.removeItem(at: installManifestURL)
+                try DistributionFileSystem.writeNewFile(
+                    try DistributionJSON.encode(priorManifest),
+                    to: installManifestURL,
+                    mode: 0o644
+                )
+                let priorStatus = DistributionInstallationStatus(
+                    installationID: initial.installationID,
+                    generation: initial.generation,
+                    prefix: initial.prefix,
+                    installedManifest: priorManifest,
+                    stateDatabasePath: initial.stateDatabasePath,
+                    service: initial.service,
+                    rollbackOperationID: nil,
+                    updatedAt: initial.updatedAt
+                )
+                let statusURL = prefix
+                    .appendingPathComponent(
+                        DistributionLayout.lifecycleDirectoryName,
+                        isDirectory: true
+                    )
+                    .appendingPathComponent(
+                        DistributionLayout.lifecycleStatusFileName
+                    )
+                try FileManager.default.removeItem(at: statusURL)
+                try DistributionFileSystem.writeNewFile(
+                    try DistributionJSON.encode(priorStatus),
+                    to: statusURL,
+                    mode: 0o600
+                )
+                XCTAssertEqual(
+                    try lifecycle.inspect(prefix: prefix).status?.installedManifest
+                        .schemaVersion,
+                    2
+                )
+                return prefix
             }
-            let priorManifest = DistributionInstallManifest(
-                schemaVersion: 2,
-                artifactID: baseline.manifest.artifactID,
-                sourceCommit: baseline.manifest.sourceCommit,
-                packageVersion: baseline.manifest.packageVersion,
-                files: priorFiles,
-                createdDirectories: initial.installedManifest.createdDirectories
-            )
-            try priorManifest.validate()
-            try FileManager.default.removeItem(
-                at: prefix.appendingPathComponent(
-                    "bin/hostwright-storage-helper"
-                )
-            )
-            let installManifestURL = prefix.appendingPathComponent(
-                DistributionLayout.installManifestFileName
-            )
-            try FileManager.default.removeItem(at: installManifestURL)
-            try DistributionFileSystem.writeNewFile(
-                try DistributionJSON.encode(priorManifest),
-                to: installManifestURL,
-                mode: 0o644
-            )
 
-            let priorStatus = DistributionInstallationStatus(
-                installationID: initial.installationID,
-                generation: initial.generation,
-                prefix: initial.prefix,
-                installedManifest: priorManifest,
-                stateDatabasePath: initial.stateDatabasePath,
-                service: initial.service,
-                rollbackOperationID: nil,
-                updatedAt: initial.updatedAt
-            )
-            let statusURL = prefix
-                .appendingPathComponent(
-                    DistributionLayout.lifecycleDirectoryName,
-                    isDirectory: true
-                )
-                .appendingPathComponent(
-                    DistributionLayout.lifecycleStatusFileName
-                )
-            try FileManager.default.removeItem(at: statusURL)
-            try DistributionFileSystem.writeNewFile(
-                try DistributionJSON.encode(priorStatus),
-                to: statusURL,
-                mode: 0o600
-            )
-            XCTAssertEqual(
-                try lifecycle.inspect(prefix: prefix).status?.installedManifest
-                    .schemaVersion,
-                2
-            )
+            let prefix = try makeSchemaTwoPrefix("schema-two-prefix")
 
-            let upgraded = try lifecycle.install(
+            let upgraded = try installWithPreparedState(lifecycle: lifecycle,
                 artifact: candidate,
                 prefix: prefix
             )
@@ -1087,6 +1257,41 @@ final class DistributionDurableLifecycleTests: XCTestCase {
                 ),
                 []
             )
+
+            let interruptedPrefix = try makeSchemaTwoPrefix(
+                "schema-two-interrupted-prefix"
+            )
+            try prepareFixtureState(lifecycle: lifecycle, prefix: interruptedPrefix)
+            XCTAssertThrowsError(
+                try DistributionInstalledLifecycle(
+                    interruptAfter: .payloadPublished
+                ).install(
+                    artifact: candidate,
+                    prefix: interruptedPrefix
+                )
+            ) { error in
+                XCTAssertEqual(
+                    error as? DistributionLifecycleInterruption,
+                    .after(.payloadPublished)
+                )
+            }
+            XCTAssertEqual(
+                try lifecycle.inspect(prefix: interruptedPrefix).readiness,
+                .recoveryRequired
+            )
+            let recovered = try lifecycle.recover(prefix: interruptedPrefix)
+            XCTAssertEqual(recovered.action, .restoredPriorGeneration)
+            XCTAssertEqual(recovered.status?.installedManifest.schemaVersion, 2)
+            _ = try lifecycle.uninstall(
+                prefix: interruptedPrefix,
+                dataPolicy: .preserve
+            )
+            XCTAssertEqual(
+                try FileManager.default.contentsOfDirectory(
+                    atPath: interruptedPrefix.path
+                ),
+                []
+            )
         }
     }
 
@@ -1101,12 +1306,12 @@ final class DistributionDurableLifecycleTests: XCTestCase {
             let prefix = root.appendingPathComponent("repair-prefix", isDirectory: true)
             try FileManager.default.createDirectory(at: prefix, withIntermediateDirectories: false)
             let lifecycle = DistributionInstalledLifecycle()
-            let baseline = try lifecycle.install(artifact: artifact, prefix: prefix)
+            let baseline = try installWithPreparedState(lifecycle: lifecycle, artifact: artifact, prefix: prefix)
             let missing = prefix.appendingPathComponent("share/doc/hostwright/README.md")
             try FileManager.default.removeItem(at: missing)
 
             let interrupted = DistributionInstalledLifecycle(interruptAfter: .payloadPublished)
-            XCTAssertThrowsError(try interrupted.install(artifact: artifact, prefix: prefix)) {
+            XCTAssertThrowsError(try installWithPreparedState(lifecycle: interrupted, artifact: artifact, prefix: prefix)) {
                 XCTAssertEqual(
                     $0 as? DistributionLifecycleInterruption,
                     .after(.payloadPublished)
@@ -1119,7 +1324,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
             XCTAssertFalse(DistributionFileSystem.entryExists(missing))
             XCTAssertEqual(try lifecycle.inspect(prefix: prefix).readiness, .ready)
 
-            let repaired = try lifecycle.install(artifact: artifact, prefix: prefix)
+            let repaired = try installWithPreparedState(lifecycle: lifecycle, artifact: artifact, prefix: prefix)
             XCTAssertEqual(repaired.generation, baseline.generation + 1)
             XCTAssertTrue(try DistributionFileSystem.isRegularNonSymlink(missing))
             XCTAssertEqual(
@@ -1163,7 +1368,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
             }
             XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: prefix.path), [])
 
-            let installed = try lifecycle.install(
+            let installed = try installWithPreparedState(lifecycle: lifecycle,
                 artifact: baseline,
                 prefix: prefix,
                 requiredOperation: .install
@@ -1196,7 +1401,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
             }
             XCTAssertEqual(try lifecycle.inspect(prefix: prefix).status, installed)
 
-            let upgraded = try lifecycle.install(
+            let upgraded = try installWithPreparedState(lifecycle: lifecycle,
                 artifact: candidate,
                 prefix: prefix,
                 requiredOperation: .upgrade
@@ -1226,7 +1431,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
             let state = SQLiteStateStore(path: stateDirectory.appendingPathComponent("state.sqlite").path)
             try MigrationRunner().apply(to: state)
             let lifecycle = DistributionInstalledLifecycle()
-            _ = try lifecycle.install(
+            _ = try installWithPreparedState(lifecycle: lifecycle,
                 artifact: artifact,
                 prefix: prefix,
                 stateDatabasePath: state.path
@@ -1244,7 +1449,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
             XCTAssertEqual(try lifecycle.inspect(prefix: prefix).readiness, .ready)
 
             let stalePlan = try lifecycle.uninstallPlan(prefix: prefix, dataPolicy: .remove)
-            _ = try lifecycle.install(artifact: artifact, prefix: prefix)
+            _ = try installWithPreparedState(lifecycle: lifecycle, artifact: artifact, prefix: prefix)
             XCTAssertThrowsError(
                 try lifecycle.uninstall(
                     prefix: prefix,
@@ -1310,7 +1515,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
             let state = SQLiteStateStore(path: stateDirectory.appendingPathComponent("state.sqlite").path)
             try MigrationRunner().apply(to: state)
             let lifecycle = DistributionInstalledLifecycle()
-            _ = try lifecycle.install(
+            _ = try installWithPreparedState(lifecycle: lifecycle,
                 artifact: artifact,
                 prefix: prefix,
                 stateDatabasePath: state.path
@@ -1379,7 +1584,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
             let prefix = root.appendingPathComponent("unbound-remove-prefix", isDirectory: true)
             try FileManager.default.createDirectory(at: prefix, withIntermediateDirectories: false)
             let lifecycle = DistributionInstalledLifecycle()
-            let installed = try lifecycle.install(artifact: artifact, prefix: prefix)
+            let installed = try installWithPreparedState(lifecycle: lifecycle, artifact: artifact, prefix: prefix)
 
             XCTAssertThrowsError(
                 try lifecycle.uninstallPlan(prefix: prefix, dataPolicy: .remove)
@@ -1439,7 +1644,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
                 )
             ])
             let lifecycle = DistributionInstalledLifecycle()
-            _ = try lifecycle.install(
+            _ = try installWithPreparedState(lifecycle: lifecycle,
                 artifact: artifact,
                 prefix: prefix,
                 stateDatabasePath: state.path
@@ -1534,7 +1739,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
             XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: prefix.path), [])
 
             let lifecycle = DistributionInstalledLifecycle()
-            let status = try lifecycle.install(artifact: artifact, prefix: prefix)
+            let status = try installWithPreparedState(lifecycle: lifecycle, artifact: artifact, prefix: prefix)
             XCTAssertThrowsError(
                 try lifecycle.uninstall(
                     prefix: prefix,
@@ -1704,7 +1909,9 @@ final class DistributionDurableLifecycleTests: XCTestCase {
             let prefix = root.appendingPathComponent("canonical-status-prefix", isDirectory: true)
             try FileManager.default.createDirectory(at: prefix, withIntermediateDirectories: false)
             let lifecycle = DistributionInstalledLifecycle()
-            let prior = try lifecycle.install(artifact: baseline, prefix: prefix)
+            _ = try installWithPreparedState(lifecycle: lifecycle, artifact: baseline, prefix: prefix)
+            try prepareFixtureState(lifecycle: lifecycle, prefix: prefix)
+            let prior = try XCTUnwrap(lifecycle.inspect(prefix: prefix).status)
             let lifecycleRoot = prefix.appendingPathComponent(
                 DistributionLayout.lifecycleDirectoryName,
                 isDirectory: true
@@ -1771,13 +1978,15 @@ final class DistributionDurableLifecycleTests: XCTestCase {
             let prefix = root.appendingPathComponent("status-window-prefix", isDirectory: true)
             try FileManager.default.createDirectory(at: prefix, withIntermediateDirectories: false)
             let lifecycle = DistributionInstalledLifecycle()
-            let prior = try lifecycle.install(artifact: baseline, prefix: prefix)
+            _ = try installWithPreparedState(lifecycle: lifecycle, artifact: baseline, prefix: prefix)
+            try prepareFixtureState(lifecycle: lifecycle, prefix: prefix)
+            let prior = try XCTUnwrap(lifecycle.inspect(prefix: prefix).status)
 
             let interrupted = DistributionInstalledLifecycle(
                 interruptAfter: nil,
                 interruptAfterStatusWrite: true
             )
-            XCTAssertThrowsError(try interrupted.install(artifact: candidate, prefix: prefix)) {
+            XCTAssertThrowsError(try installWithPreparedState(lifecycle: interrupted, artifact: candidate, prefix: prefix)) {
                 XCTAssertEqual(
                     $0 as? DistributionLifecycleInterruption,
                     .afterStatusWriteBeforeJournal
@@ -1817,7 +2026,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
                 interruptAfterStatusWrite: true
             )
 
-            XCTAssertThrowsError(try interrupted.install(artifact: artifact, prefix: prefix)) {
+            XCTAssertThrowsError(try installWithPreparedState(lifecycle: interrupted, artifact: artifact, prefix: prefix)) {
                 XCTAssertEqual(
                     $0 as? DistributionLifecycleInterruption,
                     .afterStatusWriteBeforeJournal
@@ -1851,11 +2060,14 @@ final class DistributionDurableLifecycleTests: XCTestCase {
             let prefix = root.appendingPathComponent("resumable-compensation-prefix", isDirectory: true)
             try FileManager.default.createDirectory(at: prefix, withIntermediateDirectories: false)
             let lifecycle = DistributionInstalledLifecycle()
-            _ = try lifecycle.install(artifact: baseline, prefix: prefix)
+            _ = try installWithPreparedState(lifecycle: lifecycle, artifact: baseline, prefix: prefix)
+            try prepareFixtureState(lifecycle: lifecycle, prefix: prefix)
             XCTAssertThrowsError(
                 try DistributionInstalledLifecycle(interruptAfter: .payloadPublished)
                     .install(artifact: candidate, prefix: prefix)
-            )
+            ) { error in
+                XCTAssertEqual(error as? DistributionLifecycleInterruption, .after(.payloadPublished))
+            }
 
             XCTAssertThrowsError(
                 try DistributionInstalledLifecycle(
@@ -1898,11 +2110,15 @@ final class DistributionDurableLifecycleTests: XCTestCase {
             let prefix = root.appendingPathComponent("compensation-finalization-prefix", isDirectory: true)
             try FileManager.default.createDirectory(at: prefix, withIntermediateDirectories: false)
             let lifecycle = DistributionInstalledLifecycle()
-            let installed = try lifecycle.install(artifact: baseline, prefix: prefix)
+            _ = try installWithPreparedState(lifecycle: lifecycle, artifact: baseline, prefix: prefix)
+            try prepareFixtureState(lifecycle: lifecycle, prefix: prefix)
+            let installed = try XCTUnwrap(lifecycle.inspect(prefix: prefix).status)
             XCTAssertThrowsError(
                 try DistributionInstalledLifecycle(interruptAfter: .payloadPublished)
                     .install(artifact: candidate, prefix: prefix)
-            )
+            ) { error in
+                XCTAssertEqual(error as? DistributionLifecycleInterruption, .after(.payloadPublished))
+            }
             let interrupted = try lifecycle.inspect(prefix: prefix)
             let operationID = try XCTUnwrap(interrupted.pendingOperation?.operationID)
 
@@ -1949,7 +2165,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
             let prefix = root.appendingPathComponent("repair-finalization-prefix", isDirectory: true)
             try FileManager.default.createDirectory(at: prefix, withIntermediateDirectories: false)
             let lifecycle = DistributionInstalledLifecycle()
-            _ = try lifecycle.install(artifact: artifact, prefix: prefix)
+            _ = try installWithPreparedState(lifecycle: lifecycle, artifact: artifact, prefix: prefix)
 
             XCTAssertThrowsError(
                 try DistributionInstalledLifecycle(
@@ -2012,7 +2228,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
                 let state = SQLiteStateStore(path: stateDirectory.appendingPathComponent("state.sqlite").path)
                 try MigrationRunner().apply(to: state)
                 let lifecycle = DistributionInstalledLifecycle()
-                let installed = try lifecycle.install(
+                let installed = try installWithPreparedState(lifecycle: lifecycle,
                     artifact: artifact,
                     prefix: prefix,
                     stateDatabasePath: state.path
@@ -2076,7 +2292,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
             let state = SQLiteStateStore(path: stateDirectory.appendingPathComponent("state.sqlite").path)
             try MigrationRunner().apply(to: state)
             let lifecycle = DistributionInstalledLifecycle()
-            _ = try lifecycle.install(
+            _ = try installWithPreparedState(lifecycle: lifecycle,
                 artifact: artifact,
                 prefix: prefix,
                 stateDatabasePath: state.path
@@ -2122,7 +2338,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
             let prefix = root.appendingPathComponent("uninstall-result-prefix", isDirectory: true)
             try FileManager.default.createDirectory(at: prefix, withIntermediateDirectories: false)
             let lifecycle = DistributionInstalledLifecycle()
-            _ = try lifecycle.install(artifact: artifact, prefix: prefix)
+            _ = try installWithPreparedState(lifecycle: lifecycle, artifact: artifact, prefix: prefix)
             let unmanaged = prefix.appendingPathComponent("bin/operator-tool")
             try Data("operator-owned\n".utf8).write(to: unmanaged, options: .withoutOverwriting)
 
@@ -2158,9 +2374,11 @@ final class DistributionDurableLifecycleTests: XCTestCase {
             )
             let lifecycle = DistributionInstalledLifecycle(managedService: service)
 
-            let installed = try lifecycle.install(artifact: baseline, prefix: prefix)
+            let installed = try installWithPreparedState(lifecycle: lifecycle, artifact: baseline, prefix: prefix)
             XCTAssertEqual(installed.service, .notInstalled)
             XCTAssertEqual(try lifecycle.inspect(prefix: prefix).readiness, .ready)
+
+            try prepareFixtureState(lifecycle: lifecycle, prefix: prefix)
 
             let config = root.appendingPathComponent("hostwright.yaml")
             try Data("services: {}\n".utf8).write(to: config, options: .withoutOverwriting)
@@ -2210,7 +2428,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
                 propertyListURL: root.appendingPathComponent("managed-service.plist")
             )
             let lifecycle = DistributionInstalledLifecycle(managedService: service)
-            _ = try lifecycle.install(artifact: baseline, prefix: prefix)
+            _ = try installWithPreparedState(lifecycle: lifecycle, artifact: baseline, prefix: prefix)
 
             let config = root.appendingPathComponent("hostwright.yaml")
             try Data("services: {}\n".utf8).write(to: config, options: .withoutOverwriting)
@@ -2220,10 +2438,13 @@ final class DistributionDurableLifecycleTests: XCTestCase {
                 config: config
             )
             try launchManagedService(service)
-            defer { stopManagedServiceIfLoaded(service) }
+            defer {
+                do { try stopManagedServiceIfLoaded(service) }
+                catch { XCTFail("managed lifecycle fixture cleanup failed: \(error)") }
+            }
             try waitForServiceVersion("0.0.1", config: config)
 
-            let upgraded = try lifecycle.install(artifact: candidate, prefix: prefix)
+            let upgraded = try installWithPreparedState(lifecycle: lifecycle, artifact: candidate, prefix: prefix)
             XCTAssertEqual(upgraded.service, .running)
             try waitForServiceVersion("0.0.2-dev", config: config)
 
@@ -2231,6 +2452,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
             XCTAssertEqual(rolledBack.service, .running)
             try waitForServiceVersion("0.0.1", config: config)
 
+            try prepareFixtureState(lifecycle: lifecycle, prefix: prefix)
             XCTAssertThrowsError(
                 try DistributionInstalledLifecycle(
                     managedService: service,
@@ -2246,6 +2468,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
             XCTAssertEqual(try lifecycle.recover(prefix: prefix).action, .restoredPriorGeneration)
             try waitForServiceVersion("0.0.1", config: config)
 
+            try prepareFixtureState(lifecycle: lifecycle, prefix: prefix)
             XCTAssertThrowsError(
                 try DistributionInstalledLifecycle(
                     managedService: service,
@@ -2262,7 +2485,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
             try waitForServiceVersion("0.0.1", config: config)
 
             _ = try lifecycle.uninstall(prefix: prefix, dataPolicy: .preserve)
-            XCTAssertFalse(isManagedServiceLoaded(service))
+            XCTAssertFalse(try isManagedServiceLoaded(service))
             XCTAssertTrue(FileManager.default.fileExists(atPath: service.propertyListURL.path))
             XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: prefix.path), [])
         }
@@ -2290,7 +2513,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
                 propertyListURL: root.appendingPathComponent("managed-service-symlink.plist")
             )
             let lifecycle = DistributionInstalledLifecycle(managedService: service)
-            let installed = try lifecycle.install(artifact: baseline, prefix: prefix)
+            let installed = try installWithPreparedState(lifecycle: lifecycle, artifact: baseline, prefix: prefix)
             let executableLink = root.appendingPathComponent("hostwrightd-link")
             try FileManager.default.createSymbolicLink(
                 at: executableLink,
@@ -2304,7 +2527,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
                 config: config
             )
 
-            XCTAssertThrowsError(try lifecycle.install(artifact: candidate, prefix: prefix)) { error in
+            XCTAssertThrowsError(try installWithPreparedState(lifecycle: lifecycle, artifact: candidate, prefix: prefix)) { error in
                 guard case .lifecycleFailed(let message) = error as? DistributionError else {
                     return XCTFail("expected exact managed-service path refusal, got \(error)")
                 }
@@ -2385,7 +2608,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
                 try FileManager.default.createDirectory(at: stateDirectory, withIntermediateDirectories: false)
                 let state = SQLiteStateStore(path: stateDirectory.appendingPathComponent("state.sqlite").path)
                 try MigrationRunner().apply(to: state, throughVersion: 6)
-                _ = try lifecycle.install(
+                _ = try installWithPreparedState(lifecycle: lifecycle,
                     artifact: baseline,
                     prefix: prefix,
                     stateDatabasePath: state.path
@@ -2424,7 +2647,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
                 try FileManager.default.createDirectory(at: stateDirectory, withIntermediateDirectories: false)
                 let state = SQLiteStateStore(path: stateDirectory.appendingPathComponent("state.sqlite").path)
                 try MigrationRunner().apply(to: state)
-                _ = try lifecycle.install(
+                _ = try installWithPreparedState(lifecycle: lifecycle,
                     artifact: baseline,
                     prefix: prefix,
                     stateDatabasePath: state.path
@@ -2470,7 +2693,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
                 try FileManager.default.createDirectory(at: stateDirectory, withIntermediateDirectories: false)
                 let state = SQLiteStateStore(path: stateDirectory.appendingPathComponent("state.sqlite").path)
                 try MigrationRunner().apply(to: state)
-                _ = try lifecycle.install(
+                _ = try installWithPreparedState(lifecycle: lifecycle,
                     artifact: baseline,
                     prefix: prefix,
                     stateDatabasePath: state.path
@@ -2556,8 +2779,9 @@ final class DistributionDurableLifecycleTests: XCTestCase {
 
     private func stopManagedServiceIfLoaded(
         _ service: DistributionManagedLaunchdServiceConfiguration
-    ) {
-        _ = try? DistributionProcessRunner().run(
+    ) throws {
+        guard try isManagedServiceLoaded(service) else { return }
+        _ = try DistributionProcessRunner().run(
             executablePath: "/bin/launchctl",
             arguments: ["bootout", "\(service.domain)/\(service.label)"],
             label: "stop lifecycle test service",
@@ -2567,13 +2791,20 @@ final class DistributionDurableLifecycleTests: XCTestCase {
 
     private func isManagedServiceLoaded(
         _ service: DistributionManagedLaunchdServiceConfiguration
-    ) -> Bool {
-        (try? DistributionProcessRunner().run(
+    ) throws -> Bool {
+        let result = try SecureSubprocessRunner().run(SecureSubprocessRequest(
             executablePath: "/bin/launchctl",
             arguments: ["print", "\(service.domain)/\(service.label)"],
-            label: "inspect lifecycle test service",
-            timeoutSeconds: 10
-        )) != nil
+            environment: SecureSubprocessEnvironment.currentUser,
+            timeoutMilliseconds: 10_000,
+            maximumStandardOutputBytes: 64 * 1_024,
+            maximumStandardErrorBytes: 64 * 1_024
+        ))
+        switch result.exitStatus {
+        case 0: return true
+        case 113: return false
+        default: throw DistributionError.commandFailed("inspect lifecycle test service", result.exitStatus)
+        }
     }
 
     private func waitForServiceVersion(_ version: String, config: URL) throws {
@@ -2653,6 +2884,7 @@ final class DistributionDurableLifecycleTests: XCTestCase {
                 ),
                 hostwrightDistributionBinary: binary,
                 hostwrightDaemonBinary: binary,
+                hostwrightDesktopBinary: binary,
                 containerizationAssets: try makeDistributionTestContainerizationAssets(at: fixture),
                 exampleManifestFile: repository.appendingPathComponent("examples/single-service/hostwright.yaml"),
                 licenseFile: repository.appendingPathComponent("LICENSE"),
@@ -2830,6 +3062,67 @@ final class DistributionDurableLifecycleTests: XCTestCase {
             to: prefix.appendingPathComponent(DistributionLayout.installManifestFileName),
             mode: 0o644
         )
+    }
+
+    private func prepareFixtureState(lifecycle: DistributionInstalledLifecycle, prefix: URL) throws {
+        let status = try XCTUnwrap(lifecycle.inspect(prefix: prefix).status)
+        let path: String
+        if let existing = status.stateDatabasePath { path = existing }
+        else {
+            let directory = prefix.deletingLastPathComponent().appendingPathComponent("prepared-state-" + prefix.lastPathComponent)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o700])
+            path = directory.appendingPathComponent("state.sqlite").path
+            try SQLiteStateStore(path: path).migrate()
+        }
+        _ = try lifecycle.prepareStateBinding(prefix: prefix,
+            configuration: StateStoreConfiguration(explicitDatabasePath: path))
+    }
+
+    private func installWithPreparedState(
+        lifecycle: DistributionInstalledLifecycle,
+        artifact: VerifiedDistributionArtifact,
+        prefix: URL,
+        stateDatabasePath: String? = nil,
+        requiredOperation: DistributionLifecycleOperation? = nil,
+        cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation()
+    ) throws -> DistributionInstallationStatus {
+        let inspection = try? lifecycle.inspect(prefix: prefix)
+        let prior = inspection?.status
+        var selectedPath = stateDatabasePath ?? prior?.stateDatabasePath
+        let isUpgrade: Bool
+        if let prior {
+            if case .upgrade? = try? DistributionVersionTransition.classify(
+                installedVersion: prior.installedManifest.packageVersion,
+                installedCommit: prior.installedManifest.sourceCommit,
+                candidateVersion: artifact.manifest.packageVersion,
+                candidateCommit: artifact.manifest.sourceCommit
+            ) { isUpgrade = true } else { isUpgrade = false }
+        } else { isUpgrade = false }
+        let needsPreparation = isUpgrade
+        if needsPreparation, inspection?.readiness != .recoveryRequired {
+            if selectedPath == nil {
+                let stateDirectory = prefix.deletingLastPathComponent()
+                    .appendingPathComponent("prepared-state-" + prefix.lastPathComponent)
+                try FileManager.default.createDirectory(at: stateDirectory, withIntermediateDirectories: true,
+                    attributes: [.posixPermissions: 0o700])
+                selectedPath = stateDirectory.appendingPathComponent("state.sqlite").path
+                try SQLiteStateStore(path: selectedPath!).migrate()
+            }
+            if let prior, let selectedPath, FileManager.default.fileExists(atPath: selectedPath) {
+                if prior.stateDatabasePath == nil || prior.stateDatabasePath == selectedPath {
+                    _ = try lifecycle.prepareStateBinding(prefix: prefix,
+                        configuration: StateStoreConfiguration(explicitDatabasePath: selectedPath))
+                }
+            }
+        }
+        let status = try lifecycle.install(artifact: artifact, prefix: prefix,
+            stateDatabasePath: selectedPath, requiredOperation: requiredOperation, cancellation: cancellation)
+        if prior == nil, let selectedPath, FileManager.default.fileExists(atPath: selectedPath) {
+            _ = try lifecycle.prepareStateBinding(prefix: prefix,
+                configuration: StateStoreConfiguration(explicitDatabasePath: selectedPath))
+        }
+        return status
     }
 
     private func runInstalled(_ executable: URL, arguments: [String]) throws -> String {

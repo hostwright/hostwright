@@ -8,6 +8,14 @@ import XCTest
 @testable import HostwrightControlPlane
 
 final class SchedulerPressureAuthorityCoordinatorTests: XCTestCase {
+  func testKernelPressureLevelsNeverDefaultUnknownSamplesToNormal() {
+    XCTAssertEqual(SchedulerMacOSHostPressureProbe.memoryPressureLevel(1), .nominal)
+    XCTAssertEqual(SchedulerMacOSHostPressureProbe.memoryPressureLevel(2), .warning)
+    XCTAssertEqual(SchedulerMacOSHostPressureProbe.memoryPressureLevel(4), .critical)
+    for value: UInt32 in [0, 3, 5, UInt32.max] {
+      XCTAssertEqual(SchedulerMacOSHostPressureProbe.memoryPressureLevel(value), .unknown)
+    }
+  }
   private let nodeID = UUID(uuidString: "00000000-0000-0000-0000-000000000701")!
 
   func testStartupAndReopenRecoverVersionedHysteresis() throws {

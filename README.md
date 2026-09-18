@@ -4,7 +4,7 @@ Hostwright is a macOS command-line control plane for declaring and managing Appl
 
 Status: `0.0.2-dev`, targeting `v0.0.2`. Hostwright is not production-ready.
 
-The Phase 10 Manifest v3, Control API 2.2, scheduler admission, and state v23 slices are active implementation boundaries, not aggregate qualification claims. `scheduler.optimization` and `accelerators.host-native` remain unavailable pending converged G13-G15 aggregate, live, hardware, and security evidence; direct guest passthrough remains blocked.
+The Phase 10 Manifest v3, Control API 2.2, scheduler admission, and state v24 slices are active implementation boundaries, not aggregate qualification claims. `scheduler.optimization` and `accelerators.host-native` are deferred from the accepted single-Mac release scope; direct guest passthrough remains blocked. See [the scope decision](docs/design/adr-0015-reduced-local-release.md).
 
 ## Requirements
 
@@ -80,7 +80,7 @@ hostwright image pull \
 hostwright up hostwright.yaml --dry-run --runtime-provider apple-cli
 ```
 
-At the current Phase 10 boundary, Manifest v3 validation and planning remain experimental. The current-source scheduler qualification is sealed, but confirmed allocation/lifecycle mutation remains unavailable until the persistent Control 2.2 lifecycle handoff, repository-backed runtime/victim-fencing seam, and remaining G13-G15 integration evidence are qualified. A confirmed mutation fails closed with `scheduler-authority-unavailable` and does not touch the runtime.
+Manifest v3 validation, local capacity admission, and confirmed lifecycle execution are implemented through the authenticated persistent Control API 2.2 daemon. Install the signed payload and explicitly bootstrap the daemon identity before mutation; an absent or stale authority fails closed. These development capabilities still require the current-source live, recovery, sanitizer, and signed-artifact qualification gates before release promotion.
 
 Copy the plan hash from the dry run into the confirmed command:
 
@@ -114,6 +114,7 @@ In a source checkout, replace `hostwright` with `swift run hostwright`. The [Man
 | `hostwright status`, `events`, `metrics`, `traces`, `recovery`, `state`, `cleanup`, `doctor`, `diagnostics` | Observe workloads, inspect bounded correlated local evidence, create consent-bound privacy-safe support bundles, maintain local state, recover fenced operations, and remove verified Hostwright-owned resources. |
 | `hostwright-control` | Accept one bounded local JSON request, return one JSON response, and exit. It opens no socket or HTTP listener. |
 | `hostwright daemon`, `hostwrightd` | Control the exact current-user `dev.hostwright.daemon` LaunchAgent or run the foreground loop. Both daemon modes level-trigger supported drift through the shared fenced lifecycle saga. |
+| `Hostwright.app` | Confirm authenticated local up/down/restart, cancel operations, and report daemon disconnection. |
 | `hostwright-dist` | Build, verify, install, upgrade, repair, roll back, and uninstall Hostwright distributions through explicit paths. |
 
 Run `hostwright help` or read the [CLI reference](docs/reference/cli.md) for arguments, JSON contracts, and exit codes.
@@ -126,7 +127,7 @@ SwiftPM separates contracts, runtime access, orchestration, state, and process s
 | --- | --- |
 | Contracts and input | `HostwrightCore`, `HostwrightManifest`, `HostwrightImport`, and `HostwrightPolicy` define identities, contract versions, Manifest v3 decoding, conversion, and local policy. |
 | Runtime providers | `HostwrightRuntime` owns `RuntimeAdapter`, capability negotiation, observation, and mutation contracts. `hostwright-containerization-helper` keeps the pinned Containerization framework in an authenticated out-of-process helper. |
-| Planning and state | `HostwrightReconciler` builds lifecycle plans and recovery actions. `HostwrightState` persists desired state, observations, ownership, operation records, and schema-v17 through v23 migrations in SQLite. |
+| Planning and state | `HostwrightReconciler` builds lifecycle plans and recovery actions. `HostwrightState` persists desired state, observations, ownership, operation records, and schema-v17 through v24 migrations in SQLite. |
 | Registry and secrets | `HostwrightRegistry` handles registry authentication and digest-bound OCI evidence. `HostwrightSecrets` handles Keychain and typed secret-provider boundaries. |
 | Storage | `HostwrightStorage` defines Storage Provider API v1, the built-in local provider, guarded mounts, snapshots, verified local/S3-compatible backup and restore, capacity policy, reclaim, and orphan recovery. `hostwright-storage-helper` keeps provider execution out of process. |
 | User and automation surfaces | `HostwrightCLI`, `HostwrightControl`, `HostwrightDaemonCore`, and their executable targets expose the CLI, one-shot JSON process, foreground daemon loop, and exact per-user LaunchAgent lifecycle. |
@@ -152,9 +153,9 @@ Architecture references:
 - The package pins Containerization 0.35.0. Its helper exposes a smaller local-image subset and reports image mutations as unavailable.
 - Hostwright runs on one Mac. It has no multi-host control plane or high-availability state authority.
 - The manifest parser accepts the documented Hostwright YAML subset. It rejects unsupported YAML, unknown Kubernetes or Compose fields, and unsafe paths.
-- Hostwright has no Kubernetes or CRI compatibility, Docker API, full Compose compatibility, GUI, or cloud service.
+- Hostwright has no Kubernetes or CRI compatibility, Docker API, full Compose compatibility, or cloud service. The native desktop app implements authenticated local up/down/restart with confirmation; its release qualification remains pending.
 - Hostwright supports exact Hostwright-owned named volumes, guarded mounts, snapshots, verified online backup/restore, quota and pressure accounting, reclaim policy, orphan quarantine/GC, UUID-owned project networks, project DNS/service aliases, explicit localhost or LAN ingress with TLS/mTLS policy, guarded host access, and authenticated service tunnels. Unsupported providers or unqualified exposure modes fail before mutation.
-- `hostwright-control` has no persistent listener. `hostwright daemon` installs only the exact per-user LaunchAgent after explicit invocation; `hostwrightd` has no network API and reconciles only through the existing local lifecycle/provider boundaries.
+- `hostwright-control` has no persistent listener. `hostwright daemon` installs only the exact per-user LaunchAgent after explicit invocation; `hostwrightd` exposes authenticated persistent Control API 2.2 over a private Unix socket and reconciles through the local lifecycle/provider boundaries. It exposes no TCP or public control listener.
 - Cleanup and image pruning require exact ownership and confirmation. Hostwright does not delete unmanaged resources or run global garbage collection.
 - Hostwright is not production-ready and has no support SLA.
 

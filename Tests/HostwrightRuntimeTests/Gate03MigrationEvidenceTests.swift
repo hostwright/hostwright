@@ -85,7 +85,9 @@ private struct Gate03MigrationEvidenceFixture {
     init() throws {
         let desired = DesiredRuntimeService(
             identity: RuntimeServiceIdentity(projectName: "sample", serviceName: "api"),
-            image: "example.local/api:1"
+            image: "example.local/api:1",
+            cpuCount: 1,
+            memoryBytes: 512 * 1024 * 1024
         )
         let ownership = RuntimeInventoryOwnershipEvidence(
             resourceUUID: resourceUUID,

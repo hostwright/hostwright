@@ -1,0 +1,41 @@
+{
+  "kind": "hostwright.vminit-actual-elf-inspection.v1",
+  "layerSHA256": "e3b2b9d347c2e5834d9fe5b4d615f5c0632c485d785e64f5c6b4c9b179ac168f",
+  "elves": [
+    {
+      "path": "sbin/vminitd",
+      "sha256": "b959125d64bdfb698184687d3c0bb3088bcc4a3b1cf2db418e292b7889550a17",
+      "sizeBytes": 84433856,
+      "commentStrings": [
+        "Apple clang version 21.0.0 (https://github.com/swiftlang/llvm-project.git b6f042d4515f83404d3f44012144b5e67b2c5791)",
+        "Linker: LLD 21.0.0 (https://github.com/swiftlang/llvm-project.git b6f042d4515f83404d3f44012144b5e67b2c5791)",
+        "clang version 21.1.6 (https://github.com/swiftlang/llvm-project.git b6f042d4515f83404d3f44012144b5e67b2c5791)"
+      ],
+      "buildID": [
+        "e456b62f7e97d52e8674d72720b6ba433cbf9869"
+      ],
+      "hasInterpreter": false,
+      "hasDynamicSegment": false
+    },
+    {
+      "path": "sbin/vmexec",
+      "sha256": "e30b5e74c1af4bdfce229d4769e6b8b4308921419df611a492df74a9724109b0",
+      "sizeBytes": 84483008,
+      "commentStrings": [
+        "Apple clang version 21.0.0 (https://github.com/swiftlang/llvm-project.git b6f042d4515f83404d3f44012144b5e67b2c5791)",
+        "Linker: LLD 21.0.0 (https://github.com/swiftlang/llvm-project.git b6f042d4515f83404d3f44012144b5e67b2c5791)",
+        "clang version 21.1.6 (https://github.com/swiftlang/llvm-project.git b6f042d4515f83404d3f44012144b5e67b2c5791)"
+      ],
+      "buildID": [
+        "c00b9beb52f981e0cb2ec82caed53f715e6a2f7f"
+      ],
+      "hasInterpreter": false,
+      "hasDynamicSegment": false
+    }
+  ],
+  "status": "inspected-not-link-provenance-qualified",
+  "limitations": [
+    "Stripped ELFs do not establish complete linked component/source inventory.",
+    "Matching LLVM comment is consistency evidence; it does not authenticate the SDK/source used by the OCI builder."
+  ]
+}

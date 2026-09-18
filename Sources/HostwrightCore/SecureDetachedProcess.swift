@@ -8,6 +8,8 @@ public final class SecureDetachedProcess: @unchecked Sendable {
 
     private let lock = NSLock()
     private var reaped = false
+    private var waitStatus: Int32?
+    private var terminationRequested = false
 
     fileprivate init(processID: Int32) {
         self.processID = processID
@@ -17,10 +19,19 @@ public final class SecureDetachedProcess: @unchecked Sendable {
         lock.withLock { pollUnlocked() }
     }
 
+    public var naturalExitStatus: Int32? {
+        lock.withLock {
+            _ = pollUnlocked()
+            guard !terminationRequested, let waitStatus, waitStatus & 0x7f == 0 else { return nil }
+            return (waitStatus >> 8) & 0xff
+        }
+    }
+
     public func terminate(graceMilliseconds: Int) {
         guard (10...5_000).contains(graceMilliseconds) else { return }
         lock.withLock {
             guard !reaped, pollUnlocked() else { return }
+            terminationRequested = true
             _ = kill(-processID, SIGTERM)
             let deadline = DispatchTime.now().uptimeNanoseconds +
                 UInt64(graceMilliseconds) * 1_000_000
@@ -40,17 +51,23 @@ public final class SecureDetachedProcess: @unchecked Sendable {
 
     private func pollUnlocked() -> Bool {
         guard !reaped else { return false }
-        var status: Int32 = 0
-        let result = waitpid(processID, &status, WNOHANG)
-        if result == processID {
-            reaped = true
-            return false
+        while true {
+            var information = siginfo_t()
+            let result = waitid(P_PID, id_t(processID), &information, WEXITED | WNOHANG | WNOWAIT)
+            if result == 0 {
+                guard information.si_pid == processID else { return true }
+                // Keep the exited leader unreaped so its group ID cannot be recycled before cleanup.
+                _ = kill(-processID, SIGKILL)
+                reapUnlocked()
+                return false
+            }
+            if errno == EINTR { continue }
+            if errno == ECHILD || errno == ESRCH {
+                reaped = true
+                return false
+            }
+            return true
         }
-        if result < 0, errno == ECHILD || errno == ESRCH {
-            reaped = true
-            return false
-        }
-        return result == 0 || result < 0
     }
 
     private func reapUnlocked() {
@@ -58,7 +75,11 @@ public final class SecureDetachedProcess: @unchecked Sendable {
         var status: Int32 = 0
         while true {
             let result = waitpid(processID, &status, 0)
-            if result == processID || (result < 0 && errno == ECHILD) {
+            if result == processID {
+                recordWaitStatusUnlocked(status)
+                return
+            }
+            if result < 0 && errno == ECHILD {
                 reaped = true
                 return
             }
@@ -67,12 +88,17 @@ public final class SecureDetachedProcess: @unchecked Sendable {
             return
         }
     }
+
+    private func recordWaitStatusUnlocked(_ status: Int32) {
+        waitStatus = status
+        reaped = true
+    }
 }
 
 public extension SecureSubprocessRunner {
     /// Launches a supervised process without waiting for its natural exit.
-    /// Standard streams are pinned to `/dev/null`; callers retain only the
-    /// process-group handle and must explicitly terminate it.
+    /// Standard streams default to `/dev/null`; supplied descriptors are duplicated
+    /// into the child. Callers retain the group handle and their stream descriptors.
     func launchDetached(
         _ request: SecureSubprocessRequest,
         standardInput: Int32? = nil,

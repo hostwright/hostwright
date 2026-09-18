@@ -1,0 +1,123 @@
+name: Accept final release qualification
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Exact qualified merged source
+        required: true
+        type: string
+      version:
+        description: Exact final qualified version (RC evidence cannot promote GA)
+        required: true
+        type: string
+      stage_run:
+        description: Successful trusted stage run ID
+        required: true
+        type: string
+      stage_attempt:
+        description: Exact stage attempt
+        required: true
+        type: string
+      evidence_run:
+        description: Run retaining hostwright-final-qualification-evidence
+        required: true
+        type: string
+      reviewer:
+        description: Independent agent review issuer recorded in retained report
+        required: true
+        type: string
+      review_sha256:
+        description: SHA256 of the independent review report being accepted
+        required: true
+        type: string
+permissions: {}
+jobs:
+  accept:
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    environment: release
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+      attestations: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_COMMIT: ${{ inputs.commit }}
+      RELEASE_VERSION: ${{ inputs.version }}
+      STAGE_RUN: ${{ inputs.stage_run }}
+      STAGE_ATTEMPT: ${{ inputs.stage_attempt }}
+      EVIDENCE_RUN: ${{ inputs.evidence_run }}
+      REVIEWER: ${{ inputs.reviewer }}
+      REVIEW_SHA256: ${{ inputs.review_sha256 }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify existing protected release environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/environments/release" > "$RUNNER_TEMP/release-policy.json"
+          gh api "repos/$GITHUB_REPOSITORY/environments/release/deployment-branch-policies" > "$RUNNER_TEMP/release-branches.json"
+          python3 scripts/release/validate-protection.py "$RUNNER_TEMP/release-policy.json" "$RUNNER_TEMP/release-branches.json"
+      - name: Validate exact protected source and stage run
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = hostwright/hostwright
+          [[ "$RELEASE_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+          for value in "$STAGE_RUN" "$STAGE_ATTEMPT" "$EVIDENCE_RUN"; do [[ "$value" =~ ^[1-9][0-9]*$ ]]; done
+          python3 scripts/release/staged-release.py version --version "$RELEASE_VERSION"
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$RELEASE_COMMIT" origin/main
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$STAGE_RUN" > "$RUNNER_TEMP/stage-run.json"
+          python3 scripts/release/validate-run.py "$RUNNER_TEMP/stage-run.json" trusted-release.yml "$STAGE_ATTEMPT"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$EVIDENCE_RUN" > "$RUNNER_TEMP/evidence-run.json"
+          python3 scripts/release/validate-run.py "$RUNNER_TEMP/evidence-run.json" retain-qualification-evidence.yml
+          [[ "$REVIEW_SHA256" =~ ^[a-f0-9]{64}$ ]]
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: hostwright-${{ inputs.version }}-trusted-release
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.stage_run }}
+          path: ${{ runner.temp }}/stage
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: hostwright-final-qualification-evidence
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.evidence_run }}
+          path: ${{ runner.temp }}/evidence
+      - name: Authenticate stage and validate every accepted evidence binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          signer_digest="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["head_sha"])' "$RUNNER_TEMP/stage-run.json")"
+          gh attestation verify "$RUNNER_TEMP/stage/stage-inventory.json" --repo "$GITHUB_REPOSITORY" --signer-workflow hostwright/hostwright/.github/workflows/trusted-release.yml --signer-digest "$signer_digest" --source-ref refs/heads/main --deny-self-hosted-runners
+          python3 scripts/release/staged-release.py verify --root "$RUNNER_TEMP/stage" --commit "$RELEASE_COMMIT" --version "$RELEASE_VERSION" --run "$STAGE_RUN" --attempt "$STAGE_ATTEMPT"
+          for file in "$RUNNER_TEMP/stage/source"/*; do
+            gh attestation verify "$file" --repo "$GITHUB_REPOSITORY" --signer-workflow hostwright/hostwright/.github/workflows/trusted-release.yml --signer-digest "$signer_digest" --source-ref refs/heads/main --deny-self-hosted-runners
+          done
+          mkdir "$RUNNER_TEMP/accepted"
+          python3 scripts/release/accept-qualification.py --commit "$RELEASE_COMMIT" --version "$RELEASE_VERSION" --run "$STAGE_RUN" --attempt "$STAGE_ATTEMPT" --stage "$RUNNER_TEMP/stage" --evidence "$RUNNER_TEMP/evidence" --reviewer "$REVIEWER" --review-sha256 "$REVIEW_SHA256" --producer "$GITHUB_ACTOR" --acceptance-run "$GITHUB_RUN_ID" --output "$RUNNER_TEMP/accepted/promotion-receipt.json"
+      - name: Attest protected aggregate acceptance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: ${{ runner.temp }}/accepted/promotion-receipt.json
+      - name: Retain aggregate and all accepted raw evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hostwright-promotion-receipt
+          path: ${{ runner.temp }}/accepted
+          if-no-files-found: error
+          retention-days: 90
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hostwright-accepted-qualification-evidence
+          path: ${{ runner.temp }}/evidence
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 90

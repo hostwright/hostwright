@@ -151,11 +151,11 @@ Current public Hostwright releases nevertheless remain source-only. Local unsign
 ## Control Surface Boundary
 
 Daemon-ready local control uses the authenticated, user-private Unix-socket
-Control API v2.1. It has no TCP listener. Kernel peer credentials, audit token,
+Control API v2.2. It has no TCP listener. Kernel peer credentials, audit token,
 live code identity, the persisted subject, RBAC, admission, effective-intent
 reauthorization, durable idempotency, and tamper-evident audit all run before a
 mutation handler. The one-shot `hostwright-control` companion remains only the
-bounded bootstrap path for daemon installation, repair, and uninstall. Neither surface
+bounded bootstrap path for identity setup and the exact current-user daemon service lifecycle, including offline start, repair and status. Neither surface
 permits request-selected state paths or direct calls around the shared
 validation, ownership, provider, migration, and audit boundaries.
 
@@ -174,6 +174,8 @@ CDHash as a separate non-owner identity. Later ad-hoc replacement remains
 fail-closed until explicitly declared; this first-install trust-on-first-use
 boundary does not protect against an attacker already controlling the invoking
 user account or its build directory.
+
+Docker execution is deferred. Docker envelopes are rejected by the bootstrap API and production CLI executor before input reads or command execution. The persistent daemon lifecycle transport remains reserved for authenticated workload commands; service control uses the trusted companion and retains its exact ownership checks.
 
 Admission policies are bounded declarative documents, not arbitrary native
 code. Conflicting writes, malformed policy state, stale plan hashes, expired or

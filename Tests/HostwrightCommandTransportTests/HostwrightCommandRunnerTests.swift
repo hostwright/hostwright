@@ -7,6 +7,35 @@ import HostwrightCore
 import HostwrightObservability
 
 final class HostwrightCommandRunnerTests: XCTestCase {
+    func testManagedServiceRecoveryDoesNotRequireAnAvailableDaemonSocket() throws {
+        let log = CallLog()
+        let environment = HostwrightCommandTransportEnvironment(
+            socketPath: { throw TransportFailure.unavailable },
+            persistentSend: { _, _ in
+                XCTFail("Managed service recovery must not require its stopped daemon")
+                throw TransportFailure.unavailable
+            },
+            bootstrapSend: { request in
+                XCTAssertNotNil(try CLIControlRoute.validate(
+                    request: request, expectedTransport: .bootstrapAPI
+                ))
+                log.recordBootstrap(request: request)
+                return completedResponse(requestID: request.requestID, result: CLIRunResult())
+            },
+            streamRun: { _, _, _ in throw TransportFailure.unavailable },
+            requestID: { "offline-service-recovery" }
+        )
+        for action in ["status", "validate", "start", "bootstrap", "stop", "kickstart", "rollback", "disable", "repair"] {
+            XCTAssertEqual(
+                HostwrightCommandRunner.run(arguments: ["daemon", action], environment: environment).exitCode,
+                0,
+                action
+            )
+        }
+        XCTAssertEqual(log.bootstrapRequests.count, 9)
+        XCTAssertTrue(log.persistentRequests.isEmpty)
+    }
+
     func testPersistentBootstrapAndStreamDispatchUseOnlyTheirInjectedClosures() {
         let log = CallLog()
         let persistentResult = CLIRunResult(standardOutput: "persistent\n", standardError: "persistent warning\n", exitCode: 17)

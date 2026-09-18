@@ -41,8 +41,13 @@ func hostwrightWaitForAsync<T: Sendable>(_ operation: @escaping @Sendable () asy
     let traceSession = HostwrightTraceContext.session
     let traceSpan = HostwrightTraceContext.span
 
-    Task {
+    let cancellation = HostwrightCancellationContext.token
+    try Task.checkCancellation()
+    guard cancellation?.isCancelled != true else { throw CancellationError() }
+    let child = Task {
         do {
+            guard cancellation?.isCancelled != true else { throw CancellationError() }
+            try Task.checkCancellation()
             box.result = Result.success(try await HostwrightTraceContext.withValues(
                 session: traceSession,
                 span: traceSpan,
@@ -54,7 +59,11 @@ func hostwrightWaitForAsync<T: Sendable>(_ operation: @escaping @Sendable () asy
         semaphore.signal()
     }
 
-    semaphore.wait()
+    while semaphore.wait(timeout: .now() + .milliseconds(25)) == .timedOut {
+        if Task.isCancelled || cancellation?.isCancelled == true {
+            child.cancel()
+        }
+    }
     return try box.result!.get()
 }
 
@@ -321,6 +330,136 @@ func hostwrightRestartPolicyStateMap(
     }, uniquingKeysWith: { first, _ in first })
 }
 
+func hostwrightRuntimeOwnershipHints(
+    store: SQLiteStateStore, projectID: String, projectName: String,
+    providerID: RuntimeProviderID, currentTimestamp: String = hostwrightTimestamp()
+) throws -> [RuntimeOwnedResourceHint] {
+    let hints = try store.ownership.runtimeHints(
+        projectID: projectID, projectName: projectName, providerID: providerID
+    )
+    guard providerID == .appleContainerization else { return hints }
+    let records = try store.ownership.loadAll()
+    return try hints.map { hint in
+        let matches = records.filter {
+            $0.projectID == projectID && $0.resourceType == "container" &&
+                $0.resourceIdentifier == hint.resourceIdentifier &&
+                $0.resourceUUID == hint.ownership?.resourceUUID &&
+                RuntimeProviderBinding.stableID(for: $0.runtimeAdapter) == providerID
+        }
+        guard matches.count == 1, let record = matches.first else {
+            throw StateStoreError.invalidRecord("SDK observation requires one exact durable ownership record.")
+        }
+        let authority = try OwnershipAuthorityMetadata.decode(from: record.metadataJSONRedacted)
+        let group = try authority?.operationGroupID.flatMap { try store.operationGroups.load(id: $0) }
+        return try hostwrightAuthorizedSDKObservationHint(
+            hint, ownership: record, group: group, currentTimestamp: currentTimestamp
+        )
+    }
+}
+
+func hostwrightAuthorizedSDKObservationHint(
+    _ hint: RuntimeOwnedResourceHint, ownership: OwnershipRecord,
+    group: OperationGroupRecord?, currentTimestamp: String
+) throws -> RuntimeOwnedResourceHint {
+    guard hint.authorizedAlternateOwnership == nil else {
+        throw StateStoreError.invalidRecord("SDK observation alternate ownership must be derived from durable lifecycle authority.")
+    }
+    guard let authority = try OwnershipAuthorityMetadata.decode(from: ownership.metadataJSONRedacted) else {
+        return hint
+    }
+    try authority.validate(for: ownership)
+    guard let group, authority.operationGroupID == group.id else {
+        throw StateStoreError.invalidRecord("SDK observation authority has no exact lifecycle operation group.")
+    }
+    guard ["rm", "restart", "down"].contains(group.plannedActionType) else { return hint }
+    let plan = try LifecyclePersistedIntentCodec.decode(group.intentJSONRedacted)
+    guard let expected = hint.ownership,
+          authority.controllerID == OwnershipAuthorityRecord.lifecycleController,
+          group.groupKind == "lifecycle-v1",
+          group.projectID == ownership.projectID,
+          group.projectID == plan.projectID,
+          group.planHash == plan.planSHA256,
+          group.plannedActionType == plan.command.rawValue,
+          plan.projectName == hint.identity.projectName,
+          plan.providerID == .appleContainerization,
+          plan.providerID == expected.providerID,
+          plan.projectResourceUUID == expected.projectUUID,
+          plan.projectGeneration == expected.projectGeneration,
+          plan.providerGeneration == expected.providerGeneration,
+          hint.identityVersion == RuntimeManagedResourceIdentity.currentVersion,
+          hint.resourceIdentifier == hint.identity.managedResourceIdentifier,
+          ownership.resourceIdentifier == hint.resourceIdentifier,
+          ownership.serviceName == hint.identity.serviceName,
+          ownership.resourceUUID == expected.resourceUUID,
+          ownership.resourceGeneration == expected.resourceGeneration,
+          ownership.projectResourceUUID == expected.projectUUID,
+          ownership.projectGeneration == expected.projectGeneration,
+          ownership.providerGeneration == expected.providerGeneration,
+          ownership.fencingToken == expected.fencingToken,
+          RuntimeProviderBinding.stableID(for: ownership.runtimeAdapter) == expected.providerID,
+          HostwrightResourceUUID.isValid(group.fencingToken) else {
+        throw StateStoreError.invalidRecord("SDK observation lifecycle authority does not match its exact confirmed resource scope.")
+    }
+    let nodes = plan.nodes.filter { $0.resourceUUID == expected.resourceUUID && $0.action.mutatesRuntime }
+    guard nodes.count == 1, let node = nodes.first,
+          node.resourceIdentifier == hint.resourceIdentifier,
+          node.resourceGeneration == expected.resourceGeneration,
+          node.serviceName == hint.identity.serviceName || node.serviceName == hint.identity.displayName,
+          (plan.command == .remove && node.action == .delete) ||
+            (plan.command == .restart && node.action == .restart) ||
+            (plan.command == .down && node.action == .stop) else {
+        throw StateStoreError.invalidRecord("SDK observation requires one exact confirmed lifecycle action node.")
+    }
+    let states = Set(authority.finalizers.map(\.state))
+    let alternateFence: String
+    switch group.status {
+    case .failed:
+        guard plan.command == .remove else { return hint }
+        guard authority.deletionTimestamp != nil,
+              states == [.releasing], authority.handoffGeneration > 0,
+              group.lockOwner == nil, group.lockExpiresAt == nil,
+              authority.leaseOwner == nil, authority.leaseExpiresAt == nil,
+              expected.fencingToken == group.fencingToken else {
+            throw StateStoreError.invalidRecord("SDK prior deletion observation requires the exact failed unleased deleting authority.")
+        }
+        alternateFence = node.fencingToken
+    case .succeeded:
+        guard plan.command == .restart || plan.command == .down,
+              authority.deletionTimestamp == nil, states == [.active], authority.handoffGeneration > 0,
+              group.lockOwner == nil, group.lockExpiresAt == nil,
+              authority.leaseOwner == nil, authority.leaseExpiresAt == nil,
+              expected.fencingToken == node.fencingToken else {
+            throw StateStoreError.invalidRecord("SDK completed lifecycle observation requires its exact released resource projection.")
+        }
+        alternateFence = group.fencingToken
+    case .active:
+        guard let owner = group.lockOwner, let expiry = group.lockExpiresAt,
+              authority.handoffGeneration > 0,
+              authority.leaseOwner == owner, authority.leaseExpiresAt == expiry,
+              let expiryDate = ISO8601DateFormatter().date(from: expiry),
+              let now = ISO8601DateFormatter().date(from: currentTimestamp), expiryDate > now,
+              expected.fencingToken == group.fencingToken || expected.fencingToken == node.fencingToken,
+              (plan.command == .remove && authority.deletionTimestamp != nil && states == [.releasing]) ||
+                (plan.command != .remove && authority.deletionTimestamp == nil && states == [.active]) else {
+            throw StateStoreError.invalidRecord("SDK active lifecycle observation requires the exact unexpired authority lease.")
+        }
+        alternateFence = expected.fencingToken == group.fencingToken ? node.fencingToken : group.fencingToken
+    case .interrupted:
+        return hint
+    }
+    guard alternateFence != expected.fencingToken else { return hint }
+    return RuntimeOwnedResourceHint(
+        resourceIdentifier: hint.resourceIdentifier, identity: hint.identity,
+        identityVersion: hint.identityVersion, ownership: expected,
+        authorizedAlternateOwnership: RuntimeInventoryOwnershipEvidence(
+            resourceUUID: expected.resourceUUID, projectUUID: expected.projectUUID,
+            resourceGeneration: expected.resourceGeneration, projectGeneration: expected.projectGeneration,
+            providerID: expected.providerID, providerGeneration: expected.providerGeneration,
+            fencingToken: alternateFence
+        )
+    )
+}
+
 func hostwrightDesiredStateWithOwnershipHints(
     _ desiredState: DesiredRuntimeState,
     store: SQLiteStateStore,
@@ -331,10 +470,9 @@ func hostwrightDesiredStateWithOwnershipHints(
         projectName: desiredState.projectName,
         networks: desiredState.networks,
         services: desiredState.services,
-        ownedResourceHints: try store.ownership.runtimeHints(
-            projectID: projectID,
-            projectName: desiredState.projectName,
-            providerID: providerID
+        ownedResourceHints: try hostwrightRuntimeOwnershipHints(
+            store: store, projectID: projectID,
+            projectName: desiredState.projectName, providerID: providerID
         )
     )
 }
@@ -435,6 +573,8 @@ private extension ObservedRuntimeService {
             publishedSockets: publishedSockets,
             networks: networks,
             mounts: mounts,
+            allocation: allocation,
+            ownership: ownership,
             observedAt: observedAt
         )
     }
@@ -1155,7 +1295,7 @@ enum CLIJSON {
     private static func statusObservedService(
         _ observed: ObservedRuntimeService
     ) -> [String: Any] {
-        [
+        var payload: [String: Any] = [
             "identity": observed.identity.displayName,
             "instance": observed.identity.instanceName as Any,
             "resourceIdentifier": observed.resourceIdentifier,
@@ -1196,6 +1336,25 @@ enum CLIJSON {
                 ].compactNilValues()
             }
         ].compactNilValues()
+        if let ownership = observed.ownership {
+            payload["ownership"] = [
+                "resourceUUID": ownership.resourceUUID,
+                "projectUUID": ownership.projectUUID,
+                "resourceGeneration": ownership.resourceGeneration,
+                "projectGeneration": ownership.projectGeneration,
+                "providerID": ownership.providerID.rawValue,
+                "providerGeneration": ownership.providerGeneration,
+                "fencingToken": ownership.fencingToken
+            ]
+        }
+        if let allocation = observed.allocation {
+            payload["allocation"] = [
+                "cpuCount": allocation.cpuCount as Any,
+                "memoryBytes": allocation.memoryBytes as Any,
+                "storageBytes": allocation.storageBytes as Any
+            ].compactNilValues()
+        }
+        return payload
     }
 }
 

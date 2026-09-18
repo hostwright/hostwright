@@ -7,6 +7,82 @@ import XCTest
 @testable import HostwrightSecrets
 
 final class HostwrightRuntimeTests: XCTestCase {
+    func testAppleActivationAuthorityExpiresDuringImageAndCodecPreparation() async throws {
+        for kind: PlannedRuntimeActionKind in [.create, .start] {
+            let imageList = try fixture("apple-container-image-list-real-json.txt")
+            let runner = RoutingRuntimeProcessRunner { spec in
+                if spec.arguments == ["image", "list", "--format", "json"] {
+                    return RuntimeCommandResult(spec: spec, exitStatus: 0, standardOutput: imageList, standardError: "")
+                }
+                throw RuntimeAdapterError.commandRejected(classification: spec.classification, message: "unexpected command")
+            }
+            let gate = ActivationAuthorityTestGate()
+            let adapter = AppleContainerApplyAdapter(
+                executableResolver: resolvedContainer,
+                processRunner: DelayedActivationRuntimeRunner(base: runner, gate: gate) { spec in
+                    kind == .create ? spec.arguments.first == "image" : spec.arguments == ["--version"]
+                }
+            )
+            do {
+                _ = try await RuntimeActivationAuthority.$validator.withValue({ try gate.validate() }) {
+                    try RuntimeActivationAuthority.validate()
+                    return try await adapter.execute(
+                        PlannedRuntimeAction(
+                            kind: kind, identity: proofIdentity,
+                            resourceIdentifier: proofIdentity.managedResourceIdentifier,
+                            isDestructive: false, summary: kind.rawValue, desiredService: proofService
+                        ),
+                        confirmation: mutationConfirmation(context: proofObservationMutationContext)
+                    )
+                }
+                XCTFail("Expired provider authority must reject \(kind).")
+            } catch let error as RuntimeActivationAuthorityRejection {
+                XCTAssertTrue(error.diagnostic.contains("Admission expired"))
+            }
+            XCTAssertTrue(runner.calls.filter { $0.classification == .mutating }.isEmpty)
+            XCTAssertNoThrow(try RuntimeActivationAuthority.validate())
+        }
+    }
+
+    func testAppleRestartAuthorityExpiringAfterStopPreservesPartialEffect() async throws {
+        let resourceIdentifier = identity.managedResourceIdentifier
+        let observations = ObservationFixtureSequence(outputs: [
+            try containerListOutput(identity: identity, state: "running", context: mutationContext),
+            try containerListOutput(identity: identity, state: "stopped", context: mutationContext)
+        ])
+        let runner = RoutingRuntimeProcessRunner { spec in
+            if spec.arguments == ["stop", resourceIdentifier] {
+                return RuntimeCommandResult(spec: spec, exitStatus: 0, standardOutput: "stopped", standardError: "")
+            }
+            if spec.arguments == ["list", "--all", "--format", "json"] {
+                return RuntimeCommandResult(spec: spec, exitStatus: 0, standardOutput: observations.next(), standardError: "")
+            }
+            throw RuntimeAdapterError.commandRejected(classification: spec.classification, message: "unexpected command")
+        }
+        let gate = ActivationAuthorityTestGate()
+        let adapter = AppleContainerApplyAdapter(
+            executableResolver: resolvedContainer,
+            processRunner: DelayedActivationRuntimeRunner(base: runner, gate: gate) { $0.arguments.first == "stop" }
+        )
+        do {
+            _ = try await RuntimeActivationAuthority.$validator.withValue({ try gate.validate() }) {
+                try await adapter.execute(
+                    PlannedRuntimeAction(
+                        kind: .restart, identity: identity, resourceIdentifier: resourceIdentifier,
+                        isDestructive: true, summary: "restart"
+                    ),
+                    confirmation: mutationConfirmation(context: mutationContext)
+                )
+            }
+            XCTFail("Restart must fail after authority expires during stop verification.")
+        } catch let error as RuntimeAdapterError {
+            guard case .managedRestartStartFailedAfterStop = error else {
+                return XCTFail("The completed stop must remain a partial effect: \(error).")
+            }
+        }
+        XCTAssertEqual(runner.calls.filter { $0.classification == .mutating }.map(\.arguments), [["stop", resourceIdentifier]])
+    }
+
     func testVersionedRuntimeIdentifiersAvoidLegacyHyphenCollisions() {
         let first = RuntimeServiceIdentity(projectName: "a-b", serviceName: "c")
         let second = RuntimeServiceIdentity(projectName: "a", serviceName: "b-c")

@@ -124,6 +124,7 @@ enum NetworkPortLifecycleCoordinator {
         bindings: [LifecycleResourceBinding],
         store: SQLiteStateStore,
         occupiedPorts: Set<NetworkPortEndpoint> = [],
+        allowReleasingForRemoval: Bool = false,
         isAvailable: AvailabilityProbe = { _ in true },
         isExposureAvailable: ExposureAvailabilityProbe? = nil
     ) throws -> DesiredRuntimeState {
@@ -160,6 +161,7 @@ enum NetworkPortLifecycleCoordinator {
             },
             store: store,
             occupiedPorts: occupiedPorts,
+            allowReleasingForRemoval: allowReleasingForRemoval,
             isAvailable: isAvailable,
             isExposureAvailable: isExposureAvailable
         )
@@ -174,6 +176,7 @@ enum NetworkPortLifecycleCoordinator {
         resourceUUID: ResourceUUIDResolver,
         store: SQLiteStateStore,
         occupiedPorts: Set<NetworkPortEndpoint> = [],
+        allowReleasingForRemoval: Bool = false,
         isAvailable: AvailabilityProbe = { _ in true },
         isExposureAvailable: ExposureAvailabilityProbe? = nil
     ) throws -> DesiredRuntimeState {
@@ -297,7 +300,8 @@ enum NetworkPortLifecycleCoordinator {
                     providerGeneration: providerGeneration,
                     mapping: item.mapping,
                     bindAddress: item.bindAddress,
-                    desiredSHA256: desiredSHA256
+                    desiredSHA256: desiredSHA256,
+                    allowReleasingForRemoval: allowReleasingForRemoval
                 )
                 hostPort = existing.hostPort
             } else {
@@ -477,11 +481,22 @@ enum NetworkPortLifecycleCoordinator {
                     group.fencingToken {
                     existingRecords.append(existing)
                 } else {
-                    guard existing.lifecycleState == .active,
+                    let priorGroup = try store.operationGroups.load(id: existing.operationGroupID)
+                    guard [.reserved, .active].contains(existing.lifecycleState),
+                          let priorGroup,
+                          priorGroup.groupKind == "lifecycle-v1",
+                          priorGroup.projectID == plan.projectID,
+                          priorGroup.fencingToken == existing.fencingToken,
+                          priorGroup.lockOwner == nil,
+                          priorGroup.lockExpiresAt == nil,
+                          (priorGroup.status == .succeeded ||
+                            (priorGroup.status == .failed && priorGroup.checkpoint == "compensated")),
+                          inventory.isAuthoritative,
                           targetContainers(
                             node: node,
                             inventory: inventory
-                          ).isEmpty else {
+                          ).isEmpty,
+                          try isAvailable(endpoint) else {
                         throw conflict(
                             "An earlier port reservation cannot be transferred while its exact runtime owner or operation is still present."
                         )
@@ -527,7 +542,7 @@ enum NetworkPortLifecycleCoordinator {
                 newRecords.append(
                     NetworkPortReservationRecord(
                         id: reservationID(
-                            planSHA256: plan.planSHA256,
+                            operationGroupID: group.id,
                             nodeKey: node.key,
                             resourceUUID: node.resourceUUID,
                             mapping: item.mapping,
@@ -723,6 +738,9 @@ enum NetworkPortLifecycleCoordinator {
             if let priorFencingToken {
                 fences.insert(priorFencingToken)
             }
+            if let fence = try verifiedCreationFence(
+                node: node, plan: plan, container: container, store: store
+            ) { fences.insert(fence) }
             guard exactOwnership(
                 container.ownership,
                 node: node,
@@ -822,6 +840,73 @@ enum NetworkPortLifecycleCoordinator {
                     replacing: record.expectedVersion
                 )
             )
+        }
+        return NetworkPortReservationBatch(records: released)
+    }
+
+    @discardableResult
+    static func confirmCompensatedCreateReleased(
+        node: LifecyclePlanNode,
+        context: LifecycleSagaContext,
+        inventory: RuntimeInventory,
+        store: SQLiteStateStore
+    ) throws -> NetworkPortReservationBatch {
+        guard context.direction == .rollback,
+              node.action == .create,
+              node.compensation?.action == .delete || node.compensation?.action == .retire,
+              let group = try store.operationGroups.load(id: context.groupID),
+              group.operationID == context.operationID,
+              group.fencingToken == context.fencingToken,
+              let owner = context.leaseOwner,
+              group.lockOwner == owner,
+              let expiry = group.lockExpiresAt,
+              ISO8601DateFormatter().date(from: expiry).map({ $0 > Date() }) == true else {
+            throw conflict("Compensated create port cleanup requires its exact active finite saga lease.")
+        }
+        try requireAuthority(plan: context.plan, node: node, group: group, store: store)
+        let records = try exactResourceRecords(node: node, plan: context.plan, store: store)
+        guard !records.isEmpty else { return NetworkPortReservationBatch(records: []) }
+        let expectedAuthority: RuntimeInventoryAuthority = context.plan.providerID == .appleContainerCLI
+            ? .appleContainerCLIRuntimeList : .appleContainerizationRuntimeList
+        guard inventory.isAuthoritative,
+              inventory.authority == expectedAuthority,
+              targetContainers(node: node, inventory: inventory).isEmpty,
+              records.allSatisfy({
+                  $0.operationGroupID == group.id && $0.fencingToken == group.fencingToken &&
+                      ($0.lifecycleState == .reserved || $0.lifecycleState == .releasing) &&
+                      $0.observedSHA256 == nil
+              }) else {
+            throw conflict("Compensated create port cleanup could not prove exact unactivated reservations and authoritative provider absence.")
+        }
+        func requireCleanupLease() throws {
+            try requireAuthority(plan: context.plan, node: node, group: group, store: store)
+            guard let current = try store.operationGroups.load(id: group.id),
+                  current.lockOwner == owner, current.lockExpiresAt == expiry,
+                  ISO8601DateFormatter().date(from: expiry).map({ $0 > Date() }) == true else {
+                throw conflict("Compensated create port cleanup lost its exact saga lease.")
+            }
+        }
+        var released: [NetworkPortReservationRecord] = []
+        for record in records {
+            try requireCleanupLease()
+            let releasing: NetworkPortReservationRecord
+            if record.lifecycleState == .reserved {
+                releasing = try store.networkPorts.save(replacing(
+                    record, generation: record.generation + 1,
+                    providerGeneration: Int64(context.plan.providerGeneration), fencingToken: group.fencingToken,
+                    observedSHA256: nil, lifecycleState: .releasing, finalizerState: .releasing,
+                    operationGroupID: group.id
+                ), replacing: record.expectedVersion)
+            } else {
+                releasing = record
+            }
+            try requireCleanupLease()
+            released.append(try store.networkPorts.save(replacing(
+                releasing, generation: releasing.generation,
+                providerGeneration: Int64(context.plan.providerGeneration), fencingToken: group.fencingToken,
+                observedSHA256: inventory.semanticSHA256, lifecycleState: .released, finalizerState: .released,
+                operationGroupID: group.id
+            ), replacing: releasing.expectedVersion))
         }
         return NetworkPortReservationBatch(records: released)
     }
@@ -1110,7 +1195,8 @@ enum NetworkPortLifecycleCoordinator {
         providerGeneration: Int,
         mapping: RuntimePortMapping,
         bindAddress: String,
-        desiredSHA256: String
+        desiredSHA256: String,
+        allowReleasingForRemoval: Bool = false
     ) throws {
         guard record.projectUUID == projectUUID,
               record.resourceUUID == resourceUUID,
@@ -1126,7 +1212,8 @@ enum NetworkPortLifecycleCoordinator {
                 allocationKind(mapping.allocation),
               record.desiredSHA256 == desiredSHA256,
               record.lifecycleState == .reserved ||
-                record.lifecycleState == .active,
+                record.lifecycleState == .active ||
+                (allowReleasingForRemoval && record.lifecycleState == .releasing),
               mapping.allocation == .dynamic ||
                 record.hostPort == mapping.hostPort else {
             throw conflict(
@@ -1193,13 +1280,10 @@ enum NetworkPortLifecycleCoordinator {
             id: plan.projectID
         )
         guard authorizedNode != nil,
-              node.fencingToken == group.fencingToken,
               group.groupKind == "lifecycle-v1",
               group.projectID == plan.projectID,
               group.status == .active,
               group.planHash == plan.planSHA256,
-              group.groupIdempotencyKey ==
-                plan.planSHA256,
               let persisted,
               persisted.status == .active,
               persisted.id == group.id,
@@ -1208,8 +1292,8 @@ enum NetworkPortLifecycleCoordinator {
               persisted.projectID == plan.projectID,
               persisted.groupKind == "lifecycle-v1",
               persisted.planHash == plan.planSHA256,
-              persisted.groupIdempotencyKey ==
-                plan.planSHA256,
+              persisted.groupIdempotencyKey == group.groupIdempotencyKey,
+              persisted.operationID == group.operationID,
               project.resourceUUID ==
                 plan.projectResourceUUID,
               project.providerGeneration ==
@@ -1234,6 +1318,58 @@ enum NetworkPortLifecycleCoordinator {
                         $0.runtimeID ==
                             node.resourceIdentifier))
         }
+    }
+
+    private static func verifiedCreationFence(
+        node: LifecyclePlanNode, plan: LifecyclePlan,
+        container: RuntimeInventoryContainer, store: SQLiteStateStore
+    ) throws -> String? {
+        guard let observed = container.ownership else { return nil }
+        let workloadID = UUID(uuidString: HostwrightResourceUUID.legacy(
+            kind: "local-scheduler-workload", identifier: "\(node.resourceUUID):\(node.resourceGeneration)"
+        ))!
+        var verified: String?
+        var checkedPlans = Set<String>()
+        try store.schedulerAdmissions.visitReservationHistory(
+            projectUUID: plan.projectResourceUUID, workloadID: workloadID
+        ) { reservation in
+            guard let binding = reservation.runtimeOwnership,
+                  [.committed, .released].contains(reservation.status),
+                  binding.lifecycleWorkloadID == reservation.workloadID,
+                  binding.resourceUUID == node.resourceUUID,
+                  binding.resourceIdentifier == node.resourceIdentifier,
+                  binding.resourceGeneration == Int64(node.resourceGeneration),
+                  binding.projectUUID == plan.projectResourceUUID,
+                  binding.projectGeneration == Int64(plan.projectGeneration),
+                  binding.providerID == plan.providerID,
+                  binding.providerGeneration == Int64(plan.providerGeneration),
+                  binding.fencingToken == observed.fencingToken else { return true }
+            if checkedPlans.count >= 256 { checkedPlans.removeAll(keepingCapacity: true) }
+            guard checkedPlans.insert(reservation.lifecyclePlanDigest).inserted else { return true }
+            try store.operationGroups.visitProjectLifecycleHistory(
+                projectID: plan.projectID, planHash: reservation.lifecyclePlanDigest
+            ) { group in
+                let origin = try LifecyclePersistedIntentCodec.decode(group.intentJSONRedacted)
+                guard origin.planSHA256 == group.planHash else {
+                    throw conflict("Port release found invalid creation lineage.")
+                }
+                if group.status == .succeeded && group.fencingToken == binding.fencingToken &&
+                    origin.projectResourceUUID == plan.projectResourceUUID &&
+                    origin.projectGeneration == plan.projectGeneration &&
+                    origin.providerID == plan.providerID && origin.providerGeneration == plan.providerGeneration &&
+                    origin.nodes.contains(where: {
+                        $0.action == .create && $0.resourceUUID == node.resourceUUID &&
+                            $0.resourceIdentifier == node.resourceIdentifier &&
+                            $0.resourceGeneration == node.resourceGeneration &&
+                            ($0.serviceName == binding.serviceName || $0.serviceName == RuntimeServiceIdentity(
+                                projectName: binding.projectName, serviceName: binding.serviceName,
+                                instanceName: binding.instanceName
+                            ).displayName)
+                    }) { verified = binding.fencingToken }
+            }
+            return true
+        }
+        return verified
     }
 
     private static func exactOwnership(
@@ -1356,7 +1492,7 @@ enum NetworkPortLifecycleCoordinator {
     }
 
     private static func reservationID(
-        planSHA256: String,
+        operationGroupID: String,
         nodeKey: String,
         resourceUUID: String,
         mapping: RuntimePortMapping,
@@ -1365,7 +1501,7 @@ enum NetworkPortLifecycleCoordinator {
         HostwrightResourceUUID.legacy(
             kind: "network-port-reservation",
             identifier: [
-                planSHA256,
+                operationGroupID,
                 nodeKey,
                 resourceUUID,
                 String(mapping.containerPort),

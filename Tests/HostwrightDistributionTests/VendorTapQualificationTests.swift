@@ -1,4 +1,5 @@
 import Foundation
+import HostwrightCore
 import XCTest
 
 final class VendorTapQualificationTests: XCTestCase {
@@ -21,7 +22,7 @@ final class VendorTapQualificationTests: XCTestCase {
             baselineTap: String(repeating: "c", count: 40),
             candidateTap: String(repeating: "d", count: 40)
         )
-        XCTAssertNotEqual(repeated.status, 0)
+        XCTAssertEqual(repeated.status, 64, repeated.output)
 
         let malformed = try runContract(
             script: script,
@@ -30,21 +31,34 @@ final class VendorTapQualificationTests: XCTestCase {
             baselineTap: String(repeating: "c", count: 40),
             candidateTap: String(repeating: "d", count: 40)
         )
-        XCTAssertNotEqual(malformed.status, 0)
+        XCTAssertEqual(malformed.status, 64, malformed.output)
+
+        let ambiguous = try runContract(
+            script: script,
+            baselineRelease: String(repeating: "a", count: 40),
+            candidateRelease: String(repeating: "b", count: 40),
+            baselineTap: String(repeating: "c", count: 40),
+            candidateTap: String(repeating: "d", count: 40),
+            environmentOverrides: ["HOSTWRIGHT_TEST_RESULTS_DIR": "/tmp/canonical-junit-output"]
+        )
+        XCTAssertEqual(ambiguous.status, 64, ambiguous.output)
+        XCTAssertTrue(ambiguous.output.contains("Ambiguous qualification environment override: HOSTWRIGHT_TEST_RESULTS_DIR"))
     }
 
-    func testReleaseWorkflowLocksTheTwoImmutableQualificationBuilds() throws {
+    func testReleaseWorkflowStagesExplicitChannelsAndPreservesHistoricalQualifications() throws {
         let workflow = try read(".github/workflows/trusted-release.yml")
 
         XCTAssertTrue(workflow.contains("default: 0.0.2-dev.12"))
         XCTAssertTrue(workflow.contains("default: v0.0.2-dev.12"))
-        XCTAssertTrue(workflow.contains(#"^0\.0\.2-dev\.12$"#))
+        XCTAssertTrue(workflow.contains("scripts/release/staged-release.py version"))
+        XCTAssertFalse(workflow.contains("contents: write"))
+        XCTAssertFalse(workflow.contains("gh release create"))
         XCTAssertTrue(workflow.contains("github.ref == 'refs/heads/main'"))
         XCTAssertTrue(workflow.contains("name: Validate reviewed release inputs"))
         XCTAssertTrue(workflow.contains("needs: validate"))
         XCTAssertTrue(workflow.contains("refs/tags/v0.0.2-dev.11^{}"))
         XCTAssertTrue(workflow.contains("git merge-base --is-ancestor \"$baseline_commit\" \"$RELEASE_COMMIT\""))
-        XCTAssertTrue(workflow.contains("swift run hostwright --version"))
+        XCTAssertTrue(workflow.contains("swift run --jobs 1 hostwright --version"))
         XCTAssertTrue(workflow.contains("contracts/v0.0.2/versions.json"))
         XCTAssertFalse(workflow.contains("0.0.2-dev\n        type: string"))
     }
@@ -135,7 +149,8 @@ final class VendorTapQualificationTests: XCTestCase {
         baselineRelease: String,
         candidateRelease: String,
         baselineTap: String,
-        candidateTap: String
+        candidateTap: String,
+        environmentOverrides: [String: String] = [:]
     ) throws -> (status: Int32, output: String) {
         let process = Process()
         let pipe = Pipe()
@@ -143,11 +158,12 @@ final class VendorTapQualificationTests: XCTestCase {
         process.arguments = [script.path, "validate-contract"]
         process.standardOutput = pipe
         process.standardError = pipe
-        var environment = ProcessInfo.processInfo.environment
+        var environment = SecureSubprocessEnvironment.minimal
         environment["HOSTWRIGHT_BASELINE_RELEASE_COMMIT"] = baselineRelease
         environment["HOSTWRIGHT_CANDIDATE_RELEASE_COMMIT"] = candidateRelease
         environment["HOSTWRIGHT_BASELINE_TAP_COMMIT"] = baselineTap
         environment["HOSTWRIGHT_CANDIDATE_TAP_COMMIT"] = candidateTap
+        environment.merge(environmentOverrides) { _, explicit in explicit }
         process.environment = environment
         try process.run()
         process.waitUntilExit()

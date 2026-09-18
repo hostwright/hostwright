@@ -18,6 +18,10 @@ public enum DistributionLayout {
     public static let packageIdentifier = "dev.hostwright.cli"
     public static let packageStagingPath = "/Library/Application Support/Hostwright/InstallerPayload"
     public static let packageInstallPrefix = "/usr/local"
+    public static let desktopAppPath = "libexec/hostwright/Hostwright.app"
+    public static let desktopExecutablePath = "\(desktopAppPath)/Contents/MacOS/hostwright-desktop"
+    public static let desktopInfoPlistPath = "\(desktopAppPath)/Contents/Info.plist"
+    public static let desktopCodeResourcesPath = "\(desktopAppPath)/Contents/_CodeSignature/CodeResources"
     public static let shippedExecutableNames = [
         "hostwright",
         "hostwright-control",
@@ -26,9 +30,12 @@ public enum DistributionLayout {
         "hostwright-network-provider-worker",
         "hostwright-storage-helper",
         "hostwright-dist",
-        "hostwrightd"
+        "hostwrightd",
+        "hostwright-desktop"
     ]
-    public static let shippedBinaryPaths = shippedExecutableNames.map { "bin/\($0)" }
+    public static let shippedBinaryPaths = shippedExecutableNames.map {
+        $0 == "hostwright-desktop" ? desktopExecutablePath : "bin/\($0)"
+    }
     static let legacyTrustedExecutableNamesV1 = [
         "hostwright",
         "hostwright-control",
@@ -77,8 +84,7 @@ public enum DistributionLayout {
     ].merging(DistributionContainerizationAssets.payloadModes) { _, _ in
         preconditionFailure("duplicate legacy distribution payload path")
     }
-
-    public static let payloadModes: [String: Int] = [
+    static let legacyPayloadModesV4: [String: Int] = [
         "bin/hostwright": 0o755,
         "bin/hostwright-control": 0o755,
         "bin/hostwright-containerization-helper": 0o755,
@@ -91,7 +97,30 @@ public enum DistributionLayout {
         "share/doc/hostwright/LICENSE": 0o644,
         "share/doc/hostwright/README.md": 0o644
     ].merging(DistributionContainerizationAssets.payloadModes) { _, _ in
+        preconditionFailure("duplicate legacy distribution payload path")
+    }
+
+    static let legacyPayloadModesV5: [String: Int] = [
+        "bin/hostwright": 0o755,
+        "bin/hostwright-control": 0o755,
+        "bin/hostwright-containerization-helper": 0o755,
+        "bin/hostwright-network-helper": 0o755,
+        "bin/hostwright-network-provider-worker": 0o755,
+        "bin/hostwright-storage-helper": 0o755,
+        "bin/hostwright-dist": 0o755,
+        "bin/hostwrightd": 0o755,
+        desktopExecutablePath: 0o755,
+        desktopInfoPlistPath: 0o644,
+        desktopCodeResourcesPath: 0o644,
+        "share/hostwright/examples/hostwright.yaml": 0o644,
+        "share/doc/hostwright/LICENSE": 0o644,
+        "share/doc/hostwright/README.md": 0o644
+    ].merging(DistributionContainerizationAssets.payloadModes) { _, _ in
         preconditionFailure("duplicate distribution payload path")
+    }
+
+    public static let payloadModes = legacyPayloadModesV5.merging(DistributionThirdPartyNotices.payloadModes) { _, _ in
+        preconditionFailure("duplicate third-party notice payload path")
     }
 
     static func artifactPayloadModes(
@@ -106,18 +135,29 @@ public enum DistributionLayout {
                 legacyPayloadModesV3
             ].first { Set($0.keys) == paths }
         case 2:
+            return [legacyPayloadModesV4, legacyPayloadModesV5]
+                .first { Set($0.keys) == paths }
+        case 3:
             return Set(payloadModes.keys) == paths ? payloadModes : nil
         default:
             return nil
         }
     }
 
-    static func trustedPayloadModes(schemaVersion: Int) -> [String: Int]? {
+    static func trustedPayloadModes(
+        schemaVersion: Int,
+        paths: Set<String>
+    ) -> [String: Int]? {
         switch schemaVersion {
         case 1:
-            legacyTrustedPayloadModesV1
+            Set(legacyTrustedPayloadModesV1.keys) == paths
+                ? legacyTrustedPayloadModesV1
+                : nil
         case 2:
-            payloadModes
+            [legacyPayloadModesV4, legacyPayloadModesV5]
+                .first { Set($0.keys) == paths }
+        case 3:
+            Set(payloadModes.keys) == paths ? payloadModes : nil
         default:
             nil
         }
@@ -146,6 +186,19 @@ public enum DistributionLayout {
                 "hostwrightd"
             ]
         }
+        if payloadPaths == Set(legacyPayloadModesV4.keys) {
+            return [
+                "hostwright",
+                "hostwright-control",
+                "hostwright-containerization-helper",
+                "hostwright-network-helper",
+                "hostwright-network-provider-worker",
+                "hostwright-storage-helper",
+                "hostwright-dist",
+                "hostwrightd"
+            ]
+        }
+        if payloadPaths == Set(legacyPayloadModesV5.keys) { return shippedExecutableNames }
         return payloadPaths == Set(payloadModes.keys)
             ? shippedExecutableNames
             : nil
@@ -431,7 +484,7 @@ public struct DistributionArtifactManifest: Codable, Equatable, Sendable {
     public let files: [DistributionFileRecord]
 
     public init(
-        schemaVersion: Int = 2,
+        schemaVersion: Int = 3,
         artifactID: String,
         packageVersion: String,
         sourceCommit: String,
@@ -453,7 +506,7 @@ public struct DistributionArtifactManifest: Codable, Equatable, Sendable {
     }
 
     public func validate() throws {
-        guard schemaVersion == 1 || schemaVersion == 2 else {
+        guard schemaVersion == 1 || schemaVersion == 2 || schemaVersion == 3 else {
             throw DistributionError.invalidManifest("unsupported schema version \(schemaVersion)")
         }
         guard sourceCommit.range(of: "^[a-f0-9]{40}$", options: .regularExpression) != nil,
@@ -690,7 +743,8 @@ public struct DistributionSPDXDocument: Codable, Equatable, Sendable {
             throw DistributionError.invalidArtifact("SPDX creator policy is unsupported")
         }
         let isTrustedRelease = expectedCreator == "Tool: hostwright-dist-2"
-        let expectedLicense = isTrustedRelease ? "Apache-2.0" : "NOASSERTION"
+        let expectedLicense = isTrustedRelease && manifest.schemaVersion < 3 ? "Apache-2.0" : "NOASSERTION"
+        let expectedDeclaredLicense = isTrustedRelease ? "Apache-2.0" : "NOASSERTION"
         guard spdxVersion == "SPDX-2.3",
               dataLicense == "CC0-1.0",
               SPDXID == "SPDXRef-DOCUMENT",
@@ -707,7 +761,7 @@ public struct DistributionSPDXDocument: Codable, Equatable, Sendable {
               package.filesAnalyzed,
               package.checksums == [SPDXChecksum(algorithm: "SHA256", checksumValue: archive.sha256)],
               package.licenseConcluded == expectedLicense,
-              package.licenseDeclared == expectedLicense,
+              package.licenseDeclared == expectedDeclaredLicense,
               package.copyrightText == "NOASSERTION" else {
             throw DistributionError.invalidArtifact("SPDX package binding is invalid")
         }
@@ -722,7 +776,7 @@ public struct DistributionSPDXDocument: Codable, Equatable, Sendable {
                   return expectedFiles[path] == file.checksums.first?.checksumValue &&
                     file.checksums == [SPDXChecksum(algorithm: "SHA256", checksumValue: expectedFiles[path] ?? "")] &&
                     file.fileTypes == [path.hasPrefix("bin/") ? "BINARY" : "TEXT"] &&
-                    file.licenseConcluded == expectedLicense &&
+                    file.licenseConcluded == (isTrustedRelease && manifest.schemaVersion >= 3 && path == ContainerizationRuntimeAssetContract.kernelInstallationRelativePath ? "GPL-2.0-only" : expectedLicense) &&
                     file.copyrightText == "NOASSERTION"
               }) else {
             throw DistributionError.invalidArtifact("SPDX file inventory contains duplicate or malformed entries")
@@ -1075,6 +1129,8 @@ public struct DistributionStateSnapshotRecord: Codable, Equatable, Sendable {
     public let databaseSHA256: String
     public let databaseBytes: UInt64
     public let stateSchemaVersion: Int
+    public let ownerSnapshotPath: String?
+    public let ownerUID: UInt32?
 
     public init(
         schemaVersion: Int = 1,
@@ -1082,7 +1138,9 @@ public struct DistributionStateSnapshotRecord: Codable, Equatable, Sendable {
         snapshotRelativePath: String,
         databaseSHA256: String,
         databaseBytes: UInt64,
-        stateSchemaVersion: Int
+        stateSchemaVersion: Int,
+        ownerSnapshotPath: String? = nil,
+        ownerUID: UInt32? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.kind = "distributionStateSnapshot"
@@ -1091,6 +1149,8 @@ public struct DistributionStateSnapshotRecord: Codable, Equatable, Sendable {
         self.databaseSHA256 = databaseSHA256
         self.databaseBytes = databaseBytes
         self.stateSchemaVersion = stateSchemaVersion
+        self.ownerSnapshotPath = ownerSnapshotPath
+        self.ownerUID = ownerUID
     }
 
     public func validate(transactionRelativePath: String) throws {
@@ -1098,6 +1158,15 @@ public struct DistributionStateSnapshotRecord: Codable, Equatable, Sendable {
             databasePath,
             role: "distribution state database"
         )
+        if let ownerSnapshotPath {
+            let normalized = try HostwrightLocalPathResolver.normalizedAbsolutePath(ownerSnapshotPath, role: "owner snapshot")
+            let snapshot = URL(fileURLWithPath: ownerSnapshotPath)
+            guard normalized == ownerSnapshotPath, ownerUID != nil, ownerUID != 0,
+                  snapshot.lastPathComponent == "state.sqlite",
+                  snapshot.deletingLastPathComponent().lastPathComponent == URL(fileURLWithPath: transactionRelativePath).lastPathComponent else {
+                throw DistributionError.lifecycleFailed("owner snapshot does not match its root operation journal")
+            }
+        } else if ownerUID != nil { throw DistributionError.lifecycleFailed("owner snapshot binding is incomplete") }
         let expectedPrefix = transactionRelativePath + "/state/"
         guard schemaVersion == 1,
               kind == "distributionStateSnapshot",
@@ -1130,6 +1199,7 @@ public struct DistributionLifecycleJournal: Codable, Equatable, Sendable {
     public let authorizedRollbackOperationID: String?
     public let priorStatus: DistributionInstallationStatus?
     public let packageReceiptCleanup: Bool?
+    public let ownerStateDescriptorSHA256: String?
 
     public init(
         schemaVersion: Int = 1,
@@ -1146,7 +1216,8 @@ public struct DistributionLifecycleJournal: Codable, Equatable, Sendable {
         startedAt: String,
         authorizedRollbackOperationID: String? = nil,
         priorStatus: DistributionInstallationStatus? = nil,
-        packageReceiptCleanup: Bool? = nil
+        packageReceiptCleanup: Bool? = nil,
+        ownerStateDescriptorSHA256: String? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.kind = "distributionLifecycleJournal"
@@ -1164,11 +1235,13 @@ public struct DistributionLifecycleJournal: Codable, Equatable, Sendable {
         self.authorizedRollbackOperationID = authorizedRollbackOperationID
         self.priorStatus = priorStatus
         self.packageReceiptCleanup = packageReceiptCleanup
+        self.ownerStateDescriptorSHA256 = ownerStateDescriptorSHA256
     }
 
     public func replacing(
         checkpoint: DistributionLifecycleCheckpoint,
-        stateSnapshot: DistributionStateSnapshotRecord? = nil
+        stateSnapshot: DistributionStateSnapshotRecord? = nil,
+        ownerStateDescriptorSHA256: String? = nil
     ) -> DistributionLifecycleJournal {
         DistributionLifecycleJournal(
             operationID: operationID,
@@ -1184,7 +1257,8 @@ public struct DistributionLifecycleJournal: Codable, Equatable, Sendable {
             startedAt: startedAt,
             authorizedRollbackOperationID: authorizedRollbackOperationID,
             priorStatus: priorStatus,
-            packageReceiptCleanup: packageReceiptCleanup
+            packageReceiptCleanup: packageReceiptCleanup,
+            ownerStateDescriptorSHA256: ownerStateDescriptorSHA256 ?? self.ownerStateDescriptorSHA256
         )
     }
 
@@ -1208,9 +1282,18 @@ public struct DistributionLifecycleJournal: Codable, Equatable, Sendable {
                 )
             }
         }
+        if let ownerStateDescriptorSHA256 {
+            guard ownerStateDescriptorSHA256.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil,
+                  operation != .install, priorStatus != nil else {
+                throw DistributionError.lifecycleFailed("owner state descriptor journal binding is invalid")
+            }
+        }
         try fromManifest?.validate()
         try toManifest?.validate()
         try stateSnapshot?.validate(transactionRelativePath: transactionRelativePath)
+        if stateSnapshot?.ownerSnapshotPath != nil, ownerStateDescriptorSHA256 == nil {
+            throw DistributionError.lifecycleFailed("owner snapshot has no paired root descriptor binding")
+        }
         try priorStatus?.validate()
         guard packageReceiptCleanup != false else {
             throw DistributionError.lifecycleFailed(

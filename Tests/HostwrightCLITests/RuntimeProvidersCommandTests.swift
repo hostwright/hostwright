@@ -6,6 +6,34 @@ import XCTest
 @testable import HostwrightCLI
 
 final class RuntimeProvidersCommandTests: XCTestCase {
+    func testSDKClientLifetimeRetainsOneClientAcrossTemporaryAdaptersAndNetworkUse() throws {
+        let configuration = try ContainerizationHelperClientConfiguration(
+            executableURL: URL(fileURLWithPath: "/private/test/bin/hostwright-containerization-helper"),
+            configurationURL: URL(fileURLWithPath: "/private/test/support/config/containerization-helper.json"),
+            runtimeDirectoryURL: URL(fileURLWithPath: "/private/test/support/run/helper")
+        )
+        let lifetime = CLIContainerizationHelperClientLifetime(makeClient: {
+            ContainerizationHelperClient(configuration: configuration)
+        })
+        var localClient: ContainerizationHelperClient? = try lifetime.client()
+        weak var retainedClient = localClient
+        do { _ = AppleContainerizationRuntimeAdapter(client: try lifetime.client()) }
+        localClient = nil
+        XCTAssertNotNil(retainedClient)
+        let network: any RuntimeNetworkProvider = try lifetime.client()
+        XCTAssertTrue(retainedClient === (network as? ContainerizationHelperClient))
+        XCTAssertTrue(retainedClient === (try lifetime.client()))
+    }
+
+    func testSDKClientLifetimeDoesNotCacheFailedConfiguration() throws {
+        let state = SDKClientFactoryState()
+        let lifetime = CLIContainerizationHelperClientLifetime(makeClient: { try state.makeClient() })
+        XCTAssertThrowsError(try lifetime.client())
+        let client = try lifetime.client()
+        XCTAssertTrue(client === (try lifetime.client()))
+        XCTAssertEqual(state.count, 2)
+    }
+
     func testParserAcceptsOnlyRuntimeProvidersAndOptionalJSON() throws {
         XCTAssertEqual(
             try CLICommand.parse(arguments: ["runtime", "providers"]),
@@ -317,5 +345,21 @@ private final class EffectCounter: @unchecked Sendable {
 
     func snapshot() -> EffectCounts {
         lock.withLock { counts }
+    }
+}
+
+private final class SDKClientFactoryState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var attempts = 0
+    var count: Int { lock.lock(); defer { lock.unlock() }; return attempts }
+    func makeClient() throws -> ContainerizationHelperClient {
+        lock.lock(); defer { lock.unlock() }
+        attempts += 1
+        if attempts == 1 { throw ContainerizationHelperClientError.unsafeConfiguration }
+        return ContainerizationHelperClient(configuration: try ContainerizationHelperClientConfiguration(
+            executableURL: URL(fileURLWithPath: "/private/test/bin/hostwright-containerization-helper"),
+            configurationURL: URL(fileURLWithPath: "/private/test/support/config/containerization-helper.json"),
+            runtimeDirectoryURL: URL(fileURLWithPath: "/private/test/support/run/helper")
+        ))
     }
 }

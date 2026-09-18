@@ -256,7 +256,7 @@ final class RuntimeCreateSubsetPolicyTests: XCTestCase {
     func testContainerizationAcceptsOnlyTypedHelperAndLifecycleFields() {
         XCTAssertNoThrow(
             try RuntimeCreateSubsetPolicy.validate(
-                makeService(),
+                makeService(cpuCount: 1, memoryBytes: 512 * 1024 * 1024),
                 providerID: .appleContainerization
             )
         )
@@ -284,6 +284,7 @@ final class RuntimeCreateSubsetPolicyTests: XCTestCase {
             XCTAssertNoThrow(
                 try RuntimeCreateSubsetPolicy.validate(
                     makeService(
+                        cpuCount: 1, memoryBytes: 512 * 1024 * 1024,
                         hostAccess: [endpoint],
                         networks: [attachment]
                     ),

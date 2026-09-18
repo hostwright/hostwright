@@ -1,0 +1,8 @@
+version: 3
+project: fuzz-seed
+services:
+  api:
+    image: docker.io/library/alpine:latest
+    resources:
+      requests: {cpus: 1, memory: 64MiB}
+      limits: {cpus: 1, memory: 64MiB}

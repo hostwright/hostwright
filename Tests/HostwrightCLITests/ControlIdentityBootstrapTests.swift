@@ -2,12 +2,53 @@ import Darwin
 import Foundation
 import HostwrightControlPlane
 import HostwrightControlSecurity
+import HostwrightCore
 import HostwrightState
 import XCTest
 
 @testable import HostwrightCLI
 
 final class ControlIdentityBootstrapTests: XCTestCase {
+    func testManagedBootstrapRejectsIsolatedPathsBeforeCreatingState() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-bootstrap-paths-\(UUID().uuidString)", isDirectory: true
+        )
+        XCTAssertNoThrow(try HostwrightControlIdentityBootstrap.validateManagedPaths(
+            homeDirectory: root.path, environment: [:]
+        ))
+        for key in [
+            HostwrightLocalPathResolver.applicationSupportOverride,
+            HostwrightLocalPathResolver.cacheOverride,
+            HostwrightLocalPathResolver.logOverride,
+            HostwrightLocalPathResolver.stateDatabaseOverride,
+        ] {
+            XCTAssertThrowsError(try HostwrightControlIdentityBootstrap.validateManagedPaths(
+                homeDirectory: root.path,
+                environment: [key: root.appendingPathComponent("isolated").path]
+            )) { error in
+                XCTAssertEqual((error as? HostwrightDiagnostic)?.code, .daemonDenied)
+            }
+            XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+        }
+    }
+
+    func testManagedBootstrapAcceptsOverridesThatResolveToManagedPaths() throws {
+        let home = "/Users/hostwright-bootstrap-path-test"
+        let managed = try HostwrightLocalPathResolver.resolve(
+            homeDirectory: home, environment: [:]
+        )
+        XCTAssertNoThrow(try HostwrightControlIdentityBootstrap.validateManagedPaths(
+            homeDirectory: home,
+            environment: [
+                HostwrightLocalPathResolver.applicationSupportOverride:
+                    managed.layout.applicationSupportDirectory,
+                HostwrightLocalPathResolver.cacheOverride: managed.layout.cacheDirectory,
+                HostwrightLocalPathResolver.logOverride: managed.layout.logDirectory,
+                HostwrightLocalPathResolver.stateDatabaseOverride: managed.stateDatabasePath,
+            ]
+        ))
+    }
+
     func testBootstrapDeclaresFirstIdentityAndAcceptsInstalledRequirementRotation() throws {
         try withStore { store in
             let initial = installedIdentity(hash: "a")
@@ -161,6 +202,73 @@ final class ControlIdentityBootstrapTests: XCTestCase {
         }
     }
 
+    func testBootstrapDeclaresDesktopAsOperatorAndRotatesInstalledIdentity() throws {
+        try withStore { store in
+            let installer = installedIdentity(hash: "a")
+            let control = installedIdentity(hash: "b", signingIdentifier: "hostwright-control")
+            let desktop = installedIdentity(hash: "c", signingIdentifier: "dev.hostwright.desktop")
+            try HostwrightControlIdentityBootstrap.bootstrap(
+                store: store,
+                userID: UInt32(geteuid()),
+                codeIdentity: installer,
+                companionIdentity: control,
+                desktopIdentity: desktop,
+                timestamp: "2026-09-08T20:00:00Z"
+            )
+            let firstDesktop = try XCTUnwrap(
+                try store.controlIdentities.listIdentities().first { $0.codeIdentity == desktop }
+            )
+            XCTAssertTrue(try store.rbac.listBindings(subjectID: firstDesktop.subjectID).contains {
+                $0.roleID == DefaultRole.operator.rawValue && $0.scope.kind == .global
+            })
+            XCTAssertFalse(try store.rbac.listBindings(subjectID: firstDesktop.subjectID).contains {
+                $0.roleID == DefaultRole.owner.rawValue
+            })
+
+            let replacement = installedIdentity(
+                hash: "d",
+                signingIdentifier: "dev.hostwright.desktop"
+            )
+            try HostwrightControlIdentityBootstrap.bootstrap(
+                store: store,
+                userID: UInt32(geteuid()),
+                codeIdentity: installer,
+                companionIdentity: control,
+                desktopIdentity: replacement,
+                timestamp: "2026-09-08T20:01:00Z"
+            )
+            let rotated = try XCTUnwrap(
+                try store.controlIdentities.listIdentities().first {
+                    $0.codeIdentity.signingIdentifier == "dev.hostwright.desktop"
+                }
+            )
+            XCTAssertEqual(rotated.subjectID, firstDesktop.subjectID)
+            XCTAssertEqual(rotated.codeIdentity, replacement)
+            XCTAssertEqual(rotated.generation, 2)
+            XCTAssertEqual(try store.rbac.listBindings(subjectID: rotated.subjectID).count, 1)
+        }
+    }
+
+    func testBootstrapRejectsDesktopOutsideInstallerTrustDomain() throws {
+        try withStore { store in
+            XCTAssertThrowsError(try HostwrightControlIdentityBootstrap.bootstrap(
+                store: store,
+                userID: UInt32(geteuid()),
+                codeIdentity: installedIdentity(hash: "a"),
+                companionIdentity: installedIdentity(
+                    hash: "b",
+                    signingIdentifier: "hostwright-control"
+                ),
+                desktopIdentity: installedIdentity(
+                    hash: "c",
+                    signingIdentifier: "hostwright-desktop"
+                ),
+                timestamp: "2026-09-08T20:00:00Z"
+            ))
+            XCTAssertTrue(try store.controlIdentities.listIdentities().isEmpty)
+        }
+    }
+
     private func withStore(_ body: (SQLiteStateStore) throws -> Void) throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(
             "hostwright-control-bootstrap-\(UUID().uuidString)",
@@ -177,10 +285,13 @@ final class ControlIdentityBootstrapTests: XCTestCase {
         try body(store)
     }
 
-    private func installedIdentity(hash: Character) -> CodeIdentity {
+    private func installedIdentity(
+        hash: Character,
+        signingIdentifier: String = "hostwright"
+    ) -> CodeIdentity {
         CodeIdentity(
             teamIdentifier: ControlPeerTrustPolicy.installedTeamIdentifier,
-            signingIdentifier: "hostwright",
+            signingIdentifier: signingIdentifier,
             codeDirectoryHash: String(repeating: String(hash), count: 40),
             validationMode: .installedRequirement
         )

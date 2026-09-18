@@ -777,7 +777,7 @@ final class LifecycleUpdatePlannerTests: XCTestCase {
             currentGeneration: 2,
             candidateResourceIdentifier: "hostwright-demo-web-new",
             candidateResourceUUID: resourceUUID(new, suffix: "candidate"),
-            candidateGeneration: 4
+            candidateGeneration: 2
         )
 
         XCTAssertThrowsError(

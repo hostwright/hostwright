@@ -240,6 +240,30 @@ final class CLIFileErrorAndRecoveryTests: XCTestCase {
         }
     }
 
+    func testRecoveryJSONAliasSupportsInspectionAndConfirmedActions() throws {
+        let groupID = "11111111-1111-4111-8111-111111111111"
+        let planSHA256 = String(repeating: "a", count: 64)
+        XCTAssertEqual(
+            try CLICommand.parse(arguments: ["recovery", "--json"]),
+            .recovery(action: .inspect, stateDatabasePath: nil, projectName: nil, output: .json)
+        )
+        for operation in ["resume", "rollback"] {
+            let action: RecoveryCLIAction = operation == "resume"
+                ? .resume(groupID: groupID, confirmationPlanSHA256: planSHA256, timeoutSeconds: 120)
+                : .rollback(groupID: groupID, confirmationPlanSHA256: planSHA256, timeoutSeconds: 120)
+            XCTAssertEqual(
+                try CLICommand.parse(arguments: [
+                    "recovery", operation, "--group", groupID,
+                    "--confirm-plan", planSHA256, "--json"
+                ]),
+                .recovery(action: action, stateDatabasePath: nil, projectName: nil, output: .json)
+            )
+            XCTAssertThrowsError(try CLICommand.parse(arguments: [
+                "recovery", operation, "--group", groupID, "--json"
+            ]))
+        }
+    }
+
     func testRecoveryTextAndJSONExposeRedactedActiveLeaseFields() throws {
         try withTemporaryDatabase { databasePath in
             let lockExpiresAt = "2099-07-12T12:10:00Z"

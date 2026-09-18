@@ -8,6 +8,77 @@ import XCTest
 @testable import HostwrightCLI
 
 final class LifecycleProbeLiveIntegrationTests: XCTestCase {
+    func testCompensatingRestartRequiresSchedulerAuthority() async throws {
+        let fixture = try ProbeLiveFixture(
+            action: .stop,
+            desired: probeLiveDesired(),
+            postcondition: LifecyclePlanCondition(kind: "lifecycle", subject: "phase04/web", expectedValue: "stopped"),
+            interactive: ProbeLiveInteractiveExecutor(outcomes: [])
+        )
+        defer { fixture.cleanup() }
+        let effects = schedulerProtectedEffects(fixture)
+        guard case .failed(let failure) = await effects.compensate(
+            compensation: LifecycleCompensation(action: .restart),
+            node: fixture.node,
+            context: fixture.context
+        ) else {
+            return XCTFail("Compensation must require fresh admission before restarting a workload.")
+        }
+        XCTAssertTrue(failure.diagnostic.contains("scheduler-authority-unavailable"), failure.diagnostic)
+        let actions = await fixture.adapter.executedActions()
+        XCTAssertTrue(actions.isEmpty)
+    }
+
+    func testCompletionAwareStartRequiresSchedulerAuthority() async throws {
+        let fixture = try ProbeLiveFixture(
+            action: .start,
+            desired: probeLiveDesired(),
+            postcondition: LifecyclePlanCondition(kind: "lifecycle", subject: "phase04/web", expectedValue: "exited"),
+            interactive: ProbeLiveInteractiveExecutor(outcomes: [])
+        )
+        defer { fixture.cleanup() }
+        let effects = schedulerProtectedEffects(fixture)
+        guard case .failed(let failure) = await effects.apply(node: fixture.node, context: fixture.context) else {
+            return XCTFail("Completion-aware start must require fresh admission before starting a workload.")
+        }
+        XCTAssertTrue(failure.diagnostic.contains("scheduler-authority-unavailable"), failure.diagnostic)
+        let actions = await fixture.adapter.executedActions()
+        XCTAssertTrue(actions.isEmpty)
+        XCTAssertEqual(
+            try fixture.store.operationGroupSteps.load(groupID: fixture.context.groupID)
+                .filter { $0.plannedActionType == "completion-checkpoint" }.map(\.status),
+            [.started, .unsupported]
+        )
+        guard case .noEffect = await effects.observe(node: fixture.node, context: fixture.context) else {
+            return XCTFail("Rejected completion start must retain proof that execution did not begin.")
+        }
+    }
+
+    func testLivenessRecoveryRequiresSchedulerAuthority() async throws {
+        let interactive = ProbeLiveInteractiveExecutor(outcomes: [.failed, .succeeded])
+        let fixture = try ProbeLiveFixture(
+            action: .verify,
+            desired: probeLiveDesired(
+                probes: RuntimeProbeSet(liveness: RuntimeProbeConfiguration(
+                    action: .exec(RuntimeProbeExecAction(command: ["/usr/bin/alive"])),
+                    intervalSeconds: 1, failureThreshold: 1
+                )),
+                restartPolicy: .onFailure
+            ),
+            postcondition: LifecyclePlanCondition(kind: "probe-liveness", subject: "phase04/web", expectedValue: "healthy"),
+            interactive: interactive
+        )
+        defer { fixture.cleanup() }
+        let effects = schedulerProtectedEffects(fixture)
+        guard case .failed(let failure) = await effects.apply(node: fixture.node, context: fixture.context) else {
+            return XCTFail("Liveness recovery must require fresh admission before restarting a workload.")
+        }
+        XCTAssertTrue(failure.diagnostic.contains("scheduler-authority-unavailable"), failure.diagnostic)
+        let actions = await fixture.adapter.executedActions()
+        XCTAssertTrue(actions.isEmpty)
+        XCTAssertEqual(interactive.snapshot().count, 1)
+    }
+
     func testStableRolloutObservationReprobesUntilDurableWindowElapses() async throws {
         let clock = ProbeLiveClock(milliseconds: 1_000)
         let interactive = ProbeLiveInteractiveExecutor(
@@ -782,6 +853,20 @@ final class LifecycleProbeLiveIntegrationTests: XCTestCase {
     }
 }
 
+private func schedulerProtectedEffects(_ fixture: ProbeLiveFixture) -> LifecycleLiveEffects {
+    LifecycleLiveEffects(
+        adapter: fixture.adapter,
+        state: fixture.effects.state,
+        store: fixture.store,
+        probeStore: fixture.probeStore,
+        environment: fixture.effects.environment,
+        interactiveExecutor: fixture.effects.interactiveExecutor,
+        probeNetworkClient: fixture.effects.probeNetworkClient,
+        nowMilliseconds: fixture.effects.nowMilliseconds,
+        sleepMilliseconds: fixture.effects.sleepMilliseconds
+    )
+}
+
 private struct ProbeLiveInteractiveCall: Equatable, Sendable {
     let resourceIdentifier: String
     let arguments: [String]
@@ -1304,6 +1389,7 @@ private struct ProbeLiveFixture {
             store: store,
             probeStore: probeStore,
             environment: .live,
+            schedulerActivationValidator: { _ in },
             interactiveExecutor: interactive,
             probeNetworkClient: ProbeLiveNetworkClient(),
             nowMilliseconds: { clock.now() },

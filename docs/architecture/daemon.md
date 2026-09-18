@@ -4,6 +4,8 @@
 
 ## Current Behavior
 
+Before the first authenticated foreground connection, run `hostwright daemon bootstrap-identities`. This declares the actual CLI and control companion identities for the selected local state without installing or starting a LaunchAgent. Use the same `HOSTWRIGHT_APPLICATION_SUPPORT_DIR`, `HOSTWRIGHT_CACHE_DIR`, `HOSTWRIGHT_LOG_DIR`, and `HOSTWRIGHT_STATE_DB` settings for bootstrap, the foreground daemon, and subsequent CLI commands. Keep these paths private to the current user.
+
 The foreground loop remains available:
 
 ```bash
@@ -21,11 +23,14 @@ Exactly one of `--foreground` or `--service` is required. Managed service mode r
 Lifecycle control uses:
 
 ```bash
+hostwright daemon bootstrap-identities --json
 hostwright daemon status
 hostwright daemon install --daemon-executable <absolute-hostwrightd> --config <absolute-hostwright.yaml>
 hostwright daemon validate|bootstrap|start|stop|kickstart|rollback|disable|repair|uninstall
 hostwright daemon upgrade --daemon-executable <absolute-hostwrightd> --config <absolute-hostwright.yaml>
 ```
+
+Managed installation, upgrade and repair use the current user’s default local paths and reject environment overrides that resolve elsewhere before bootstrapping identities or changing the service. All daemon service commands use the trusted local companion, allowing recovery when the daemon socket is absent. Install, upgrade and repair refresh actual CLI, companion and desktop identities. `bootstrap-identities` accepts no executable or manifest arguments and reports its own versioned JSON result.
 
 All lifecycle commands support text or versioned JSON output. `install` and `upgrade` require canonical existing paths to a securely validated executable named `hostwrightd` and a current-user- or root-owned, regular, single-link, non-writable-by-group/others config file. Both launch inputs are securely revalidated immediately before bootstrap.
 

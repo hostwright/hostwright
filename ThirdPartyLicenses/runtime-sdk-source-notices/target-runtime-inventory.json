@@ -1,0 +1,410 @@
+{
+  "kind": "hostwright.swift-sdk-runtime-inspection.v1",
+  "sdkArchiveSHA256": "d2078b69bdeb5c31202c10e9d8a11d6f66f82938b51a4b75f032ccb35c4c286c",
+  "runtimeArchives": [
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/libmimalloc.a",
+      "sha256": "b7beaabb7c6163abac9feb3b6b5c7060c97450a35afd03dda6017851a0022e71",
+      "sizeBytes": 1041598,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/libz.a",
+      "sha256": "9d5caacfb84c007c5394b7ffbd1749ef10f17d4cf614cdacc68071fc0e56bed8",
+      "sizeBytes": 133996,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/libbz2.a",
+      "sha256": "2210ac10d8fb8bc377b49df9fbb0bbd23c4f43e3e36af5ca5e2c9218ee7fa2d8",
+      "sizeBytes": 217826,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/liblzma.a",
+      "sha256": "d426ae904b10ae002312752f43436a9e726d41d9aea9f9499d17cdbe302dd64e",
+      "sizeBytes": 1413384,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/libxml2.a",
+      "sha256": "908fab9dcf209c9bfa28c204efb1dd50424f3be73e827749118e681dda184c7b",
+      "sizeBytes": 7133822,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/libarchive.a",
+      "sha256": "aa5bdf840a416cb6660f76fa53672dd9fcf318de6d4b168543fe689071898896",
+      "sizeBytes": 5081648,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/libcrypto.a",
+      "sha256": "dfb2ff5acf37ef039fcd841d887524392f4ad0305d5a9f6f7902adc202a47498",
+      "sizeBytes": 16612056,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/libssl.a",
+      "sha256": "18d25d482e1a736f5c6df088589ce9694624b91e9e71bf9255cecdac60844df8",
+      "sizeBytes": 6071170,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/libcurl.a",
+      "sha256": "ac3230c3f774cf87bc90fb0a8eeab1af730122ada2579503b80b1bfc0e6ff5a8",
+      "sizeBytes": 9071144,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/libc.a",
+      "sha256": "28587bb377135ef651d259223f186e6d430001d0e82bf6aebea3d6c99801742b",
+      "sizeBytes": 3461538,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/libm.a",
+      "sha256": "f0a17a43c74d2fe5474fa2fd29c8f14799e777d7d75a2cc4d11c20a6e7b161c5",
+      "sizeBytes": 8,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/librt.a",
+      "sha256": "f0a17a43c74d2fe5474fa2fd29c8f14799e777d7d75a2cc4d11c20a6e7b161c5",
+      "sizeBytes": 8,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/libpthread.a",
+      "sha256": "f0a17a43c74d2fe5474fa2fd29c8f14799e777d7d75a2cc4d11c20a6e7b161c5",
+      "sizeBytes": 8,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/libcrypt.a",
+      "sha256": "f0a17a43c74d2fe5474fa2fd29c8f14799e777d7d75a2cc4d11c20a6e7b161c5",
+      "sizeBytes": 8,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/libutil.a",
+      "sha256": "f0a17a43c74d2fe5474fa2fd29c8f14799e777d7d75a2cc4d11c20a6e7b161c5",
+      "sizeBytes": 8,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/libxnet.a",
+      "sha256": "f0a17a43c74d2fe5474fa2fd29c8f14799e777d7d75a2cc4d11c20a6e7b161c5",
+      "sizeBytes": 8,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/libresolv.a",
+      "sha256": "f0a17a43c74d2fe5474fa2fd29c8f14799e777d7d75a2cc4d11c20a6e7b161c5",
+      "sizeBytes": 8,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/libdl.a",
+      "sha256": "f0a17a43c74d2fe5474fa2fd29c8f14799e777d7d75a2cc4d11c20a6e7b161c5",
+      "sizeBytes": 8,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/libc++.a",
+      "sha256": "8b70b11751a3a0615f1d183db3d2a7dc30238fd0cb96ca637470372fefde5d13",
+      "sizeBytes": 10280668,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/libc++abi.a",
+      "sha256": "6d6b5bce51d8c4ef860e612b0596a3174c56dd1b09b3a70a5ebd574b7eb5eeed",
+      "sizeBytes": 1812516,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/libunwind.a",
+      "sha256": "9238db587e40763b31761c800f4272530e42b500fb4ba027ac26eed2b67def7d",
+      "sizeBytes": 374744,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/libfts.a",
+      "sha256": "87039f3db3edf95d5d6e5810d6b5488b75e9e227259b9d3d49d052466a8f610a",
+      "sizeBytes": 40802,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/libc++experimental.a",
+      "sha256": "4f2611831740dcf0c8cd4c2b953b38e737d9c66903ff30fffe264ffac79ae153",
+      "sizeBytes": 3594034,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/swift/clang/lib/linux/libclang_rt.builtins-aarch64.a",
+      "sha256": "b4885796695248097e3cfbc784edaad01d836c820c2ae6dc6e5cc2f41ac3e981",
+      "sizeBytes": 495168,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/swift_static/linux-static/libswiftMusl.a",
+      "sha256": "0dba0a3c33503c181684786a597899487e85588d21dad23b00cfb49348bc850f",
+      "sizeBytes": 179718,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/swift_static/linux-static/libswiftCore.a",
+      "sha256": "3f972d2eabf73aecbf92f30a8f8e6426881913a9a0c759fbe6304fa4ee13ae5c",
+      "sizeBytes": 81403580,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/swift_static/linux-static/libswiftSwiftOnoneSupport.a",
+      "sha256": "d2869ce0c71e8b02c07ed82b161dc57d63d5128b98ab401f298951908fd64711",
+      "sizeBytes": 1290364,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/swift_static/linux-static/libswift_Builtin_float.a",
+      "sha256": "2f29ad94decafe8e35a0427727b444a3fc6a507b9ad8dc9a5c60bc33188bcd1e",
+      "sizeBytes": 15606,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/swift_static/linux-static/libswift_Concurrency.a",
+      "sha256": "4456ff67530096d0fd2ab22e370cbcd154b6890eac82302e5461d4e0c6e012d4",
+      "sizeBytes": 9602092,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/swift_static/linux-static/libswift_RegexParser.a",
+      "sha256": "19a773aba27b682fb5a77ba794ad06dc0089486d6e4032ecdfd00ddac739b0a6",
+      "sizeBytes": 6668538,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/swift_static/linux-static/libswift_StringProcessing.a",
+      "sha256": "f4c69343ddf4970e4fad5b2e9cf05ba8231bb9ab572f95c5a9c0f89d5fccb890",
+      "sizeBytes": 4830936,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/swift_static/linux-static/libswiftRegexBuilder.a",
+      "sha256": "ee2284ea323cd0c3412571c0dad32cf6764864051d698ebe668cf5a24cfb492a",
+      "sizeBytes": 350142,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/swift_static/linux-static/libswift_Differentiation.a",
+      "sha256": "6fa6239a8980c5deef8f63285007edeb471efb5090ac5616748fec6200141b21",
+      "sizeBytes": 2037848,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/swift_static/linux-static/libswiftDistributed.a",
+      "sha256": "509feca67c571a6e4116d93433a29f0a97eabe2832140b6d76a25411180ac90f",
+      "sizeBytes": 701166,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/swift_static/linux-static/libswiftObservation.a",
+      "sha256": "80ea1f0c703ccedf51637f4c337b9c3366f95f331d23de247470ea9a6fe01fdd",
+      "sizeBytes": 605344,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/swift_static/linux-static/libswiftRuntime.a",
+      "sha256": "3940d7011a416e7bbc372815c05fa2911a502f07b9c715a0a9a266cd092887c1",
+      "sizeBytes": 5666432,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/swift_static/linux-static/libswiftSynchronization.a",
+      "sha256": "8d9d314ad7695b7f3e692aff517aae0a2bb7af4bab5a390740b243b33259aa81",
+      "sizeBytes": 281622,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/swift_static/linux-static/libswift_Volatile.a",
+      "sha256": "d01eac630ed690d5035a131b38e2a4c159173d21d7b307ccf3000b4e640eaae5",
+      "sizeBytes": 17770,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/swift_static/linux-static/lib_FoundationICU.a",
+      "sha256": "c5439937ced68568677465238df212c9efdc268e9497bb666684f26d2ef798d8",
+      "sizeBytes": 91533940,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/swift_static/linux-static/lib_FoundationCollections.a",
+      "sha256": "ec44642854c3469084f670af108e64b9faab5622bc71777864406472a401d322",
+      "sizeBytes": 9694542,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/swift_static/linux-static/lib_FoundationCShims.a",
+      "sha256": "1f275f4e355de464d584c70c5fb03edf239288af781ff79e18a69c62bf07b726",
+      "sizeBytes": 30254,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/swift_static/linux-static/libFoundationEssentials.a",
+      "sha256": "09bb54a4d068536d2c6f913a1ac4ec19ad22bfd01b2d1983951f6afc9f0dd645",
+      "sizeBytes": 40985036,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/swift_static/linux-static/libFoundationInternationalization.a",
+      "sha256": "a309d8b01f6d0ff1c081265584295e66d7678faf27b5c78c006db3aa7d15c8b5",
+      "sizeBytes": 14530432,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/swift_static/linux-static/libCoreFoundation.a",
+      "sha256": "02186281c1698ab4af0faf15af70db109ae7eb5097062c2a262203064dc28b05",
+      "sizeBytes": 8650848,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/swift_static/linux-static/lib_CFXMLInterface.a",
+      "sha256": "53a4c4affd05c1e053c26c93f9783aa5044a0f56a6517437d91d50d7b8686b5b",
+      "sizeBytes": 210598,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/swift_static/linux-static/lib_CFURLSessionInterface.a",
+      "sha256": "3b56603a09edca191ebc82b6cf107f8c5b440cae81cf78e2218ceee2b1ba3a46",
+      "sizeBytes": 142182,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/swift_static/linux-static/libFoundation.a",
+      "sha256": "831d95e51d834ecbaa3d8e6dd0ccc51d74ac472f7df54b3f354d71575afb9dc6",
+      "sizeBytes": 31555748,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/swift_static/linux-static/libFoundationXML.a",
+      "sha256": "90337cb13cd748a66fa663a58be3df8c488cdcabb82c88bb6d353c959103ad53",
+      "sizeBytes": 1641104,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/swift_static/linux-static/libFoundationNetworking.a",
+      "sha256": "543c11cf3e1b6f7915267011e4cac143dc78e0ceda00823c32c17b59a1a7cd75",
+      "sizeBytes": 8239912,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/swift_static/linux-static/libBlocksRuntime.a",
+      "sha256": "348ed13c907b6b1b6bc19f7a713c1c1209c75d5297c068bb1223f13e3d009429",
+      "sizeBytes": 29108,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/swift_static/linux-static/libswiftDispatch.a",
+      "sha256": "1561d019db1ef0b348e762e2522f1c20eb66d64dba1f8aec903a272d66f1f090",
+      "sizeBytes": 1169794,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/swift_static/linux-static/libdispatch.a",
+      "sha256": "62a9f86bba347ece0131eeef379eda911a37b80251640fbe57e28c0fae7b11bb",
+      "sizeBytes": 1808996,
+      "classification": "candidate-target-runtime-archive-not-proven-linked-in-vminit"
+    }
+  ],
+  "metadata": [
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/cmake/libxml2-2.14.5/libxml2-config-version.cmake",
+      "sha256": "0d0bf2e6b9e5271bd9a516484744a35577dd021716d31858fb69e003052bdb69",
+      "versions": [
+        "2.14.5"
+      ]
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/cmake/mimalloc/mimalloc-config-version.cmake",
+      "sha256": "6c2f54bce88ad4e9a7d5f56dcf2fa669aa69834124ee371c9671f9d0b63a4a1d",
+      "versions": []
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/cmake/liblzma/liblzma-config-version.cmake",
+      "sha256": "1a629698088b7e7f0ba43e9b60f77d78036666ddf5fac80bc60aafe206c90b25",
+      "versions": [
+        "5.8.1"
+      ]
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/pkgconfig/mimalloc.pc",
+      "sha256": "858dca59145b40bf933e98673ecd876de9a563441e39efb5020a741a6ababe40",
+      "versions": [
+        "2.2"
+      ]
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/pkgconfig/zlib.pc",
+      "sha256": "949729571a10b162901ec690b9606b95228de74a9a7505a14fbfd37bb50d9598",
+      "versions": [
+        "1.3.1"
+      ]
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/pkgconfig/liblzma.pc",
+      "sha256": "3665385828058c52eb7b3e23f7757c887c61bfa765287167312a3ac3615f63df",
+      "versions": [
+        "5.8.1"
+      ]
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/pkgconfig/libxml-2.0.pc",
+      "sha256": "39a3b4fef5a5eb40b0a7351d67d4ce1d15d39eed4a0d16e4dd26f0f0b2747d7d",
+      "versions": [
+        "2.14.5"
+      ]
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/pkgconfig/libarchive.pc",
+      "sha256": "2cf2a9746a306946fc8ad86ba5e8fdd9ebdfeb887cbf7de94d7826ae2f29adc4",
+      "versions": [
+        "3.8.1"
+      ]
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/pkgconfig/libcurl.pc",
+      "sha256": "2dec1bf8c560c483642f2264c786195ba5e186fd68a79cf47c431fd511269e66",
+      "versions": [
+        "8.15.0-DEV"
+      ]
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/swift_static/_foundation_unicode/uvernum.h",
+      "sha256": "dd8038453c55bcc1b7a2a7825dd995447363e962abc81171f1f10a142ca9161a",
+      "versions": [
+        "76.1"
+      ]
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/lib/swift_static/_foundation_unicode/uversion.h",
+      "sha256": "87aee341cd51160ac3781cc202621e03f2b836c0f033320921bd0bd6a4edbf82",
+      "versions": []
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/include/openssl/opensslv.h",
+      "sha256": "86b6611f9347b0dc2ab5b49d5eebfd771e0dbaeea98e2e6fc72208677ed3c95d",
+      "versions": []
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/include/mimalloc.h",
+      "sha256": "a62aee63dfa22224c9d184ae09f270f9bb7dd4184ff9823b0be97433b04b63ce",
+      "versions": []
+    },
+    {
+      "path": "swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle/swift-6.3-RELEASE_static-linux-0.1.0/swift-linux-musl/musl-1.2.5.sdk/aarch64/usr/include/bzlib.h",
+      "sha256": "6ac62e811669598ee30c9e1c379b9e627f6ff17a5a3dc1e0b4fa8b8ea75e580d",
+      "versions": []
+    }
+  ],
+  "standaloneLicenseFiles": [],
+  "scope": "Candidate SDK runtime inputs; actual published OCI link/source provenance not established."
+}

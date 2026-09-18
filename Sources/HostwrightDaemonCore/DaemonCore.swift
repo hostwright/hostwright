@@ -465,6 +465,9 @@ public struct DaemonLoopRunner {
             let manifestSnapshot = try readConfiguration(manifestPath, .manifest, nil)
             let manifestText = manifestSnapshot.text
             let manifest = try ManifestValidator.validated(manifestText)
+            let lifecycleManifestSHA256 = try reconciliationDriver.lifecycleManifestSHA256(
+                text: manifestText, manifest: manifest
+            )
             let configurationTargets = try DaemonConfigurationTargetResolver.paths(
                 manifestPath: manifestPath,
                 manifest: manifest
@@ -486,6 +489,7 @@ public struct DaemonLoopRunner {
                     try schedulerAuthorizedRuntimeMapping(
                         manifest: manifest,
                         manifestSHA256: manifestSnapshot.target.contentSHA256,
+                        lifecycleManifestSHA256: lifecycleManifestSHA256,
                         projectID: projectID,
                         store: store
                     )
@@ -559,10 +563,15 @@ public struct DaemonLoopRunner {
                     message: "The unattended reconciliation plan contains blocking issues. No runtime mutation was admitted."
                 )
             }
-            let selectedServiceNames = selectedLifecycleServices(
+            var selectedServiceNames = selectedLifecycleServices(
                 manifest: manifest,
                 plan: plan
             )
+            if let local = authorizedMapping.schedulerAuthority.localLifecycleAuthority {
+                let admitted = Set(local.entries.map(\.serviceName))
+                selectedServiceNames = (selectedServiceNames ?? manifest.services.map(\.name))
+                    .filter { admitted.contains($0) }.sorted()
+            }
             let operationIdempotencyKeySHA256 = try restartOperationIdempotencyKey(
                 plan: plan,
                 restartPolicyRecords: restartPolicyRecords,
@@ -820,9 +829,21 @@ public struct DaemonLoopRunner {
     private func schedulerAuthorizedRuntimeMapping(
         manifest: HostwrightManifest,
         manifestSHA256: String,
+        lifecycleManifestSHA256: String,
         projectID: String,
         store: SQLiteStateStore
     ) throws -> AuthorizedRuntimeMapping {
+        if let local = try DaemonLocalLifecycleAuthority.resolve(
+            store: store, manifest: manifest, manifestSHA256: manifestSHA256, projectID: projectID,
+            lifecycleManifestSHA256: lifecycleManifestSHA256
+        ) {
+            return AuthorizedRuntimeMapping(
+                mapping: ManifestRuntimeMapper.map(
+                    manifest, projectResourceUUID: local.projectUUID, schedulerAdmissionValidated: true
+                ),
+                schedulerAuthority: DaemonSchedulerAuthorityBinding(localLifecycleAuthority: local)
+            )
+        }
         let admissions: [ManifestSchedulerAdmission]
         do {
             admissions = try ManifestSchedulerAdmissionBridge.admit(

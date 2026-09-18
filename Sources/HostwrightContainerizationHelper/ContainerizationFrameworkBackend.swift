@@ -113,6 +113,19 @@ private final class GuestPolicyBoundedBufferWriter:
     }
 }
 
+enum ContainerizationHelperSDKResourceConfiguration {
+    static func make(cpuCount: Int?, memoryBytes: UInt64?) throws -> LinuxContainer.Configuration {
+        guard let cpuCount, let memoryBytes,
+              ContainerizationHelperResourceAllocation.isValid(cpuCount: cpuCount, memoryBytes: memoryBytes) else {
+            throw ContainerizationHelperBackendError.rejected("stored allocation is missing or invalid")
+        }
+        var configuration = LinuxContainer.Configuration()
+        configuration.cpus = cpuCount
+        configuration.memoryInBytes = memoryBytes
+        return configuration
+    }
+}
+
 protocol ContainerizationHelperRuntimeDriving: Sendable {
     func resolveProcess(
         for request: ContainerizationHelperCreatePayload
@@ -144,11 +157,15 @@ protocol ContainerizationHelperRuntimeDriving: Sendable {
     func restart(_ record: ContainerizationHelperPersistedRecord) async throws
     func stop(_ record: ContainerizationHelperPersistedRecord) async throws
     func delete(_ record: ContainerizationHelperPersistedRecord) async throws
+    func allocation(resourceIdentifier: String) async throws -> RuntimeInventoryAllocation?
     func usage(resourceIdentifier: String) async throws -> ContainerizationHelperResourceUsage
     func shutdown() async
+    func shutdownIfIdle() async -> Bool
 }
 
 extension ContainerizationHelperRuntimeDriving {
+    func shutdownIfIdle() async -> Bool { false }
+
     func networkPolicyCapabilities()
         async -> RuntimeNetworkPolicyProviderCapabilities {
         .unavailable
@@ -166,6 +183,10 @@ actor ContainerizationFrameworkBackend: ContainerizationHelperBackend {
     private let store: ContainerizationHelperStateStore
     private let driver: any ContainerizationHelperRuntimeDriving
     private var records: [String: ContainerizationHelperPersistedRecord]
+    private var inFlightMutations = Set<String>()
+    private var quarantinedResources = Set<String>()
+    private var idleShutdownAccepted = false
+    private var idleShutdownCompleted = false
 
     static func make(
         configuration: ContainerizationHelperConfiguration
@@ -631,6 +652,9 @@ extension ContainerizationFrameworkBackend {
         _ request: ContainerizationHelperObservePayload
     ) async throws -> ContainerizationHelperObservation {
         try Task.checkCancellation()
+        guard quarantinedResources.isEmpty else {
+            throw ContainerizationHelperBackendError.conflict("resource durable authority requires reconstruction")
+        }
         try await finishPreparedDeletes()
 
         var containers: [RuntimeInventoryContainer] = []
@@ -659,6 +683,7 @@ extension ContainerizationFrameworkBackend {
                 try inventoryContainer(
                     record,
                     usage: usage,
+                    allocation: try await observedAllocation(record),
                     networkAttachments: networkAttachments
                 )
             )
@@ -807,6 +832,11 @@ extension ContainerizationFrameworkBackend {
         _ request: RuntimeNetworkCreateRequest,
         context: RuntimeMutationContext
     ) async throws -> RuntimeNetworkOperationResult {
+        guard !idleShutdownAccepted, !inFlightMutations.contains(request.identity.runtimeIdentifier) else {
+            throw ContainerizationHelperBackendError.conflict("helper idle shutdown was accepted")
+        }
+        inFlightMutations.insert(request.identity.runtimeIdentifier)
+        defer { inFlightMutations.remove(request.identity.runtimeIdentifier) }
         try Task.checkCancellation()
         try validateNetworkMutation(identity: request.identity, context: context)
         guard request.ipv4.mode != .automatic else {
@@ -894,6 +924,11 @@ extension ContainerizationFrameworkBackend {
         _ request: RuntimeNetworkDeleteRequest,
         context: RuntimeMutationContext
     ) async throws -> RuntimeNetworkOperationResult {
+        guard !idleShutdownAccepted, !inFlightMutations.contains(request.identity.runtimeIdentifier) else {
+            throw ContainerizationHelperBackendError.conflict("helper idle shutdown was accepted")
+        }
+        inFlightMutations.insert(request.identity.runtimeIdentifier)
+        defer { inFlightMutations.remove(request.identity.runtimeIdentifier) }
         try Task.checkCancellation()
         try validateNetworkMutation(identity: request.identity, context: context)
         guard let observed = try await driver.inspectNetwork(request.identity) else {
@@ -944,6 +979,19 @@ extension ContainerizationFrameworkBackend {
         context: RuntimeMutationContext
     ) async throws -> ContainerizationHelperMutationResult {
         try Task.checkCancellation()
+        guard !idleShutdownAccepted,
+              !inFlightMutations.contains(request.resourceIdentifier),
+              !quarantinedResources.contains(request.resourceIdentifier),
+              records[request.resourceIdentifier] == nil else {
+            throw ContainerizationHelperBackendError.conflict("resource already exists or is reserved")
+        }
+        inFlightMutations.insert(request.resourceIdentifier)
+        defer { inFlightMutations.remove(request.resourceIdentifier) }
+        guard ContainerizationHelperResourceAllocation.isValid(
+            cpuCount: request.cpuCount, memoryBytes: request.memoryBytes
+        ) else {
+            throw ContainerizationHelperBackendError.rejected("explicit valid CPU and memory limits are required")
+        }
         try validateCreateOwnership(request: request, context: context)
         try await validateCreateNetworks(request)
         if request.networkPolicy != nil {
@@ -970,12 +1018,17 @@ extension ContainerizationFrameworkBackend {
         guard !resolved.command.isEmpty else {
             throw ContainerizationHelperBackendError.rejected("image has no executable command")
         }
+        try Task.checkCancellation()
+        guard records[request.resourceIdentifier] == nil,
+              !quarantinedResources.contains(request.resourceIdentifier) else {
+            throw ContainerizationHelperBackendError.conflict("create authority changed during resolution")
+        }
         var record = ContainerizationHelperPersistedRecord(request: request, context: context)
         record.command = resolved.command
         record.environment = resolved.environment
         record.workingDirectory = resolved.workingDirectory
         record.user = resolved.user
-        try store.save(record)
+        try persistRecord(record)
         records[record.resourceIdentifier] = record
 
         do {
@@ -983,19 +1036,25 @@ extension ContainerizationFrameworkBackend {
             try await reconcileDriverNetworkPolicies()
             record = records[record.resourceIdentifier] ?? record
             try await driver.create(record, networks: request.networks)
+            try await verifyAllocation(record)
+            record.allocationVerified = true
             try Task.checkCancellation()
             try await reconcileDriverNetworkPolicies()
             record = records[record.resourceIdentifier] ?? record
+            record.allocationVerified = true
             record.phase = .stopped
             record.failureCategory = nil
-            try store.save(record)
+            try persistRecord(record)
             records[record.resourceIdentifier] = record
             return result(for: record.resourceIdentifier, lifecycle: .stopped)
         } catch {
-            try? await driver.stop(record)
+            guard !quarantinedResources.contains(record.resourceIdentifier) else { throw error }
+            if !quarantinedResources.contains(record.resourceIdentifier) {
+                try? await driver.stop(record)
+            }
             record.phase = error is CancellationError ? .stopped : .failed
             record.failureCategory = error is CancellationError ? "cancelled" : "create-failed"
-            try store.save(record)
+            try persistRecord(record)
             records[record.resourceIdentifier] = record
             throw error
         }
@@ -1006,30 +1065,45 @@ extension ContainerizationFrameworkBackend {
         context: RuntimeMutationContext
     ) async throws -> ContainerizationHelperMutationResult {
         var record = try requireRecord(request, context: context)
+        inFlightMutations.insert(record.resourceIdentifier)
+        defer { inFlightMutations.remove(record.resourceIdentifier) }
+        guard ContainerizationHelperResourceAllocation.isValid(
+            cpuCount: record.cpuCount, memoryBytes: record.memoryBytes
+        ) else {
+            throw ContainerizationHelperBackendError.rejected("stored CPU and memory allocation is unverified; recreate the resource")
+        }
         guard [.created, .stopped].contains(record.phase) else {
             throw ContainerizationHelperBackendError.conflict("resource cannot be started")
         }
         record.phase = .preparedStart
+        record.allocationVerified = false
         record.failureCategory = nil
-        try store.save(record)
+        try persistRecord(record)
         records[record.resourceIdentifier] = record
         do {
             try Task.checkCancellation()
             try await reconcileDriverNetworkPolicies()
             record = records[record.resourceIdentifier] ?? record
             try await driver.start(record)
+            try await verifyAllocation(record)
+            record.allocationVerified = true
             try Task.checkCancellation()
             try await reconcileDriverNetworkPolicies()
             record = records[record.resourceIdentifier] ?? record
+            record.allocationVerified = true
             record.phase = .running
-            try store.save(record)
+            try persistRecord(record)
             records[record.resourceIdentifier] = record
             return result(for: record.resourceIdentifier, lifecycle: .running)
         } catch {
-            try? await driver.stop(record)
+            guard !quarantinedResources.contains(record.resourceIdentifier) else { throw error }
+            if !quarantinedResources.contains(record.resourceIdentifier) {
+                try? await driver.stop(record)
+            }
             record.phase = .stopped
             record.failureCategory = error is CancellationError ? "cancelled" : "start-failed"
-            try store.save(record)
+            record.allocationVerified = false
+            try persistRecord(record)
             records[record.resourceIdentifier] = record
             throw error
         }
@@ -1040,6 +1114,8 @@ extension ContainerizationFrameworkBackend {
         context: RuntimeMutationContext
     ) async throws -> ContainerizationHelperMutationResult {
         var record = try requireRecord(request, context: context)
+        inFlightMutations.insert(record.resourceIdentifier)
+        defer { inFlightMutations.remove(record.resourceIdentifier) }
         guard record.phase == .running else {
             throw ContainerizationHelperBackendError.conflict("resource is not running")
         }
@@ -1049,18 +1125,19 @@ extension ContainerizationFrameworkBackend {
             try Task.checkCancellation()
             record.phase = .stopped
             record.failureCategory = nil
-            try store.save(record)
+            try persistRecord(record)
             records[record.resourceIdentifier] = record
             try await reconcileDriverNetworkPolicies()
             record = records[record.resourceIdentifier] ?? record
             return result(for: record.resourceIdentifier, lifecycle: .stopped)
         } catch {
+            guard !quarantinedResources.contains(record.resourceIdentifier) else { throw error }
             record.failureCategory = error is CancellationError
                 ? "cancelled"
                 : record.phase == .stopped
                     ? "policy-reconcile-failed"
                     : "stop-failed"
-            try store.save(record)
+            try persistRecord(record)
             records[record.resourceIdentifier] = record
             throw error
         }
@@ -1071,29 +1148,44 @@ extension ContainerizationFrameworkBackend {
         context: RuntimeMutationContext
     ) async throws -> ContainerizationHelperMutationResult {
         var record = try requireRecord(request, context: context)
+        inFlightMutations.insert(record.resourceIdentifier)
+        defer { inFlightMutations.remove(record.resourceIdentifier) }
+        guard ContainerizationHelperResourceAllocation.isValid(
+            cpuCount: record.cpuCount, memoryBytes: record.memoryBytes
+        ) else {
+            throw ContainerizationHelperBackendError.rejected("stored CPU and memory allocation is unverified; recreate the resource")
+        }
         guard record.phase == .running else {
             throw ContainerizationHelperBackendError.conflict("resource is not running")
         }
         record.phase = .preparedRestart
+        record.allocationVerified = false
         record.failureCategory = nil
-        try store.save(record)
+        try persistRecord(record)
         records[record.resourceIdentifier] = record
         do {
             try Task.checkCancellation()
             try await driver.restart(record)
+            try await verifyAllocation(record)
+            record.allocationVerified = true
             try Task.checkCancellation()
             try await reconcileDriverNetworkPolicies()
             record = records[record.resourceIdentifier] ?? record
             record.runtimeInstanceID = UUID().uuidString.lowercased()
+            record.allocationVerified = true
             record.phase = .running
-            try store.save(record)
+            try persistRecord(record)
             records[record.resourceIdentifier] = record
             return result(for: record.resourceIdentifier, lifecycle: .running)
         } catch {
-            try? await driver.stop(record)
+            guard !quarantinedResources.contains(record.resourceIdentifier) else { throw error }
+            if !quarantinedResources.contains(record.resourceIdentifier) {
+                try? await driver.stop(record)
+            }
             record.phase = .stopped
             record.failureCategory = error is CancellationError ? "cancelled" : "restart-failed"
-            try store.save(record)
+            record.allocationVerified = false
+            try persistRecord(record)
             records[record.resourceIdentifier] = record
             throw error
         }
@@ -1104,9 +1196,11 @@ extension ContainerizationFrameworkBackend {
         context: RuntimeMutationContext
     ) async throws -> ContainerizationHelperMutationResult {
         var record = try requireRecord(request, context: context)
+        inFlightMutations.insert(record.resourceIdentifier)
+        defer { inFlightMutations.remove(record.resourceIdentifier) }
         record.phase = .preparedDelete
         record.failureCategory = nil
-        try store.save(record)
+        try persistRecord(record)
         records[record.resourceIdentifier] = record
         do {
             try Task.checkCancellation()
@@ -1120,12 +1214,13 @@ extension ContainerizationFrameworkBackend {
             )
             try persistNetworkPolicyEvidence(evidence)
             try store.removeLog(resourceIdentifier: record.resourceIdentifier)
-            try store.removeRecord(resourceIdentifier: record.resourceIdentifier)
+            try removePersistedRecord(resourceIdentifier: record.resourceIdentifier)
             records.removeValue(forKey: record.resourceIdentifier)
             return result(for: record.resourceIdentifier, lifecycle: .missing)
         } catch {
+            guard !quarantinedResources.contains(record.resourceIdentifier) else { throw error }
             record.failureCategory = error is CancellationError ? "cancelled" : "delete-failed"
-            try store.save(record)
+            try persistRecord(record)
             records[record.resourceIdentifier] = record
             throw error
         }
@@ -1135,22 +1230,37 @@ extension ContainerizationFrameworkBackend {
         _ = requestID
     }
 
+    func shutdownIfIdle() async -> Bool {
+        if idleShutdownAccepted { return idleShutdownCompleted }
+        guard records.isEmpty, inFlightMutations.isEmpty, quarantinedResources.isEmpty else { return false }
+        idleShutdownAccepted = true
+        guard await driver.shutdownIfIdle() else {
+            idleShutdownAccepted = false
+            return false
+        }
+        idleShutdownCompleted = true
+        return true
+    }
+
     func shutdown() async {
+        guard !idleShutdownCompleted else { return }
         for var record in records.values where record.phase == .running || record.phase == .created {
+            guard !quarantinedResources.contains(record.resourceIdentifier),
+                  !inFlightMutations.contains(record.resourceIdentifier) else { continue }
             do {
                 try await driver.stop(record)
                 record.phase = .stopped
                 record.failureCategory = nil
-                try store.save(record)
+                try persistRecord(record)
                 records[record.resourceIdentifier] = record
             } catch {
                 record.phase = .failed
                 record.failureCategory = "shutdown-failed"
-                try? store.save(record)
+                try? persistRecord(record)
                 records[record.resourceIdentifier] = record
             }
         }
-        await driver.shutdown()
+        if quarantinedResources.isEmpty && inFlightMutations.isEmpty { await driver.shutdown() }
     }
 
     private static func recoverInterruptedState(
@@ -1179,27 +1289,96 @@ extension ContainerizationFrameworkBackend {
 
     private func finishPreparedDeletes() async throws {
         for record in records.values where record.phase == .preparedDelete {
+            guard !inFlightMutations.contains(record.resourceIdentifier),
+                  !quarantinedResources.contains(record.resourceIdentifier) else { continue }
+            inFlightMutations.insert(record.resourceIdentifier)
+            defer { inFlightMutations.remove(record.resourceIdentifier) }
             try Task.checkCancellation()
             try await driver.delete(record)
             try store.removeLog(resourceIdentifier: record.resourceIdentifier)
-            try store.removeRecord(resourceIdentifier: record.resourceIdentifier)
+            try removePersistedRecord(resourceIdentifier: record.resourceIdentifier)
             records.removeValue(forKey: record.resourceIdentifier)
         }
+    }
+
+    private func removePersistedRecord(resourceIdentifier: String) throws {
+        guard !quarantinedResources.contains(resourceIdentifier) else {
+            throw ContainerizationHelperBackendError.conflict("resource durable authority requires reconstruction")
+        }
+        quarantinedResources.insert(resourceIdentifier)
+        try store.removeRecord(resourceIdentifier: resourceIdentifier)
+        records.removeValue(forKey: resourceIdentifier)
+        quarantinedResources.remove(resourceIdentifier)
+    }
+
+    private func persistRecord(_ record: ContainerizationHelperPersistedRecord) throws {
+        guard !quarantinedResources.contains(record.resourceIdentifier) else {
+            throw ContainerizationHelperBackendError.conflict("resource durable authority requires reconstruction")
+        }
+        quarantinedResources.insert(record.resourceIdentifier)
+        try store.save(record)
+        records[record.resourceIdentifier] = record
+        quarantinedResources.remove(record.resourceIdentifier)
     }
 
     private func requireRecord(
         _ request: ContainerizationHelperMutationPayload,
         context: RuntimeMutationContext
     ) throws -> ContainerizationHelperPersistedRecord {
-        guard let record = records[request.resourceIdentifier],
+        try Task.checkCancellation()
+        guard !idleShutdownAccepted,
+              !inFlightMutations.contains(request.resourceIdentifier),
+              !quarantinedResources.contains(request.resourceIdentifier),
+              var record = records[request.resourceIdentifier],
               record.resourceUUID == request.resourceUUID.lowercased(),
               record.resourceUUID == context.resourceUUID.lowercased(),
               record.projectUUID == context.projectResourceUUID.lowercased(),
+              record.mutationContext.providerID == context.providerID,
               record.mutationContext.resourceGeneration == context.resourceGeneration,
               record.mutationContext.projectGeneration == context.projectGeneration,
               record.mutationContext.providerGeneration == context.providerGeneration,
-              record.mutationContext.fencingToken == context.fencingToken.lowercased() else {
+              [.created, .running, .stopped].contains(record.phase) else {
             throw ContainerizationHelperBackendError.conflict("resource ownership or fence changed")
+        }
+        let labels = try labelDictionary(record.labels)
+        guard let identity = RuntimeManagedResourceIdentity.identity(from: labels),
+              RuntimeManagedResourceIdentity.labelsMatch(labels, identity: identity,
+                resourceIdentifier: record.resourceIdentifier),
+              let prior = try RuntimeManagedResourceIdentity.ownershipEvidence(from: labels,
+                expectedProviderID: .appleContainerization),
+              prior.resourceUUID == record.resourceUUID,
+              prior.projectUUID == record.projectUUID,
+              prior.resourceGeneration == record.mutationContext.resourceGeneration,
+              prior.projectGeneration == record.mutationContext.projectGeneration,
+              prior.providerGeneration == record.mutationContext.providerGeneration,
+              prior.fencingToken == record.mutationContext.fencingToken.lowercased(),
+              request.expectedOwnership == nil || request.expectedOwnership == prior else {
+            throw ContainerizationHelperBackendError.conflict("prior resource ownership changed")
+        }
+        if record.mutationContext.fencingToken == context.fencingToken.lowercased() {
+            guard record.mutationContext == context else {
+                throw ContainerizationHelperBackendError.conflict("same-fence operation context changed")
+            }
+        } else {
+            guard request.expectedOwnership == prior,
+                  context.validationIssue == nil,
+                  context.operationID != record.mutationContext.operationID,
+                  (record.previousMutationContexts ?? []).allSatisfy({
+                      $0.validationIssue == nil && $0.fencingToken != context.fencingToken &&
+                          $0.operationID != context.operationID
+                  }),
+                  [.created, .running, .stopped].contains(record.phase) else {
+                throw ContainerizationHelperBackendError.conflict("exact prior ownership is required for fence transfer")
+            }
+            let replacement = try RuntimeManagedResourceIdentity.labels(for: identity,
+                resourceIdentifier: record.resourceIdentifier, context: context)
+            record.labels = record.labels.map {
+                RuntimeInventoryLabel(key: $0.key, value: replacement[$0.key] ?? $0.value)
+            }
+            record.previousMutationContexts = (record.previousMutationContexts ?? []) + [record.mutationContext]
+            record.mutationContext = context
+            try persistRecord(record)
+            records[record.resourceIdentifier] = record
         }
         return record
     }
@@ -1256,7 +1435,7 @@ extension ContainerizationFrameworkBackend {
             record.networkPolicyGeneration = value.generation
             record.networkPolicySHA256 = value.sha256
             record.networkPolicyVerified = value.verified
-            try store.save(record)
+            try persistRecord(record)
             records[resourceIdentifier] = record
         }
     }
@@ -1424,9 +1603,31 @@ extension ContainerizationFrameworkBackend {
         return result
     }
 
+    private func verifyAllocation(_ record: ContainerizationHelperPersistedRecord) async throws {
+        guard let actual = try await driver.allocation(resourceIdentifier: record.resourceIdentifier),
+              actual.cpuCount == record.cpuCount, actual.memoryBytes == record.memoryBytes,
+              ContainerizationHelperResourceAllocation.isValid(cpuCount: actual.cpuCount, memoryBytes: actual.memoryBytes) else {
+            throw ContainerizationHelperBackendError.executionFailed("SDK allocation did not match the requested CPU and memory limits")
+        }
+    }
+
+    private func observedAllocation(_ record: ContainerizationHelperPersistedRecord) async throws -> RuntimeInventoryAllocation? {
+        if let actual = try await driver.allocation(resourceIdentifier: record.resourceIdentifier) {
+            guard ContainerizationHelperResourceAllocation.isValid(cpuCount: actual.cpuCount, memoryBytes: actual.memoryBytes) else {
+                throw ContainerizationHelperBackendError.executionFailed("SDK returned invalid resource allocation")
+            }
+            return actual
+        }
+        guard record.phase == .stopped || record.phase == .created,
+              record.allocationVerified == true,
+              ContainerizationHelperResourceAllocation.isValid(cpuCount: record.cpuCount, memoryBytes: record.memoryBytes) else { return nil }
+        return RuntimeInventoryAllocation(cpuCount: record.cpuCount, memoryBytes: record.memoryBytes)
+    }
+
     private func inventoryContainer(
         _ record: ContainerizationHelperPersistedRecord,
         usage: RuntimeInventoryUsage?,
+        allocation: RuntimeInventoryAllocation?,
         networkAttachments: [RuntimeInventoryNetworkAttachment]
     ) throws -> RuntimeInventoryContainer {
         let labels = try labelDictionary(record.labels)
@@ -1465,7 +1666,7 @@ extension ContainerizationFrameworkBackend {
             ports: [],
             mounts: [],
             networks: networkAttachments,
-            allocation: RuntimeInventoryAllocation(cpuCount: 4, memoryBytes: 1_073_741_824),
+            allocation: allocation,
             usage: usage,
             services: []
         )
@@ -1503,6 +1704,9 @@ private actor AppleContainerizationRuntimeDriver: ContainerizationHelperRuntimeD
     private var appliedGuestPolicies:
         [String: ContainerizationGuestNetworkPolicy] = [:]
     private var runningPolicyResources = Set<String>()
+    private var inFlightDriverMutations = 0
+    private var idleShutdownAccepted = false
+    private var idleShutdownCompleted = false
 
     init(
         configuration: ContainerizationHelperConfiguration,
@@ -1646,6 +1850,11 @@ private actor AppleContainerizationRuntimeDriver: ContainerizationHelperRuntimeD
         _ request: RuntimeNetworkCreateRequest,
         labels: [String: String]
     ) async throws -> ContainerizationHelperRuntimeNetworkRecord {
+        guard !idleShutdownAccepted else {
+            throw ContainerizationHelperBackendError.conflict("driver idle shutdown was accepted")
+        }
+        inFlightDriverMutations += 1
+        defer { inFlightDriverMutations -= 1 }
         guard networks[request.identity.runtimeIdentifier] == nil else {
             throw ContainerizationHelperBackendError.conflict("network already exists")
         }
@@ -1702,6 +1911,11 @@ private actor AppleContainerizationRuntimeDriver: ContainerizationHelperRuntimeD
     }
 
     func deleteNetwork(_ identity: RuntimeNetworkIdentity) async throws {
+        guard !idleShutdownAccepted else {
+            throw ContainerizationHelperBackendError.conflict("driver idle shutdown was accepted")
+        }
+        inFlightDriverMutations += 1
+        defer { inFlightDriverMutations -= 1 }
         guard let managed = networks[identity.runtimeIdentifier],
               managed.record.identity == identity else {
             throw ContainerizationHelperBackendError.rejected("network is not managed")
@@ -1750,6 +1964,11 @@ private actor AppleContainerizationRuntimeDriver: ContainerizationHelperRuntimeD
     func reconcileNetworkPolicies(
         records: [ContainerizationHelperPersistedRecord]
     ) async throws -> [String: ContainerizationGuestNetworkPolicyEvidence] {
+        guard !idleShutdownAccepted else {
+            throw ContainerizationHelperBackendError.conflict("driver idle shutdown was accepted")
+        }
+        inFlightDriverMutations += 1
+        defer { inFlightDriverMutations -= 1 }
         let ordered = records.sorted {
             $0.resourceIdentifier < $1.resourceIdentifier
         }
@@ -1864,6 +2083,11 @@ private actor AppleContainerizationRuntimeDriver: ContainerizationHelperRuntimeD
         _ record: ContainerizationHelperPersistedRecord,
         networks: [RuntimeDesiredNetworkAttachment]
     ) async throws {
+        guard !idleShutdownAccepted else {
+            throw ContainerizationHelperBackendError.conflict("driver idle shutdown was accepted")
+        }
+        inFlightDriverMutations += 1
+        defer { inFlightDriverMutations -= 1 }
         guard containers[record.resourceIdentifier] == nil else {
             throw ContainerizationHelperBackendError.conflict("resource already has a live VM")
         }
@@ -1887,6 +2111,11 @@ private actor AppleContainerizationRuntimeDriver: ContainerizationHelperRuntimeD
     }
 
     func start(_ record: ContainerizationHelperPersistedRecord) async throws {
+        guard !idleShutdownAccepted else {
+            throw ContainerizationHelperBackendError.conflict("driver idle shutdown was accepted")
+        }
+        inFlightDriverMutations += 1
+        defer { inFlightDriverMutations -= 1 }
         let container: LinuxContainer
         if let current = containers[record.resourceIdentifier] {
             container = current
@@ -1918,6 +2147,11 @@ private actor AppleContainerizationRuntimeDriver: ContainerizationHelperRuntimeD
     }
 
     func restart(_ record: ContainerizationHelperPersistedRecord) async throws {
+        guard !idleShutdownAccepted else {
+            throw ContainerizationHelperBackendError.conflict("driver idle shutdown was accepted")
+        }
+        inFlightDriverMutations += 1
+        defer { inFlightDriverMutations -= 1 }
         guard let current = containers.removeValue(forKey: record.resourceIdentifier) else {
             throw ContainerizationHelperBackendError.conflict("resource has no live VM")
         }
@@ -1951,6 +2185,11 @@ private actor AppleContainerizationRuntimeDriver: ContainerizationHelperRuntimeD
     }
 
     func stop(_ record: ContainerizationHelperPersistedRecord) async throws {
+        guard !idleShutdownAccepted else {
+            throw ContainerizationHelperBackendError.conflict("driver idle shutdown was accepted")
+        }
+        inFlightDriverMutations += 1
+        defer { inFlightDriverMutations -= 1 }
         guard let container = containers.removeValue(forKey: record.resourceIdentifier) else { return }
         try await container.stop()
         runningPolicyResources.remove(record.resourceIdentifier)
@@ -1961,6 +2200,11 @@ private actor AppleContainerizationRuntimeDriver: ContainerizationHelperRuntimeD
     }
 
     func delete(_ record: ContainerizationHelperPersistedRecord) async throws {
+        guard !idleShutdownAccepted else {
+            throw ContainerizationHelperBackendError.conflict("driver idle shutdown was accepted")
+        }
+        inFlightDriverMutations += 1
+        defer { inFlightDriverMutations -= 1 }
         if let container = containers.removeValue(forKey: record.resourceIdentifier) {
             try await container.stop()
         }
@@ -1989,6 +2233,11 @@ private actor AppleContainerizationRuntimeDriver: ContainerizationHelperRuntimeD
         }
     }
 
+    func allocation(resourceIdentifier: String) async throws -> RuntimeInventoryAllocation? {
+        guard let container = containers[resourceIdentifier] else { return nil }
+        return RuntimeInventoryAllocation(cpuCount: container.cpus, memoryBytes: container.memoryInBytes)
+    }
+
     func usage(resourceIdentifier: String) async throws -> ContainerizationHelperResourceUsage {
         guard let container = containers[resourceIdentifier] else {
             throw ContainerizationHelperBackendError.conflict("resource has no live VM")
@@ -2007,7 +2256,55 @@ private actor AppleContainerizationRuntimeDriver: ContainerizationHelperRuntimeD
         )
     }
 
+    func shutdownIfIdle() async -> Bool {
+        if idleShutdownAccepted { return idleShutdownCompleted }
+        guard inFlightDriverMutations == 0, containers.isEmpty, networks.isEmpty,
+              desiredNetworkAttachments.isEmpty, observedNetworkAttachments.isEmpty,
+              policyRecords.isEmpty, appliedGuestPolicies.isEmpty, runningPolicyResources.isEmpty,
+              Self.privateDirectoryIsEmpty(imageStore.path.appendingPathComponent("containers")),
+              Self.privateDirectoryIsEmpty(configuration.dataRootURL.appendingPathComponent("guest-network-policies")) else { return false }
+        idleShutdownAccepted = true
+        await shutdown()
+        idleShutdownCompleted = true
+        return true
+    }
+
+    private static func privateDirectoryIsEmpty(_ url: URL) -> Bool {
+        let components = url.path.split(separator: "/").map(String.init)
+        guard url.path.hasPrefix("/"), !components.isEmpty,
+              url.standardizedFileURL.path == url.path else { return false }
+        var descriptor = open("/", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        guard descriptor >= 0 else { return false }
+        for (index, component) in components.enumerated() {
+            var metadata = stat()
+            guard fstat(descriptor, &metadata) == 0,
+                  metadata.st_uid == 0 || metadata.st_uid == geteuid(),
+                  metadata.st_mode & (S_IWGRP | S_IWOTH | S_ISUID | S_ISGID | S_ISTXT) == 0 else {
+                Darwin.close(descriptor); return false
+            }
+            let next = openat(descriptor, component, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+            let missingLeaf = next < 0 && errno == ENOENT && index == components.count - 1
+            Darwin.close(descriptor)
+            if next < 0 { return missingLeaf }
+            descriptor = next
+        }
+        var metadata = stat()
+        guard fstat(descriptor, &metadata) == 0, metadata.st_uid == geteuid(),
+              metadata.st_mode & (S_IWGRP | S_IWOTH | S_ISUID | S_ISGID | S_ISTXT) == 0,
+              let directory = fdopendir(descriptor) else { Darwin.close(descriptor); return false }
+        defer { closedir(directory) }
+        errno = 0
+        while let entry = readdir(directory) {
+            let name = withUnsafePointer(to: &entry.pointee.d_name) {
+                $0.withMemoryRebound(to: CChar.self, capacity: Int(entry.pointee.d_namlen) + 1) { String(cString: $0) }
+            }
+            if name != "." && name != ".." { return false }
+        }
+        return errno == 0
+    }
+
     func shutdown() async {
+        guard !idleShutdownCompleted else { return }
         let active = containers.values
         containers.removeAll()
         for container in active {
@@ -2028,6 +2325,9 @@ private actor AppleContainerizationRuntimeDriver: ContainerizationHelperRuntimeD
         useExistingRootfs: Bool,
         networkAttachments: [RuntimeDesiredNetworkAttachment]
     ) async throws -> LinuxContainer {
+        let resources = try ContainerizationHelperSDKResourceConfiguration.make(
+            cpuCount: record.cpuCount, memoryBytes: record.memoryBytes
+        )
         let image = try await imageStore.get(reference: record.image.reference, pull: false)
         let writer = try stateStore.logWriter(resourceIdentifier: record.resourceIdentifier)
         let allocated = try allocateNetworkInterfaces(
@@ -2085,6 +2385,7 @@ private actor AppleContainerizationRuntimeDriver: ContainerizationHelperRuntimeD
                 Self.configure(
                     &process,
                     record: record,
+                    resources: resources,
                     writer: writer,
                     guestPolicyShare: guestPolicyShare
                 )
@@ -2103,6 +2404,7 @@ private actor AppleContainerizationRuntimeDriver: ContainerizationHelperRuntimeD
                 Self.configure(
                     &process,
                     record: record,
+                    resources: resources,
                     writer: writer,
                     guestPolicyShare: guestPolicyShare
                 )
@@ -2205,9 +2507,12 @@ private actor AppleContainerizationRuntimeDriver: ContainerizationHelperRuntimeD
     private static func configure(
         _ configuration: inout LinuxContainer.Configuration,
         record: ContainerizationHelperPersistedRecord,
+        resources: LinuxContainer.Configuration,
         writer: any Writer,
         guestPolicyShare: URL?
     ) {
+        configuration.cpus = resources.cpus
+        configuration.memoryInBytes = resources.memoryInBytes
         configuration.process.environmentVariables = record.environment.map { "\($0.name)=\($0.value)" }
         if let guestPolicyShare {
             configuration.mounts.append(

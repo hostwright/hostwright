@@ -36,8 +36,8 @@ def render() -> str:
             "",
             f"Epic: [#{epic['number']}]({epic['url']}) — {epic['releaseDisposition']}",
             "",
-            "| Marker | Issue | Workstream | Release disposition |",
-            "| --- | ---: | --- | --- |",
+            "| Marker | Issue | Workstream | Release disposition | Recorded state |",
+            "| --- | ---: | --- | --- | --- |",
         ])
         children = sorted(
             (issue for issue in issues if issue["kind"] == "workstream" and issue["phase"] == phase),
@@ -45,7 +45,8 @@ def render() -> str:
         )
         for child in children:
             title = child["title"].split(": ", 1)[-1].replace("|", "\\|")
-            lines.append(f"| `{child['marker']}` | [#{child['number']}]({child['url']}) | {title} | {child['releaseDisposition']} |")
+            state = "open" if child["state"] == "open" else "closed: " + child["stateReason"].replace("_", " ")
+            lines.append(f"| `{child['marker']}` | [#{child['number']}]({child['url']}) | {title} | {child['releaseDisposition']} | {state} |")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 

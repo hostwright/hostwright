@@ -47,7 +47,7 @@ public enum ControlPeerAuthenticationError: Error, Equatable, Sendable {
 public struct ControlPeerTrustPolicy: Sendable, Equatable {
   public static let installedTeamIdentifier = "993YC3JY4Q"
   public static let defaultInstalledIdentifiers: Set<String> = [
-    "dev.hostwright.cli", "hostwright", "hostwright-control", "hostwrightd",
+    "dev.hostwright.cli", "dev.hostwright.desktop", "hostwright", "hostwright-control", "hostwrightd",
   ]
 
   public let expectedUserID: UInt32
@@ -339,6 +339,33 @@ public enum DarwinCurrentControlCodeIdentity {
     return try inspect(code: code)
   }
 
+  public static func inspect(executablePath: String) throws -> CodeIdentity {
+    guard executablePath.hasPrefix("/"),
+      URL(fileURLWithPath: executablePath).standardizedFileURL.path == executablePath
+    else { throw ControlPeerAuthenticationError.codeUnavailable }
+    var status = stat()
+    guard lstat(executablePath, &status) == 0,
+      (status.st_mode & S_IFMT) == S_IFREG,
+      status.st_nlink == 1
+    else { throw ControlPeerAuthenticationError.codeUnavailable }
+    var staticCode: SecStaticCode?
+    guard SecStaticCodeCreateWithPath(
+      URL(fileURLWithPath: executablePath) as CFURL,
+      SecCSFlags(),
+      &staticCode
+    ) == errSecSuccess, let staticCode else {
+      throw ControlPeerAuthenticationError.staticCodeUnavailable
+    }
+    guard SecStaticCodeCheckValidity(
+      staticCode,
+      SecCSFlags(rawValue: kSecCSStrictValidate | revocationFlag),
+      nil
+    ) == errSecSuccess else {
+      throw ControlPeerAuthenticationError.codeRequirementRejected
+    }
+    return try inspect(staticCode: staticCode)
+  }
+
   private static func inspect(code: SecCode) throws -> CodeIdentity {
     guard
       SecCodeCheckValidity(
@@ -353,6 +380,10 @@ public enum DarwinCurrentControlCodeIdentity {
     guard SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode else {
       throw ControlPeerAuthenticationError.staticCodeUnavailable
     }
+    return try inspect(staticCode: staticCode)
+  }
+
+  private static func inspect(staticCode: SecStaticCode) throws -> CodeIdentity {
     var information: CFDictionary?
     guard
       SecCodeCopySigningInformation(

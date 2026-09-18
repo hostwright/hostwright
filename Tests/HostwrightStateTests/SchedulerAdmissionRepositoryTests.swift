@@ -11,6 +11,199 @@ final class SchedulerAdmissionRepositoryTests: XCTestCase {
     private let expiry = "2026-08-05T12:04:00Z"
     private let projectUUID = "00000000-0000-0000-0000-0000000000a1"
 
+    func testAtomicPlacementsRollBackTheWholeBatchAndFenceOnStaleSibling() throws {
+        try withRepository { repository, _ in
+            let nodeID = UUID(uuidString: "00000000-0000-0000-0000-000000000301")!
+            let capacity = try nodeCapacity(node: nodeID.uuidString, capacity: ["cpu": 2])
+            try repository.recordNodeCapacity(snapshot: capacity)
+            try repository.recordHostPressure(record: SchedulerHostPressureRecord(
+                nodeID: nodeID, posture: SchedulerHostPosture(), generation: 1,
+                observedAt: createdAt, evidenceDigest: String(repeating: "a", count: 64),
+                policyState: SchedulerHostPressurePolicyState(
+                    version: SchedulerHostPressurePolicyState.currentVersion,
+                    reasonCodes: [.allowed],
+                    nextHysteresisState: SchedulerHostPressureHysteresisState(
+                        posture: .allowed, consecutiveClearObservations: 0,
+                        version: SchedulerHostPressurePolicyState.currentVersion
+                    )
+                )
+            ))
+            let workloadIDs = [
+                UUID(uuidString: "00000000-0000-0000-0000-000000000401")!,
+                UUID(uuidString: "00000000-0000-0000-0000-000000000402")!
+            ]
+            let input = try SchedulerEngineInput(
+                pendingWorkloads: workloadIDs.map { id in
+                    try SchedulerWorkload(
+                        requirements: WorkloadPlacementRequirements(
+                            workloadID: id, request: ResourceVector(["cpu": 1])
+                        ), priority: 0, subjectID: "owner", projectID: projectUUID
+                    )
+                },
+                nodes: [SchedulerNode(snapshot: NodePlacementSnapshot(
+                    nodeID: nodeID, capacity: capacity.capacity, allocation: .zero,
+                    architecture: "arm64", runtime: "linux-vm", provider: "apple-container-cli"
+                ))]
+            )
+            let decision = try SchedulerEngine().plan(input)
+            let artifact = try repository.recordDecisionArtifact(
+                decision: decision,
+                workloadBindings: workloadIDs.map { id in
+                    try SchedulerDecisionWorkloadBinding(
+                        workloadID: id, nodeID: nodeID, resources: ResourceVector(["cpu": 1]),
+                        capacityDigest: capacity.capacityDigest, capacityGeneration: capacity.generation,
+                        ownerSubjectID: "owner", projectUUID: projectUUID
+                    )
+                }, projectUUID: projectUUID,
+                configDigest: String(repeating: "c", count: 64),
+                profileDigest: String(repeating: "d", count: 64),
+                lifecyclePlanDigest: String(repeating: "e", count: 64),
+                createdAt: createdAt, updatedAt: createdAt
+            )
+            func current(config: String) throws -> SchedulerAdmissionCurrentAuthority {
+                try SchedulerAdmissionCurrentAuthority(
+                    nodeCapacityDigest: capacity.capacityDigest, nodeCapacityGeneration: capacity.generation,
+                    configDigest: config, profileDigest: artifact.profileDigest,
+                    lifecyclePlanDigest: artifact.lifecyclePlanDigest, expectedNodeEpoch: 1,
+                    expectedPressureGeneration: 1,
+                    expectedPressureEvidenceDigest: String(repeating: "a", count: 64),
+                    expectedPressurePosture: .nominal, leaseCreatedAt: createdAt, leaseExpiresAt: expiry
+                )
+            }
+            let good = try current(config: artifact.configDigest)
+            let fenceBefore = try repository.fencingState(nodeID: nodeID)
+            XCTAssertThrowsError(try repository.applyPlacements(
+                decisionID: decision.decisionID, projectUUID: projectUUID,
+                expectedInputDigest: input.inputDigest,
+                authorities: [workloadIDs[0]: good, workloadIDs[1]: current(config: String(repeating: "f", count: 64))]
+            ))
+            XCTAssertTrue(try repository.reservations(nodeID: nodeID).isEmpty)
+            XCTAssertEqual(try repository.fencingState(nodeID: nodeID), fenceBefore)
+            XCTAssertThrowsError(try repository.applyPlacements(
+                decisionID: decision.decisionID, projectUUID: projectUUID,
+                expectedInputDigest: input.inputDigest, authorities: [workloadIDs[0]: good]
+            ))
+            let authorities = Dictionary(uniqueKeysWithValues: workloadIDs.map { ($0, good) })
+            let admitted = try repository.applyPlacements(
+                decisionID: decision.decisionID, projectUUID: projectUUID,
+                expectedInputDigest: input.inputDigest, authorities: authorities
+            )
+            XCTAssertEqual(admitted.count, 2)
+            XCTAssertEqual(try repository.activeCapacity(nodeID: nodeID), capacity.capacity)
+            XCTAssertEqual(try repository.applyPlacements(
+                decisionID: decision.decisionID, projectUUID: projectUUID,
+                expectedInputDigest: input.inputDigest, authorities: authorities
+            ), admitted)
+        }
+    }
+
+    func testVMChargedReservationsRemainChargedThroughCommitAndCancellation() throws {
+        try withRepository { repository, _ in
+            let mib: Int64 = 1_024 * 1_024
+            let capacity = try self.nodeCapacity(
+                node: "00000000-0000-0000-0000-000000000308",
+                capacity: ["cpu": 2, "memory": 640 * mib]
+            )
+            try repository.recordNodeCapacity(snapshot: capacity)
+            let workload = try SchedulerWorkload(
+                requirements: WorkloadPlacementRequirements(
+                    workloadID: UUID(), request: ResourceVector(["cpu": 1, "memory": 512 * mib])
+                ), priority: 0, subjectID: "owner", projectID: projectUUID,
+                overhead: ResourceVector(["cpu": 1, "memory": 128 * mib])
+            )
+            let charge = try workload.capacityCharge()
+            func binding(_ index: Int) throws -> SchedulerAdmissionBinding {
+                try self.binding(
+                    decision: index == 0 ? "00000000-0000-0000-0000-000000000109" : "00000000-0000-0000-0000-000000000110",
+                    workload: index == 0 ? "00000000-0000-0000-0000-000000000209" : "00000000-0000-0000-0000-000000000210",
+                    node: capacity.nodeID.uuidString, resources: charge.values, nodeCapacity: capacity
+                )
+            }
+            let first = try binding(0)
+            let second = try binding(1)
+            let reservation = try reserve(repository: repository, binding: first,
+                authority: authority(binding: first, expectedNodeEpoch: 1))
+            XCTAssertEqual(reservation.resources, charge)
+            XCTAssertEqual(try repository.activeCapacity(nodeID: capacity.nodeID), charge)
+            XCTAssertThrowsError(try reserve(repository: repository, binding: second,
+                authority: authority(binding: second, expectedNodeEpoch: 1)))
+            let committed = try repository.commit(
+                reservationID: reservation.reservationID, expectedToken: reservation.fencingToken,
+                updatedAt: "2026-08-05T12:01:00Z"
+            )
+            XCTAssertEqual(committed.resources, charge)
+            _ = try repository.requestRelease(
+                reservationID: reservation.reservationID, expectedToken: reservation.fencingToken,
+                updatedAt: "2026-08-05T12:02:00Z"
+            )
+            XCTAssertEqual(try repository.activeCapacity(nodeID: capacity.nodeID), charge)
+            XCTAssertThrowsError(try reserve(repository: repository, binding: second,
+                authority: authority(binding: second, expectedNodeEpoch: 1)))
+            _ = try repository.release(
+                reservationID: reservation.reservationID, expectedToken: reservation.fencingToken,
+                evidence: .verifiedRuntimeAbsence(evidenceDigest: String(repeating: "a", count: 64),
+                    verifiedAt: "2026-08-05T12:03:00Z")
+            )
+            XCTAssertEqual(try repository.activeCapacity(nodeID: capacity.nodeID), .zero)
+            XCTAssertEqual(try reserve(repository: repository, binding: second,
+                authority: authority(binding: second, expectedNodeEpoch: 1)).resources, charge)
+        }
+    }
+
+    func testConcurrentVMChargedReservationsCannotBothConsumeOneVMBudget() throws {
+        final class Results: @unchecked Sendable {
+            let lock = NSLock()
+            var values: [Result<SchedulerReservationRecord, Error>] = []
+            func append(_ value: Result<SchedulerReservationRecord, Error>) {
+                lock.lock(); defer { lock.unlock() }
+                values.append(value)
+            }
+        }
+        try withRepository { repository, _ in
+            let mib: Int64 = 1_024 * 1_024
+            let capacity = try self.nodeCapacity(
+                node: "00000000-0000-0000-0000-000000000308",
+                capacity: ["cpu": 2, "memory": 640 * mib]
+            )
+            try repository.recordNodeCapacity(snapshot: capacity)
+            let workload = try SchedulerWorkload(
+                requirements: WorkloadPlacementRequirements(
+                    workloadID: UUID(), request: ResourceVector(["cpu": 1, "memory": 512 * mib])
+                ), priority: 0, subjectID: "owner", projectID: projectUUID,
+                overhead: ResourceVector(["cpu": 1, "memory": 128 * mib])
+            )
+            let charge = try workload.capacityCharge()
+            let bindings = try (0..<3).map { _ in
+                try self.binding(decision: UUID().uuidString, workload: UUID().uuidString,
+                    node: capacity.nodeID.uuidString, resources: charge.values, nodeCapacity: capacity)
+            }
+            let authorities = try bindings.map { try authority(binding: $0, expectedNodeEpoch: 1) }
+            let blocker = try reserve(repository: repository, binding: bindings[0], authority: authorities[0])
+            for index in 1...2 {
+                XCTAssertThrowsError(try reserve(repository: repository,
+                    binding: bindings[index], authority: authorities[index]))
+            }
+            _ = try repository.release(reservationID: blocker.reservationID, expectedToken: blocker.fencingToken,
+                evidence: .verifiedRuntimeAbsence(evidenceDigest: String(repeating: "a", count: 64),
+                    verifiedAt: "2026-08-05T12:01:00Z"))
+            let results = Results()
+            DispatchQueue.concurrentPerform(iterations: 2) { index in
+                results.append(Result { try repository.reserve(binding: bindings[index + 1], authority: authorities[index + 1]) })
+            }
+            XCTAssertEqual(results.values.filter { if case .success = $0 { true } else { false } }.count, 1)
+            let failures = results.values.compactMap { result -> Error? in
+                if case .failure(let error) = result { return error }; return nil
+            }
+            XCTAssertEqual(failures.count, 1)
+            if let failure = failures.first {
+                guard case .insufficientCapacity = failure as? SchedulerAdmissionError else {
+                    return XCTFail("expected charged capacity rejection, got \(failure)")
+                }
+            }
+            XCTAssertEqual(try repository.activeCapacity(nodeID: capacity.nodeID), charge)
+        }
+    }
+
     func testStableKeysUseStructuredTokensAndCanonicalInterpolation() throws {
         let nodeID = UUID(uuidString: "00000000-0000-0000-0000-000000000301")!
         let error = SchedulerAdmissionError.staleFence(
@@ -907,6 +1100,55 @@ final class SchedulerAdmissionRepositoryTests: XCTestCase {
                 id: reservationA.reservationID
             )
             XCTAssertEqual(reopenedRecord, released)
+        }
+    }
+
+    func testReservationHistoryPagesOneLineageAndValidatesLaterRows() throws {
+        try withRepository { repository, store in
+            let capacity = try self.nodeCapacity(
+                node: "00000000-0000-0000-0000-000000000306", capacity: ["cpu": 2]
+            )
+            try repository.recordNodeCapacity(snapshot: capacity)
+            let formatter = ISO8601DateFormatter()
+            let base = try XCTUnwrap(formatter.date(from: self.createdAt))
+            var last: SchedulerReservationRecord?
+            for index in 0..<257 {
+                let time = base.addingTimeInterval(Double(index * 2))
+                let binding = try self.binding(
+                    decision: String(format: "99999999-0000-4000-8000-%012d", index),
+                    workload: "00000000-0000-0000-0000-000000000214",
+                    node: capacity.nodeID.uuidString, resources: ["cpu": 1], nodeCapacity: capacity,
+                    createdAt: formatter.string(from: time), expiresAt: formatter.string(from: time.addingTimeInterval(300))
+                )
+                let reservation = try reserve(repository: repository, binding: binding,
+                    authority: self.authority(binding: binding, expectedNodeEpoch: 1))
+                last = try repository.release(
+                    reservationID: reservation.reservationID, expectedToken: reservation.fencingToken,
+                    evidence: .verifiedRuntimeAbsence(evidenceDigest: String(repeating: "c", count: 64),
+                        verifiedAt: formatter.string(from: time.addingTimeInterval(1)))
+                )
+            }
+            let final = try XCTUnwrap(last)
+            var count = 0
+            try repository.visitReservationHistory(projectUUID: projectUUID, workloadID: final.workloadID) { _ in
+                count += 1
+                return true
+            }
+            XCTAssertEqual(count, 257)
+            let visitorError = NSError(domain: "history-visitor", code: 7)
+            XCTAssertThrowsError(try repository.visitReservationHistory(projectUUID: projectUUID) { _ in
+                throw visitorError
+            }) { XCTAssertEqual($0 as NSError, visitorError) }
+            try store.withConnection { connection in
+                try connection.run("UPDATE scheduler_reservations SET capacity_digest = ? WHERE reservation_id = ?",
+                    bindings: [.text(String(repeating: "f", count: 64)), .text(final.reservationID.uuidString.lowercased())])
+            }
+            count = 0
+            XCTAssertThrowsError(try repository.visitReservationHistory(projectUUID: projectUUID) { _ in
+                count += 1
+                return true
+            })
+            XCTAssertEqual(count, 256)
         }
     }
 

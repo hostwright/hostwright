@@ -59,12 +59,14 @@ enum ContainerizationHelperBootstrap {
     static func prepare(
         configuration: ContainerizationHelperClientConfiguration,
         homeDirectoryURL: URL = FileManager.default.homeDirectoryForCurrentUser,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
         expectedUserID: uid_t = geteuid(),
         assetLock: ContainerizationHelperBootstrapAssetLock = .pinned
     ) throws {
         let paths = try installedPaths(
             configuration: configuration,
-            homeDirectoryURL: homeDirectoryURL
+            homeDirectoryURL: homeDirectoryURL,
+            environment: environment
         )
         let guestNetworkPolicyLoaderSHA256 =
             try validateInstalledExecutableAndAssets(
@@ -101,12 +103,14 @@ enum ContainerizationHelperBootstrap {
             data,
             configuration: configuration,
             homeDirectoryURL: homeDirectoryURL,
+            supportURL: paths.supportURL,
             expectedUserID: expectedUserID
         )
     }
 
     private struct InstalledPaths {
         let prefixURL: URL
+        let supportURL: URL
         let dataRootURL: URL
         let kernelURL: URL
         let initImageLayoutURL: URL
@@ -115,7 +119,8 @@ enum ContainerizationHelperBootstrap {
 
     private static func installedPaths(
         configuration: ContainerizationHelperClientConfiguration,
-        homeDirectoryURL: URL
+        homeDirectoryURL: URL,
+        environment: [String: String]
     ) throws -> InstalledPaths {
         try requireNormalizedAbsolute(homeDirectoryURL)
         let binURL = configuration.executableURL.deletingLastPathComponent()
@@ -127,15 +132,14 @@ enum ContainerizationHelperBootstrap {
             throw ContainerizationHelperClientError.helperLaunchFailed
         }
 
-        let supportURL = homeDirectoryURL
-            .appendingPathComponent("Library", isDirectory: true)
-            .appendingPathComponent("Application Support", isDirectory: true)
-            .appendingPathComponent("Hostwright", isDirectory: true)
-        let expectedConfigurationURL = supportURL
-            .appendingPathComponent("config", isDirectory: true)
+        let layout = try HostwrightLocalPathResolver.resolve(
+            homeDirectory: homeDirectoryURL.path,
+            environment: environment
+        ).layout
+        let supportURL = URL(fileURLWithPath: layout.applicationSupportDirectory, isDirectory: true)
+        let expectedConfigurationURL = URL(fileURLWithPath: layout.configurationDirectory, isDirectory: true)
             .appendingPathComponent(configurationFileName, isDirectory: false)
-        let expectedRuntimeURL = supportURL
-            .appendingPathComponent("run", isDirectory: true)
+        let expectedRuntimeURL = URL(fileURLWithPath: layout.runtimeDirectory, isDirectory: true)
             .appendingPathComponent("helper", isDirectory: true)
         guard configuration.configurationURL.path == expectedConfigurationURL.path,
               configuration.runtimeDirectoryURL.path == expectedRuntimeURL.path else {
@@ -149,6 +153,7 @@ enum ContainerizationHelperBootstrap {
             )
         return InstalledPaths(
             prefixURL: prefixURL,
+            supportURL: supportURL,
             dataRootURL: supportURL
                 .appendingPathComponent("data", isDirectory: true)
                 .appendingPathComponent("containerization-helper", isDirectory: true),
@@ -298,29 +303,45 @@ enum ContainerizationHelperBootstrap {
         _ data: Data,
         configuration: ContainerizationHelperClientConfiguration,
         homeDirectoryURL: URL,
+        supportURL: URL,
         expectedUserID: uid_t
     ) throws {
         do {
-            let home = try BootstrapDirectory.openRoot(
-                homeDirectoryURL,
+            let withinHome = supportURL.path.hasPrefix(homeDirectoryURL.path + "/")
+            let anchorURL = withinHome ? homeDirectoryURL : URL(fileURLWithPath: "/", isDirectory: true)
+            var parent = try BootstrapDirectory.openRoot(
+                anchorURL,
                 expectedUserID: expectedUserID,
-                trustedRootOwner: false
+                trustedRootOwner: !withinHome
             )
-            let library = try home.openOrCreateDirectory(
-                "Library",
-                expectedUserID: expectedUserID,
-                requirePrivateMode: false
+            let relative = String(supportURL.path.dropFirst(anchorURL.path == "/" ? 1 : anchorURL.path.count + 1))
+            let components = relative.split(separator: "/").map(String.init)
+            guard let supportName = components.last else {
+                throw ContainerizationHelperClientError.unsafeConfiguration
+            }
+            for component in components.dropLast() {
+                if withinHome {
+                    parent = try parent.openOrCreateDirectory(
+                        component, expectedUserID: expectedUserID, requirePrivateMode: false
+                    )
+                } else {
+                    parent = try parent.openDirectory(
+                        component, expectedUserID: expectedUserID, trustedRootOwner: true
+                    )
+                }
+            }
+            let support = try parent.openOrCreateDirectory(
+                supportName, expectedUserID: expectedUserID, requirePrivateMode: true
             )
-            let applicationSupport = try library.openOrCreateDirectory(
-                "Application Support",
-                expectedUserID: expectedUserID,
-                requirePrivateMode: false
-            )
-            let support = try applicationSupport.openOrCreateDirectory(
-                "Hostwright",
-                expectedUserID: expectedUserID,
-                requirePrivateMode: true
-            )
+            if let existingConfig = try support.existingPrivateDirectory("config", expectedUserID: expectedUserID) {
+                try existingConfig.requireMatchingExistingFile(configurationFileName, data: data, expectedUserID: expectedUserID)
+            }
+            if let existingData = try support.existingPrivateDirectory("data", expectedUserID: expectedUserID) {
+                _ = try existingData.existingPrivateDirectory("containerization-helper", expectedUserID: expectedUserID)
+            }
+            if let existingRun = try support.existingPrivateDirectory("run", expectedUserID: expectedUserID) {
+                _ = try existingRun.existingPrivateDirectory("helper", expectedUserID: expectedUserID)
+            }
             let config = try support.openOrCreateDirectory(
                 "config",
                 expectedUserID: expectedUserID,
@@ -449,6 +470,26 @@ private final class BootstrapDirectory {
             Darwin.close(child)
             throw error
         }
+    }
+
+    func existingPrivateDirectory(_ name: String, expectedUserID: uid_t) throws -> BootstrapDirectory? {
+        try validateComponent(name)
+        let child = openat(descriptor, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        guard child >= 0 else {
+            guard errno == ENOENT else { throw ContainerizationHelperClientError.unsafeConfiguration }
+            return nil
+        }
+        do {
+            try Self.validateDirectory(child, expectedUserID: expectedUserID, trustedRootOwner: false, requirePrivateMode: true)
+            return BootstrapDirectory(descriptor: child)
+        } catch {
+            Darwin.close(child)
+            throw error
+        }
+    }
+
+    func requireMatchingExistingFile(_ name: String, data: Data, expectedUserID: uid_t) throws {
+        _ = try existingFileEquals(name, data: data, expectedUserID: expectedUserID)
     }
 
     func openOrCreateDirectory(

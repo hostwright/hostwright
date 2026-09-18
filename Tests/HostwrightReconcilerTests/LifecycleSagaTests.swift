@@ -281,6 +281,7 @@ final class LifecycleSagaExecutorTests: XCTestCase {
             ("create-web:compensation-unavailable", .compensation, .safeHold),
             ("create-web:cancelled-before-effect", .interruption, .resume),
             ("create-web:cancelled-no-effect", .interruption, .resume),
+            ("lifecycle:cancelled-during-effect", .safeHold, .safeHold),
             ("create-web:ambiguous-after-resume", .safeHold, .safeHold),
             ("create-web:ambiguous-effect", .safeHold, .safeHold),
             ("create-web:accepted-without-effect", .safeHold, .safeHold),
@@ -305,7 +306,10 @@ final class LifecycleSagaExecutorTests: XCTestCase {
             XCTAssertEqual(record.recovery, recovery)
             XCTAssertEqual(
                 record.nodeKey,
-                value.hasPrefix("create-web:") ? "create-web" : nil
+                value.hasPrefix("create-web:")
+                    ? "create-web"
+                    : (value == "lifecycle:cancelled-during-effect"
+                        ? "lifecycle" : nil)
             )
         }
         XCTAssertNil(LifecycleMutationCheckpointRecord(checkpoint: ""))
@@ -592,6 +596,45 @@ final class LifecycleSagaExecutorTests: XCTestCase {
         let steps = try fixture.store.operationGroupSteps.load(groupID: fixture.groupID)
         XCTAssertEqual(steps.filter { $0.status == .started }.count, 1)
         XCTAssertEqual(steps.filter { $0.status == .succeeded }.count, 1)
+    }
+
+    func testTaskCancellationDuringEffectPersistsRecoverableSafeHold() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+        let effects = BlockingLifecycleEffects(treatCancellationAsNoEffect: true)
+        let executor = LifecycleSagaExecutor(
+            store: fixture.store,
+            effects: effects,
+            validator: ExactLifecycleValidator(),
+            clock: FixedLifecycleClock()
+        )
+        let execution = Task {
+            try await executor.execute(
+                plan: fixture.plan,
+                operationID: fixture.operationID,
+                groupID: fixture.groupID,
+                fencingToken: fixture.fence,
+                lockOwner: "lifecycle-cancellation-test"
+            )
+        }
+        await effects.waitUntilApplyStarted()
+        execution.cancel()
+        await effects.releaseApply()
+
+        let result = try await execution.value
+        XCTAssertEqual(result.status, .safeHold)
+        let group = try XCTUnwrap(
+            fixture.store.operationGroups.load(id: fixture.groupID)
+        )
+        XCTAssertEqual(group.status, .failed)
+        XCTAssertEqual(group.checkpoint, "lifecycle:cancelled-during-effect")
+        XCTAssertNil(group.lockOwner)
+        XCTAssertNil(group.lockExpiresAt)
+        let steps = try fixture.store.operationGroupSteps.load(
+            groupID: fixture.groupID
+        )
+        XCTAssertEqual(steps.count, 1)
+        XCTAssertEqual(steps.first?.status, .started)
     }
 
     func testExpiredExactActiveLeaseHasOneReclaimerAndReobservesBeforeRetry() async throws {
@@ -1753,12 +1796,17 @@ private actor InspectingLifecycleEffects: LifecycleSagaEffects {
 }
 
 private actor BlockingLifecycleEffects: LifecycleSagaEffects {
+    private let treatCancellationAsNoEffect: Bool
     private var applyStarted = false
     private var applyWaiters: [CheckedContinuation<Void, Never>] = []
     private var applyRelease: CheckedContinuation<Void, Never>?
     private var appliedCount = 0
     private var observedCount = 0
     private var effectCommitted = false
+
+    init(treatCancellationAsNoEffect: Bool = false) {
+        self.treatCancellationAsNoEffect = treatCancellationAsNoEffect
+    }
 
     func apply(
         node: LifecyclePlanNode,
@@ -1773,6 +1821,20 @@ private actor BlockingLifecycleEffects: LifecycleSagaEffects {
             await withCheckedContinuation { continuation in
                 applyRelease = continuation
             }
+        }
+        if treatCancellationAsNoEffect && Task.isCancelled {
+            return .failed(
+                RuntimeNormalizedFailure(
+                    category: .cancelled,
+                    retryDisposition: .safeAfterObservation,
+                    recoveryDisposition: .reobserve,
+                    providerID: context.plan.providerID.rawValue,
+                    providerVersion: "bound-generation-\(context.plan.providerGeneration)",
+                    operationID: context.operationID,
+                    diagnostic: "scripted cancellation",
+                    guidance: "resume the exact operation"
+                )
+            )
         }
         effectCommitted = true
         return .accepted

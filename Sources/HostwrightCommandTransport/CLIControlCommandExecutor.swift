@@ -21,6 +21,7 @@ public enum CLIControlCommandExecutor {
             : CLIControlRoute.validate(request: request) else {
             return nil
         }
+        try requireSupportedTransport(route)
         let commandEnvironment = try environment.resolvingRelativePaths(
             against: route.workingDirectory
         )
@@ -107,6 +108,7 @@ public enum CLIControlCommandExecutor {
     ) throws -> ControlResponseEnvelope {
         let request = prepared.request
         let route = prepared.route
+        try requireSupportedTransport(route)
         guard route.execution == .unary else {
             return ControlResponseEnvelope(
                 requestID: request.requestID,
@@ -141,6 +143,15 @@ public enum CLIControlCommandExecutor {
                 environment: executionEnvironment
             )
             return try response(requestID: request.requestID, result: result)
+        }
+    }
+
+    private static func requireSupportedTransport(_ route: CLIControlRoute) throws {
+        guard route.transport == .persistentControlAPI, route.dockerEndpoint == nil else {
+            throw HostwrightDiagnostic(
+                code: .controlAPIInvalid,
+                message: "This transport does not support executing Docker or bootstrap command envelopes."
+            )
         }
     }
 

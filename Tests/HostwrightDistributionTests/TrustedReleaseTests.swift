@@ -16,6 +16,28 @@ final class TrustedReleaseTests: XCTestCase {
         )
     }
 
+    func testPublishedSchemaOneEmptyDependencyInventoryRemainsVerifiable() throws {
+        let manifest = makeManifest(
+            schemaVersion: 1,
+            payloadModes: DistributionLayout.legacyTrustedPayloadModesV1
+        )
+        XCTAssertNoThrow(try provenanceWithEmptyDependencies(manifest: manifest).validate(manifest: manifest))
+    }
+
+    func testCurrentSchemaRejectsEmptyDependencyInventory() throws {
+        let manifest = makeManifest()
+        XCTAssertThrowsError(try provenanceWithEmptyDependencies(manifest: manifest).validate(manifest: manifest))
+        let metadata = TrustedReleaseBuildMetadata(
+            externalSwiftPMDependencies: [],
+            packageLicenseSPDX: "Apache-2.0",
+            reproducibilityBuildCount: 2,
+            byteIdenticalUnsignedPayloads: true,
+            toolVersions: trustedToolVersions()
+        )
+        XCTAssertThrowsError(try metadata.validate())
+        XCTAssertThrowsError(try metadata.validate(manifestSchemaVersion: 3))
+    }
+
     func testDeveloperIDParserSelectsOnlyExactApplicationAndInstallerIdentities() throws {
         let applicationFingerprint = String(repeating: "A", count: 40)
         let installerFingerprint = String(repeating: "B", count: 40)
@@ -580,6 +602,98 @@ final class TrustedReleaseTests: XCTestCase {
         )
     }
 
+    func testRevisionOnlyProvenanceKeepsExactCommitAndRejectsMissingOrDuplicateIdentity() throws {
+        let containerization = "containerization|https://github.com/apple/containerization.git|0.35.0|\(DistributionContainerizationAssets.frameworkRevision)"
+        let crypto = "swift-crypto|\(HostwrightSecurityDependencyPins.swiftCryptoLocation)||\(HostwrightSecurityDependencyPins.swiftCryptoRevision)"
+        XCTAssertNoThrow(try TrustedReleaseBuildMetadata.validateExternalDependencies([containerization, crypto].sorted()))
+        for invalid in ["swift-crypto|https://github.com/apple/swift-crypto.git||",
+                        "swift-crypto|https://github.com/apple/swift-crypto.git||not-a-revision",
+                        "swift-crypto|https://github.com/apple/swift-crypto.git|invented|\(HostwrightSecurityDependencyPins.swiftCryptoRevision)"] {
+            XCTAssertThrowsError(try TrustedReleaseBuildMetadata.validateExternalDependencies([containerization, invalid].sorted()))
+        }
+        XCTAssertThrowsError(try TrustedReleaseBuildMetadata.validateExternalDependencies([
+            containerization, crypto, crypto.replacingOccurrences(of: "||", with: "|4.5.2|")
+        ].sorted()))
+    }
+
+    func testCleanBuildInventoryRequiresQualifiedSecurityRevisions() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-security-dependency-inventory-\(UUID().uuidString)", isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let resolved = root.appendingPathComponent("Package.resolved")
+        let builder = DistributionCleanBuilder()
+        let pins: [[String: Any]] = [
+            [
+                "identity": "containerization", "kind": "remoteSourceControl",
+                "location": "https://github.com/apple/containerization.git",
+                "state": [
+                    "version": "0.35.0",
+                    "revision": DistributionContainerizationAssets.frameworkRevision,
+                ],
+            ],
+            [
+                "identity": "swift-crypto", "kind": "remoteSourceControl",
+                "location": HostwrightSecurityDependencyPins.swiftCryptoLocation,
+                "state": ["revision": HostwrightSecurityDependencyPins.swiftCryptoRevision],
+            ],
+            [
+                "identity": "swift-nio-http2", "kind": "remoteSourceControl",
+                "location": HostwrightSecurityDependencyPins.swiftNIOHTTP2Location,
+                "state": [
+                    "version": HostwrightSecurityDependencyPins.swiftNIOHTTP2Version,
+                    "revision": HostwrightSecurityDependencyPins.swiftNIOHTTP2Revision,
+                ],
+            ],
+        ]
+        let graph: [[String: Any]] = pins.map { pin in
+            let state = pin["state"] as? [String: String]
+            return [
+                "identity": pin["identity"] as Any, "url": pin["location"] as Any,
+                "version": state?["version"] ?? "unspecified", "dependencies": [],
+            ]
+        }
+        func inventory(_ pins: [[String: Any]], _ graph: [[String: Any]]) throws -> [String] {
+            try JSONSerialization.data(withJSONObject: ["pins": pins, "version": 3])
+                .write(to: resolved)
+            let data = try JSONSerialization.data(withJSONObject: ["dependencies": graph])
+            return try builder.requirePinnedExternalDependencies(
+                String(decoding: data, as: UTF8.self), resolvedFile: resolved
+            )
+        }
+        let valid = try inventory(pins, graph)
+        XCTAssertTrue(valid.contains(
+            "swift-crypto|\(HostwrightSecurityDependencyPins.swiftCryptoLocation)||\(HostwrightSecurityDependencyPins.swiftCryptoRevision)"
+        ))
+        for scenario in ["crypto-revision", "crypto-version", "crypto-branch", "http2-downgrade", "reported-version"] {
+            var changedPins = pins
+            var changedGraph = graph
+            switch scenario {
+            case "crypto-revision":
+                changedPins[1]["state"] = ["revision": String(repeating: "a", count: 40)]
+            case "crypto-version":
+                changedPins[1]["state"] = [
+                    "revision": HostwrightSecurityDependencyPins.swiftCryptoRevision,
+                    "version": "4.5.2",
+                ]
+            case "crypto-branch":
+                changedPins[1]["state"] = [
+                    "revision": HostwrightSecurityDependencyPins.swiftCryptoRevision,
+                    "branch": "main",
+                ]
+            case "http2-downgrade":
+                changedPins[2]["state"] = [
+                    "revision": "61d1b44f6e4e118792be1cff88ee2bc0267c6f9a",
+                    "version": "1.44.0",
+                ]
+            default:
+                changedGraph[1]["version"] = "4.5.1"
+            }
+            XCTAssertThrowsError(try inventory(changedPins, changedGraph), scenario)
+        }
+    }
+
     func testTrustedSPDXInventoriesArchiveAndPackageWithLicense() throws {
         let trusted = makeManifest()
         let payload = DistributionArtifactManifest(
@@ -605,7 +719,10 @@ final class TrustedReleaseTests: XCTestCase {
         ))
         XCTAssertThrowsError(try archive.validate(manifest: payload, archive: trusted.archive))
         XCTAssertEqual(archive.packages.first?.licenseDeclared, "Apache-2.0")
-        XCTAssertTrue(archive.files.allSatisfy { $0.licenseConcluded == "Apache-2.0" })
+        XCTAssertEqual(archive.packages.first?.licenseConcluded, "NOASSERTION")
+        XCTAssertTrue(archive.files.allSatisfy {
+            $0.licenseConcluded == ($0.fileName == "./" + ContainerizationRuntimeAssetContract.kernelInstallationRelativePath ? "GPL-2.0-only" : "NOASSERTION")
+        })
     }
 
     func testHomebrewFormulaUsesImmutableArtifactAndCompleteInstalledSurface() throws {
@@ -848,10 +965,21 @@ final class TrustedReleaseTests: XCTestCase {
         let formulaArchive = try XCTUnwrap(formulaJSON["archive"] as? [String: Any])
         XCTAssertEqual(formulaArchive["sha256"] as? String, report.manifest.archive.sha256)
 
-        let workflow = try String(
+        let stage = try String(
             contentsOf: packageRoot().appendingPathComponent(".github/workflows/trusted-release.yml"),
             encoding: .utf8
         )
+        let promotion = try String(
+            contentsOf: packageRoot().appendingPathComponent(".github/workflows/promote-release.yml"),
+            encoding: .utf8
+        )
+        XCTAssertFalse(stage.contains("contents: write"))
+        XCTAssertFalse(stage.contains("gh release create"))
+        XCTAssertFalse(promotion.contains("swift build"))
+        XCTAssertFalse(promotion.contains("swift run"))
+        XCTAssertTrue(promotion.contains("--signer-digest"))
+        XCTAssertTrue(promotion.contains("staged-release.py receipt"))
+        let workflow = stage + "\n" + promotion
         XCTAssertEqual(workflow.components(separatedBy: "retention-days: 90").count - 1, 1)
         let runScripts = workflowRunScriptBodies(workflow)
         XCTAssertFalse(runScripts.contains("${{ inputs."))
@@ -899,7 +1027,7 @@ final class TrustedReleaseTests: XCTestCase {
     }
 
     private func makeManifest(
-        schemaVersion: Int = 2,
+        schemaVersion: Int = 3,
         payloadModes: [String: Int] = DistributionLayout.payloadModes
     ) -> TrustedReleaseManifest {
         let version = "0.0.2-dev"
@@ -1028,6 +1156,28 @@ final class TrustedReleaseTests: XCTestCase {
                     )
                 )
             )
+        )
+    }
+
+    private func provenanceWithEmptyDependencies(
+        manifest: TrustedReleaseManifest
+    ) throws -> TrustedReleaseProvenanceStatement {
+        let data = try JSONEncoder().encode(makeProvenance(manifest: manifest))
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var predicate = try XCTUnwrap(object["predicate"] as? [String: Any])
+        var definition = try XCTUnwrap(predicate["buildDefinition"] as? [String: Any])
+        var parameters = try XCTUnwrap(definition["internalParameters"] as? [String: Any])
+        parameters["externalSwiftPMDependencies"] = [String]()
+        definition["internalParameters"] = parameters
+        definition["resolvedDependencies"] = [[
+            "uri": "git+https://github.com/hostwright/hostwright.git",
+            "digest": ["gitCommit": manifest.sourceCommit],
+        ]]
+        predicate["buildDefinition"] = definition
+        object["predicate"] = predicate
+        return try JSONDecoder().decode(
+            TrustedReleaseProvenanceStatement.self,
+            from: JSONSerialization.data(withJSONObject: object)
         )
     }
 

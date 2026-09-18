@@ -96,6 +96,10 @@ let package = Package(
             name: "hostwright-runtime-conformance",
             targets: ["HostwrightRuntimeConformanceTool"]
         ),
+        .executable(
+            name: "hostwright-critical-fuzzer",
+            targets: ["HostwrightCriticalFuzzer"]
+        ),
         .library(name: "HostwrightCore", targets: ["HostwrightCore"]),
         .library(
             name: "HostwrightReleaseQualification",
@@ -175,7 +179,8 @@ let package = Package(
         ),
         .package(
             url: "https://github.com/apple/swift-crypto.git",
-            exact: "3.15.1"
+            // Crypto 4.5.2 fixes RSA parsing while overriding Containerization's 3.x range.
+            revision: "da9d28d69ebe3894b18376c8f2395c2f37b8448f"
         ),
         .package(
             url: "https://github.com/swiftwasm/WasmKit.git",
@@ -211,6 +216,7 @@ let package = Package(
                 "HostwrightControlSecurity",
                 "HostwrightCore",
                 "HostwrightDaemonCore",
+                "HostwrightDistribution",
                 "HostwrightExtensions",
                 "HostwrightHealth",
                 "HostwrightImport",
@@ -222,6 +228,7 @@ let package = Package(
                 "HostwrightReconciler",
                 "HostwrightRegistry",
                 "HostwrightRuntime",
+                "HostwrightScheduler",
                 "HostwrightSecrets",
                 "HostwrightState",
                 "HostwrightStorage"
@@ -287,7 +294,8 @@ let package = Package(
                 "HostwrightCore",
                 "HostwrightManifest",
                 "HostwrightRuntime",
-                "HostwrightState"
+                "HostwrightState",
+                .product(name: "Containerization", package: "containerization")
             ]
         ),
         // Qualification-only continuity tooling is intentionally not exposed as a product.
@@ -326,6 +334,17 @@ let package = Package(
         .target(
             name: "HostwrightReleaseQualification",
             dependencies: ["HostwrightCore"]
+        ),
+        .executableTarget(
+            name: "HostwrightCriticalFuzzer",
+            dependencies: [
+                "HostwrightControlPlane",
+                "HostwrightImport",
+                "HostwrightManifest",
+                "HostwrightReleaseQualification",
+                "HostwrightRuntime"
+            ],
+            path: "Sources/HostwrightCriticalFuzzer"
         ),
         .target(
             name: "HostwrightControlPlane",
@@ -390,6 +409,8 @@ let package = Package(
         .target(
             name: "HostwrightDistribution",
             dependencies: [
+                "HostwrightControlPlane",
+                "HostwrightControlSecurity",
                 "HostwrightCore",
                 "HostwrightState",
                 "HostwrightStorage"
@@ -974,7 +995,8 @@ let package = Package(
             name: "HostwrightNetworkHelperTests",
             dependencies: [
                 "HostwrightNetworkHelperCore",
-                "HostwrightRuntime"
+                "HostwrightRuntime",
+                .product(name: "_CryptoExtras", package: "swift-crypto")
             ]
         ),
         .testTarget(

@@ -9,6 +9,33 @@ import HostwrightObservability
 import HostwrightRuntime
 
 final class CLIControlCommandExecutorTests: XCTestCase {
+    func testDockerReadEnvelopeCannotExecuteMutatingCLIArguments() throws {
+        let capture = LogCapture()
+        let environment = environment(logSink: capture, readTextFile: { _ in
+            XCTFail("Unsupported Docker execution must fail before reading command inputs")
+            throw HostwrightDiagnostic(code: .controlAPIInvalid, message: "unexpected read")
+        })
+        for arguments in [["daemon", "disable"], ["state", "backup"], ["up", "/qualified/hostwright.yaml"]] {
+            let route = try CLIControlRoute.docker(
+                operation: "capabilities", endpoint: "version", arguments: arguments
+            )
+            let request = request(for: route)
+            XCTAssertFalse(route.mutating)
+            XCTAssertThrowsError(try CLIControlCommandExecutor.prepare(
+                request: request, environment: environment
+            )) { error in
+                XCTAssertEqual((error as? HostwrightDiagnostic)?.code, .controlAPIInvalid)
+            }
+            let prepared = CLIControlPreparedCommand(
+                request: request, route: route, environment: environment
+            )
+            XCTAssertThrowsError(try CLIControlCommandExecutor.execute(prepared: prepared)) { error in
+                XCTAssertEqual((error as? HostwrightDiagnostic)?.code, .controlAPIInvalid)
+            }
+        }
+        XCTAssertTrue(capture.records().isEmpty)
+    }
+
     func testUnarySuccessPreservesExactTypedCLIResult() throws {
         let capture = LogCapture()
         let environment = environment(logSink: capture)

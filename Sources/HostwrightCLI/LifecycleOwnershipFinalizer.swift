@@ -20,11 +20,25 @@ struct LifecycleOwnershipFinalizer: LifecycleSagaFinalizing {
 
     func finalize(context: LifecycleSagaContext) async throws {
         let operationGroup = try exactOperationGroup(context: context)
+        let rollbackSteps = context.direction == .rollback
+            ? try store.operationGroupSteps.load(groupID: operationGroup.id)
+            : []
         let deletingUUIDs = Set(
-            context.plan.nodes.compactMap { node in
-                node.action == .delete || node.action == .retire
-                    ? node.resourceUUID
-                    : nil
+            context.plan.nodes.compactMap { node -> String? in
+                if context.direction == .forward {
+                    return node.action == .delete || node.action == .retire
+                        ? node.resourceUUID : nil
+                }
+                guard let action = node.compensation?.action,
+                      action == .delete || action == .retire,
+                      let step = rollbackSteps.last(where: { $0.stepKey == node.key }),
+                      step.direction == .rollback,
+                      step.status == .succeeded,
+                      step.plannedActionType == action.rawValue,
+                      step.resourceIdentifier == node.resourceIdentifier else {
+                    return nil
+                }
+                return node.resourceUUID
             }
         )
         let records = try store.ownership.loadAll().filter {
@@ -34,9 +48,23 @@ struct LifecycleOwnershipFinalizer: LifecycleSagaFinalizing {
                 RuntimeProviderBinding.stableID(for: $0.runtimeAdapter) ==
                     context.plan.providerID
         }
-        let inventory = deletingUUIDs.isEmpty
+        let compensatedCreates = context.direction == .rollback
+            ? context.plan.nodes.filter { $0.action == .create &&
+                ($0.compensation?.action == .delete || $0.compensation?.action == .retire) }
+            : []
+        let pendingCreatePorts = try store.networkPorts.loadProject(
+            projectUUID: context.plan.projectResourceUUID
+        ).filter { port in compensatedCreates.contains { $0.resourceUUID == port.resourceUUID } }
+        let inventory = deletingUUIDs.isEmpty && pendingCreatePorts.isEmpty
             ? nil
             : try await adapter.inventory()
+        if let inventory {
+            for node in compensatedCreates where pendingCreatePorts.contains(where: { $0.resourceUUID == node.resourceUUID }) {
+                _ = try NetworkPortLifecycleCoordinator.confirmCompensatedCreateReleased(
+                    node: node, context: context, inventory: inventory, store: store
+                )
+            }
+        }
         let activePorts = try store.networkPorts.loadProject(
             projectUUID: context.plan.projectResourceUUID
         )
@@ -82,6 +110,7 @@ struct LifecycleOwnershipFinalizer: LifecycleSagaFinalizing {
                     runtimeAdapter: record.runtimeAdapter,
                     expectedResourceUUID: record.resourceUUID,
                     expectedFencingToken: record.fencingToken,
+                    expectedOperationFencingToken: operationGroup.fencingToken,
                     expectedOperationGroupID: operationGroup.id,
                     expectedLeaseOwner: leaseOwner,
                     expectedLeaseExpiresAt: leaseExpiry,

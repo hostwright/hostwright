@@ -9,6 +9,7 @@ struct LogsCommandRunner {
     let manifestPath: String
     let tail: Int
     let stateStoreConfiguration: StateStoreConfiguration
+    let runtimeProvider: RuntimeProviderSelection
     let environment: CLIEnvironment
 
     func run() -> CLIRunResult {
@@ -22,15 +23,30 @@ struct LogsCommandRunner {
 
             let store = SQLiteStateStore(configuration: stateStoreConfiguration)
             try store.migrate()
+            let selectedProvider = try hostwrightSelectRuntimeProvider(
+                requested: runtimeProvider,
+                store: store,
+                projectID: "project-\(mapping.desiredState.projectName)",
+                requiredFeatures: [.observation],
+                environment: environment
+            )
             let observationDesiredState = try hostwrightDesiredStateWithOwnershipHints(
                 mapping.desiredState,
                 store: store,
-                projectID: "project-\(mapping.desiredState.projectName)"
+                projectID: "project-\(mapping.desiredState.projectName)",
+                providerID: selectedProvider.selection.providerID
             )
 
-            let adapter = environment.runtimeAdapter()
+            let adapter = selectedProvider.adapter
             let observed = try hostwrightWaitForAsync {
                 try await adapter.observe(desiredState: observationDesiredState)
+            }
+            guard observed.adapterMetadata?.providerID == selectedProvider.selection.providerID,
+                  observed.capabilitySHA256 == selectedProvider.selection.capabilitySHA256 else {
+                throw RuntimeProviderSelectionError.staleCapability(
+                    expectedSHA256: selectedProvider.selection.capabilitySHA256,
+                    currentSHA256: observed.capabilitySHA256 ?? "missing"
+                )
             }
             let observedMatches = observed.services.filter { $0.identity == desired.identity }
             guard observedMatches.count == 1, let observedService = observedMatches.first else {

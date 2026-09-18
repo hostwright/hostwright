@@ -1,0 +1,47 @@
+rules:
+  - id: hostwright.swift.direct-shell-execution
+    languages: [swift]
+    message: Direct shell execution bypasses the bounded subprocess boundary.
+    severity: ERROR
+    pattern-either:
+      - pattern: 'system($COMMAND)'
+      - pattern: 'popen($COMMAND, $MODE)'
+
+  - id: hostwright.swift.shell-command-process
+    languages: [swift]
+    message: A Process configured as a shell command requires command-injection review.
+    severity: ERROR
+    patterns:
+      - pattern-inside: |
+          $PROCESS = Process()
+          ...
+      - pattern-either:
+          - pattern: '$PROCESS.executableURL = URL(fileURLWithPath: "/bin/sh")'
+          - pattern: '$PROCESS.executableURL = URL(fileURLWithPath: "/bin/bash")'
+          - pattern: '$PROCESS.executableURL = URL(fileURLWithPath: "/bin/zsh")'
+
+  - id: hostwright.swift.world-writable-permissions
+    languages: [swift]
+    message: World-writable file permissions violate the local trust boundary.
+    severity: ERROR
+    pattern-either:
+      - pattern: '$ATTR[.posixPermissions] = 0o777'
+      - pattern: '$ATTR[FileAttributeKey.posixPermissions] = 0o777'
+
+  - id: hostwright.swift.insecure-tls-credential
+    languages: [swift]
+    message: Accepting an arbitrary TLS server trust requires explicit review.
+    severity: ERROR
+    pattern: '$HANDLER(.useCredential(URLCredential(trust: $TRUST)), $CHALLENGE)'
+
+  - id: hostwright.shell.remote-script-execution
+    languages: [bash]
+    message: Downloading and executing a remote script is forbidden in release tooling.
+    severity: ERROR
+    pattern-regex: '(curl|wget)[^\n|]*\|[[:space:]]*(sh|bash|zsh)'
+
+  - id: hostwright.shell.eval
+    languages: [bash]
+    message: Shell eval requires explicit injection review.
+    severity: ERROR
+    pattern: 'eval $COMMAND'

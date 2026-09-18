@@ -88,7 +88,7 @@ struct InteractiveCLIOptionsTests {
     func rejectsFollowOnlyOptionsWithoutFollow() {
         #expect(throws: CLIUsageError.self) {
             try CLICommand.parse(arguments: [
-                "logs", "api", "--runtime-provider", "apple-cli"
+                "logs", "api", "--timeout", "10"
             ])
         }
     }

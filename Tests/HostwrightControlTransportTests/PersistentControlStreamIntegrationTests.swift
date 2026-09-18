@@ -445,7 +445,7 @@ final class PersistentControlStreamIntegrationTests: XCTestCase {
     }
     for _ in 0..<17 { start.signal() }
     XCTAssertEqual(completed.wait(timeout: .now() + 2), .success)
-    XCTAssertTrue(harness.waitForCancellation("race-1"))
+    XCTAssertTrue(harness.waitForCancellation("race-1", timeout: 10))
     XCTAssertTrue(results.errors.allSatisfy {
       ($0 as? PersistentControlClientError) == .invalidResponse
     })
@@ -457,7 +457,7 @@ final class PersistentControlStreamIntegrationTests: XCTestCase {
     XCTAssertEqual(try session.nextFrame(streamID: "after-race").kind, .open)
     XCTAssertTrue(harness.waitForOpen("after-race"))
     try session.cancel(streamID: "after-race")
-    XCTAssertTrue(harness.waitForCancellation("after-race"))
+    XCTAssertTrue(harness.waitForCancellation("after-race", timeout: 10))
     XCTAssertNil(fixture.serverError)
   }
 
@@ -1224,7 +1224,7 @@ final class PersistentControlStreamIntegrationTests: XCTestCase {
 
   func testAggregateUnreadFrameBudgetIsEnforcedAcrossStreams() throws {
     let fixture = try StreamITRawClientFixture { descriptor in
-      let deadline = try ControlTransportDeadline(timeoutMilliseconds: 2_000)
+      let deadline = try ControlTransportDeadline(timeoutMilliseconds: 10_000)
       for _ in 0..<2 {
         _ = try ControlFrameCodec.read(kind: .request, descriptor: descriptor, deadline: deadline)
       }
@@ -1249,16 +1249,18 @@ final class PersistentControlStreamIntegrationTests: XCTestCase {
           )
         }
       }
-      Thread.sleep(forTimeInterval: 0.250)
+      _ = try ControlFrameCodec.read(
+        kind: .request, descriptor: descriptor,
+        deadline: try ControlTransportDeadline(timeoutMilliseconds: 10_000))
     }
     defer { fixture.close() }
     for streamID in ["aggregate-a", "aggregate-b"] {
       try fixture.session.openStream(
         streamID: streamID, request: ControlStreamOpenRequest(source: .events), initialCredit: 128)
     }
-    // Let the client reader accumulate both producers before checking state; the transport
-    // retains already accepted frames for drain, but must refuse every later operation.
-    Thread.sleep(forTimeInterval: 0.350)
+    // The producer stays open until the client enforces its aggregate budget.
+    XCTAssertTrue(fixture.waitForExit(timeout: 10))
+    XCTAssertEqual(fixture.serverError as? ControlTransportError, .peerClosed)
     XCTAssertThrowsError(try fixture.session.openStream(
       streamID: "aggregate-after-limit", request: ControlStreamOpenRequest(source: .events))) {
       XCTAssertEqual($0 as? PersistentControlClientError, .connectionClosed)

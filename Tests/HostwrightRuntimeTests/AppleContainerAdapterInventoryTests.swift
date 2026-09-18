@@ -30,7 +30,7 @@ final class AppleContainerAdapterInventoryTests: XCTestCase {
         )
         let state = DesiredRuntimeState(
             projectName: "demo",
-            services: [DesiredRuntimeService(identity: identity, image: "ghcr.io/example/api:1.1.0")],
+            services: [DesiredRuntimeService(identity: identity, image: "ghcr.io/example/api:1.1.0", cpuCount: 1, memoryBytes: 536_870_912)],
             ownedResourceHints: [
                 RuntimeOwnedResourceHint(
                     resourceIdentifier: identity.managedResourceIdentifier,
@@ -53,6 +53,7 @@ final class AppleContainerAdapterInventoryTests: XCTestCase {
         XCTAssertEqual(service.resourceIdentifier, identity.managedResourceIdentifier)
         XCTAssertEqual(service.lifecycleState, .running)
         XCTAssertEqual(service.healthState, .unknown)
+        XCTAssertEqual(service.allocation, RuntimeInventoryAllocation(cpuCount: 4, memoryBytes: 8_589_934_592, storageBytes: 68_719_476_736))
         XCTAssertEqual(service.ports.map(\.hostPort), [8080, 8081])
         XCTAssertEqual(service.mounts.map(\.target), ["/cache", "/srv/data"])
         XCTAssertEqual(service.networks.map(\.name), ["default"])

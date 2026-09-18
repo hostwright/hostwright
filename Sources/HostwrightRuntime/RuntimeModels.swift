@@ -35,17 +35,20 @@ public struct RuntimeOwnedResourceHint: Equatable, Sendable {
     public let identity: RuntimeServiceIdentity
     public let identityVersion: Int
     public let ownership: RuntimeInventoryOwnershipEvidence?
+    public let authorizedAlternateOwnership: RuntimeInventoryOwnershipEvidence?
 
     public init(
         resourceIdentifier: String,
         identity: RuntimeServiceIdentity,
         identityVersion: Int,
-        ownership: RuntimeInventoryOwnershipEvidence? = nil
+        ownership: RuntimeInventoryOwnershipEvidence? = nil,
+        authorizedAlternateOwnership: RuntimeInventoryOwnershipEvidence? = nil
     ) {
         self.resourceIdentifier = resourceIdentifier
         self.identity = identity
         self.identityVersion = identityVersion
         self.ownership = ownership
+        self.authorizedAlternateOwnership = authorizedAlternateOwnership
     }
 }
 
@@ -938,6 +941,8 @@ public struct ObservedRuntimeService: Equatable, Sendable {
     public let publishedSockets: [RuntimeUnixSocketPublication]
     public let networks: [RuntimeNetworkAttachment]
     public let mounts: [RuntimeMountReference]
+    public let allocation: RuntimeInventoryAllocation?
+    public let ownership: RuntimeInventoryOwnershipEvidence?
     public let observedAt: String?
 
     public init(
@@ -950,6 +955,8 @@ public struct ObservedRuntimeService: Equatable, Sendable {
         publishedSockets: [RuntimeUnixSocketPublication] = [],
         networks: [RuntimeNetworkAttachment] = [],
         mounts: [RuntimeMountReference] = [],
+        allocation: RuntimeInventoryAllocation? = nil,
+        ownership: RuntimeInventoryOwnershipEvidence? = nil,
         observedAt: String? = nil
     ) {
         self.identity = identity
@@ -961,6 +968,8 @@ public struct ObservedRuntimeService: Equatable, Sendable {
         self.publishedSockets = publishedSockets
         self.networks = networks
         self.mounts = mounts
+        self.allocation = allocation
+        self.ownership = ownership
         self.observedAt = observedAt
     }
 }

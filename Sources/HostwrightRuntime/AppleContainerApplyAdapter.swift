@@ -321,7 +321,7 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
             )
         let observedService: ObservedRuntimeService?
         do {
-            let result = try await runRedacted(createSpec)
+            let result = try await runRedacted(createSpec, activating: true)
             try codec.discardMutationOutput(result.standardOutput)
             observedService = try await verifyMutation(
                 action,
@@ -520,7 +520,7 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
                     resourceIdentifier: containerID
                 )
         }
-        let result = try await runRedacted(spec)
+        let result = try await runRedacted(spec, activating: true)
         try codec.discardMutationOutput(result.standardOutput)
         let observedService = try await verifyMutation(
             action,
@@ -566,6 +566,7 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
             action,
             context: context
         )
+        try RuntimeActivationAuthority.validate()
         let stoppedByRestart: Bool
         switch initialLifecycle {
         case .running:
@@ -611,7 +612,7 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
                     context: context,
                     resourceIdentifier: containerID
                 )
-            startResult = try await runRedacted(startSpec)
+            startResult = try await runRedacted(startSpec, activating: true)
             try codec.discardMutationOutput(startResult.standardOutput)
             let observedService = try await verifyMutation(
                 action,
@@ -878,8 +879,9 @@ public struct AppleContainerApplyAdapter: RuntimeAdapter {
         return matching.first
     }
 
-    private func runRedacted(_ spec: RuntimeCommandSpec) async throws -> RuntimeCommandResult {
+    private func runRedacted(_ spec: RuntimeCommandSpec, activating: Bool = false) async throws -> RuntimeCommandResult {
         do {
+            if activating { try RuntimeActivationAuthority.validate() }
             return try await processRunner.run(spec).redacted(using: redactionPolicy)
         } catch let error as RuntimeAdapterError {
             throw error.redacted(using: redactionPolicy, exactValues: spec.sensitiveValues)

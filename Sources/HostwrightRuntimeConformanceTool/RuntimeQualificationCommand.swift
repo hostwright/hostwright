@@ -66,6 +66,9 @@ enum RuntimeQualificationCommand {
         if arguments == ["--version"] {
             return .success(versionLine + "\n")
         }
+        if arguments.first == "sdk-seed" {
+            return await RuntimeQualificationSDKSeeder.run(arguments: Array(arguments.dropFirst()))
+        }
         do {
             let options = try parse(arguments)
             try await RuntimeQualificationExecutor.execute(options)

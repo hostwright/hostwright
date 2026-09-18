@@ -625,6 +625,8 @@ private struct MigrationFixture {
         self.service = desiredService ?? DesiredRuntimeService(
             identity: identity,
             image: imageReference,
+            cpuCount: 1,
+            memoryBytes: 512 * 1024 * 1024,
             restartPolicy: .unlessStopped
         )
         self.sourceOwnership = RuntimeInventoryOwnershipEvidence(

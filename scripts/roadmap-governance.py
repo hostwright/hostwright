@@ -119,6 +119,10 @@ def validate_manifest(path: Path) -> dict[str, Any]:
         require(isinstance(assignees, list) and ASSIGNEE in assignees, f"issue #{number} lacks assignee {ASSIGNEE}")
         require(issue.get("releaseDisposition") in {"required", "deferred"}, f"issue #{number} has invalid release disposition")
         require(issue.get("scopeDecision") == SCOPE_DECISION, f"issue #{number} lacks the recorded scope decision")
+        require(issue.get("state") in {"open", "closed"}, f"issue #{number} has invalid recorded state")
+        if issue["state"] == "closed":
+            reason = "not_planned" if issue["releaseDisposition"] == "deferred" else "completed"
+            require(issue.get("stateReason") == reason, f"issue #{number} has inconsistent recorded closure reason")
         if issue["releaseDisposition"] == "deferred":
             require(isinstance(issue.get("deferralReason"), str) and issue["deferralReason"].strip(), f"issue #{number} has no deferral reason")
         elif number >= 207:
@@ -442,6 +446,7 @@ def self_test(manifest_path: Path) -> None:
             lambda value: value.update(scopeDecision="docs/unreviewed.md"),
             lambda value: value["issues"][0].update(releaseDisposition="complete"),
             lambda value: value["issues"][0].update(scopeDecision="docs/unreviewed.md"),
+            lambda value: next(item for item in value["issues"] if item["number"] == 210).update(stateReason="completed"),
             lambda value: next(item for item in value["issues"] if item["number"] == 220).update(releaseDisposition="required"),
         ]
         for mutate in mutations:

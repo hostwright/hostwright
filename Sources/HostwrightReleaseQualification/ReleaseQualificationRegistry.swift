@@ -1461,6 +1461,9 @@ public struct ReleaseQualificationLocalLaneRunner: Sendable {
                     ($0.path.hasSuffix(".md") || $0.path.hasSuffix(".mdx"))) ||
                 ($0.path.hasPrefix("examples/") && $0.path.hasSuffix("/hostwright.yaml"))
         }
+        guard selected.allSatisfy({ $0.size <= ReleaseQualificationLimits.maximumSourceFileBytes }) else {
+            throw ReleaseQualificationContractError.oversizedInput
+        }
         guard Self.documentationSnapshotPaths.isSubset(of: Set(selected.map(\.path))) else {
             throw ReleaseQualificationContractError.tamperedEvidence
         }
@@ -1600,7 +1603,7 @@ public struct ReleaseQualificationLocalLaneRunner: Sendable {
                   fields[1] == "blob",
                   fields[2].range(of: "^[a-f0-9]{40}$", options: .regularExpression) != nil,
                   let size = Int(fields[3]),
-                  (0...ReleaseQualificationLimits.maximumSourceFileBytes).contains(size) else {
+                  size >= 0 else {
                 throw ReleaseQualificationContractError.tamperedEvidence
             }
             entries.append(

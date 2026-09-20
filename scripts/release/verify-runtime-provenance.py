@@ -270,9 +270,9 @@ def arm64_image(data):
             res2==res3==res4==0 and text_offset<image_size,
             'invalid arm64 Linux Image header')
 
-def archive_members(data, selected=None):
+def archive_entries(data):
     require(data.startswith(b'!<arch>\n'), 'expected actual static archive')
-    result={}; names=b''; offset=8
+    result=[]; names=b''; offset=8
     while offset<len(data):
         header=data[offset:offset+60]; require(len(header)==60 and header[58:]==b'`\n', 'invalid static archive header')
         size=int(header[48:58]); require(size>=0 and offset+60+size<=len(data), 'invalid static archive member size')
@@ -289,14 +289,79 @@ def archive_members(data, selected=None):
                 name=names[start:].split(b'/\n',1)[0].decode()
             else: name=name.rstrip('/')
             require(name and not re.search(r'[\x00-\x1f\x7f]',name), 'invalid static archive member name')
-            if name in result:
-                require(selected is not None and name not in selected, 'ambiguous duplicate archive member')
-            else:result[name]=raw
+            result.append((name,offset,raw))
         offset+=60+size
         if size%2:
             require(offset<len(data) and data[offset:offset+1]==b'\n', 'invalid static archive padding')
             offset+=1
     return result
+
+def archive_members(data, selected=None):
+    result={}
+    for name,offset,raw in archive_entries(data):
+        if name in result:
+            require(selected is not None and name not in selected, 'ambiguous duplicate archive member')
+        else:result[name]=raw
+    return result
+
+def elf_sections(data):
+    elf(data,True)
+    offset=struct.unpack_from('<Q',data,40)[0]
+    size,count,names_index=struct.unpack_from('<HHH',data,58)
+    require(count>0 and size>=64 and names_index<count and offset+size*count<=len(data),
+            'invalid relocatable ELF section table')
+    headers=[struct.unpack_from('<IIQQQQIIQQ',data,offset+i*size) for i in range(count)]
+    strings=headers[names_index]
+    require(strings[1]==3 and strings[4]+strings[5]<=len(data), 'invalid ELF section names')
+    names=data[strings[4]:strings[4]+strings[5]]
+    result=set()
+    for section in headers[1:]:
+        name_offset=section[0]
+        require(name_offset<len(names), 'invalid ELF section name offset')
+        end=names.find(b'\0',name_offset)
+        require(end>name_offset, 'unterminated ELF section name')
+        name=names[name_offset:end].decode()
+        require(not re.search(r'[\x00-\x1f\x7f]',name), 'invalid ELF section name')
+        if section[1]!=8:
+            require(section[4]+section[5]<=len(data), 'truncated ELF section')
+        result.add((name,section[5]))
+    return result
+
+def lld_map_sections(data):
+    lines=data.splitlines()
+    require(lines and re.fullmatch(r'\s*VMA\s+LMA\s+Size\s+Align\s+Out\s+In\s+Symbol\s*',lines[0]),
+            'missing actual LLD map columns')
+    out_column=lines[0].index('Out'); in_column=lines[0].index('In',out_column+3)
+    symbol_column=lines[0].index('Symbol',in_column+2)
+    result={}
+    for line in lines[1:]:
+        if len(line)<=in_column or line[out_column:in_column].strip() or not line[in_column:symbol_column].strip():
+            continue
+        value=line[in_column:].strip()
+        if ':(' not in value:continue
+        if value.startswith('<internal>:'):continue
+        match=re.fullmatch(r'(.+):\(([^()]*)\)',value)
+        require(match is not None, 'unsupported LLD section row')
+        columns=line[:out_column].split()
+        require(len(columns)==4 and all(re.fullmatch(r'[0-9a-fA-F]+',part) for part in columns),
+                'invalid LLD section dimensions')
+        result.setdefault(match[1],set()).add((match[2],int(columns[2],16)))
+    return result
+
+def selected_archive_entries(data, member, map_sections, entries=None):
+    candidates=[(offset,raw) for name,offset,raw in (entries if entries is not None else archive_entries(data)) if name==member]
+    require(candidates, 'selected archive member missing')
+    if len(candidates)==1:return candidates
+    section_sets=[elf_sections(raw) for _,raw in candidates]
+    selected=[]
+    for index,candidate in enumerate(section_sets):
+        other=set().union(*(sections for i,sections in enumerate(section_sets) if i!=index))
+        observed=candidate & map_sections
+        unique=(candidate-other) & map_sections
+        require(not observed or unique, 'ambiguous selected archive occurrence')
+        if unique:selected.append(candidates[index])
+    require(selected, 'selected archive occurrence lacks section witness')
+    return selected
 
 def lld_map_inputs(data):
     lines=data.splitlines()
@@ -323,12 +388,15 @@ def link_closure(link, output, projects, fetch, tools=None):
     require(tools is not None, 'missing authenticated linker toolchain')
     map_data=substantive(link['map'],fetch).decode()
     selected=lld_map_inputs(map_data)
-    require(selected and len(selected)==len(link['selectedInputs']) and
-            selected=={r['mapInput'] for r in link['selectedInputs']}, 'link map/member ledger coverage mismatch')
+    require(selected and selected=={r['mapInput'] for r in link['selectedInputs']},
+            'link map/member ledger coverage mismatch')
+    section_rows=lld_map_sections(map_data)
+    require(selected==set(section_rows), 'link map section/input coverage mismatch')
     require(link['commands'] and link['responseFiles'], 'missing actual linker commands/response files')
     commands=[argv(record,fetch,tools) for record in link['commands']]
     require(any(any('-Map' in arg or '--Map' in arg for arg in command[1:]) for command in commands), 'linker argv lacks actual map capture')
     for record in link['responseFiles']:substantive(record,fetch)
+    archive_cache={}; parsed_archives={}; expected={}; covered={}; archive_digests={}; ledger=set()
     for record in link['selectedInputs']:
         data=bound(record['file'],fetch)
         input_file=record['mapInput'].split('(',1)[0]
@@ -336,14 +404,33 @@ def link_closure(link, output, projects, fetch, tools=None):
                 'selected map/archive file identity mismatch')
         if 'member' in record:
             require(record['mapInput'].endswith('('+record['member']+')'), 'archive member/map mismatch')
-            members=archive_members(data,{record['member']}); require(record['member'] in members, 'selected archive member missing')
-            data=members[record['member']]
+            key=record['mapInput']; file_sha=record['file']['sha256']
+            require(key not in archive_digests or archive_digests[key]==file_sha,
+                    'selected map input binds different archives')
+            archive_digests[key]=file_sha
+            if key not in expected:
+                if file_sha not in parsed_archives:parsed_archives[file_sha]=archive_entries(data)
+                archive_cache[key]=selected_archive_entries(data,record['member'],section_rows[key],parsed_archives[file_sha])
+                expected[key]={offset for offset,_ in archive_cache[key]}
+            if len(archive_cache[key])>1:
+                require('archiveOffset' in record, 'selected duplicate requires archive occurrence offset')
+            offset=record.get('archiveOffset',archive_cache[key][0][0])
+            require(offset in expected[key], 'selected archive occurrence offset mismatch')
+            data=next(raw for entry_offset,raw in archive_cache[key] if entry_offset==offset)
+            covered.setdefault(key,set()).add(offset)
+            identity=(key,offset)
+        else:
+            require('archiveOffset' not in record, 'standalone input has archive offset')
+            identity=(record['mapInput'],None)
+        require(identity not in ledger, 'duplicate selected input ledger entry')
+        ledger.add(identity)
         require(digest(data)==record['objectSHA256'], 'selected object mismatch'); elf(data,True)
         require(record['sourceFiles'], 'selected object has no compiled-source attribution')
         for source in record['sourceFiles']:
             require(source['project'] in projects and source['path'] in projects[source['project']], 'selected source missing')
             leaf=projects[source['project']][source['path']]
             require(leaf['gitMode']!='120000' and leaf['sha256']==source['sha256'], 'selected source attribution mismatch')
+    require(expected==covered, 'selected archive occurrence ledger coverage mismatch')
 
 def go_loader(loader, output, projects, fetch, tools=None):
     elf(output)

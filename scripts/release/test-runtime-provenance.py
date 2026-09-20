@@ -12,6 +12,17 @@ def elf(relocatable=False):
   struct.pack_into('<I',data,64,1)
  return bytes(data)
 
+def sectioned_elf(section_name):
+ names=b'\0.shstrtab\0'+section_name.encode()+b'\0'
+ data=bytearray(64+3*64+len(names)+4);data[:7]=b'\x7fELF\x02\x01\x01'
+ struct.pack_into('<HH',data,16,1,183)
+ struct.pack_into('<Q',data,40,64)
+ struct.pack_into('<HHH',data,58,64,3,1)
+ struct.pack_into('<IIQQQQIIQQ',data,128,1,3,0,0,256,len(names),0,0,1,0)
+ struct.pack_into('<IIQQQQIIQQ',data,192,11,1,0,0,256+len(names),4,0,0,4,0)
+ data[256:256+len(names)]=names
+ return bytes(data)
+
 def arm64_image():
  data=bytearray(128)
  struct.pack_into('<QQQQQQ',data,8,0,4096,0xa,0,0,0)
@@ -83,6 +94,10 @@ class RuntimeProvenanceTests(unittest.TestCase):
    header=name.encode().ljust(16)+b'0           '+b'0     '+b'0     '+b'644     '+str(len(data)).encode().ljust(10)+b'`\n'
    return header+data+(b'\n' if len(data)%2 else b'')
   archive=b'!<arch>\n'+member('main.o/',b'first')+member('other.o/',b'a')+member('other.o/',b'b')
+  self.assertEqual([(name,payload) for name,_,payload in v.archive_entries(archive)],
+                   [('main.o',b'first'),('other.o',b'a'),('other.o',b'b')])
+  self.assertEqual([offset for _,offset,_ in v.archive_entries(archive)],
+                   [8,8+len(member('main.o/',b'first')),8+len(member('main.o/',b'first'))+len(member('other.o/',b'a'))])
   self.assertEqual(v.archive_members(archive,{'main.o'})['main.o'],b'first')
   with self.assertRaisesRegex(ValueError,'ambiguous duplicate archive member'):
    v.archive_members(archive)
@@ -96,6 +111,62 @@ class RuntimeProvenanceTests(unittest.TestCase):
   self.assertEqual(v.lld_map_inputs(header+internal+selected+symbol),{'/build/OrderedSet+Partial SetAlgebra.swift.o'})
   with self.assertRaisesRegex(ValueError,'unsupported LLD input row'):
    v.lld_map_inputs(header+'          200294           200294        4     4         unexplained-input\n')
+ def test_archive_occurrences_have_distinct_selected_section_witnesses(self):
+  first=sectioned_elf('.text.first');second=sectioned_elf('.text.second')
+  def member(data):
+   header=b'same.o/'.ljust(16)+b'0           '+b'0     '+b'0     '+b'644     '+str(len(data)).encode().ljust(10)+b'`\n'
+   return header+data+(b'\n' if len(data)%2 else b'')
+  archive=b'!<arch>\n'+member(first)+member(second)
+  entries=v.archive_entries(archive)
+  self.assertEqual([(n,o,v.digest(d)) for n,o,d in entries],
+                   [('same.o',8,v.digest(first)),('same.o',8+len(member(first)),v.digest(second))])
+  self.assertIn(('.text.first',4),v.elf_sections(first))
+  self.assertIn(('.text.second',4),v.elf_sections(second))
+  header='             VMA              LMA     Size Align Out     In      Symbol\n'
+  rows=('          200294           200294        4     4         lib.a(same.o):(.text.first)\n'
+        '          200298           200298        4     4         lib.a(same.o):(.text.second)\n')
+  self.assertEqual(v.lld_map_sections(header+rows)['lib.a(same.o)'],
+                   {('.text.first',4),('.text.second',4)})
+  self.assertEqual([offset for offset,_ in v.selected_archive_entries(archive,'same.o',v.lld_map_sections(header+rows)['lib.a(same.o)'])],
+                   [entry[1] for entry in entries])
+  with self.assertRaisesRegex(ValueError,'section witness'):
+   v.selected_archive_entries(archive,'same.o',{('.text.missing',4)})
+  with self.assertRaisesRegex(ValueError,'ambiguous selected archive occurrence'):
+   v.selected_archive_entries(b'!<arch>\n'+member(first)+member(first),'same.o',{('.text.first',4)})
+  with self.assertRaisesRegex(ValueError,'invalid relocatable ELF section table'):
+   v.elf_sections(elf(True))
+ def test_link_closure_requires_every_selected_duplicate_occurrence(self):
+  manifest,runtime,payloads,files=fixture()
+  first=sectioned_elf('.text.first');second=sectioned_elf('.text.second')
+  def member(data):
+   header=b'same.o/'.ljust(16)+b'0           '+b'0     '+b'0     '+b'644     '+str(len(data)).encode().ljust(10)+b'`\n'
+   return header+data+(b'\n' if len(data)%2 else b'')
+  archive=b'!<arch>\n'+member(first)+member(second)
+  link=manifest['oci']['links'][0]
+  original=link['selectedInputs'][0]
+  record=dict(original,file=dict(path='proof/libduplicated.a',sha256=v.digest(archive),sizeBytes=len(archive)),
+              mapInput='libduplicated.a(same.o)',member='same.o',archiveOffset=8,objectSHA256=v.digest(first))
+  other=dict(record,archiveOffset=8+len(member(first)),objectSHA256=v.digest(second))
+  files['proof/libduplicated.a']=archive
+  link['selectedInputs']=[record,other]
+  rows=(b'             VMA              LMA     Size Align Out     In      Symbol\n'
+        b'          200294           200294        4     4         libduplicated.a(same.o):(.text.first)\n'
+        b'          200298           200298        4     4         libduplicated.a(same.o):(.text.second)\n')
+  path=link['map']['path'];files[path]=rows
+  link['map'].update(sha256=v.digest(rows),sizeBytes=len(rows))
+  with mock.patch.object(v,'authenticate'):
+   v.verify(v.canonical(manifest),runtime,payloads,files.__getitem__,manifest['sourceCommit'])
+  for change in ('omitted','forged-offset','forged-object','ambiguous-map'):
+   altered=copy.deepcopy(manifest);selected=altered['oci']['links'][0]['selectedInputs']
+   if change=='omitted':selected.pop()
+   elif change=='forged-offset':selected[1]['archiveOffset']+=2
+   elif change=='forged-object':selected[1]['objectSHA256']=v.digest(first)
+   else:
+    wrong=rows.replace(b'.text.second',b'.text.first');files[path]=wrong
+    altered['oci']['links'][0]['map'].update(sha256=v.digest(wrong),sizeBytes=len(wrong))
+   with self.subTest(change=change),mock.patch.object(v,'authenticate'),self.assertRaises(ValueError):
+    v.verify(v.canonical(altered),runtime,payloads,files.__getitem__,altered['sourceCommit'])
+   files[path]=rows
  def test_kernel_payload_requires_raw_arm64_image_header(self):
   v.arm64_image(arm64_image())
   for payload in (elf(),b'ARM\x64',arm64_image()[:40],arm64_image()[:56]+b'bad!'+arm64_image()[60:]):

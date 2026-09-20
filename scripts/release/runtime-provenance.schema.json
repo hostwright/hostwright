@@ -378,6 +378,10 @@
     },
     "selected": {
       "properties": {
+        "archiveOffset": {
+          "minimum": 8,
+          "type": "integer"
+        },
         "file": {
           "$ref": "#/$defs/record"
         },

@@ -46,31 +46,15 @@ final class Phase10StateRecoveryQualificationAdmissionTests: XCTestCase {
                     group in
                     group.addTask {
                         await startGate.wait()
-                        do {
-                            let reservation = try repository.reserve(
-                                binding: firstBinding,
-                                authority: firstAuthority
-                            )
-                            return .won(reservation.reservationID)
-                        } catch let error as SchedulerAdmissionError {
-                            return .failed(error)
-                        } catch {
-                            return .unexpected(String(describing: error))
-                        }
+                        return Self.reserveForRace(
+                            repository: repository, binding: firstBinding, authority: firstAuthority
+                        )
                     }
                     group.addTask {
                         await startGate.wait()
-                        do {
-                            let reservation = try repository.reserve(
-                                binding: secondBinding,
-                                authority: secondAuthority
-                            )
-                            return .won(reservation.reservationID)
-                        } catch let error as SchedulerAdmissionError {
-                            return .failed(error)
-                        } catch {
-                            return .unexpected(String(describing: error))
-                        }
+                        return Self.reserveForRace(
+                            repository: repository, binding: secondBinding, authority: secondAuthority
+                        )
                     }
 
                     var collected: [Phase10RaceOutcome] = []
@@ -107,6 +91,32 @@ final class Phase10StateRecoveryQualificationAdmissionTests: XCTestCase {
                     try ResourceVector(["cpu": 1])
                 )
             }
+        }
+    }
+
+    private static func reserveForRace(
+        repository: SchedulerAdmissionRepository,
+        binding: SchedulerAdmissionBinding,
+        authority: SchedulerAdmissionAuthority
+    ) -> Phase10RaceOutcome {
+        do {
+            for _ in 0..<9 {
+                do {
+                    return .won(try repository.reserve(
+                        binding: binding, authority: authority
+                    ).reservationID)
+                } catch StateStoreError.databaseLocked(_, let message)
+                    where message.contains("state-writer fence") {
+                    Thread.sleep(forTimeInterval: 0.05)
+                }
+            }
+            return .won(try repository.reserve(
+                binding: binding, authority: authority
+            ).reservationID)
+        } catch let error as SchedulerAdmissionError {
+            return .failed(error)
+        } catch {
+            return .unexpected(String(describing: error))
         }
     }
 

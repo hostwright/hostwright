@@ -1756,6 +1756,7 @@ final class PersistentControlStreamIntegrationTests: XCTestCase {
     let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
       .appendingPathComponent(".build", isDirectory: true)
       .appendingPathComponent("hw-p09-stream-it-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: root.deletingLastPathComponent(), withIntermediateDirectories: true)
     try FileManager.default.createDirectory(
       at: root, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700]
     )

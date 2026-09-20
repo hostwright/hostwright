@@ -67,7 +67,9 @@ private let selectedTarget: CriticalFuzzTarget? = ProcessInfo.processInfo.enviro
 
 private func evaluateInput(_ pointer: UnsafePointer<UInt8>?, _ size: Int) -> Int32 {
   guard let selectedTarget, let pointer, size >= 0 else { return 0 }
-  selectedTarget.evaluate(Data(bytes: pointer, count: size))
+  autoreleasepool {
+    selectedTarget.evaluate(Data(bytes: pointer, count: size))
+  }
   return 0
 }
 
@@ -107,7 +109,10 @@ private enum HostwrightCriticalFuzzerMain {
     }
     do {
       for path in paths {
-        selectedTarget.evaluate(try Data(contentsOf: URL(fileURLWithPath: path)))
+        let data = try Data(contentsOf: URL(fileURLWithPath: path))
+        autoreleasepool {
+          selectedTarget.evaluate(data)
+        }
       }
     } catch {
       FileHandle.standardError.write(Data("Corpus replay failed: \(error)\n".utf8))

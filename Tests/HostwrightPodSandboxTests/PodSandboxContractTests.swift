@@ -1297,6 +1297,10 @@ final class PodSandboxContractTests: XCTestCase {
         if let path = ProcessInfo.processInfo.environment["HOSTWRIGHT_POD_SANDBOX_GUEST_EXECUTABLE"] {
             return URL(fileURLWithPath: path)
         }
+        let builtProduct = Bundle(for: PodSandboxContractTests.self)
+            .bundleURL.deletingLastPathComponent()
+            .appendingPathComponent("hostwright-pod-sandbox-guest")
+        if FileManager.default.isExecutableFile(atPath: builtProduct.path) { return builtProduct }
         let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
         let candidates = [
             root.appendingPathComponent(".build/arm64-apple-macosx/debug/hostwright-pod-sandbox-guest"),

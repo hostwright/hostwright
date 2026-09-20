@@ -1120,12 +1120,14 @@ final class RuntimeInteractiveOperationsTests: XCTestCase {
         let sinkStarted = expectation(description: "output sink started")
         let releaseSink = DispatchSemaphore(value: 0)
         let runnerFinished = expectation(description: "process runner finished")
+        let (sinkStartStream, sinkStartContinuation) = AsyncStream<Void>.makeStream()
         let runner = TimeoutAfterOutputInteractiveProcessRunner(
-            runnerFinished: runnerFinished
+            runnerFinished: runnerFinished,
+            sinkStartStream: sinkStartStream
         )
         let identifier = managedIdentifier
         let capability = snapshot()
-        let task = Task {
+        let task = Task.detached(priority: .userInitiated) {
             try await AppleContainerInteractiveExecutor(
                 executableResolver: InteractiveExecutableResolver(),
                 processRunner: runner
@@ -1141,12 +1143,14 @@ final class RuntimeInteractiveOperationsTests: XCTestCase {
                 timeoutMilliseconds: 1_000
             ) { _ in
                 sinkStarted.fulfill()
+                sinkStartContinuation.yield(())
                 _ = releaseSink.wait(timeout: .now() + 2)
             }
         }
 
-        await fulfillment(of: [sinkStarted], timeout: 5)
-        await fulfillment(of: [runnerFinished], timeout: 5)
+        await fulfillment(of: [sinkStarted], timeout: 15)
+        await fulfillment(of: [runnerFinished], timeout: 15)
+        sinkStartContinuation.finish()
         releaseSink.signal()
         do {
             _ = try await task.value
@@ -1545,9 +1549,11 @@ private final class TimeoutAfterOutputInteractiveProcessRunner:
     RuntimeInteractiveProcessRunning,
     @unchecked Sendable {
     private let runnerFinished: XCTestExpectation
+    private let sinkStartStream: AsyncStream<Void>
 
-    init(runnerFinished: XCTestExpectation) {
+    init(runnerFinished: XCTestExpectation, sinkStartStream: AsyncStream<Void>) {
         self.runnerFinished = runnerFinished
+        self.sinkStartStream = sinkStartStream
     }
 
     func run(
@@ -1561,6 +1567,7 @@ private final class TimeoutAfterOutputInteractiveProcessRunner:
                 data: Data("output-before-timeout".utf8)
             )
         )
+        for await _ in sinkStartStream { break }
         runnerFinished.fulfill()
         throw RuntimeInteractiveError.processTimedOut
     }

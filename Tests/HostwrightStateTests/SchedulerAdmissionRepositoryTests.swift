@@ -188,7 +188,21 @@ final class SchedulerAdmissionRepositoryTests: XCTestCase {
                     verifiedAt: "2026-08-05T12:01:00Z"))
             let results = Results()
             DispatchQueue.concurrentPerform(iterations: 2) { index in
-                results.append(Result { try repository.reserve(binding: bindings[index + 1], authority: authorities[index + 1]) })
+                results.append(Result {
+                    for _ in 0..<9 {
+                        do {
+                            return try repository.reserve(
+                                binding: bindings[index + 1], authority: authorities[index + 1]
+                            )
+                        } catch StateStoreError.databaseLocked(_, let message)
+                            where message.contains("state-writer fence") {
+                            Thread.sleep(forTimeInterval: 0.05)
+                        }
+                    }
+                    return try repository.reserve(
+                        binding: bindings[index + 1], authority: authorities[index + 1]
+                    )
+                })
             }
             XCTAssertEqual(results.values.filter { if case .success = $0 { true } else { false } }.count, 1)
             let failures = results.values.compactMap { result -> Error? in

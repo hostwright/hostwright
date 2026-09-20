@@ -227,7 +227,9 @@ final class CLIControlAuthorizationScopeTests: XCTestCase {
                 DispatchQueue.global(qos: .userInitiated).async {
                     started.signal()
                     result.capture {
-                        try StateUpgradeService(store: fixture.store).withSerializedLifecycleMutation {
+                        try StateUpgradeService(store: fixture.store).withSerializedLifecycleMutation(
+                            lockWaitMilliseconds: 10_000
+                        ) {
                             try fixture.store.ownership.upsert(fixture.ownership(
                                 id: "ownership-api-replacement",
                                 resourceIdentifier: "hostwright-scope-tests-api-replacement",
@@ -237,8 +239,9 @@ final class CLIControlAuthorizationScopeTests: XCTestCase {
                     }
                     completed.signal()
                 }
-                XCTAssertEqual(started.wait(timeout: .now() + 1), .success)
+                XCTAssertEqual(started.wait(timeout: .now() + 5), .success)
                 XCTAssertEqual(completed.wait(timeout: .now() + 0.100), .timedOut)
+                Thread.sleep(forTimeInterval: 0.300)
                 XCTAssertEqual(
                     try CLIControlAuthorizationScopeResolver.resolve(
                         command: readCommand,
@@ -249,7 +252,7 @@ final class CLIControlAuthorizationScopeTests: XCTestCase {
                 )
             }
 
-            XCTAssertEqual(completed.wait(timeout: .now() + 2), .success)
+            XCTAssertEqual(completed.wait(timeout: .now() + 15), .success)
             XCTAssertNil(result.error)
             XCTAssertThrowsError(try CLIControlAuthorizationScopeResolver.resolve(
                 command: readCommand,

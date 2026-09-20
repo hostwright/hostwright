@@ -1140,6 +1140,7 @@ final class PersistentControlServerTests: XCTestCase {
       "hw-p09-\(UUID().uuidString.prefix(8))",
       isDirectory: true
     )
+    try FileManager.default.createDirectory(at: buildDirectory, withIntermediateDirectories: true)
     try FileManager.default.createDirectory(
       at: candidate, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
     let resolved = candidate.path.withCString { realpath($0, nil) }

@@ -753,8 +753,20 @@ final class ReleaseQualificationRegistryTests: XCTestCase {
     }
 
     func testSafeChecksUseRealBoundedInputsAndAggregateDeterministically() throws {
+        let root = try ReleaseQualificationTestSupport.temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = ReleaseQualificationTestSupport.repositoryRoot()
+        for name in ["Package.swift", "Package.resolved"] {
+            try FileManager.default.copyItem(
+                at: source.appendingPathComponent(name),
+                to: root.appendingPathComponent(name)
+            )
+        }
+        try Data("bounded source scan\n".utf8).write(
+            to: root.appendingPathComponent("README.md")
+        )
         let results = try ReleaseQualificationSafeCheckRunner().run(
-            sourceRoot: ReleaseQualificationTestSupport.repositoryRoot()
+            sourceRoot: root
         )
         XCTAssertEqual(
             results.map(\.checkID),

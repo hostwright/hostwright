@@ -1,0 +1,75 @@
+name: Authenticated kernel source ingredient
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  kernel-source:
+    name: Verify and attest Linux 6.18.15 source
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - name: Check out the exact main commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Authenticate the upstream source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = hostwright/hostwright
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          root="$RUNNER_TEMP/kernel-source-ingredient"
+          mkdir -m 700 "$root"
+          cp scripts/release/keys/gregkh-pinned-public-key.asc "$root/"
+          cd "$root"
+          printf '%s  %s\n' \
+            d3494056bb1a9726366499d790dfd44555d9f6e354cd4549143bf9c0b7ccb99c \
+            gregkh-pinned-public-key.asc | sha256sum --check --status
+          for name in linux-6.18.15.tar.xz linux-6.18.15.tar.sign; do
+            curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' --tlsv1.2 \
+              --output "$name" "https://cdn.kernel.org/pub/linux/kernel/v6.x/$name"
+          done
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            --output kata-fs-dax.patch \
+            'https://raw.githubusercontent.com/kata-containers/kata-containers/660e3bb6535b141c84430acb25b159857278d596/tools/packaging/kernel/patches/6.18.x/0001-fs-dax-check-zero-or-empty-entry-before-converting-xarray.patch'
+          printf '%s  %s\n' \
+            7c716216c3c4134ed0de69195701e677577bbcdd3979f331c182acd06bf2f170 linux-6.18.15.tar.xz \
+            d42cfc8e2edea41feb14e28dbc6b962da59a4fc0808b25b1157e1063be6984b3 linux-6.18.15.tar.sign \
+            92dd4a192ea58fa9a59e3bc6d6995e2a156cf862c36a3c10eb212fabdecdaf03 kata-fs-dax.patch \
+            | sha256sum --check --status
+          test "$(git hash-object kata-fs-dax.patch)" = c61319d6a8b04dd67728821b0f7e9bd23eb83d55
+          python3 "$GITHUB_WORKSPACE/scripts/release/verify-kernel-source-signature.py" \
+            --inputs "$root" --output "$root/signature-receipt.json"
+          sha256sum linux-6.18.15.tar.xz linux-6.18.15.tar.sign kata-fs-dax.patch \
+            gregkh-pinned-public-key.asc signature-receipt.json \
+            > checksums.sha256
+          test -z "$(git -C "$GITHUB_WORKSPACE" status --porcelain=v1 --untracked-files=all)"
+      - name: Attest the source and verification inputs
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            ${{ runner.temp }}/kernel-source-ingredient/linux-6.18.15.tar.xz
+            ${{ runner.temp }}/kernel-source-ingredient/linux-6.18.15.tar.sign
+            ${{ runner.temp }}/kernel-source-ingredient/kata-fs-dax.patch
+            ${{ runner.temp }}/kernel-source-ingredient/gregkh-pinned-public-key.asc
+            ${{ runner.temp }}/kernel-source-ingredient/signature-receipt.json
+            ${{ runner.temp }}/kernel-source-ingredient/checksums.sha256
+      - name: Retain the authenticated source ingredient
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kernel-source-${{ github.sha }}
+          path: ${{ runner.temp }}/kernel-source-ingredient/
+          retention-days: 30
+          if-no-files-found: error

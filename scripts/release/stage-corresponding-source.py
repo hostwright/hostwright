@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Bind source bytes to staged products; qualification requires independent verification."""
-import argparse,hashlib,importlib.util,json,pathlib,re,shutil,subprocess,tarfile,zipfile
+import argparse,hashlib,importlib.util,json,pathlib,re,shutil,stat,subprocess,tarfile,zipfile
 EMPTY_STATUS_SHA256=hashlib.sha256(b'').hexdigest()
 KIND='hostwright.corresponding-source.v1'
 NEW_RUNTIME_KIND='hostwright.corresponding-source.new-runtime.v1'
@@ -77,7 +77,7 @@ def verify_contract(root,commit,version,gpg=None,gpg_sha256=None):
  path=release['artifactID']+'/share/doc/hostwright/runtime-license-inventory.json'
  with zipfile.ZipFile(product) as archive:
   matches=[i for i in archive.infolist() if i.filename==path]
-  if len(matches)!=1 or matches[0].file_size>16*1024**2:raise ValueError('product lacks exact runtime license inventory')
+  if len(matches)!=1 or matches[0].file_size>16*1024**2 or stat.S_IFMT(matches[0].external_attr>>16) not in (0,stat.S_IFREG):raise ValueError('product lacks exact runtime license inventory')
   product_runtime=parse(archive.read(matches[0]))
  if source_evidence_contents(source_runtime)!=source_evidence_contents(product_runtime):raise ValueError('product runtime source evidence differs from corresponding-source contents')
  if binding['sourceManifestKind']!=NEW_RUNTIME_KIND:
@@ -85,7 +85,7 @@ def verify_contract(root,commit,version,gpg=None,gpg_sha256=None):
  prefix=release['artifactID']+'/'
  with zipfile.ZipFile(product) as product_archive:
   entries=[item for item in product_archive.infolist() if item.filename.startswith(prefix+'share/hostwright/containerization/') and not item.is_dir()]
-  if len({item.filename for item in entries})!=len(entries) or any(item.file_size>2*1024**3 for item in entries):raise ValueError('unsafe actual product runtime closure')
+  if len({item.filename for item in entries})!=len(entries) or any(item.file_size>2*1024**3 or stat.S_IFMT(item.external_attr>>16) not in (0,stat.S_IFREG) for item in entries):raise ValueError('unsafe actual product runtime closure')
   product_payloads={item.filename[len(prefix):]:product_archive.read(item) for item in entries}
  with tarfile.open(source/binding['archive']['fileName'],'r:gz') as source_archive:
   qualified_runtime(source_archive,commit,product_payloads)

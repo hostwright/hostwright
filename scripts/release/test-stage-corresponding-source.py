@@ -99,6 +99,25 @@ class SourceTests(unittest.TestCase):
     source.verify_contract(root,'a'*40,'0.0.2')
    self.assertEqual(validator.call_args.args[1],'a'*40)
    self.assertEqual(validator.call_args.args[2],{'share/hostwright/containerization/kernel/vmlinux':payload})
+   import stat
+   with zipfile.ZipFile(product,'w') as archive:
+    archive.writestr('artifact/share/doc/hostwright/runtime-license-inventory.json',source.canonical(runtime))
+    item=zipfile.ZipInfo('artifact/share/hostwright/containerization/kernel/vmlinux')
+    item.create_system=3;item.external_attr=(stat.S_IFLNK|0o777)<<16
+    archive.writestr(item,payload)
+   (release/'release-manifest.json').write_bytes(source.canonical(dict(artifactID='artifact',archive=dict(fileName=product.name,sha256=source.sha(product)))))
+   with mock.patch.object(source.subprocess,'run',return_value=subprocess.CompletedProcess([],0,stdout=source.canonical(verified))),mock.patch.object(source,'qualified_runtime',return_value={'verified':True}):
+    with self.assertRaisesRegex(ValueError,'unsafe actual product runtime closure'):
+     source.verify_contract(root,'a'*40,'0.0.2')
+   with zipfile.ZipFile(product,'w') as archive:
+    item=zipfile.ZipInfo('artifact/share/doc/hostwright/runtime-license-inventory.json')
+    item.create_system=3;item.external_attr=(stat.S_IFLNK|0o777)<<16
+    archive.writestr(item,source.canonical(runtime))
+    archive.writestr('artifact/share/hostwright/containerization/kernel/vmlinux',payload)
+   (release/'release-manifest.json').write_bytes(source.canonical(dict(artifactID='artifact',archive=dict(fileName=product.name,sha256=source.sha(product)))))
+   with mock.patch.object(source.subprocess,'run',return_value=subprocess.CompletedProcess([],0,stdout=source.canonical(verified))):
+    with self.assertRaisesRegex(ValueError,'product lacks exact runtime license inventory'):
+     source.verify_contract(root,'a'*40,'0.0.2')
  def test_explicit_gpg_requires_both_absolute_path_and_exact_digest(self):
   spec=importlib.util.spec_from_file_location('bundle',pathlib.Path(__file__).with_name('corresponding-source.py'));bundle=importlib.util.module_from_spec(spec);spec.loader.exec_module(bundle)
   for validate in (bundle.gpg_arguments,source.gpg_arguments):

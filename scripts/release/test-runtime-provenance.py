@@ -70,6 +70,16 @@ def fixture():
  return manifest,runtime,payloads,files
 
 class RuntimeProvenanceTests(unittest.TestCase):
+ def test_unselected_archive_duplicates_do_not_hide_ambiguous_selected_members(self):
+  def member(name,data):
+   header=name.encode().ljust(16)+b'0           '+b'0     '+b'0     '+b'644     '+str(len(data)).encode().ljust(10)+b'`\n'
+   return header+data+(b'\n' if len(data)%2 else b'')
+  archive=b'!<arch>\n'+member('main.o/',b'first')+member('other.o/',b'a')+member('other.o/',b'b')
+  self.assertEqual(v.archive_members(archive,{'main.o'})['main.o'],b'first')
+  with self.assertRaisesRegex(ValueError,'ambiguous duplicate archive member'):
+   v.archive_members(archive)
+  with self.assertRaisesRegex(ValueError,'ambiguous duplicate archive member'):
+   v.archive_members(archive,{'other.o'})
  def test_lld_map_uses_input_column_and_preserves_spaced_object_names(self):
   header='             VMA              LMA     Size Align Out     In      Symbol\n'
   internal='          200270           200270       24     4         <internal>:(.note.gnu.build-id)\n'

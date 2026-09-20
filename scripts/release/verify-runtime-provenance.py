@@ -270,7 +270,7 @@ def arm64_image(data):
             res2==res3==res4==0 and text_offset<image_size,
             'invalid arm64 Linux Image header')
 
-def archive_members(data):
+def archive_members(data, selected=None):
     require(data.startswith(b'!<arch>\n'), 'expected actual static archive')
     result={}; names=b''; offset=8
     while offset<len(data):
@@ -286,8 +286,9 @@ def archive_members(data):
                 start=int(name[1:]); require(start<len(names), 'invalid archive member name')
                 name=names[start:].split(b'/\n',1)[0].decode()
             else: name=name.rstrip('/')
-            require(name not in result, 'ambiguous duplicate archive member')
-            result[name]=raw
+            if name in result:
+                require(selected is not None and name not in selected, 'ambiguous duplicate archive member')
+            else:result[name]=raw
         offset+=60+size+(size%2)
     return result
 
@@ -329,7 +330,7 @@ def link_closure(link, output, projects, fetch, tools=None):
                 'selected map/archive file identity mismatch')
         if 'member' in record:
             require(record['mapInput'].endswith('('+record['member']+')'), 'archive member/map mismatch')
-            members=archive_members(data); require(record['member'] in members, 'selected archive member missing')
+            members=archive_members(data,{record['member']}); require(record['member'] in members, 'selected archive member missing')
             data=members[record['member']]
         require(digest(data)==record['objectSHA256'], 'selected object mismatch'); elf(data,True)
         require(record['sourceFiles'], 'selected object has no compiled-source attribution')

@@ -275,21 +275,27 @@ def archive_members(data, selected=None):
     result={}; names=b''; offset=8
     while offset<len(data):
         header=data[offset:offset+60]; require(len(header)==60 and header[58:]==b'`\n', 'invalid static archive header')
-        size=int(header[48:58]); raw=data[offset+60:offset+60+size]
+        size=int(header[48:58]); require(size>=0 and offset+60+size<=len(data), 'invalid static archive member size')
+        raw=data[offset+60:offset+60+size]
         require(len(raw)==size, 'truncated static archive')
         name=header[:16].decode().strip()
         if name=='//': names=raw
         elif name not in ('/','/SYM64/'):
             if name.startswith('#1/'):
-                length=int(name[3:]); name=raw[:length].rstrip(b'\0').decode(); raw=raw[length:]
+                length=int(name[3:]); require(0<length<=len(raw), 'invalid extended archive member name')
+                name=raw[:length].rstrip(b'\0').decode(); raw=raw[length:]
             elif re.fullmatch('/[0-9]+',name):
                 start=int(name[1:]); require(start<len(names), 'invalid archive member name')
                 name=names[start:].split(b'/\n',1)[0].decode()
             else: name=name.rstrip('/')
+            require(name and not re.search(r'[\x00-\x1f\x7f]',name), 'invalid static archive member name')
             if name in result:
                 require(selected is not None and name not in selected, 'ambiguous duplicate archive member')
             else:result[name]=raw
-        offset+=60+size+(size%2)
+        offset+=60+size
+        if size%2:
+            require(offset<len(data) and data[offset:offset+1]==b'\n', 'invalid static archive padding')
+            offset+=1
     return result
 
 def lld_map_inputs(data):

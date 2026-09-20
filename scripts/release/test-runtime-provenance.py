@@ -70,6 +70,14 @@ def fixture():
  return manifest,runtime,payloads,files
 
 class RuntimeProvenanceTests(unittest.TestCase):
+ def test_static_archive_rejects_nonprogressing_sizes_and_bad_boundaries(self):
+  header=b'main.o/         '+b'0           '+b'0     '+b'0     '+b'644     '
+  for size,payload in ((b'-60',b''),(b'3',b'a'),(b'1',b'a'),(b'0',b'')):
+   archive=b'!<arch>\n'+header+size.ljust(10)+b'`\n'+payload
+   if size==b'0':archive+=b'garbage'
+   with self.subTest(size=size,payload=payload),self.assertRaises(ValueError):v.archive_members(archive)
+  extended=b'!<arch>\n'+b'#1/4'.ljust(16)+b'0           '+b'0     '+b'0     '+b'644     '+b'2'.ljust(10)+b'`\n'+b'ab'
+  with self.assertRaisesRegex(ValueError,'invalid extended archive member name'):v.archive_members(extended)
  def test_unselected_archive_duplicates_do_not_hide_ambiguous_selected_members(self):
   def member(name,data):
    header=name.encode().ljust(16)+b'0           '+b'0     '+b'0     '+b'644     '+str(len(data)).encode().ljust(10)+b'`\n'

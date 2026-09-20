@@ -871,7 +871,23 @@ final class DistributionIntegrationTests: XCTestCase {
                 readers.leave()
             }
 
-            usleep(250_000)
+            var buildStarted = false
+            for _ in 0..<300 {
+                if !process.isRunning { break }
+                let childProbe = Process()
+                childProbe.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+                childProbe.arguments = ["-P", String(process.processIdentifier)]
+                childProbe.standardOutput = FileHandle.nullDevice
+                childProbe.standardError = FileHandle.nullDevice
+                try childProbe.run()
+                childProbe.waitUntilExit()
+                if childProbe.terminationStatus == 0 {
+                    buildStarted = true
+                    break
+                }
+                usleep(50_000)
+            }
+            XCTAssertTrue(buildStarted, "distribution build did not start its child process")
             XCTAssertTrue(process.isRunning)
             XCTAssertEqual(Darwin.kill(process.processIdentifier, SIGTERM), 0)
             process.waitUntilExit()

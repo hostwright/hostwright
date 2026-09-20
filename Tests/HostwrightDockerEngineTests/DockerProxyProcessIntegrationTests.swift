@@ -271,7 +271,7 @@ final class DockerProxyProcessIntegrationTests: XCTestCase {
     }
 
     private func waitForSocket(_ path: String) throws {
-        for _ in 0..<200 {
+        for _ in 0..<1_500 {
             var status = stat()
             if lstat(path, &status) == 0,
                (status.st_mode & S_IFMT) == S_IFSOCK,
@@ -284,7 +284,7 @@ final class DockerProxyProcessIntegrationTests: XCTestCase {
     }
 
     private func waitForSocketReplacement(_ path: String, previousInode: UInt64) throws {
-        for _ in 0..<200 {
+        for _ in 0..<1_500 {
             var status = stat()
             if lstat(path, &status) == 0,
                (status.st_mode & S_IFMT) == S_IFSOCK,

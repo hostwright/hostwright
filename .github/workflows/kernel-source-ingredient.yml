@@ -38,7 +38,7 @@ jobs:
             d3494056bb1a9726366499d790dfd44555d9f6e354cd4549143bf9c0b7ccb99c \
             gregkh-pinned-public-key.asc | sha256sum --check --status
           for name in linux-6.18.15.tar.xz linux-6.18.15.tar.sign; do
-            curl --fail --location --retry 3 --proto '=https' --tlsv1.2 \
+            curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' --tlsv1.2 \
               --output "$name" "https://cdn.kernel.org/pub/linux/kernel/v6.x/$name"
           done
           printf '%s  %s\n' \

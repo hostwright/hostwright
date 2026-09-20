@@ -137,7 +137,8 @@ class RuntimeProvenanceTests(unittest.TestCase):
   with mock.patch.object(v.subprocess,'run',return_value=subprocess.CompletedProcess([],1)) as run:
    with self.assertRaisesRegex(ValueError,'attestation verification failed'):v.authenticate(pathlib.Path(__file__),manifest['producer'],manifest['sourceCommit'])
   args=run.call_args.args[0]
-  self.assertEqual(args[args.index('--signer-workflow')+1],v.REPO+'/'+v.WORKFLOW)
+  self.assertEqual(args[args.index('--cert-identity')+1],'https://github.com/'+v.REPO+'/'+v.WORKFLOW+'@refs/heads/main')
+  self.assertNotIn('--signer-workflow',args)
   self.assertEqual(args[args.index('--source-digest')+1],manifest['sourceCommit'])
   self.assertIn('--deny-self-hosted-runners',args);self.assertNotIn('--custom-trusted-root',args)
  def test_source_bundle_and_actual_product_bytes_are_independently_compared(self):

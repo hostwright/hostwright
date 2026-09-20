@@ -127,7 +127,7 @@ def authenticate(filename, producer, source_commit):
             and type(producer['attempt']) is int and producer['attempt'] > 0, 'invalid producer binding')
     identity = 'https://github.com/'+REPO+'/'+WORKFLOW+'@refs/heads/main'
     command = ['gh','attestation','verify',str(filename),'--repo',REPO,'--hostname','github.com',
-               '--signer-workflow',REPO+'/'+WORKFLOW,'--signer-digest',source_commit,
+               '--signer-digest',source_commit,
                '--source-digest',source_commit,'--source-ref','refs/heads/main',
                '--cert-identity',identity,'--cert-oidc-issuer','https://token.actions.githubusercontent.com',
                '--deny-self-hosted-runners','--format','json']

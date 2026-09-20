@@ -47,11 +47,11 @@ class SourceTests(unittest.TestCase):
    write_product(runtime);binding=source.descriptor(root,'a'*40,'0.0.2')
    verified=dict(archiveSHA256=binding['archive']['sha256'],manifestSHA256=binding['manifest']['sha256'],releaseSourceRevision='a'*40,version='0.0.2')
    with mock.patch.object(source.subprocess,'run',return_value=subprocess.CompletedProcess([],0,stdout=source.canonical(verified))) as verifier:
-    with self.assertRaisesRegex(ValueError,'validator unavailable'):source.verify_contract(root,'a'*40,'0.0.2')
+    with self.assertRaisesRegex(ValueError,'legacy runtime source'):source.verify_contract(root,'a'*40,'0.0.2')
     self.assertIn('--expected-manifest-sha256',verifier.call_args.args[0]);self.assertIn('a'*40,verifier.call_args.args[0])
     import shutil
     target=root/'failed-stage';target.mkdir();shutil.copytree(release,target/'release');(target/'historic').write_bytes(b'preserve')
-    with self.assertRaisesRegex(ValueError,'validator unavailable'):source.install(target,directory,'a'*40,'0.0.2')
+    with self.assertRaisesRegex(ValueError,'legacy runtime source'):source.install(target,directory,'a'*40,'0.0.2')
     self.assertFalse((target/'source').exists());self.assertEqual((target/'historic').read_bytes(),b'preserve')
     altered=copy.deepcopy(runtime);altered['assets'][1]['sourceDistributionEvidence']['files']=['different'];write_product(altered)
     with self.assertRaisesRegex(ValueError,'differs'):source.verify_contract(root,'a'*40,'0.0.2')
@@ -74,6 +74,50 @@ class SourceTests(unittest.TestCase):
   self.assertEqual(source.source_evidence_contents(runtime),source.source_evidence_contents(dynamic))
   dynamic['assets'][1]['sourceDistributionEvidence']['files']=['changed']
   self.assertNotEqual(source.source_evidence_contents(runtime),source.source_evidence_contents(dynamic))
+ def test_new_runtime_stage_binds_actual_product_payloads_to_authenticated_source(self):
+  import io,subprocess,tarfile,zipfile
+  with tempfile.TemporaryDirectory() as temporary:
+   root=pathlib.Path(temporary);binding=fixtures.source_fixture(root);directory=root/'source'
+   manifest_path=directory/'source-manifest.json';manifest=source.parse(manifest_path.read_bytes())
+   manifest['kind']=source.NEW_RUNTIME_KIND
+   manifest_path.write_bytes(source.canonical(manifest))
+   runtime=dict(kind='hostwright.runtime-license-inventory.v1',schemaVersion=1,status='qualified',assets=[])
+   bundle=directory/binding['archive']['fileName']
+   with tarfile.open(bundle,'w:gz') as archive:
+    for name,data in [('source-manifest.json',manifest_path.read_bytes()),('licenses/runtime-license-inventory.json',source.canonical(runtime))]:
+     item=tarfile.TarInfo(name);item.size=len(data);archive.addfile(item,io.BytesIO(data))
+   (directory/'SOURCE_SHA256SUMS').write_text(source.sha(bundle)+'  '+bundle.name+'\n'+source.sha(manifest_path)+'  source-manifest.json\n')
+   release=root/'release';release.mkdir();product=release/'product.zip'
+   payload=b'actual signed product runtime bytes'
+   with zipfile.ZipFile(product,'w') as archive:
+    archive.writestr('artifact/share/doc/hostwright/runtime-license-inventory.json',source.canonical(runtime))
+    archive.writestr('artifact/share/hostwright/containerization/kernel/vmlinux',payload)
+   (release/'release-manifest.json').write_bytes(source.canonical(dict(artifactID='artifact',archive=dict(fileName=product.name,sha256=source.sha(product)))))
+   binding=source.descriptor(root,'a'*40,'0.0.2')
+   verified=dict(archiveSHA256=binding['archive']['sha256'],manifestSHA256=binding['manifest']['sha256'],releaseSourceRevision='a'*40,version='0.0.2')
+   with mock.patch.object(source.subprocess,'run',return_value=subprocess.CompletedProcess([],0,stdout=source.canonical(verified))),mock.patch.object(source,'qualified_runtime',return_value={'verified':True}) as validator:
+    source.verify_contract(root,'a'*40,'0.0.2')
+   self.assertEqual(validator.call_args.args[1],'a'*40)
+   self.assertEqual(validator.call_args.args[2],{'share/hostwright/containerization/kernel/vmlinux':payload})
+   import stat
+   with zipfile.ZipFile(product,'w') as archive:
+    archive.writestr('artifact/share/doc/hostwright/runtime-license-inventory.json',source.canonical(runtime))
+    item=zipfile.ZipInfo('artifact/share/hostwright/containerization/kernel/vmlinux')
+    item.create_system=3;item.external_attr=(stat.S_IFLNK|0o777)<<16
+    archive.writestr(item,payload)
+   (release/'release-manifest.json').write_bytes(source.canonical(dict(artifactID='artifact',archive=dict(fileName=product.name,sha256=source.sha(product)))))
+   with mock.patch.object(source.subprocess,'run',return_value=subprocess.CompletedProcess([],0,stdout=source.canonical(verified))),mock.patch.object(source,'qualified_runtime',return_value={'verified':True}):
+    with self.assertRaisesRegex(ValueError,'unsafe actual product runtime closure'):
+     source.verify_contract(root,'a'*40,'0.0.2')
+   with zipfile.ZipFile(product,'w') as archive:
+    item=zipfile.ZipInfo('artifact/share/doc/hostwright/runtime-license-inventory.json')
+    item.create_system=3;item.external_attr=(stat.S_IFLNK|0o777)<<16
+    archive.writestr(item,source.canonical(runtime))
+    archive.writestr('artifact/share/hostwright/containerization/kernel/vmlinux',payload)
+   (release/'release-manifest.json').write_bytes(source.canonical(dict(artifactID='artifact',archive=dict(fileName=product.name,sha256=source.sha(product)))))
+   with mock.patch.object(source.subprocess,'run',return_value=subprocess.CompletedProcess([],0,stdout=source.canonical(verified))):
+    with self.assertRaisesRegex(ValueError,'product lacks exact runtime license inventory'):
+     source.verify_contract(root,'a'*40,'0.0.2')
  def test_explicit_gpg_requires_both_absolute_path_and_exact_digest(self):
   spec=importlib.util.spec_from_file_location('bundle',pathlib.Path(__file__).with_name('corresponding-source.py'));bundle=importlib.util.module_from_spec(spec);spec.loader.exec_module(bundle)
   for validate in (bundle.gpg_arguments,source.gpg_arguments):

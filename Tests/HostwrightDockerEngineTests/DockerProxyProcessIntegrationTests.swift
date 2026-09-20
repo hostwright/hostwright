@@ -248,6 +248,10 @@ final class DockerProxyProcessIntegrationTests: XCTestCase {
             let url = URL(fileURLWithPath: configured)
             if FileManager.default.isExecutableFile(atPath: url.path) { return url }
         }
+        let builtProduct = Bundle(for: DockerProxyProcessIntegrationTests.self)
+            .bundleURL.deletingLastPathComponent()
+            .appendingPathComponent("hostwright-docker-proxy")
+        if FileManager.default.isExecutableFile(atPath: builtProduct.path) { return builtProduct }
         var directory = URL(fileURLWithPath: CommandLine.arguments[0])
             .deletingLastPathComponent()
         for _ in 0..<8 {

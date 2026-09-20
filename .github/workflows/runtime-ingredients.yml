@@ -61,6 +61,7 @@ jobs:
         with:
           subject-path: |
             ${{ runner.temp }}/runtime-ingredients/hostwright-netfilter-first
+            ${{ runner.temp }}/runtime-ingredients/hostwright-netfilter-second
             ${{ runner.temp }}/runtime-ingredients/hostwright-netfilter-buildinfo.txt
             ${{ runner.temp }}/runtime-ingredients/go-environment.json
             ${{ runner.temp }}/runtime-ingredients/hostwright-netfilter.sha256

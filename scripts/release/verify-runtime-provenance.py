@@ -263,6 +263,13 @@ def elf(data, relocatable=False):
             loads+=1
     require(relocatable or loads>0, 'missing executable ELF load segment')
 
+def arm64_image(data):
+    require(len(data)>=64 and data[56:60]==b'ARM\x64', 'expected raw arm64 Linux Image')
+    text_offset,image_size,flags,res2,res3,res4=struct.unpack_from('<QQQQQQ',data,8)
+    require(image_size>=len(data) and image_size<=MAX_FILE and (flags & ~0xe)==0 and
+            res2==res3==res4==0 and text_offset<image_size,
+            'invalid arm64 Linux Image header')
+
 def archive_members(data):
     require(data.startswith(b'!<arch>\n'), 'expected actual static archive')
     result={}; names=b''; offset=8
@@ -461,7 +468,7 @@ def verify(manifest_data, runtime, payloads, fetch, source_commit):
         require(set(record['components'])==components and len(record['components'])==len(components), 'OCI file component attribution mismatch')
     for name,data in extracted.items(): link_closure(links[name],data,projects,fetch,tools)
     kernel=manifest['kernel']; require(kernel['project'] in projects, 'kernel source project missing')
-    kernel_data=payloads[path(kernel['payloadPath'])]; elf(kernel_data)
+    kernel_data=payloads[path(kernel['payloadPath'])]; arm64_image(kernel_data)
     require(digest(kernel_data)==kernel['outputSHA256'] and kernel['patches'] is not None, 'kernel build output mismatch')
     kernel_project=next(p for p in manifest['sourceProjects'] if p['identity']==kernel['project'])
     require({(r['path'],r['sha256']) for r in kernel['patches']}==

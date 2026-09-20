@@ -12,6 +12,12 @@ def elf(relocatable=False):
   struct.pack_into('<I',data,64,1)
  return bytes(data)
 
+def arm64_image():
+ data=bytearray(128)
+ struct.pack_into('<QQQQQQ',data,8,0,4096,0xa,0,0,0)
+ data[56:60]=b'ARM\x64'
+ return bytes(data)
+
 def tar(files):
  buffer=io.BytesIO()
  with tarfile.open(fileobj=buffer,mode='w:gz') as archive:
@@ -54,16 +60,23 @@ def fixture():
  payloads[prefix+'/index.json']=v.canonical(dict(schemaVersion=2,mediaType='application/vnd.oci.image.index.v1+json',manifests=[image]))
  payloads[prefix+'/oci-layout']=v.canonical(dict(imageLayoutVersion='1.0.0'))
  kernel='share/hostwright/containerization/kernel/vmlinux';loader='share/hostwright/containerization/guest/hostwright-netfilter'
- payloads[kernel]=elf();payloads[loader]=elf()
+ payloads[kernel]=arm64_image();payloads[loader]=elf()
  runtime=dict(kind='hostwright.runtime-license-inventory.v1',schemaVersion=1,status='qualified',assets=[dict(identity=i,status='qualified',blockers=[],licenseExpression='MIT') for i in ('kata-linux-kernel','apple-vminit-oci','hostwright-netfilter-loader')])
  manifest=dict(kind=v.KIND,schemaVersion=1,sourceCommit=project['commit'],closureMode='new-source-build',producer=dict(commit=project['commit'],runID=1,attempt=1),
   runtimeInventorySHA256=v.digest(v.canonical(runtime)),payloads=[dict(path=p,sha256=v.digest(d),sizeBytes=len(d)) for p,d in payloads.items()],sourceProjects=[project],
   oci=dict(prefix=prefix,links=[link('sbin/vminitd'),link('sbin/vmexec')],files=[dict(path=n,sha256=v.digest(elf()),sizeBytes=len(elf()),type='elf',components=['compiled-project']) for n in ['sbin/vminitd','sbin/vmexec']]),loader=link(loader),toolchain=tools,
   licensing={i:[dict(project='compiled-project',spdx='MIT',licenses=['proof/LICENSE'],notices=['proof/NOTICE'])] for i in ['kata-linux-kernel','apple-vminit-oci','hostwright-netfilter-loader']},
-  kernel=dict(project='compiled-project',payloadPath=kernel,outputSHA256=v.digest(elf()),config=add('proof/kernel.config',b'CONFIG_ARM64=y\n'),compiler=tools[0]['executable'],commands=add('proof/kernel.argv',v.canonical(['/toolchains/clang','-o','vmlinux','main.c'])),patches=[]))
+  kernel=dict(project='compiled-project',payloadPath=kernel,outputSHA256=v.digest(arm64_image()),config=add('proof/kernel.config',b'CONFIG_ARM64=y\n'),compiler=tools[0]['executable'],commands=add('proof/kernel.argv',v.canonical(['/toolchains/clang','-o','vmlinux','main.c'])),patches=[]))
  return manifest,runtime,payloads,files
 
 class RuntimeProvenanceTests(unittest.TestCase):
+ def test_kernel_payload_requires_raw_arm64_image_header(self):
+  v.arm64_image(arm64_image())
+  for payload in (elf(),b'ARM\x64',arm64_image()[:40],arm64_image()[:56]+b'bad!'+arm64_image()[60:]):
+   with self.subTest(payload=payload[:8]),self.assertRaises(ValueError):v.arm64_image(payload)
+  for offset,value in ((16,64),(24,1),(32,1),(8,4096)):
+   payload=bytearray(arm64_image());struct.pack_into('<Q',payload,offset,value)
+   with self.subTest(offset=offset),self.assertRaises(ValueError):v.arm64_image(payload)
  def test_static_sdk_spdx_identifiers_require_exact_known_values(self):
   self.assertEqual(v.spdx('0BSD AND bzip2-1.0.6'),'0BSD AND bzip2-1.0.6')
   for expression in ('0bsd','bzip2-1.0.5','LicenseRef-bzip2'):

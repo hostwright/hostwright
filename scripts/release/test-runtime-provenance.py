@@ -64,6 +64,11 @@ def fixture():
  return manifest,runtime,payloads,files
 
 class RuntimeProvenanceTests(unittest.TestCase):
+ def test_static_sdk_spdx_identifiers_require_exact_known_values(self):
+  self.assertEqual(v.spdx('0BSD AND bzip2-1.0.6'),'0BSD AND bzip2-1.0.6')
+  for expression in ('0bsd','bzip2-1.0.5','LicenseRef-bzip2'):
+   with self.subTest(expression=expression),self.assertRaisesRegex(ValueError,'unsupported SPDX identifier'):
+    v.spdx(expression)
  def test_authenticated_seam_accepts_actual_byte_bindings_without_receipt_verification_flags(self):
   manifest,runtime,payloads,files=fixture()
   with mock.patch.object(v,'authenticate') as auth:

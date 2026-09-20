@@ -45,7 +45,7 @@ def fixture():
  object=elf(True);header=(b'main.o/         '+b'0           '+b'0     '+b'0     '+b'644     '+str(len(object)).encode().ljust(10)+b'`\n')
  archive=b'!<arch>\n'+header+object
  def link(name):
-  return dict(path=name,outputSHA256=v.digest(elf()),map=add('proof/'+name.replace('/','-')+'.map',b'VMA LMA Size Align Out In Symbol\n0 0 1 1 libcompiled.a(main.o):(.text)\n'),
+  return dict(path=name,outputSHA256=v.digest(elf()),map=add('proof/'+name.replace('/','-')+'.map',b'             VMA              LMA     Size Align Out     In      Symbol\n          200270           200270       24     4         libcompiled.a(main.o):(.text)\n'),
    commands=[add('proof/'+name.replace('/','-')+'.argv',v.canonical(['/toolchains/ld.lld','@response','-Map=output.map','-o','output','libcompiled.a']))],
    responseFiles=[add('proof/'+name.replace('/','-')+'.rsp',b'libcompiled.a\n')],
    selectedInputs=[dict(mapInput='libcompiled.a(main.o)',file=add('proof/libcompiled.a',archive),member='main.o',objectSHA256=v.digest(object),
@@ -70,6 +70,14 @@ def fixture():
  return manifest,runtime,payloads,files
 
 class RuntimeProvenanceTests(unittest.TestCase):
+ def test_lld_map_uses_input_column_and_preserves_spaced_object_names(self):
+  header='             VMA              LMA     Size Align Out     In      Symbol\n'
+  internal='          200270           200270       24     4         <internal>:(.note.gnu.build-id)\n'
+  selected='          200294           200294        4     4         /build/OrderedSet+Partial SetAlgebra.swift.o:(.text)\n'
+  symbol='          200294           200294        4     4                 mldsa::(anonymous namespace)::run()\n'
+  self.assertEqual(v.lld_map_inputs(header+internal+selected+symbol),{'/build/OrderedSet+Partial SetAlgebra.swift.o'})
+  with self.assertRaisesRegex(ValueError,'unsupported LLD input row'):
+   v.lld_map_inputs(header+'          200294           200294        4     4         unexplained-input\n')
  def test_kernel_payload_requires_raw_arm64_image_header(self):
   v.arm64_image(arm64_image())
   for payload in (elf(),b'ARM\x64',arm64_image()[:40],arm64_image()[:56]+b'bad!'+arm64_image()[60:]):

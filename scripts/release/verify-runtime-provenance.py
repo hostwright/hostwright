@@ -291,15 +291,31 @@ def archive_members(data):
         offset+=60+size+(size%2)
     return result
 
+def lld_map_inputs(data):
+    lines=data.splitlines()
+    require(lines and re.fullmatch(r'\s*VMA\s+LMA\s+Size\s+Align\s+Out\s+In\s+Symbol\s*',lines[0]),
+            'missing actual LLD map columns')
+    out_column=lines[0].index('Out'); in_column=lines[0].index('In',out_column+3)
+    symbol_column=lines[0].index('Symbol',in_column+2)
+    selected=set()
+    for line in lines[1:]:
+        if len(line)<=in_column or line[out_column:in_column].strip() or not line[in_column:symbol_column].strip():
+            continue
+        require(':(' in line[in_column:], 'unsupported LLD input row')
+        name=line[in_column:].split(':(',1)[0]
+        if name=='<internal>':continue
+        require(re.fullmatch(r'[^\x00-\x1f\x7f]+\.a\([^()]+\)|[^\x00-\x1f\x7f]+\.o',name),
+                'unsupported LLD map input')
+        selected.add(name)
+    require(selected, 'empty actual LLD selected input set')
+    return selected
+
 def link_closure(link, output, projects, fetch, tools=None):
     elf(output)
     require(link['outputSHA256']==digest(output), 'link output mismatch')
     require(tools is not None, 'missing authenticated linker toolchain')
     map_data=substantive(link['map'],fetch).decode()
-    require('VMA' in map_data and 'Out' in map_data and 'In' in map_data, 'missing actual LLD map')
-    selected=set(re.findall(r'([^\s]+):\(',map_data))
-    require(all(re.fullmatch(r'[^\s]+\.a\([^\s()]+\)|[^\s]+\.o',name) for name in selected),
-            'unsupported or unaccounted LLD map input')
+    selected=lld_map_inputs(map_data)
     require(selected and len(selected)==len(link['selectedInputs']) and
             selected=={r['mapInput'] for r in link['selectedInputs']}, 'link map/member ledger coverage mismatch')
     require(link['commands'] and link['responseFiles'], 'missing actual linker commands/response files')

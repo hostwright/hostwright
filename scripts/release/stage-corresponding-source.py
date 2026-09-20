@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Bind source bytes to staged products; qualification requires independent verification."""
-import argparse,hashlib,json,pathlib,re,shutil,subprocess,tarfile,zipfile
+import argparse,hashlib,importlib.util,json,pathlib,re,shutil,subprocess,tarfile,zipfile
 EMPTY_STATUS_SHA256=hashlib.sha256(b'').hexdigest()
 KIND='hostwright.corresponding-source.v1'
+NEW_RUNTIME_KIND='hostwright.corresponding-source.new-runtime.v1'
 
 def sha(path):
  path=pathlib.Path(path)
@@ -26,7 +27,7 @@ def archive_name(commit,version):
  return 'hostwright-'+version+'-'+commit[:12]+'-corresponding-source.tar.gz'
 def validate_manifest(manifest,commit,version):
  state=manifest.get('preparedSourceState',{})
- if (manifest.get('kind')!=KIND or manifest.get('schemaVersion')!=1 or manifest.get('releaseSourceRevision')!=commit or manifest.get('version')!=version or manifest.get('status')!='prepared-not-release-qualified' or manifest.get('publicationRoute')!='same-github-release-alongside-binaries' or manifest.get('upstreamSignatureVerified') is not True or state.get('head')!=commit or state.get('clean') is not True or state.get('gitStatusSHA256')!=EMPTY_STATUS_SHA256):
+ if (manifest.get('kind') not in (KIND,NEW_RUNTIME_KIND) or manifest.get('schemaVersion')!=1 or manifest.get('releaseSourceRevision')!=commit or manifest.get('version')!=version or manifest.get('status')!='prepared-not-release-qualified' or manifest.get('publicationRoute')!='same-github-release-alongside-binaries' or manifest.get('upstreamSignatureVerified') is not True or state.get('head')!=commit or state.get('clean') is not True or state.get('gitStatusSHA256')!=EMPTY_STATUS_SHA256):
   raise ValueError('source manifest is mismatched, dirty, or lacks pinned signature preparation')
 def descriptor(root,commit,version):
  source=root/'source';name=archive_name(commit,version)
@@ -38,14 +39,16 @@ def descriptor(root,commit,version):
  checksums=(archive_sha+'  '+name+'\n'+manifest_sha+'  source-manifest.json\n').encode()
  if read(source/'SOURCE_SHA256SUMS')!=checksums:raise ValueError('source checksum inventory mismatch')
  return dict(kind='hostwright.corresponding-source-stage.v1',sourceCommit=commit,version=version,
-             sourceManifestKind=KIND,sourceManifestSchemaVersion=1,
+             sourceManifestKind=manifest['kind'],sourceManifestSchemaVersion=1,
              archive=dict(fileName=name,sha256=archive_sha,sizeBytes=(source/name).stat().st_size),
              manifest=dict(fileName='source-manifest.json',sha256=manifest_sha,sizeBytes=len(manifest_data)),
              checksums=dict(fileName='SOURCE_SHA256SUMS',sha256=sha(source/'SOURCE_SHA256SUMS')))
-def qualified_runtime(runtime):
- # No validator yet binds the actual OCI static link/build provenance to source and licenses.
- # Producer signatures and matching inventory JSON cannot establish that missing proof.
- raise ValueError('runtime provenance validator unavailable: source stage fails closed; editable status/license/evidence fields cannot qualify actual runtime bytes')
+def qualified_runtime(archive=None,commit=None,product_payloads=None):
+ if archive is None or commit is None or product_payloads is None:
+  raise ValueError('runtime provenance validator unavailable without authenticated actual runtime/source inputs')
+ spec=importlib.util.spec_from_file_location('runtime_provenance',pathlib.Path(__file__).with_name('verify-runtime-provenance.py'))
+ validator=importlib.util.module_from_spec(spec);spec.loader.exec_module(validator)
+ return validator.verify_source_bundle(archive,commit,product_payloads)
 def source_evidence_contents(runtime):
  result=parse(canonical(runtime));result.pop('payloadFiles',None)
  for asset in result['assets']:
@@ -77,8 +80,15 @@ def verify_contract(root,commit,version,gpg=None,gpg_sha256=None):
   if len(matches)!=1 or matches[0].file_size>16*1024**2:raise ValueError('product lacks exact runtime license inventory')
   product_runtime=parse(archive.read(matches[0]))
  if source_evidence_contents(source_runtime)!=source_evidence_contents(product_runtime):raise ValueError('product runtime source evidence differs from corresponding-source contents')
- qualified_runtime(source_runtime)
- qualified_runtime(product_runtime)
+ if binding['sourceManifestKind']!=NEW_RUNTIME_KIND:
+  raise ValueError('legacy runtime source lacks authenticated actual-byte provenance')
+ prefix=release['artifactID']+'/'
+ with zipfile.ZipFile(product) as product_archive:
+  entries=[item for item in product_archive.infolist() if item.filename.startswith(prefix+'share/hostwright/containerization/') and not item.is_dir()]
+  if len({item.filename for item in entries})!=len(entries) or any(item.file_size>2*1024**3 for item in entries):raise ValueError('unsafe actual product runtime closure')
+  product_payloads={item.filename[len(prefix):]:product_archive.read(item) for item in entries}
+ with tarfile.open(source/binding['archive']['fileName'],'r:gz') as source_archive:
+  qualified_runtime(source_archive,commit,product_payloads)
  return binding
 
 def install(root,prepared,commit,version,gpg=None,gpg_sha256=None):

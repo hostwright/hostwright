@@ -3,6 +3,7 @@
 import argparse
 import gzip
 import hashlib
+import importlib.util
 import io
 import json
 import os
@@ -119,12 +120,19 @@ def verify(bundle, expected_archive=None, expected_manifest=None, expected_sourc
         data=archive.extractfile(manifest_member).read();manifest=json.loads(data)
         manifest_sha=hashlib.sha256(data).hexdigest()
         if data!=canonical(manifest) or (expected_manifest and manifest_sha!=expected_manifest):raise ValueError('source manifest digest/canonical encoding mismatch')
-        if manifest['kind']!='hostwright.corresponding-source.v1' or manifest['schemaVersion']!=1 or manifest['pins']!=PINS:
+        source_kind=manifest['kind']
+        if manifest['schemaVersion']!=1 or (source_kind!='hostwright.corresponding-source.new-runtime.v1' and (source_kind!='hostwright.corresponding-source.v1' or manifest.get('pins')!=PINS)):
             raise ValueError('unexpected source bundle schema or pins')
         if not re.fullmatch('[a-f0-9]{40}',manifest['releaseSourceRevision']) or not valid_version(manifest['version']):raise ValueError('invalid source/version binding')
-        if manifest['status']!='prepared-not-release-qualified' or manifest['publicationRoute']!='same-github-release-alongside-binaries':raise ValueError('source preparation cannot assert release authority')
+        if manifest['status']!='prepared-not-release-qualified' or manifest['publicationRoute']!='same-github-release-alongside-binaries' or manifest.get('upstreamSignatureVerified') is not True:raise ValueError('source preparation lacks authenticated upstream signature')
         if (expected_source and manifest['releaseSourceRevision']!=expected_source) or (expected_version and manifest['version']!=expected_version):raise ValueError('source bundle differs from accepted source/version')
         verify_records(archive,manifest['files'])
+        if source_kind=='hostwright.corresponding-source.new-runtime.v1':
+            spec=importlib.util.spec_from_file_location('runtime_provenance',pathlib.Path(__file__).with_name('verify-runtime-provenance.py'))
+            validator=importlib.util.module_from_spec(spec);spec.loader.exec_module(validator)
+            validator.verify_source_bundle(archive,manifest['releaseSourceRevision'])
+            return dict(archiveSHA256=archive_sha,manifestSHA256=manifest_sha,sizeBytes=bundle.stat().st_size,
+                        version=manifest['version'],releaseSourceRevision=manifest['releaseSourceRevision'],status=manifest['status'])
         records={r['path']:r for r in manifest['files']}
         if records['kernel/linux-6.18.15.tar.xz']['sha256']!=PINS['kernelSourceSHA256'] or records['kernel/linux-6.18.15.tar.xz']['sizeBytes']!=PINS['kernelSourceSizeBytes'] or records['kernel/actual.config']['sha256']!=PINS['kernelConfigurationSHA256']:
             raise ValueError('kernel corresponding-source pin mismatch')

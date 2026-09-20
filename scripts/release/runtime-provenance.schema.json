@@ -1,0 +1,663 @@
+{
+  "$defs": {
+    "goLoader": {
+      "properties": {
+        "commands": {
+          "items": {
+            "$ref": "#/$defs/record"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "compiler": {
+          "$ref": "#/$defs/record"
+        },
+        "format": {
+          "const": "go-buildinfo-v1"
+        },
+        "goRuntimeProject": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "goVersion": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "moduleRevisions": {
+          "type": "object"
+        },
+        "modules": {
+          "items": {
+            "properties": {
+              "buildInfo": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "minItems": 2,
+                "type": "array"
+              },
+              "project": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "revision": {
+                "pattern": "^[a-f0-9]{40}$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "project",
+              "buildInfo",
+              "revision"
+            ],
+            "type": "object"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "outputSHA256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        },
+        "packageTrace": {
+          "$ref": "#/$defs/record"
+        },
+        "path": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "project": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "sourceFiles": {
+          "items": {
+            "$ref": "#/$defs/sourceFile"
+          },
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "format",
+        "path",
+        "outputSHA256",
+        "project",
+        "goRuntimeProject",
+        "goVersion",
+        "modules",
+        "sourceFiles",
+        "commands",
+        "compiler",
+        "moduleRevisions",
+        "packageTrace"
+      ],
+      "type": "object"
+    },
+    "kernel": {
+      "properties": {
+        "commands": {
+          "$ref": "#/$defs/record"
+        },
+        "compiler": {
+          "$ref": "#/$defs/record"
+        },
+        "config": {
+          "$ref": "#/$defs/record"
+        },
+        "outputSHA256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        },
+        "patches": {
+          "items": {
+            "$ref": "#/$defs/record"
+          },
+          "minItems": 0,
+          "type": "array"
+        },
+        "payloadPath": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "project": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "project",
+        "payloadPath",
+        "outputSHA256",
+        "config",
+        "compiler",
+        "commands",
+        "patches"
+      ],
+      "type": "object"
+    },
+    "licensing": {
+      "properties": {
+        "licenses": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "notices": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "project": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "spdx": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "project",
+        "spdx",
+        "licenses",
+        "notices"
+      ],
+      "type": "object"
+    },
+    "link": {
+      "properties": {
+        "commands": {
+          "items": {
+            "$ref": "#/$defs/record"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "map": {
+          "$ref": "#/$defs/record"
+        },
+        "outputSHA256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        },
+        "path": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "responseFiles": {
+          "items": {
+            "$ref": "#/$defs/record"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "selectedInputs": {
+          "items": {
+            "$ref": "#/$defs/selected"
+          },
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "path",
+        "outputSHA256",
+        "map",
+        "commands",
+        "responseFiles",
+        "selectedInputs"
+      ],
+      "type": "object"
+    },
+    "ociFile": {
+      "properties": {
+        "components": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "path": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        },
+        "sizeBytes": {
+          "maximum": 2147483648,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "source": {
+          "$ref": "#/$defs/sourceFile"
+        },
+        "type": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "sha256",
+        "sizeBytes",
+        "type",
+        "components"
+      ],
+      "type": "object"
+    },
+    "patch": {
+      "properties": {
+        "afterInventorySHA256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        },
+        "beforeInventorySHA256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        },
+        "path": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        },
+        "sizeBytes": {
+          "maximum": 2147483648,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "sha256",
+        "sizeBytes",
+        "beforeInventorySHA256",
+        "afterInventorySHA256"
+      ],
+      "type": "object"
+    },
+    "project": {
+      "properties": {
+        "archive": {
+          "$ref": "#/$defs/record"
+        },
+        "commit": {
+          "pattern": "^[a-f0-9]{40}$",
+          "type": "string"
+        },
+        "commitObject": {
+          "$ref": "#/$defs/record"
+        },
+        "identity": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "inventory": {
+          "$ref": "#/$defs/record"
+        },
+        "licenses": {
+          "items": {
+            "$ref": "#/$defs/sourceLicense"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "notices": {
+          "items": {
+            "$ref": "#/$defs/sourceLicense"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "patches": {
+          "items": {
+            "$ref": "#/$defs/patch"
+          },
+          "minItems": 0,
+          "type": "array"
+        },
+        "spdx": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "tree": {
+          "pattern": "^[a-f0-9]{40}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "identity",
+        "commit",
+        "tree",
+        "commitObject",
+        "archive",
+        "inventory",
+        "licenses",
+        "notices",
+        "patches",
+        "spdx"
+      ],
+      "type": "object"
+    },
+    "record": {
+      "properties": {
+        "path": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        },
+        "sizeBytes": {
+          "maximum": 2147483648,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "sha256",
+        "sizeBytes"
+      ],
+      "type": "object"
+    },
+    "selected": {
+      "properties": {
+        "file": {
+          "$ref": "#/$defs/record"
+        },
+        "mapInput": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "member": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "objectSHA256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        },
+        "sourceFiles": {
+          "items": {
+            "$ref": "#/$defs/sourceFile"
+          },
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "mapInput",
+        "file",
+        "objectSHA256",
+        "sourceFiles"
+      ],
+      "type": "object"
+    },
+    "sourceFile": {
+      "properties": {
+        "path": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "project": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project",
+        "path",
+        "sha256"
+      ],
+      "type": "object"
+    },
+    "sourceLicense": {
+      "properties": {
+        "component": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "path": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        },
+        "sizeBytes": {
+          "maximum": 2147483648,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sourcePath": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "spdx": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "sha256",
+        "sizeBytes",
+        "sourcePath",
+        "component",
+        "spdx"
+      ],
+      "type": "object"
+    },
+    "tool": {
+      "properties": {
+        "environment": {
+          "$ref": "#/$defs/record"
+        },
+        "executable": {
+          "$ref": "#/$defs/record"
+        },
+        "executablePath": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "identity": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "loadedLibraries": {
+          "items": {
+            "$ref": "#/$defs/record"
+          },
+          "minItems": 0,
+          "type": "array"
+        },
+        "version": {
+          "$ref": "#/$defs/record"
+        }
+      },
+      "required": [
+        "identity",
+        "executablePath",
+        "executable",
+        "version",
+        "environment",
+        "loadedLibraries"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "hostwright.runtime-provenance.v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Schema is structural only. Qualification requires actual byte/source/link checks and cryptographically authenticated fixed producer. Unknown receipt flags confer no authority. Current profile rejects multi-layer OCI, LTO/non-ELF selected inputs, source additions/deletions/mode/binary patches.",
+  "properties": {
+    "closureMode": {
+      "const": "new-source-build"
+    },
+    "kernel": {
+      "$ref": "#/$defs/kernel"
+    },
+    "kind": {
+      "const": "hostwright.runtime-provenance.v1"
+    },
+    "licensing": {
+      "properties": {
+        "apple-vminit-oci": {
+          "items": {
+            "$ref": "#/$defs/licensing"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "hostwright-netfilter-loader": {
+          "items": {
+            "$ref": "#/$defs/licensing"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "kata-linux-kernel": {
+          "items": {
+            "$ref": "#/$defs/licensing"
+          },
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "kata-linux-kernel",
+        "apple-vminit-oci",
+        "hostwright-netfilter-loader"
+      ],
+      "type": "object"
+    },
+    "loader": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/link"
+        },
+        {
+          "$ref": "#/$defs/goLoader"
+        }
+      ]
+    },
+    "oci": {
+      "properties": {
+        "files": {
+          "items": {
+            "$ref": "#/$defs/ociFile"
+          },
+          "minItems": 2,
+          "type": "array"
+        },
+        "links": {
+          "items": {
+            "$ref": "#/$defs/link"
+          },
+          "minItems": 2,
+          "type": "array"
+        },
+        "prefix": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "prefix",
+        "links",
+        "files"
+      ],
+      "type": "object"
+    },
+    "payloads": {
+      "items": {
+        "$ref": "#/$defs/record"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "producer": {
+      "properties": {
+        "attempt": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "commit": {
+          "pattern": "^[a-f0-9]{40}$",
+          "type": "string"
+        },
+        "runID": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "commit",
+        "runID",
+        "attempt"
+      ],
+      "type": "object"
+    },
+    "runtimeInventorySHA256": {
+      "pattern": "^[a-f0-9]{64}$",
+      "type": "string"
+    },
+    "schemaVersion": {
+      "const": 1
+    },
+    "sourceCommit": {
+      "pattern": "^[a-f0-9]{40}$",
+      "type": "string"
+    },
+    "sourceProjects": {
+      "items": {
+        "$ref": "#/$defs/project"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "toolchain": {
+      "items": {
+        "$ref": "#/$defs/tool"
+      },
+      "minItems": 2,
+      "type": "array"
+    }
+  },
+  "required": [
+    "kind",
+    "schemaVersion",
+    "sourceCommit",
+    "closureMode",
+    "producer",
+    "runtimeInventorySHA256",
+    "payloads",
+    "sourceProjects",
+    "oci",
+    "kernel",
+    "loader",
+    "toolchain",
+    "licensing"
+  ],
+  "type": "object"
+}

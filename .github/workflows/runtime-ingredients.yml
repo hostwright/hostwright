@@ -1,0 +1,74 @@
+name: Authenticated runtime ingredients
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  guest-loader:
+    name: Build and attest the guest loader
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - name: Check out the exact main commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Set up the locked Go toolchain
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: Guest/HostwrightNetfilter/go.mod
+          cache-dependency-path: Guest/HostwrightNetfilter/go.sum
+      - name: Build, test and retain actual loader inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = hostwright/hostwright
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          mkdir -p "$RUNNER_TEMP/runtime-ingredients"
+          cd Guest/HostwrightNetfilter
+          test -z "$(gofmt -l .)"
+          GOTOOLCHAIN=local go test -mod=readonly ./...
+          for build in first second; do
+            GOTOOLCHAIN=local GOOS=linux GOARCH=arm64 CGO_ENABLED=0 \
+              go build -mod=readonly -trimpath -buildvcs=false \
+                -ldflags='-buildid= -s -w' \
+                -o "$RUNNER_TEMP/runtime-ingredients/hostwright-netfilter-$build" .
+          done
+          cmp "$RUNNER_TEMP/runtime-ingredients/hostwright-netfilter-first" \
+            "$RUNNER_TEMP/runtime-ingredients/hostwright-netfilter-second"
+          file "$RUNNER_TEMP/runtime-ingredients/hostwright-netfilter-first" \
+            | grep -F 'ELF 64-bit LSB executable, ARM aarch64'
+          go version -m "$RUNNER_TEMP/runtime-ingredients/hostwright-netfilter-first" \
+            > "$RUNNER_TEMP/runtime-ingredients/hostwright-netfilter-buildinfo.txt"
+          GOTOOLCHAIN=local go env -json GOVERSION GOOS GOARCH GOMOD GOWORK GOPROXY GOSUMDB \
+            > "$RUNNER_TEMP/runtime-ingredients/go-environment.json"
+          sha256sum "$RUNNER_TEMP/runtime-ingredients/hostwright-netfilter-first" \
+            > "$RUNNER_TEMP/runtime-ingredients/hostwright-netfilter.sha256"
+          test -z "$(git -C ../.. status --porcelain=v1 --untracked-files=all)"
+      - name: Attest the built loader and its retained build inputs
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            ${{ runner.temp }}/runtime-ingredients/hostwright-netfilter-first
+            ${{ runner.temp }}/runtime-ingredients/hostwright-netfilter-second
+            ${{ runner.temp }}/runtime-ingredients/hostwright-netfilter-buildinfo.txt
+            ${{ runner.temp }}/runtime-ingredients/go-environment.json
+            ${{ runner.temp }}/runtime-ingredients/hostwright-netfilter.sha256
+      - name: Retain the attested loader and build inputs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: runtime-guest-loader-${{ github.sha }}
+          path: ${{ runner.temp }}/runtime-ingredients/
+          retention-days: 30
+          if-no-files-found: error

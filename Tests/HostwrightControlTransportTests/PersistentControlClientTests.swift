@@ -465,6 +465,7 @@ final class PersistentControlClientTests: XCTestCase {
       ".build/p09c-\(compactID.prefix(12))",
       isDirectory: true
     )
+    try FileManager.default.createDirectory(at: root.deletingLastPathComponent(), withIntermediateDirectories: true)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
     try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: root.path)
     return root

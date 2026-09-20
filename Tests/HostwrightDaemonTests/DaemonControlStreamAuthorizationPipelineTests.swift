@@ -241,8 +241,7 @@ final class DaemonControlStreamAuthorizationPipelineTests: XCTestCase {
     subjects: [String],
     _ body: (Fixture) throws -> Void
   ) throws {
-    let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-      .appendingPathComponent(".build", isDirectory: true)
+    let root = FileManager.default.temporaryDirectory
       .appendingPathComponent("hw-p09-stream-auth-\(UUID().uuidString)", isDirectory: true)
     try FileManager.default.createDirectory(
       at: root,

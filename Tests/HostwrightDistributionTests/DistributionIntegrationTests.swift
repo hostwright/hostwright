@@ -10,7 +10,7 @@ final class DistributionIntegrationTests: XCTestCase {
 
     func testPackageRemoveCLIRefusesBeforeInspectingOrMutatingPrefix() throws {
         try withTemporaryRoot { root in
-            let tool = repositoryRoot().appendingPathComponent(".build/debug/hostwright-dist")
+            let tool = builtProductsDirectory().appendingPathComponent("hostwright-dist")
             let absentPrefix = root.appendingPathComponent("package-remove-must-not-create")
 
             let result = try runExecutable(tool, arguments: [
@@ -59,7 +59,7 @@ final class DistributionIntegrationTests: XCTestCase {
     func testBuiltDistributionToolRunsBlockedArtifactAndLifecycleEvidence() throws {
         try withTemporaryRoot { root in
             let repository = repositoryRoot()
-            let binaries = repository.appendingPathComponent(".build/debug", isDirectory: true)
+            let binaries = builtProductsDirectory()
             let tool = binaries.appendingPathComponent("hostwright-dist")
             let common = [
                 "--hostwright-binary", binaries.appendingPathComponent("hostwright").path,
@@ -841,7 +841,7 @@ final class DistributionIntegrationTests: XCTestCase {
             ).standardOutput.trimmingCharacters(in: .whitespacesAndNewlines)
 
             let process = Process()
-            process.executableURL = repository.appendingPathComponent(".build/debug/hostwright-dist")
+            process.executableURL = builtProductsDirectory().appendingPathComponent("hostwright-dist")
             process.arguments = [
                 "build",
                 "--source-root", source.path,
@@ -887,8 +887,7 @@ final class DistributionIntegrationTests: XCTestCase {
 
     func testAssemblerRejectsWrongNetworkHelperContractVersions() throws {
         try withTemporaryRoot { root in
-            let binaries = repositoryRoot()
-                .appendingPathComponent(".build/debug", isDirectory: true)
+            let binaries = builtProductsDirectory()
             for (name, networkHelper, providerWorker) in [
                 (
                     "wrong-network-helper",
@@ -930,7 +929,7 @@ final class DistributionIntegrationTests: XCTestCase {
         networkProviderWorkerBinary: URL? = nil
     ) throws -> DistributionBuildReport {
         let repository = repositoryRoot()
-        let binaries = repository.appendingPathComponent(".build/debug", isDirectory: true)
+        let binaries = builtProductsDirectory()
         return try DistributionAssembler().assemble(
             DistributionAssemblyRequest(
                 hostwrightBinary: binaries.appendingPathComponent("hostwright"),
@@ -968,6 +967,10 @@ final class DistributionIntegrationTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
+    }
+
+    private func builtProductsDirectory() -> URL {
+        Bundle(for: DistributionIntegrationTests.self).bundleURL.deletingLastPathComponent()
     }
 
     private func runExecutable(_ executable: URL, arguments: [String]) throws -> (status: Int32, output: String, error: String) {

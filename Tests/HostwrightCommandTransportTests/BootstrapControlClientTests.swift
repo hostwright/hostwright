@@ -245,6 +245,10 @@ final class BootstrapControlClientTests: XCTestCase {
             ".build/p09bc-\(identifier.prefix(12))",
             isDirectory: true
         )
+        try FileManager.default.createDirectory(
+            at: repository.appendingPathComponent(".build", isDirectory: true),
+            withIntermediateDirectories: true
+        )
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: root.path)
         return root

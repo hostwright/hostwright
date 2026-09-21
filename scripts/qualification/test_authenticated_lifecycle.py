@@ -5,6 +5,7 @@ import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest import mock
+import tarfile
 import zipfile
 import hashlib
 
@@ -20,6 +21,9 @@ class BoundaryTests(unittest.TestCase):
         # Resolve macOS /var symlink because live paths must be canonical.
         self.root = self.root.resolve()
         self.source = self.root/'source'; self.source.mkdir()
+        verifier = self.source/'scripts/release/corresponding-source.py'
+        verifier.parent.mkdir(parents=True)
+        verifier.write_text('# corresponding-source verifier fixture\n')
         self.cli = self.root/'hostwright'; self.cli.write_text('signed-cli-fixture')
         self.daemon = self.root/'hostwrightd'; self.daemon.write_text('signed-daemon-fixture')
         self.tool = self.root/'container'; self.tool.write_text('runtime-fixture')
@@ -56,9 +60,41 @@ class BoundaryTests(unittest.TestCase):
                                  'payloadFiles': [{'path': a['payloadPath'], 'sha256': a['signedSHA256']} for a in self.receipt['artifacts']]}
         (release/'release-manifest.json').write_text(json.dumps(self.release_manifest))
         (release/'release-manifest.json.cms').write_bytes(b'CMS fixture, verifier process mocked only')
+        source = stage/'source'; source.mkdir()
+        source_manifest = {
+            'kind': 'hostwright.corresponding-source.new-runtime.v1',
+            'schemaVersion': 1,
+            'releaseSourceRevision': 'a'*40,
+            'version': '0.0.2',
+            'status': 'prepared-not-release-qualified',
+            'publicationRoute': 'same-github-release-alongside-binaries',
+            'upstreamSignatureVerified': True,
+            'preparedSourceState': {'head': 'a'*40, 'clean': True, 'gitStatusSHA256': '0'*64},
+        }
+        source_manifest_path = source/'source-manifest.json'
+        source_manifest_path.write_text(json.dumps(source_manifest, sort_keys=True, separators=(',', ':'))+'\n')
+        source_archive = source/('hostwright-0.0.2-'+'a'*12+'-corresponding-source.tar.gz')
+        with tarfile.open(source_archive, 'w:gz') as bundle:
+            bundle.add(source_manifest_path, arcname='source-manifest.json')
+        source_checksums = source/'SOURCE_SHA256SUMS'
+        source_checksums.write_text(q.sha(source_archive)+'  '+source_archive.name+'\n'+q.sha(source_manifest_path)+'  source-manifest.json\n')
         inventory = stage/'stage-inventory.json'
-        inventory.write_text(json.dumps({'kind': 'hostwright.stage-inventory.v1', 'sourceCommit': 'a'*40, 'version': '0.0.2', 'files': {'release/'+p.name: q.sha(p) for p in release.iterdir()}}))
-        self.receipt['release'] = {'stageRoot': str(stage), 'inventorySHA256': q.sha(inventory), 'verifierPath': str(self.verifier), 'verifierSHA256': q.sha(self.verifier), 'version': '0.0.2', 'teamIdentifier': 'ABCDE12345'}
+        source_descriptor = {
+            'kind': 'hostwright.corresponding-source-stage.v1',
+            'sourceCommit': 'a'*40,
+            'version': '0.0.2',
+            'sourceManifestKind': source_manifest['kind'],
+            'sourceManifestSchemaVersion': 1,
+            'archive': {'fileName': source_archive.name, 'sha256': q.sha(source_archive), 'sizeBytes': source_archive.stat().st_size},
+            'manifest': {'fileName': source_manifest_path.name, 'sha256': q.sha(source_manifest_path), 'sizeBytes': source_manifest_path.stat().st_size},
+            'checksums': {'fileName': source_checksums.name, 'sha256': q.sha(source_checksums)},
+        }
+        staged_files = {'release/'+p.name: q.sha(p) for p in release.iterdir()}
+        staged_files.update({'source/'+p.name: q.sha(p) for p in source.iterdir()})
+        inventory.write_text(json.dumps({'kind': 'hostwright.stage-inventory.v2', 'sourceCommit': 'a'*40, 'version': '0.0.2',
+                                         'buildRunID': '123', 'buildRunAttempt': '1', 'files': staged_files,
+                                         'correspondingSource': source_descriptor}))
+        self.receipt['release'] = {'stageRoot': str(stage), 'inventorySHA256': q.sha(inventory), 'verifierPath': str(self.verifier), 'verifierSHA256': q.sha(self.verifier), 'version': '0.0.2', 'teamIdentifier': 'ABCDE12345', 'correspondingSource': source_descriptor}
         runtime = self.root/'runtime'; runtime.mkdir(mode=0o700)
         self.receipt['runtimeAppRoot'] = str(runtime)
         runtime_receipt = runtime/'qualification-root.json'
@@ -80,6 +116,13 @@ class BoundaryTests(unittest.TestCase):
         self.calls.append(argv)
         if 'verify-release' in argv:
             stdout = json.dumps(dict(self.release_manifest, schemaVersion=1, kind='trustedReleaseVerification', status='passed', signerTeamIdentifier='ABCDE12345'))
+        elif '--expected-archive-sha256' in argv:
+            source = self.receipt['release']['correspondingSource']
+            stdout = json.dumps({'archiveSHA256': source['archive']['sha256'],
+                                 'manifestSHA256': source['manifest']['sha256'],
+                                 'releaseSourceRevision': self.receipt['source'],
+                                 'version': self.receipt['release']['version'],
+                                 'status': 'prepared-not-release-qualified'})
         elif 'list' in argv:
             stdout = json.dumps([{'Name': 'other-lab', 'Source': 'local', 'State': 'stopped', 'Running': False}])
         else:
@@ -157,7 +200,13 @@ class BoundaryTests(unittest.TestCase):
         stage = Path(self.receipt['release']['stageRoot'])/'stage-inventory.json'
         data = q.load(stage); data['sourceCommit'] = 'b'*40; stage.write_text(json.dumps(data))
         self.receipt['release']['inventorySHA256'] = q.sha(stage); self.write_receipt()
-        self.reject('verifier source/version/signer mismatch')
+        self.reject('corresponding-source stage binding mismatch')
+
+    def test_corresponding_source_artifact_mismatch_rejected(self):
+        source = self.receipt['release']['correspondingSource']
+        archive = Path(self.receipt['release']['stageRoot'])/'source'/source['archive']['fileName']
+        archive.write_bytes(b'tampered corresponding source')
+        self.reject('binding mismatch')
 
     def test_selected_actual_executable_must_equal_archive_payload(self):
         self.cli.write_bytes(b'other validly signed source executable')

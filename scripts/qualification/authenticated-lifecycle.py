@@ -195,6 +195,68 @@ def protected(path):
         require(info.st_uid == 0 and not info.st_mode & 0o022 and not stat.S_ISLNK(info.st_mode),
                 f'provenance input/tool must have protected root-owned ancestry: {item}')
 
+def verify_corresponding_source(args, binding, proof, inventory, runner):
+    source = inventory.get('correspondingSource')
+    require(isinstance(source, dict)
+            and source.get('kind') == 'hostwright.corresponding-source-stage.v1'
+            and source.get('sourceCommit') == binding['source']
+            and source.get('version') == proof['version']
+            and source.get('sourceManifestKind') == 'hostwright.corresponding-source.new-runtime.v1'
+            and source.get('sourceManifestSchemaVersion') == 1,
+            'corresponding-source stage binding mismatch')
+    source_root = Path(proof['stageRoot'])/'source'
+    files = inventory.get('files')
+    require(isinstance(files, dict), 'stage inventory file bindings missing')
+    descriptors = {}
+    for role in ('archive', 'manifest', 'checksums'):
+        descriptor = source.get(role)
+        require(isinstance(descriptor, dict), 'corresponding-source file descriptor missing')
+        name = descriptor.get('fileName')
+        require(isinstance(name, str) and name and Path(name).name == name
+                and name not in descriptors, 'unsafe corresponding-source file name')
+        path = source_root/name
+        protected(path)
+        bound(path, descriptor.get('sha256'))
+        relative = 'source/'+name
+        require(files.get(relative) == descriptor['sha256'], 'corresponding-source inventory mismatch')
+        if 'sizeBytes' in descriptor:
+            require(descriptor['sizeBytes'] == path.stat().st_size, 'corresponding-source size mismatch')
+        descriptors[role] = path
+
+    archive = descriptors['archive']
+    manifest_path = descriptors['manifest']
+    checksums = descriptors['checksums']
+    expected_checksums = (
+        source['archive']['sha256']+'  '+archive.name+'\n'
+        +source['manifest']['sha256']+'  '+manifest_path.name+'\n'
+    ).encode()
+    require(checksums.read_bytes() == expected_checksums, 'corresponding-source checksum inventory mismatch')
+    manifest = load(manifest_path)
+    require(manifest.get('kind') == source['sourceManifestKind']
+            and manifest.get('schemaVersion') == source['sourceManifestSchemaVersion']
+            and manifest.get('releaseSourceRevision') == binding['source']
+            and manifest.get('version') == proof['version'],
+            'corresponding-source manifest binding mismatch')
+
+    verifier = Path(args.source_root)/'scripts/release/corresponding-source.py'
+    require(verifier.is_file() and not verifier.is_symlink(), 'corresponding-source verifier missing from clean source')
+    result = runner([
+        sys.executable, str(verifier), 'verify',
+        '--archive', str(archive),
+        '--expected-archive-sha256', source['archive']['sha256'],
+        '--expected-manifest-sha256', source['manifest']['sha256'],
+        '--expected-source', binding['source'],
+        '--expected-version', proof['version'],
+    ], capture_output=True, text=True, check=True, timeout=600)
+    report = decode(result.stdout)
+    require(report.get('archiveSHA256') == source['archive']['sha256']
+            and report.get('manifestSHA256') == source['manifest']['sha256']
+            and report.get('releaseSourceRevision') == binding['source']
+            and report.get('version') == proof['version']
+            and report.get('status') == 'prepared-not-release-qualified',
+            'corresponding-source verifier returned different bindings')
+    return report
+
 def verify_provenance(args, binding, runner):
     proof = binding.get('release', {})
     require(proof, 'protected staged release provenance required')
@@ -204,13 +266,17 @@ def verify_provenance(args, binding, runner):
     bound(inventory_path, proof['inventorySHA256'])
     bound(proof['verifierPath'], proof['verifierSHA256'])
     inventory = load(inventory_path)
-    require(inventory.get('kind') == 'hostwright.stage-inventory.v1'
+    require(inventory.get('kind') == 'hostwright.stage-inventory.v2'
             and inventory.get('sourceCommit') == binding['source']
-            and inventory.get('version') == proof['version'], 'stage source/version mismatch')
+            and inventory.get('version') == proof['version']
+            and re.fullmatch(r'[1-9][0-9]*', str(inventory.get('buildRunID', '')))
+            and re.fullmatch(r'[1-9][0-9]*', str(inventory.get('buildRunAttempt', ''))),
+            'stage source/version/run mismatch')
     files = inventory['files']
     for relative, digest in files.items():
         require(not Path(relative).is_absolute() and '..' not in Path(relative).parts, 'unsafe stage inventory path')
         protected(stage/relative); bound(stage/relative, digest)
+    verify_corresponding_source(args, binding, proof, inventory, runner)
     release_dir = stage/'release'
     require({'release/'+entry.name for entry in release_dir.iterdir()} <= set(files), 'stage inventory omits release/CMS inputs')
     result = runner([proof['verifierPath'], 'verify-release', '--release-dir', str(release_dir),

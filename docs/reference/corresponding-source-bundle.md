@@ -28,6 +28,19 @@ provenance and carries the exact archive bytes into staging; the legacy bundle
 path remains available for historical source preparation but is refused by
 release staging.
 
+The runtime ingredient workflow does not yet produce this archive. The pinned
+Apple Containerization 0.35.0 source exists upstream at commit
+`44bec8b9933bc491d0cbf44abac90a1f6aaebf6b`, but the current product consumes
+prebuilt GHCR vminit and Kata kernel bytes whose deterministic source-to-payload
+proof and producer handoff have not been established. Its retained loader and
+kernel ingredients therefore cannot satisfy the rebuilt kernel/vminit
+source/link/toolchain evidence required by `verify-runtime-provenance.py`. A
+release remains blocked until a producer builds the exact shipped inputs, embeds
+the source commit and producer run identity, attests the manifest and every
+runtime payload, and uploads the exact
+`runtime-provenance-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}` artifact
+containing `runtime-provenance.tar.gz`.
+
 Use `verify-kernel-source-signature.py --inputs <kernel-input-directory> --output
 <new-receipt-path>` to independently verify the source's detached signature against
 the kernel.org stable signing fingerprint. The script disables key retrieval and

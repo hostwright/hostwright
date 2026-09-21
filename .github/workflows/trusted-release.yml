@@ -17,6 +17,10 @@ on:
         required: true
         default: v0.0.2-dev.12
         type: string
+      runtime_provenance_run:
+        description: Successful authenticated runtime-ingredients run for this exact commit
+        required: true
+        type: string
 
 permissions: {}
 
@@ -36,6 +40,7 @@ jobs:
       VALIDATION_COMMIT: ${{ inputs.commit }}
       VALIDATION_VERSION: ${{ inputs.version }}
       VALIDATION_TAG: ${{ inputs.tag }}
+      VALIDATION_RUNTIME_RUN: ${{ inputs.runtime_provenance_run }}
     steps:
       - name: Validate immutable dispatch contract
         shell: bash
@@ -44,6 +49,7 @@ jobs:
           [[ "$VALIDATION_COMMIT" =~ ^[a-f0-9]{40}$ ]]
           [[ "$VALIDATION_VERSION" =~ ^0\.0\.2(-dev\.[1-9][0-9]{0,2}|-rc\.[1-9][0-9]?)?$ ]]
           [[ "$VALIDATION_TAG" == "v$VALIDATION_VERSION" ]]
+          [[ "$VALIDATION_RUNTIME_RUN" =~ ^[1-9][0-9]*$ ]]
           test "$GITHUB_REPOSITORY" = hostwright/hostwright
 
       - name: Check out the exact reviewed commit
@@ -79,16 +85,17 @@ jobs:
     permissions:
       contents: read
       attestations: read
+      actions: read
     env:
       GH_TOKEN: ${{ github.token }}
       RELEASE_COMMIT: ${{ inputs.commit }}
       RELEASE_VERSION: ${{ inputs.version }}
       RELEASE_TAG: ${{ inputs.tag }}
+      RELEASE_RUNTIME_PROVENANCE_RUN: ${{ inputs.runtime_provenance_run }}
       RELEASE_APPLICATION_IDENTITY: ${{ vars.RELEASE_APPLICATION_IDENTITY }}
       RELEASE_INSTALLER_IDENTITY: ${{ vars.RELEASE_INSTALLER_IDENTITY }}
       RELEASE_TEAM_ID: ${{ vars.RELEASE_TEAM_ID }}
       RELEASE_NOTARY_PROFILE: ${{ vars.RELEASE_NOTARY_PROFILE }}
-      RELEASE_RUNTIME_PROVENANCE_ARCHIVE: ${{ vars.RELEASE_RUNTIME_PROVENANCE_ARCHIVE }}
       RELEASE_GPG: ${{ vars.RELEASE_GPG }}
       RELEASE_GPG_SHA256: ${{ vars.RELEASE_GPG_SHA256 }}
     steps:
@@ -134,19 +141,50 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          swift build --jobs 1
-          swift test --jobs 1 list
-          swift test --jobs 1
-          scripts/integration.sh
-          scripts/grep-orchard.sh .
-          scripts/test.sh
-          scripts/lint.sh
+          scripts/test.sh full
           test "$(swift run --jobs 1 hostwright --version)" = "$RELEASE_VERSION"
           test "$(plutil -extract productVersion raw contracts/v0.0.2/versions.json)" = "$RELEASE_VERSION"
+
+      - name: Download runtime provenance from the exact authenticated producer run
+        id: runtime-source
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_RUNTIME_PROVENANCE_RUN" =~ ^[1-9][0-9]*$ ]]
+          run_receipt="$RUNNER_TEMP/runtime-provenance-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RELEASE_RUNTIME_PROVENANCE_RUN" > "$run_receipt"
+          attempt="$(python3 - "$run_receipt" "$RELEASE_RUNTIME_PROVENANCE_RUN" "$RELEASE_COMMIT" <<'PY'
+          import json, sys
+          run = json.load(open(sys.argv[1], encoding='utf-8'))
+          expected_id, expected_commit = int(sys.argv[2]), sys.argv[3]
+          if (run.get('id') != expected_id or run.get('head_sha') != expected_commit
+                  or run.get('path', '').split('@', 1)[0] != '.github/workflows/runtime-ingredients.yml'
+                  or run.get('head_branch') != 'main' or run.get('status') != 'completed'
+                  or run.get('conclusion') != 'success'
+                  or run.get('repository', {}).get('full_name') != 'hostwright/hostwright'):
+              raise SystemExit('runtime provenance run does not match the reviewed main commit and producer workflow')
+          attempt = run.get('run_attempt')
+          if not isinstance(attempt, int) or attempt < 1:
+              raise SystemExit('runtime provenance run attempt is missing')
+          print(attempt)
+          PY
+          )"
+          artifact="runtime-provenance-$RELEASE_COMMIT-$RELEASE_RUNTIME_PROVENANCE_RUN-$attempt"
+          download="$RUNNER_TEMP/$artifact"
+          test ! -e "$download"
+          mkdir -m 700 "$download"
+          gh run download "$RELEASE_RUNTIME_PROVENANCE_RUN" --repo "$GITHUB_REPOSITORY" --name "$artifact" --dir "$download"
+          archive="$download/runtime-provenance.tar.gz"
+          test -f "$archive"
+          test ! -L "$archive"
+          test "$(find "$download" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" = 1
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
 
       - name: Prepare pinned corresponding-source bytes from the clean reviewed checkout
         id: source
         shell: bash
+        env:
+          RELEASE_RUNTIME_PROVENANCE_ARCHIVE: ${{ steps.runtime-source.outputs.archive }}
         run: |
           set -euo pipefail
           [[ "$RELEASE_RUNTIME_PROVENANCE_ARCHIVE" == /* ]]

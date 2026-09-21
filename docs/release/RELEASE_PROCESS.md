@@ -96,7 +96,7 @@ The release publishes only artifacts produced from the final clean tag by the re
 - verification instructions and compatibility manifest;
 - vendor-tap formula bound to the released digest.
 
-The trusted stage requires an authenticated `hostwright.corresponding-source.new-runtime.v1` archive for the exact release commit. The staging verifier checks that archive against the shipped runtime payloads and refuses the legacy source bundle, so a release cannot fall back to license metadata without actual runtime byte provenance.
+The trusted stage requires the successful `Authenticated runtime ingredients` run ID for the exact release commit. It downloads that run's uniquely named archive and verifies its authenticated `hostwright.corresponding-source.new-runtime.v1` manifest and payloads against the shipped runtime bytes. The legacy source bundle is refused, so a release cannot fall back to license metadata without actual runtime byte provenance.
 
 Unsigned developer `hostwright-dist` output is useful local integration evidence, not a public release artifact.
 
@@ -120,7 +120,7 @@ Only after the final RC evidence and approval:
 
 1. verify the release commit is on protected `main`, clean, signed according to policy, and identical to the qualified commit;
 2. set the product version from `0.0.2-dev` to `0.0.2` in a reviewed release PR and rerun the complete release gate;
-3. dispatch the protected trusted-release workflow for the exact qualified commit/version/tag;
+3. dispatch the protected trusted-release workflow for the exact qualified commit/version/tag and its successful authenticated runtime-provenance run ID;
 4. let that workflow build, sign, notarize, staple, verify, create the immutable annotated tag, publish, download, compare, and attest the exact bytes;
 5. verify clean installation, upgrade, rollback, and uninstall from the published channel;
 6. publish the GitHub Release and vendor-tap formula only after artifact verification;

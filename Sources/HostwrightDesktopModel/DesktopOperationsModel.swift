@@ -1,10 +1,13 @@
 import Combine
+import Darwin
 import Foundation
+import HostwrightCLI
 import HostwrightCommandTransport
 import HostwrightControlPlane
 import HostwrightControlTransport
 import HostwrightCore
 import HostwrightDaemonCore
+import HostwrightManifest
 import HostwrightRuntime
 
 private enum DesktopModelBoundary {
@@ -59,9 +62,25 @@ private struct DesktopLifecycleCLIResult {
 
 public struct DesktopControlAPIClient: Sendable {
     public let transport: any DesktopControlTransport
+    private let authorizationScope: @Sendable (
+        CLICommand,
+        [String]
+    ) throws -> CLIControlAuthorizationScope
 
-    public init(transport: any DesktopControlTransport) {
+    public init(
+        transport: any DesktopControlTransport,
+        authorizationScope: @escaping @Sendable (
+            CLICommand,
+            [String]
+        ) throws -> CLIControlAuthorizationScope = { command, arguments in
+            try HostwrightCommandTransportEnvironment.live.authorizationScope(
+                command,
+                arguments
+            )
+        }
+    ) {
         self.transport = transport
+        self.authorizationScope = authorizationScope
     }
 
     public func daemonHealth() throws -> DesktopDaemonHealth {
@@ -106,14 +125,80 @@ public struct DesktopControlAPIClient: Sendable {
         }
     }
 
-    public func projectStatus() throws -> DesktopProjectStatus {
-        let request = makeRequest(
-            operation: "status",
-            timeoutMilliseconds: ControlPlaneContract.maximumUnaryDeadlineMilliseconds,
-            prefix: "status"
-        )
+    public func projectStatus(manifestPath: String? = nil) throws -> DesktopProjectStatus {
+        let request: ControlRequestEnvelope
+        if let manifestPath {
+            let path = try Self.validatedManifestPath(manifestPath)
+            do {
+                _ = try ManifestValidator.validated(
+                    Self.validatedManifestText(for: path)
+                )
+            } catch let failure as DesktopControlFailure {
+                throw failure
+            } catch {
+                throw DesktopControlFailure(
+                    code: "manifest.invalid",
+                    message: "The selected manifest is invalid."
+                )
+            }
+            let unscopedRoute = try CLIControlRoute.classify(
+                arguments: ["status", path, "--output", "json"]
+            )
+            let command = try CLICommand.parse(arguments: unscopedRoute.arguments)
+            let scope: CLIControlAuthorizationScope
+            do {
+                scope = try authorizationScope(
+                    command,
+                    unscopedRoute.arguments
+                )
+            } catch {
+                throw DesktopControlFailure(
+                    code: "manifest.authorizationFailed",
+                    message: "The selected manifest could not establish an authorized project scope."
+                )
+            }
+            let route = unscopedRoute.withAuthorizationScope(scope)
+            request = makeRequest(
+                operation: route.operation,
+                body: route.requestBody(),
+                timeoutMilliseconds: ControlPlaneContract.maximumUnaryDeadlineMilliseconds,
+                prefix: "status"
+            )
+        } else {
+            request = makeRequest(
+                operation: "status",
+                timeoutMilliseconds: ControlPlaneContract.maximumUnaryDeadlineMilliseconds,
+                prefix: "status"
+            )
+        }
         let response = try transport.send(request)
-        let result = try checkedResult(checkedResponse(response, for: request))
+        let checked = try checkedResponse(response, for: request)
+        let result: ControlPlaneJSONValue
+        if manifestPath != nil {
+            let cliResult = try CLIControlResultContract.result(from: checked)
+            guard cliResult.exitCode == 0 else {
+                throw DesktopControlFailure(
+                    code: "status.requestFailed",
+                    message: DesktopModelBoundary.redactedMessage(
+                        cliResult.standardError,
+                        fallback: "The selected manifest status request failed safely."
+                    )
+                )
+            }
+            do {
+                result = try JSONDecoder().decode(
+                    ControlPlaneJSONValue.self,
+                    from: Data(cliResult.standardOutput.utf8)
+                )
+            } catch {
+                throw DesktopControlFailure(
+                    code: "status.invalidResponse",
+                    message: "The daemon returned an invalid selected-manifest status document."
+                )
+            }
+        } else {
+            result = try checkedResult(checked)
+        }
         do {
             let payload = try decode(StatusPayload.self, from: result)
             guard let projectName = payload.project, !projectName.isEmpty,
@@ -122,6 +207,12 @@ public struct DesktopControlAPIClient: Sendable {
                 throw DesktopControlFailure(
                     code: "status.invalidResponse",
                     message: "The daemon returned an incomplete project status."
+                )
+            }
+            if let manifestPath, payload.manifest.path != manifestPath {
+                throw DesktopControlFailure(
+                    code: "status.manifestMismatch",
+                    message: "The daemon returned status for a different manifest."
                 )
             }
             let services = payload.services.map { service in
@@ -151,6 +242,93 @@ public struct DesktopControlAPIClient: Sendable {
                 message: "The daemon returned an invalid project status."
             )
         }
+    }
+
+    private static func validatedManifestPath(_ path: String) throws -> String {
+        guard path.hasPrefix("/"), path.utf8.count <= 4_096,
+              URL(fileURLWithPath: path).standardizedFileURL.path == path else {
+            throw DesktopControlFailure(
+                code: "manifest.invalidPath",
+                message: "Choose an absolute local manifest path."
+            )
+        }
+        return path
+    }
+
+    private static func validatedManifestText(for path: String) throws -> String {
+        let descriptor = Darwin.open(
+            path,
+            O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC
+        )
+        guard descriptor >= 0 else {
+            throw DesktopControlFailure(
+                code: "manifest.unreadable",
+                message: "The selected manifest could not be read."
+            )
+        }
+        defer { _ = Darwin.close(descriptor) }
+
+        var opened = stat()
+        guard fstat(descriptor, &opened) == 0,
+              opened.st_mode & S_IFMT == S_IFREG,
+              opened.st_size >= 0 else {
+            throw DesktopControlFailure(
+                code: "manifest.unsafeFile",
+                message: "The selected manifest must be a regular local file."
+            )
+        }
+
+        let maximumBytes = ManifestParser.maximumUTF8Bytes
+        var data = Data()
+        let initialCapacity = opened.st_size > Int64(maximumBytes + 1)
+            ? maximumBytes + 1
+            : Int(opened.st_size)
+        data.reserveCapacity(initialCapacity)
+        var buffer = [UInt8](repeating: 0, count: 16 * 1_024)
+        while data.count <= maximumBytes {
+            let remaining = maximumBytes + 1 - data.count
+            let count = Darwin.read(descriptor, &buffer, min(buffer.count, remaining))
+            if count < 0, errno == EINTR { continue }
+            guard count >= 0 else {
+                throw DesktopControlFailure(
+                    code: "manifest.unreadable",
+                    message: "The selected manifest could not be read."
+                )
+            }
+            if count == 0 { break }
+            data.append(contentsOf: buffer.prefix(count))
+        }
+
+        guard data.count <= maximumBytes else {
+            throw DesktopControlFailure(
+                code: "manifest.tooLarge",
+                message: "The selected manifest exceeds the supported size."
+            )
+        }
+
+        var final = stat()
+        guard fstat(descriptor, &final) == 0,
+              final.st_mode & S_IFMT == S_IFREG,
+              final.st_dev == opened.st_dev,
+              final.st_ino == opened.st_ino,
+              final.st_size == opened.st_size,
+              final.st_size == data.count,
+              final.st_mtimespec.tv_sec == opened.st_mtimespec.tv_sec,
+              final.st_mtimespec.tv_nsec == opened.st_mtimespec.tv_nsec,
+              final.st_ctimespec.tv_sec == opened.st_ctimespec.tv_sec,
+              final.st_ctimespec.tv_nsec == opened.st_ctimespec.tv_nsec else {
+            throw DesktopControlFailure(
+                code: "manifest.changedDuringRead",
+                message: "The selected manifest changed while it was being read."
+            )
+        }
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw DesktopControlFailure(
+                code: "manifest.invalidUTF8",
+                message: "The selected manifest must be valid UTF-8 text."
+            )
+        }
+        return text
     }
 
     public func connectSession() throws -> any DesktopControlSession {
@@ -398,6 +576,7 @@ public final class DesktopOperationsModel: ObservableObject {
     @Published public private(set) var isEventStreamRunning = false
     @Published public private(set) var isLogStreamRunning = false
     @Published public private(set) var lifecycleState: DesktopLifecycleState = .idle
+    @Published public private(set) var selectedManifestPath: String?
 
     public let endpoint: DesktopControlEndpoint?
     private let api: DesktopControlAPIClient
@@ -414,6 +593,7 @@ public final class DesktopOperationsModel: ObservableObject {
     private var lifecycleID: UUID?
     private var lifecycleCancellation: PersistentControlRequestCancellation?
     private var lifecycleProject: DesktopProjectStatus?
+    private var manifestSelectionID = UUID()
 
     public init(
         endpoint: DesktopControlEndpoint? = nil,
@@ -426,6 +606,41 @@ public final class DesktopOperationsModel: ObservableObject {
             ? [1_000]
             : reconnectDelaysMilliseconds.map { min($0, 60_000) }
         self.connectionState = .disconnected
+    }
+
+    public func selectManifest(at path: String) {
+        let standardized = URL(fileURLWithPath: path).standardizedFileURL.path
+        guard standardized == path, path.hasPrefix("/") else {
+            record(error: DesktopControlFailure(
+                code: "manifest.invalidPath",
+                message: "Choose an absolute local manifest path."
+            ))
+            return
+        }
+        invalidateLifecycleForConnectionChange()
+        cancelEventStream()
+        cancelLogStream(clearBuffer: true)
+        projects = []
+        selectedManifestPath = path
+        manifestSelectionID = UUID()
+        switch connectionState {
+        case .connected:
+            refreshStatus()
+        case .connecting, .reconnecting:
+            connect()
+        case .disconnected, .unavailable:
+            connect()
+        }
+    }
+
+    public func clearSelectedManifest() {
+        invalidateLifecycleForConnectionChange()
+        cancelEventStream()
+        cancelLogStream(clearBuffer: true)
+        projects = []
+        selectedManifestPath = nil
+        manifestSelectionID = UUID()
+        refreshStatus()
     }
 
     public static func live(
@@ -469,6 +684,7 @@ public final class DesktopOperationsModel: ObservableObject {
         cancelEventStream()
         cancelLogStream()
         cancelStatusRefresh()
+        projects = []
         reconnectTask?.cancel()
         let connectionID = UUID()
         self.connectionID = connectionID
@@ -489,6 +705,7 @@ public final class DesktopOperationsModel: ObservableObject {
         cancelEventStream()
         cancelLogStream()
         cancelStatusRefresh()
+        projects = []
         reconnectTask?.cancel()
         let connectionID = UUID()
         self.connectionID = connectionID
@@ -706,11 +923,14 @@ public final class DesktopOperationsModel: ObservableObject {
         let refreshID = UUID()
         self.refreshID = refreshID
         let api = self.api
+        let manifestPath = selectedManifestPath
+        let manifestSelectionID = self.manifestSelectionID
+        if manifestPath != nil { projects = [] }
         refreshTask = Task { [weak self] in
             guard !Task.isCancelled else { return }
             let request = Task.detached {
                 try Task.checkCancellation()
-                return try api.projectStatus()
+                return try api.projectStatus(manifestPath: manifestPath)
             }
             defer {
                 request.cancel()
@@ -725,12 +945,14 @@ public final class DesktopOperationsModel: ObservableObject {
                 }, onCancel: {
                     request.cancel()
                 })
-                guard !Task.isCancelled, let self, self.refreshID == refreshID else { return }
+                guard !Task.isCancelled, let self, self.refreshID == refreshID,
+                      self.manifestSelectionID == manifestSelectionID else { return }
                 self.apply(project: project)
             } catch is CancellationError {
                 return
             } catch {
-                guard !Task.isCancelled, let self, self.refreshID == refreshID else { return }
+                guard !Task.isCancelled, let self, self.refreshID == refreshID,
+                      self.manifestSelectionID == manifestSelectionID else { return }
                 self.record(error: Self.failure(from: error))
             }
         }
@@ -866,6 +1088,8 @@ public final class DesktopOperationsModel: ObservableObject {
         guard !Task.isCancelled, self.connectionID == connectionID else { return }
         connectionState = .connecting
         let api = self.api
+        let manifestPath = selectedManifestPath
+        let manifestSelectionID = self.manifestSelectionID
         let healthRequest = Task.detached {
             try Task.checkCancellation()
             return try api.daemonHealth()
@@ -877,12 +1101,13 @@ public final class DesktopOperationsModel: ObservableObject {
             }, onCancel: {
                 healthRequest.cancel()
             })
-            guard !Task.isCancelled, self.connectionID == connectionID else { return }
+            guard !Task.isCancelled, self.connectionID == connectionID,
+                  self.manifestSelectionID == manifestSelectionID else { return }
             daemonHealth = health
             connectionState = .connected
             let statusRequest = Task.detached {
                 try Task.checkCancellation()
-                return try api.projectStatus()
+                return try api.projectStatus(manifestPath: manifestPath)
             }
             defer { statusRequest.cancel() }
             do {
@@ -891,21 +1116,24 @@ public final class DesktopOperationsModel: ObservableObject {
                 }, onCancel: {
                     statusRequest.cancel()
                 })
-                guard !Task.isCancelled, self.connectionID == connectionID else { return }
+                guard !Task.isCancelled, self.connectionID == connectionID,
+                      self.manifestSelectionID == manifestSelectionID else { return }
                 apply(project: project)
             } catch is CancellationError {
                 return
             } catch {
-                guard !Task.isCancelled, self.connectionID == connectionID else { return }
+                guard !Task.isCancelled, self.connectionID == connectionID,
+                      self.manifestSelectionID == manifestSelectionID else { return }
                 record(error: Self.failure(from: error))
             }
         } catch is CancellationError {
             return
         } catch {
-            guard !Task.isCancelled, self.connectionID == connectionID else { return }
+            guard !Task.isCancelled, self.connectionID == connectionID,
+                  self.manifestSelectionID == manifestSelectionID else { return }
             let statusRequest = Task.detached {
                 try Task.checkCancellation()
-                return try api.projectStatus()
+                return try api.projectStatus(manifestPath: manifestPath)
             }
             defer { statusRequest.cancel() }
             do {
@@ -914,13 +1142,15 @@ public final class DesktopOperationsModel: ObservableObject {
                 }, onCancel: {
                     statusRequest.cancel()
                 })
-                guard !Task.isCancelled, self.connectionID == connectionID else { return }
+                guard !Task.isCancelled, self.connectionID == connectionID,
+                      self.manifestSelectionID == manifestSelectionID else { return }
                 apply(project: project)
                 connectionState = .connected
             } catch is CancellationError {
                 return
             } catch {
-                guard !Task.isCancelled, self.connectionID == connectionID else { return }
+                guard !Task.isCancelled, self.connectionID == connectionID,
+                      self.manifestSelectionID == manifestSelectionID else { return }
                 let failure = Self.failure(from: error)
                 connectionState = .unavailable(failure)
                 lastFailure = failure

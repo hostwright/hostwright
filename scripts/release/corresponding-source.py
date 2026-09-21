@@ -12,6 +12,7 @@ import re
 import subprocess
 import tarfile
 import tempfile
+import shutil
 
 PINS = dict(kernelVersion='6.18.15', kernelConfigurationVersion='186',
             kernelSourceSHA256='7c716216c3c4134ed0de69195701e677577bbcdd3979f331c182acd06bf2f170',
@@ -194,7 +195,71 @@ def validate_sdk_notice_inventory(metadata, records):
             raise ValueError('candidate SDK source notice missing or changed')
 
 
+def prepare_runtime_archive(args):
+    """Stage an independently prepared new-runtime source archive.
+
+    Runtime provenance is produced by the authenticated runtime build lane.  This
+    command only verifies and carries those exact bytes forward; it must not
+    downgrade to the legacy source bundle when the runtime lane is requested.
+    """
+    root = args.root.resolve()
+    out_parent = args.output_parent.resolve()
+    if root == out_parent or root in out_parent.parents:
+        raise ValueError('source output must be outside the source checkout')
+    if not valid_version(args.version) or not re.fullmatch(r'[a-f0-9]{40}', args.source):
+        raise ValueError('invalid release source/version')
+    source_archive = regular(args.runtime_provenance_archive)
+    before = source_state(root)
+    if before['head'] != args.source or before['clean'] is not True:
+        raise ValueError('requested source must be the exact clean checkout HEAD')
+    snapshot_fd, snapshot_name = tempfile.mkstemp(prefix='hostwright-runtime-source-', suffix='.tar.gz', dir=out_parent)
+    os.close(snapshot_fd)
+    snapshot = pathlib.Path(snapshot_name)
+    try:
+        snapshot.chmod(0o600)
+        with source_archive.open('rb') as source, snapshot.open('wb') as target:
+            shutil.copyfileobj(source, target)
+        verified = verify(snapshot, expected_source=args.source, expected_version=args.version,
+                          gpg=args.gpg, gpg_sha256=args.gpg_sha256)
+        with tarfile.open(snapshot, 'r:gz') as archive:
+            member = archive.getmember('source-manifest.json')
+            if not member.isfile() or member.size > 16 * 1024**2:
+                raise ValueError('runtime source archive lacks a regular source manifest')
+            manifest_data = archive.extractfile(member).read()
+        manifest = json.loads(manifest_data)
+        if manifest.get('kind') != 'hostwright.corresponding-source.new-runtime.v1':
+            raise ValueError('runtime source archive is not the new-runtime contract')
+        if source_state(root) != before:
+            raise ValueError('source checkout changed during runtime source preparation')
+        out = pathlib.Path(tempfile.mkdtemp(prefix='hostwright-source-' + args.source[:12] + '-', dir=out_parent))
+        name = 'hostwright-' + args.version + '-' + args.source[:12] + '-corresponding-source.tar.gz'
+        bundle = out / name
+        shutil.copyfile(snapshot, bundle)
+        archive_sha = digest_file(bundle)
+        manifest_sha = hashlib.sha256(manifest_data).hexdigest()
+        if verified.get('archiveSHA256') != archive_sha or verified.get('manifestSHA256') != manifest_sha:
+            raise ValueError('runtime source verification changed while staging')
+        (out / 'source-manifest.json').write_bytes(manifest_data)
+        checksums = (archive_sha + '  ' + name + '\n' +
+                     manifest_sha + '  source-manifest.json\n')
+        (out / 'SOURCE_SHA256SUMS').write_text(checksums)
+        receipt = dict(verified, archiveSHA256=archive_sha, manifestSHA256=manifest_sha,
+                       sizeBytes=bundle.stat().st_size)
+        (out / 'source-bundle-receipt.json').write_bytes(canonical(receipt))
+        return dict(directory=str(out), archive=str(bundle), **receipt)
+    except BaseException:
+        if 'out' in locals() and out.exists():
+            shutil.rmtree(out)
+        raise
+    finally:
+        snapshot.unlink(missing_ok=True)
+
+
 def prepare(args):
+    if args.runtime_provenance_archive is not None:
+        return prepare_runtime_archive(args)
+    if args.kernel_inputs is None or args.kata_recipes is None or args.loader_receipt is None:
+        raise ValueError('legacy source preparation requires all pinned source inputs')
     root=args.root.resolve();out_parent=args.output_parent.resolve()
     if root==out_parent or root in out_parent.parents:raise ValueError('source output must be outside the source checkout')
     if not valid_version(args.version) or not re.fullmatch('[a-f0-9]{40}',args.source):raise ValueError('invalid release source/version')
@@ -284,12 +349,15 @@ def prepare(args):
 
 def main():
     p=argparse.ArgumentParser();subs=p.add_subparsers(dest='command',required=True)
-    q=subs.add_parser('prepare');q.add_argument('--root',type=pathlib.Path,required=True);q.add_argument('--kernel-inputs',type=pathlib.Path,required=True);q.add_argument('--kata-recipes',type=pathlib.Path,required=True);q.add_argument('--loader-receipt',type=pathlib.Path,required=True);q.add_argument('--output-parent',type=pathlib.Path,required=True);q.add_argument('--version',required=True);q.add_argument('--source',required=True)
+    q=subs.add_parser('prepare');q.add_argument('--root',type=pathlib.Path,required=True);q.add_argument('--kernel-inputs',type=pathlib.Path);q.add_argument('--kata-recipes',type=pathlib.Path);q.add_argument('--loader-receipt',type=pathlib.Path);q.add_argument('--runtime-provenance-archive',type=pathlib.Path);q.add_argument('--output-parent',type=pathlib.Path,required=True);q.add_argument('--version',required=True);q.add_argument('--source',required=True)
     q=subs.add_parser('verify');q.add_argument('--archive',type=pathlib.Path,required=True);q.add_argument('--expected-archive-sha256',required=True);q.add_argument('--expected-manifest-sha256',required=True);q.add_argument('--expected-source',required=True);q.add_argument('--expected-version',required=True)
     for parser in subs.choices.values():parser.add_argument('--gpg');parser.add_argument('--gpg-sha256')
     args=p.parse_args()
     gpg_arguments(args.gpg,args.gpg_sha256)
-    if args.command=='prepare':prepare(args)
+    if args.command=='prepare':
+        result = prepare(args)
+        if result is not None:
+            print(json.dumps(result,sort_keys=True))
     else:
         if not re.fullmatch('[a-f0-9]{64}',args.expected_archive_sha256) or not re.fullmatch('[a-f0-9]{64}',args.expected_manifest_sha256):raise ValueError('exact staged archive and manifest digests are required')
         print(json.dumps(verify(args.archive,args.expected_archive_sha256,args.expected_manifest_sha256,args.expected_source,args.expected_version,args.gpg,args.gpg_sha256),sort_keys=True))

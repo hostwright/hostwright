@@ -1,5 +1,7 @@
+import Foundation
 import SwiftUI
 import HostwrightDesktopModel
+import UniformTypeIdentifiers
 
 public struct MenuBarLabel: View {
     @EnvironmentObject private var model: DesktopOperationsModel
@@ -37,6 +39,8 @@ public struct OperationsConsoleView: View {
     @SceneStorage(DesktopSceneStorageKey.selection) private var storedSelection = "overview"
     @SceneStorage(DesktopSceneStorageKey.selectedProject) private var storedProjectID = ""
     @SceneStorage(DesktopSceneStorageKey.selectedService) private var storedServiceID = ""
+    @State private var isManifestImporterPresented = false
+    @State private var manifestImporterError: String?
 
     public init(initialSelection: String? = nil) {
         _storedSelection = SceneStorage(
@@ -87,6 +91,13 @@ public struct OperationsConsoleView: View {
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button {
+                        isManifestImporterPresented = true
+                    } label: {
+                        Label("Choose manifest", systemImage: "doc.badge.plus")
+                    }
+                    .accessibilityIdentifier(DesktopAccessibilityIdentifier.manifestSelect)
+
+                    Button {
                         model.reconnect()
                     } label: {
                         Label("Reconnect", systemImage: "arrow.clockwise")
@@ -119,6 +130,37 @@ public struct OperationsConsoleView: View {
         }
         .onChange(of: model.connectionState) { _, _ in
             updateSelectionValidity(for: model.projects)
+        }
+        .fileImporter(
+            isPresented: $isManifestImporterPresented,
+            allowedContentTypes: [
+                UTType(filenameExtension: "yaml") ?? .plainText,
+                UTType(filenameExtension: "yml") ?? .plainText,
+            ],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first else {
+                    manifestImporterError = "Choose one Hostwright manifest to continue."
+                    return
+                }
+                model.selectManifest(at: url.standardizedFileURL.path)
+            case .failure(let error):
+                guard (error as NSError).code != NSUserCancelledError else { return }
+                manifestImporterError = "The manifest could not be opened. Try selecting it again."
+            }
+        }
+        .alert(
+            "Manifest Selection Failed",
+            isPresented: Binding(
+                get: { manifestImporterError != nil },
+                set: { if !$0 { manifestImporterError = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(manifestImporterError ?? "The selected manifest could not be opened.")
         }
     }
 

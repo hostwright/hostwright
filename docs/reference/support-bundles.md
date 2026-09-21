@@ -1,10 +1,10 @@
 # Privacy-Safe Support Bundles
 
-Phase 08 Gate 15 adds a schema-v1, local-only support-bundle workflow under `hostwright diagnostics support`. It preserves the earlier `hostwright diagnostics --bundle <path>` diagnostics-v1 export. Support bundles add preview and confirmation, optional macOS CMS encryption, durable file-effect recovery, retained ownership evidence, and receipt-proven exact deletion. They add no listener, uploader, hosted support service, credential-store reader, schema v18 migration, or Phase 09 API.
+Phase 08 Gate 15 adds a schema-v1, local-only support-bundle workflow under `hostwright diagnostics support` over the current schema-v24 state database. It preserves the earlier `hostwright diagnostics --bundle <path>` diagnostics-v1 export. Support bundles add preview and confirmation, optional macOS CMS encryption, durable file-effect recovery, retained ownership evidence, and receipt-proven exact deletion. They add no listener, uploader, hosted support service, credential-store reader, state migration, or Phase 09 API.
 
 ## Preview and create
 
-Use an existing compatible schema-v17 state database and, when configuration shape is useful, the exact Manifest-v2 file:
+Use an existing compatible schema-v24 state database and, when configuration shape is useful, the exact Manifest v3 file:
 
 ```bash
 hostwright diagnostics support preview \
@@ -79,8 +79,8 @@ If `status` reports pending recovery, stop creating or deleting bundles and run 
 
 ## Retention and failures
 
-Creation, deletion, and no-effect failure receipts use the `supportEvidence` Manifest-v2 retention class in the existing event ledger. They contain hashes, sizes, reason codes, and operation/bundle identities—not the output path or bundle content. Ordinary `events`, `audits`, and `traces` retention remain disjoint. Confirmed compaction may remove only eligible expired receipts after the normal recovery horizon, hold, verified-backup, and exact-candidate checks. It never deletes the external operator-owned bundle.
+Creation, deletion, and no-effect failure receipts use the `supportEvidence` retention class in the existing event ledger. They contain hashes, sizes, reason codes, and operation/bundle identities—not the output path or bundle content. Ordinary `events`, `audits`, and `traces` retention remain disjoint. Confirmed compaction may remove only eligible expired receipts after the normal recovery horizon, hold, verified-backup, and exact-candidate checks. It never deletes the external operator-owned bundle.
 
 Stable errors are `HW-SUPPORT-001` through `HW-SUPPORT-013`: invalid contract, changed preview, unsafe output path, section or total size limit, invalid recipient, encryption unavailable or failed, unavailable ownership receipt, changed bundle identity, required recovery, recovery safe hold, and cancellation. JSON errors carry the exact code and normal bounded CLI exit classification without exposing the output path.
 
-The workflow requires a current schema-v17 database. Schema v16 must be upgraded by an existing state-writing workflow; support reads do not migrate it. Future schemas and old-binary downgrade attempts fail closed. The bundle is troubleshooting evidence for the recorded local host only. It is not an attestation, audit-chain export, support SLA, remote telemetry stream, or proof of Phase 08 aggregate soak completion.
+The workflow requires a current schema-v24 database. Schema v16 must be upgraded by an existing state-writing workflow; support reads do not migrate it. Future schemas and old-binary downgrade attempts fail closed. The bundle is troubleshooting evidence for the recorded local host only. It is not an attestation, audit-chain export, support SLA, remote telemetry stream, or proof of Phase 08 aggregate soak completion.

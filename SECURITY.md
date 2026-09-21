@@ -4,11 +4,11 @@ Hostwright is not yet production ready. Security-sensitive behavior must be desi
 
 ## Current Security Posture
 
-- Runtime mutation is limited to reviewed `RuntimeAdapter` gates: create-missing-service, restart-policy-allowed managed start, restart-policy-allowed managed restart, and exact cleanup-eligible managed container delete.
-- Destructive mutation is limited to ownership-scoped cleanup delete with dry-run classification, exact token confirmation, live observation, and non-running lifecycle state.
-- `hostwrightd --foreground` observes, plans, records events, and runs bounded health checks without unattended runtime mutation.
+- Supported local runtime mutation is fenced through reviewed `RuntimeAdapter` and lifecycle-saga gates: exact plan confirmation, provider capability, ownership and generation checks, durable intent before effects, and post-effect verification. Ambiguous effects enter a safe hold.
+- Destructive resource and file effects remain ownership-scoped with dry-run classification, exact confirmation, live observation, and fail-closed handling when ownership or state cannot be proven.
+- `hostwrightd --foreground` observes, plans, records events, and runs bounded health checks; the managed daemon may reconcile admitted workload changes only through the shared fenced lifecycle saga.
 - No privileged helper exists.
-- No launch agent or service installer exists.
+- The supported daemon service is one explicit current-user LaunchAgent, `dev.hostwright.daemon`; no privileged helper or system-wide service installer exists.
 - Phase 07 networking is limited to exact UUID-owned project DNS, ingress, certificate, policy, authenticated service-tunnel, and restricted provider-SPI boundaries. No unmanaged host DNS, general VPN, unauthenticated public exposure, cloud, CRI, Kubernetes, or Docker API behavior exists.
 - Internal planning/source-material binaries are not required in the public tree.
 

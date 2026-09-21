@@ -191,11 +191,13 @@ let package = Package(
         .target(
             name: "HostwrightDesktopModel",
             dependencies: [
+                "HostwrightCLI",
                 "HostwrightCommandTransport",
                 "HostwrightControlPlane",
                 "HostwrightControlTransport",
                 "HostwrightCore",
                 "HostwrightDaemonCore",
+                "HostwrightManifest",
                 "HostwrightRuntime"
             ],
             path: "Sources/HostwrightDesktopModel"

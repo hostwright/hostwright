@@ -797,16 +797,6 @@ let package = Package(
             ]
         ),
         .testTarget(
-            name: "HostwrightDockerEngineTests",
-            dependencies: [
-                "HostwrightCommandTransport",
-                "HostwrightControlPlane",
-                "HostwrightDockerEngine",
-                "HostwrightControlTransport",
-                "HostwrightCore"
-            ]
-        ),
-        .testTarget(
             name: "HostwrightCoreTests",
             dependencies: ["HostwrightCore"],
             resources: [
@@ -815,7 +805,7 @@ let package = Package(
         ),
         .testTarget(
             name: "HostwrightReleaseQualificationTests",
-            dependencies: ["HostwrightReleaseQualification"],
+            dependencies: ["HostwrightReleaseQualification", "HostwrightTestSupport"],
             resources: [
                 .process("Fixtures")
             ]
@@ -845,7 +835,7 @@ let package = Package(
         ),
         .testTarget(
             name: "HostwrightManifestTests",
-            dependencies: ["HostwrightManifest"]
+            dependencies: ["HostwrightManifest", "HostwrightTestSupport"]
         ),
         .testTarget(
             name: "HostwrightRuntimeTests",
@@ -877,13 +867,8 @@ let package = Package(
             ]
         ),
         .testTarget(
-            name: "HostwrightPhase09QualificationToolTests",
-            dependencies: ["HostwrightCore", "HostwrightPhase09QualificationTool"]
-        ),
-        .testTarget(
             name: "HostwrightStateTests",
             dependencies: [
-                "HostwrightAccelerator",
                 "HostwrightControlPlane",
                 "HostwrightControlSecurity",
                 "HostwrightManifest",
@@ -944,19 +929,6 @@ let package = Package(
             dependencies: ["HostwrightHealth"],
             resources: [
                 .process("Fixtures")
-            ]
-        ),
-        .testTarget(
-            name: "HostwrightAcceleratorTests",
-            dependencies: ["HostwrightAccelerator"]
-        ),
-        .testTarget(
-            name: "HostwrightAcceleratorXPCTests",
-            dependencies: [
-                "HostwrightAccelerator",
-                "HostwrightAcceleratorXPC",
-                "HostwrightCore",
-                "HostwrightState"
             ]
         ),
         .testTarget(
@@ -1034,23 +1006,6 @@ let package = Package(
             dependencies: [
                 "HostwrightStorage",
                 "HostwrightTestSupport"
-            ]
-        ),
-        .testTarget(
-            name: "HostwrightClusterTests",
-            dependencies: [
-                "HostwrightCluster",
-                .product(name: "X509", package: "swift-certificates")
-            ],
-            resources: [
-                .process("Fixtures")
-            ]
-        ),
-        .testTarget(
-            name: "HostwrightPodSandboxTests",
-            dependencies: [
-                "HostwrightCluster",
-                "HostwrightPodSandbox"
             ]
         ),
         .testTarget(

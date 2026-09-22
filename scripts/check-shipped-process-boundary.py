@@ -26,6 +26,52 @@ TEST_SUPPORT_TARGET = "HostwrightTestSupport"
 TEST_SUPPORT_PATH = "Tests/HostwrightTestSupport"
 PROCESS_CALL = re.compile(r"(?:\bFoundation\s*\.\s*)?\bProcess\s*\(")
 
+DIRECT_CLI_ALLOWED = {
+    "Sources/HostwrightCommandTransport/BootstrapControlAPI.swift",
+    "Sources/HostwrightCommandTransport/CLIControlCommandExecutor.swift",
+    "Sources/HostwrightCommandTransport/HostwrightCommandRunner.swift",
+    "Sources/HostwrightControl/LocalControlAPI.swift",
+}
+SCRIPT_PROHIBITIONS = {
+    "scripts/phase02-qualification.py": [
+        r"shell\s*=\s*True", r"os\.system\s*\(", r"rm -rf", r"\breboot\b", r"\bshutdown\b",
+        r'\[gh,\s*"release",\s*"create"', r'\[gh,\s*"api",\s*"--method",\s*"DELETE"',
+        r'"--type",\s*"execute"',
+    ],
+    "scripts/phase03-qualification.sh": [
+        r"rm -rf", r"\beval ", r"\bcurl ", r"image pull", r"release create", r"gh api",
+    ],
+    "scripts/phase08-daemon-qualification.sh": [r"rm -rf", r"\bkillall\b", r"\bpkill\b", r"\bsudo\b"],
+    "scripts/phase08-mutation-checkpoint-qualification.sh": [r"rm -rf", r"/sbin/(?:reboot|shutdown)", r"\blaunchctl\b", r"\bgh "],
+    "scripts/phase08-soak-qualification.sh": [r"rm -rf", r"\bsleepnow\b", r"container system stop", r"\blaunchctl\b", r"/sbin/(?:reboot|shutdown)", r"\bgh "],
+    "scripts/release/qualify-vendor-tap.sh": [
+        r"rm -rf", r"spctl --assess --type execute", r"\bbrew install hostwright(?:\r?\n|$)",
+    ],
+    ".github/workflows/trusted-release.yml": [r"contents:\s*write", r"gh release create"],
+    ".github/workflows/vendor-tap-qualification.yml": [r"contents:\s*write"],
+    "scripts/release/prepare-containerization-assets.sh": [r"HOSTWRIGHT_CONTAINERIZATION_ASSET_URL", r'curl -H "Authorization:'],
+}
+
+
+def validate_source_prohibitions(root: Path) -> None:
+    for source in sorted((root / "Sources").rglob("*.swift")):
+        text = source.read_text(encoding="utf-8")
+        path = source.relative_to(root).as_posix()
+        require(PROCESS_CALL.search(text) is None, f"production Process callsite: {path}")
+        require(re.search(r"\b(?:struct|class|actor|enum)\s+(?:Mock|Fake)\w*", text) is None,
+                f"production test double: {path}")
+        require(re.search(r"\bHostwrightCLI\s*\.\s*run\s*\(", text) is None or path in DIRECT_CLI_ALLOWED,
+                f"direct CLI execution outside control boundary: {path}")
+        if path == "Sources/HostwrightCommand/main.swift":
+            require(re.search(r"\b(?:HostwrightCLI|SQLiteStateStore|RuntimeAdapter)\b", text) is None,
+                    "command executable contains a direct state/runtime fallback")
+    for path, patterns in SCRIPT_PROHIBITIONS.items():
+        source = root / path
+        if source.exists():
+            text = source.read_text(encoding="utf-8")
+            for pattern in patterns:
+                require(re.search(pattern, text) is None, f"prohibited operation {pattern}: {path}")
+
 
 class BoundaryError(ValueError):
     pass
@@ -123,6 +169,12 @@ def validate(package: dict[str, Any], root: Path) -> None:
             if (dependency := dependency_name(item, local_names)) is not None
         }
 
+    if "HostwrightCommand" in local_dependencies:
+        require(local_dependencies["HostwrightCommand"] == {"HostwrightCommandTransport"},
+                "command executable bypasses transport boundary")
+        require("HostwrightCommandTransport" in local_dependencies.get("HostwrightDaemon", set()),
+                "daemon bypasses transport boundary")
+
     product_roots: list[tuple[str, list[str]]] = []
     for product in products:
         require(isinstance(product, dict), "invalid product entry")
@@ -158,6 +210,8 @@ def validate(package: dict[str, Any], root: Path) -> None:
             content = source.read_text(encoding="utf-8")
             require(PROCESS_CALL.search(content) is None,
                     f"shipped product closure contains Process callsite: {source.relative_to(root)}")
+
+    validate_source_prohibitions(root)
 
 
 def fixture(root: Path, *, dependency: str | None = None, product_target: str = "App") -> dict[str, Any]:
@@ -265,6 +319,22 @@ def self_test() -> None:
             "dependencies": [],
         })
         expect_failure(integration_product, root, "reaches qualification target")
+
+    with tempfile.TemporaryDirectory(prefix="hostwright-architecture-boundary-") as temporary:
+        root = Path(temporary)
+        for content, failure in [
+            ("struct FakeProduction {}", "production test double"),
+            ("HostwrightCLI . run ()", "direct CLI execution"),
+            ("Foundation.Process()", "Process callsite"),
+        ]:
+            package = fixture(root)
+            (root / "Sources/Core/Core.swift").write_text(content, encoding="utf-8")
+            expect_failure(package, root, failure)
+        package = fixture(root)
+        prohibited = root / "scripts/phase08-soak-qualification.sh"
+        prohibited.parent.mkdir(parents=True)
+        prohibited.write_text("rm -rf /tmp/fixture", encoding="utf-8")
+        expect_failure(package, root, "prohibited operation")
 
 
 def main() -> int:

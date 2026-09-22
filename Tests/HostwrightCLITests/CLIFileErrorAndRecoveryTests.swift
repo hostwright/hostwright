@@ -91,7 +91,7 @@ final class CLIFileErrorAndRecoveryTests: XCTestCase {
     }
 
     func testApplyActiveLeaseExplainsOwnerExpiryAndDoesNotMutate() throws {
-        try withTemporaryDatabase { databasePath in
+        try withCLITestDatabase(prefix: "hostwright-cli-file-errors") { databasePath in
             let manifestText = singleServiceManifest
             let manifest = try ManifestValidator.validated(manifestText)
             let adapter = RecordingRuntimeAdapter(projectName: "demo")
@@ -145,7 +145,7 @@ final class CLIFileErrorAndRecoveryTests: XCTestCase {
     }
 
     func testApplyRecordedIntentActiveLeaseRequiresManualInspection() throws {
-        try withTemporaryDatabase { databasePath in
+        try withCLITestDatabase(prefix: "hostwright-cli-file-errors") { databasePath in
             let manifestText = singleServiceManifest
             let manifest = try ManifestValidator.validated(manifestText)
             let adapter = RecordingRuntimeAdapter(projectName: "demo")
@@ -213,7 +213,7 @@ final class CLIFileErrorAndRecoveryTests: XCTestCase {
     }
 
     func testApplyCanRetryAfterPreRuntimePersistenceFailureWithRecordedIntent() throws {
-        try withTemporaryDatabase { databasePath in
+        try withCLITestDatabase(prefix: "hostwright-cli-file-errors") { databasePath in
             let manifestText = singleServiceManifest
             let manifest = try ManifestValidator.validated(manifestText)
             let adapter = RecordingRuntimeAdapter(projectName: "demo")
@@ -265,7 +265,7 @@ final class CLIFileErrorAndRecoveryTests: XCTestCase {
     }
 
     func testRecoveryTextAndJSONExposeRedactedActiveLeaseFields() throws {
-        try withTemporaryDatabase { databasePath in
+        try withCLITestDatabase(prefix: "hostwright-cli-file-errors") { databasePath in
             let lockExpiresAt = "2099-07-12T12:10:00Z"
             let store = SQLiteStateStore(path: databasePath)
             try store.migrate()
@@ -303,7 +303,7 @@ final class CLIFileErrorAndRecoveryTests: XCTestCase {
     }
 
     func testConfirmedRecoveryRejectsWrongPlanHashBeforeRuntimeMutation() throws {
-        try withTemporaryDatabase { databasePath in
+        try withCLITestDatabase(prefix: "hostwright-cli-file-errors") { databasePath in
             let store = SQLiteStateStore(path: databasePath)
             try store.migrate()
             let groupID = "11111111-1111-4111-8111-111111111111"
@@ -441,15 +441,6 @@ final class CLIFileErrorAndRecoveryTests: XCTestCase {
             platformSnapshot: { PlatformSnapshot(macOSMajorVersion: 26, architecture: "arm64") },
             operatingSystemDescription: { "macOS 26.5" }
         )
-    }
-
-    private func withTemporaryDatabase(_ body: (String) throws -> Void) throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("hostwright-cli-file-errors-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer {
-            try? FileManager.default.removeItem(at: directory)
-        }
-        try body(directory.appendingPathComponent("state.sqlite").path)
     }
 
     private func jsonObject(_ text: String) throws -> [String: Any] {

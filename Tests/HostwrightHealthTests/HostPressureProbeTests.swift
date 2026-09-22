@@ -6,13 +6,6 @@ import XCTest
 final class HostPressureProbeTests: XCTestCase {
     private let observationTime = Date(timeIntervalSince1970: 1_754_000_000)
 
-    func testInjectableProbeAcceptsObservationTimeFromItsCaller() {
-        let expected = HostPressureSample(observedAt: observationTime)
-        let probe = FixedHostPressureProbe(sample: expected)
-
-        XCTAssertEqual(probe.sample(at: observationTime), expected)
-    }
-
     func testDispatchMemoryPressureEventsMapToStableSampleLevels() {
         XCTAssertEqual(
             MacOSHostPressureProbe.memoryPressureLevel(for: .normal),
@@ -134,14 +127,6 @@ final class HostPressureProbeTests: XCTestCase {
                 from: hostileData
             )
         )
-    }
-
-    private struct FixedHostPressureProbe: HostPressureProbe {
-        let sample: HostPressureSample
-
-        func sample(at _: Date) -> HostPressureSample {
-            sample
-        }
     }
 
     private struct FixedProcessInfoReader: HostProcessInfoReader {

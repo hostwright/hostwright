@@ -92,7 +92,7 @@ final class BenchmarkCommandTests: XCTestCase {
     }
 
     func testContractRunWritesBlockedReportWithThreeRawIterationsAndExactCleanup() throws {
-        try withTemporaryDirectory { directory in
+        try withCLITestDirectory(prefix: "hostwright-benchmark-tests") { directory in
             let reportURL = directory.appendingPathComponent("benchmark.json")
             let adapter = BenchmarkContractAdapter()
             let result = HostwrightCLI.run(
@@ -120,7 +120,7 @@ final class BenchmarkCommandTests: XCTestCase {
     }
 
     func testCleanupFailureProducesFailedEvidenceAndExactIdentifier() throws {
-        try withTemporaryDirectory { directory in
+        try withCLITestDirectory(prefix: "hostwright-benchmark-tests") { directory in
             let reportURL = directory.appendingPathComponent("benchmark.json")
             let adapter = BenchmarkContractAdapter(deleteFails: true)
             let result = HostwrightCLI.run(
@@ -140,7 +140,7 @@ final class BenchmarkCommandTests: XCTestCase {
     }
 
     func testMissingLocalImageCapabilityWritesBlockedReportInsteadOfPass() throws {
-        try withTemporaryDirectory { directory in
+        try withCLITestDirectory(prefix: "hostwright-benchmark-tests") { directory in
             let reportURL = directory.appendingPathComponent("benchmark.json")
             let adapter = BenchmarkContractAdapter(createBlocked: true)
             let result = HostwrightCLI.run(
@@ -160,7 +160,7 @@ final class BenchmarkCommandTests: XCTestCase {
     }
 
     func testMissingHostIdentityWritesBlockedReportBeforeRuntimeMeasurement() throws {
-        try withTemporaryDirectory { directory in
+        try withCLITestDirectory(prefix: "hostwright-benchmark-tests") { directory in
             let reportURL = directory.appendingPathComponent("benchmark.json")
             let host = BenchmarkHostSnapshot(
                 operatingSystem: "macOS 26.5",
@@ -187,7 +187,7 @@ final class BenchmarkCommandTests: XCTestCase {
     }
 
     func testRuntimeTimeoutReportOmitsPartialOutputAndUnrelatedIdentifiers() throws {
-        try withTemporaryDirectory { directory in
+        try withCLITestDirectory(prefix: "hostwright-benchmark-tests") { directory in
             let reportURL = directory.appendingPathComponent("benchmark.json")
             let adapter = BenchmarkContractAdapter(
                 versionError: .commandTimedOut(
@@ -211,7 +211,7 @@ final class BenchmarkCommandTests: XCTestCase {
     }
 
     func testAttendedSleepWakeContractRecordsGapWithoutClaimingHardwarePass() throws {
-        try withTemporaryDirectory { directory in
+        try withCLITestDirectory(prefix: "hostwright-benchmark-tests") { directory in
             let reportURL = directory.appendingPathComponent("benchmark.json")
             let clock = BenchmarkContractClock()
             let tracker = CallTracker()
@@ -240,7 +240,7 @@ final class BenchmarkCommandTests: XCTestCase {
     }
 
     func testExistingReportRefusalPreservesRealFile() throws {
-        try withTemporaryDirectory { directory in
+        try withCLITestDirectory(prefix: "hostwright-benchmark-tests") { directory in
             let reportURL = directory.appendingPathComponent("benchmark.json")
             try "sentinel".write(to: reportURL, atomically: true, encoding: .utf8)
             let result = HostwrightCLI.run(
@@ -271,7 +271,7 @@ final class BenchmarkCommandTests: XCTestCase {
     }
 
     func testLiveExclusiveWriterCreatesModeSixHundredFileAndRefusesSecondWrite() throws {
-        try withTemporaryDirectory { directory in
+        try withCLITestDirectory(prefix: "hostwright-benchmark-tests") { directory in
             let reportURL = directory.appendingPathComponent("exclusive.json")
             try CLIEnvironment.live.writeNewTextFile(reportURL.path, "first")
             XCTAssertEqual(try String(contentsOf: reportURL, encoding: .utf8), "first")
@@ -347,12 +347,6 @@ final class BenchmarkCommandTests: XCTestCase {
         )
     }
 
-    private func withTemporaryDirectory(_ body: (URL) throws -> Void) throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("hostwright-benchmark-tests-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        try body(directory)
-    }
 }
 
 private final class BenchmarkContractClock: @unchecked Sendable {

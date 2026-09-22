@@ -7,7 +7,7 @@ import XCTest
 
 final class RBACSchemaV20MigrationTests: XCTestCase {
   func testV19UpgradeCreatesExactPolicyProfileSchemaAndVerifiedRollbackRestoresV19() throws {
-    try withTemporaryStore(throughVersion: 19) { store, directory in
+    try withTemporaryStateStore(prefix: "hostwright-rbac-schema-v20", throughVersion: 19) { store, directory in
       let timestamp = "2026-08-03T01:00:00Z"
       try insertIdentity(timestamp: timestamp, store: store)
       let service = StateUpgradeService(store: store)
@@ -89,7 +89,7 @@ final class RBACSchemaV20MigrationTests: XCTestCase {
   }
 
   func testV20ChecksumTamperingFailsClosedWithoutFurtherWrites() throws {
-    try withTemporaryStore(throughVersion: 20) { store, _ in
+    try withTemporaryStateStore(prefix: "hostwright-rbac-schema-v20", throughVersion: 20) { store, _ in
       let connection = try SQLiteConnection(
         path: store.path, createIfNeeded: false, profile: .portableArtifact)
       try connection.run("UPDATE schema_migrations SET checksum = 'tampered' WHERE version = 20")
@@ -113,7 +113,7 @@ final class RBACSchemaV20MigrationTests: XCTestCase {
   }
 
   func testIntegrityRequiresTheExactFiveFrozenBuiltInRolesAtSchemaV20() throws {
-    try withTemporaryStore(throughVersion: 19) { store, _ in
+    try withTemporaryStateStore(prefix: "hostwright-rbac-schema-v20", throughVersion: 19) { store, _ in
       let timestamp = "2026-08-03T01:00:00Z"
       try insertIdentity(timestamp: timestamp, store: store)
       try store.migrate()
@@ -155,21 +155,6 @@ final class RBACSchemaV20MigrationTests: XCTestCase {
           && $0.affectedRows >= 1
       })
     }
-  }
-
-  private func withTemporaryStore(
-    throughVersion: Int,
-    _ body: (SQLiteStateStore, URL) throws -> Void
-  ) throws {
-    let directory = FileManager.default.temporaryDirectory
-      .appendingPathComponent("hostwright-rbac-schema-v20-\(UUID().uuidString)", isDirectory: true)
-    try FileManager.default.createDirectory(
-      at: directory, withIntermediateDirectories: false,
-      attributes: [.posixPermissions: 0o700])
-    defer { try? FileManager.default.removeItem(at: directory) }
-    let store = SQLiteStateStore(path: directory.appendingPathComponent("state.sqlite").path)
-    try MigrationRunner().apply(to: store, throughVersion: throughVersion)
-    try body(store, directory)
   }
 
   private func insertIdentity(timestamp: String, store: SQLiteStateStore) throws {

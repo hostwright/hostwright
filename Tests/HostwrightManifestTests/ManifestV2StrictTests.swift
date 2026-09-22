@@ -1,3 +1,4 @@
+import HostwrightTestSupport
 import XCTest
 @testable import HostwrightManifest
 
@@ -60,11 +61,7 @@ final class ManifestV2StrictTests: XCTestCase {
             .deletingLastPathComponent()
         let paths = [
             root.appendingPathComponent("contracts/v0.0.2/manifest.yaml")
-        ] + (try FileManager.default.contentsOfDirectory(
-            at: root.appendingPathComponent("examples"),
-            includingPropertiesForKeys: nil
-        )).map { $0.appendingPathComponent("hostwright.yaml") }
-            .filter { FileManager.default.fileExists(atPath: $0.path) }
+        ] + (try RepositoryTestInputs.exampleManifests(in: root))
 
         for path in paths {
             let parsed = try ManifestValidator.validated(String(contentsOf: path, encoding: .utf8))

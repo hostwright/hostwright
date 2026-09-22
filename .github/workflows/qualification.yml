@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [distribution, phase09-gate13, phase09-gate14, phase09-other, release, live]
+        shard: [distribution, release, live]
     steps:
       - uses: actions/checkout@v4
         with:

@@ -19,7 +19,7 @@ final class OCIReferrerDiscoveryTests: XCTestCase {
         let next =
             "</v2/team/app/referrers/\(subjectValue)" +
             "?artifactType=\(signatureType)&page=2>; rel=\"next\""
-        let transport = ReferrerDiscoveryTransport([
+        let transport = RecordingRegistryTransport([
             Self.response(
                 body: Self.index([
                     Self.descriptor(
@@ -65,7 +65,7 @@ final class OCIReferrerDiscoveryTests: XCTestCase {
     }
 
     func testNativeDiscoveryReportsServerSideFilter() throws {
-        let transport = ReferrerDiscoveryTransport([
+        let transport = RecordingRegistryTransport([
             Self.response(
                 body: Self.index([
                     Self.descriptor(
@@ -91,7 +91,7 @@ final class OCIReferrerDiscoveryTests: XCTestCase {
     func testNativeDiscoveryRejectsDeclaredMismatchedSubject() throws {
         let wrongSubject =
             "sha256:" + String(repeating: "9", count: 64)
-        let transport = ReferrerDiscoveryTransport([
+        let transport = RecordingRegistryTransport([
             Self.response(
                 body: Data(
                     """
@@ -129,7 +129,7 @@ final class OCIReferrerDiscoveryTests: XCTestCase {
         let subject = try OCIContentDigest(
             "sha512:" + String(repeating: "a", count: 128)
         )
-        let transport = ReferrerDiscoveryTransport([
+        let transport = RecordingRegistryTransport([
             RegistryTransportResponse(
                 statusCode: 404,
                 headers: [:],
@@ -155,7 +155,7 @@ final class OCIReferrerDiscoveryTests: XCTestCase {
     func test404UsesExactReferrersTagFallback() throws {
         let descriptorDigest =
             "sha256:" + String(repeating: "2", count: 64)
-        let transport = ReferrerDiscoveryTransport([
+        let transport = RecordingRegistryTransport([
             RegistryTransportResponse(
                 statusCode: 404,
                 headers: [:],
@@ -189,7 +189,7 @@ final class OCIReferrerDiscoveryTests: XCTestCase {
     }
 
     func testMissingFallbackTagIsExplicitEmptyCapability() throws {
-        let transport = ReferrerDiscoveryTransport([
+        let transport = RecordingRegistryTransport([
             RegistryTransportResponse(
                 statusCode: 404,
                 headers: [:],
@@ -214,7 +214,7 @@ final class OCIReferrerDiscoveryTests: XCTestCase {
     }
 
     func testCrossOriginPaginationAndMalformedFallbackFailClosed() throws {
-        let crossOrigin = ReferrerDiscoveryTransport([
+        let crossOrigin = RecordingRegistryTransport([
             Self.response(
                 body: Self.index([]),
                 headers: [
@@ -238,7 +238,7 @@ final class OCIReferrerDiscoveryTests: XCTestCase {
         }
         XCTAssertEqual(crossOrigin.requests.count, 1)
 
-        let malformedFallback = ReferrerDiscoveryTransport([
+        let malformedFallback = RecordingRegistryTransport([
             RegistryTransportResponse(
                 statusCode: 404,
                 headers: [:],
@@ -261,7 +261,7 @@ final class OCIReferrerDiscoveryTests: XCTestCase {
     }
 
     func testCancellationStopsBeforeDiscoveryRequest() throws {
-        let transport = ReferrerDiscoveryTransport([])
+        let transport = RecordingRegistryTransport([])
         let cancellation = RegistryTransportCancellation()
         cancellation.cancel()
 
@@ -282,7 +282,7 @@ final class OCIReferrerDiscoveryTests: XCTestCase {
     }
 
     private func makeClient(
-        _ transport: ReferrerDiscoveryTransport
+        _ transport: RecordingRegistryTransport
     ) -> OCIReferrerRegistryClient {
         OCIReferrerRegistryClient(
             authenticationClient: RegistryAuthenticationClient(
@@ -321,35 +321,5 @@ final class OCIReferrerDiscoveryTests: XCTestCase {
         """
         {"mediaType":"\(OCIReferrerDescriptor.manifestMediaType)","digest":"\(digest)","size":64,"artifactType":"\(artifactType)"}
         """
-    }
-}
-
-private final class ReferrerDiscoveryTransport:
-    RegistrySynchronousHTTPTransporting,
-    @unchecked Sendable
-{
-    private let lock = NSLock()
-    private var responses: [RegistryTransportResponse]
-    private var recordedRequests: [RegistryTransportRequest] = []
-
-    init(_ responses: [RegistryTransportResponse]) {
-        self.responses = responses
-    }
-
-    var requests: [RegistryTransportRequest] {
-        lock.withLock { recordedRequests }
-    }
-
-    func send(
-        _ request: RegistryTransportRequest,
-        cancellation: RegistryTransportCancellation
-    ) throws -> RegistryTransportResponse {
-        try lock.withLock {
-            recordedRequests.append(request)
-            guard !responses.isEmpty else {
-                throw RegistryTransportError.transportFailed
-            }
-            return responses.removeFirst()
-        }
     }
 }

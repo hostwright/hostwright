@@ -236,30 +236,6 @@ final class SchedulerAdmissionRepositoryTests: XCTestCase {
         )
     }
 
-    func testPreemptionHasOneRepositoryAuthorityAndDiagnosticsBindFieldNames() throws {
-        let repositoryURL = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("Sources/HostwrightState/SchedulerAdmissionRepository.swift")
-        let source = try String(contentsOf: repositoryURL, encoding: .utf8)
-
-        XCTAssertFalse(source.contains("public func reserveAndFence"))
-        XCTAssertFalse(source.contains("public func recordPreemptionIntent("))
-        XCTAssertFalse(source.contains("public func recordPreemptionIntentAfterFence"))
-        XCTAssertEqual(
-            source.components(separatedBy: "public func completePreemptionDecision").count - 1,
-            1
-        )
-        XCTAssertTrue(source.contains("scheduler-schema-missing:\\(table)"))
-        XCTAssertTrue(source.contains("scheduler-schema-columns:\\(table)"))
-        XCTAssertTrue(source.contains("scheduler-query-limit:\\(field)"))
-        XCTAssertTrue(source.contains("scheduler-json-size:\\(field)"))
-        XCTAssertTrue(source.contains("scheduler-json-canonicality:\\(field)"))
-        XCTAssertTrue(source.contains("scheduler-json-shape:\\(field)"))
-        XCTAssertFalse(source.contains("scheduler-query-limit:(field)"))
-    }
-
     func testCodableDecodingRejectsInvalidSchedulerAdmissionInputs() throws {
         let decoder = JSONDecoder()
         let digestA = String(repeating: "a", count: 64)

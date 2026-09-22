@@ -64,7 +64,7 @@ final class TeamWorkflowCLITests: XCTestCase {
     }
 
     func testDirectCommandConstructionCannotBypassTeamPathPairing() throws {
-        try withTemporaryDirectory { directory in
+        try withCLITestDirectory(prefix: "hostwright-team-xctest") { directory in
             let databasePath = directory.appendingPathComponent("state.sqlite").path
             let apply = try HostwrightCLI.run(
                 command: .apply(
@@ -97,7 +97,7 @@ final class TeamWorkflowCLITests: XCTestCase {
     }
 
     func testReadOnlyCommandsLoadRealProfileFilesAndEnforceDigestPolicy() throws {
-        try withTemporaryDirectory { directory in
+        try withCLITestDirectory(prefix: "hostwright-team-xctest") { directory in
             let taggedManifestURL = directory.appendingPathComponent("tagged.yaml")
             let digestManifestURL = directory.appendingPathComponent("digest.yaml")
             let stackURL = directory.appendingPathComponent("compose.yaml")
@@ -153,7 +153,7 @@ final class TeamWorkflowCLITests: XCTestCase {
     }
 
     func testInvalidProfileProducesStableRedactedJSONError() throws {
-        try withTemporaryDirectory { directory in
+        try withCLITestDirectory(prefix: "hostwright-team-xctest") { directory in
             let manifestURL = directory.appendingPathComponent("hostwright.yaml")
             let profileURL = directory.appendingPathComponent("team.json")
             let secret = "token=profile-secret-value"
@@ -176,7 +176,7 @@ final class TeamWorkflowCLITests: XCTestCase {
     }
 
     func testApprovalCannotBypassMissingSchedulerAuthority() throws {
-        try withTemporaryDirectory { directory in
+        try withCLITestDirectory(prefix: "hostwright-team-xctest") { directory in
             let manifestURL = directory.appendingPathComponent("hostwright.yaml")
             let profileURL = directory.appendingPathComponent("team.json")
             let approvalURL = directory.appendingPathComponent("approval.json")
@@ -223,7 +223,7 @@ final class TeamWorkflowCLITests: XCTestCase {
     }
 
     func testMismatchedApprovalStopsBeforeRuntimeMutation() throws {
-        try withTemporaryDirectory { directory in
+        try withCLITestDirectory(prefix: "hostwright-team-xctest") { directory in
             let manifestURL = directory.appendingPathComponent("hostwright.yaml")
             let profileURL = directory.appendingPathComponent("team.json")
             let approvalURL = directory.appendingPathComponent("approval.json")
@@ -266,7 +266,7 @@ final class TeamWorkflowCLITests: XCTestCase {
     }
 
     func testCleanupBindsProfileIntoTokenAndPersistsApprovalAudit() throws {
-        try withTemporaryDirectory { directory in
+        try withCLITestDirectory(prefix: "hostwright-team-xctest") { directory in
             let manifestURL = directory.appendingPathComponent("hostwright.yaml")
             let profileURL = directory.appendingPathComponent("team.json")
             let approvalURL = directory.appendingPathComponent("approval.json")
@@ -350,7 +350,7 @@ final class TeamWorkflowCLITests: XCTestCase {
     }
 
     func testApprovalCannotBypassCleanupOwnership() throws {
-        try withTemporaryDirectory { directory in
+        try withCLITestDirectory(prefix: "hostwright-team-xctest") { directory in
             let manifestURL = directory.appendingPathComponent("hostwright.yaml")
             let profileURL = directory.appendingPathComponent("team.json")
             let approvalURL = directory.appendingPathComponent("approval.json")
@@ -411,7 +411,7 @@ final class TeamWorkflowCLITests: XCTestCase {
     }
 
     func testApprovalCannotBypassManagedStartOwnership() throws {
-        try withTemporaryDirectory { directory in
+        try withCLITestDirectory(prefix: "hostwright-team-xctest") { directory in
             let manifestURL = directory.appendingPathComponent("hostwright.yaml")
             let profileURL = directory.appendingPathComponent("team.json")
             let approvalURL = directory.appendingPathComponent("approval.json")
@@ -591,12 +591,6 @@ final class TeamWorkflowCLITests: XCTestCase {
         return String(line.dropFirst(prefix.count))
     }
 
-    private func withTemporaryDirectory(_ body: (URL) throws -> Void) throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("hostwright-team-xctest-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        try body(directory)
-    }
 }
 
 private final class CapturingRuntimeAdapter: RuntimeAdapter, @unchecked Sendable {

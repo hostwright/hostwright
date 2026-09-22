@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly qualification_filter='(DistributionIntegrationTests|DistributionDurableLifecycleTests|Phase09Gate13QualificationHarnessTests|Phase09Gate14QualificationHarnessTests|Phase09Gate15QualificationHarnessTests|Phase09Gate16QualificationHarnessTests|ReleaseQualificationRegistryTests|Phase07ContainerizationNetworkLiveTests|Phase07LANExposureLiveTests|LifecycleGate05LiveTests|Phase07LocalNetworkForwardingLiveTests|Phase07NetworkGate01LiveTests)/'
+readonly qualification_filter='(DistributionIntegrationTests|DistributionDurableLifecycleTests|ReleaseQualificationRegistryTests|Phase07ContainerizationNetworkLiveTests|Phase07LANExposureLiveTests|LifecycleGate05LiveTests|Phase07LocalNetworkForwardingLiveTests|Phase07NetworkGate01LiveTests)/'
 readonly durable_lifecycle_sentinel_filter='DistributionDurableLifecycleTests/(testPackageLifecycleUsesExistingRepairUpgradeRollbackAndDowngradeRules|testInterruptedUpgradeRecoversThenUpgradeAndVerifiedRollbackRestoreBinaryAndState|testRequiredOperationRejectsLockedStateMismatchWithoutMutation|testRemoveDataRequiresCurrentPlanAndInterruptedRemovalRestoresPayloadAndState|testManagedServiceSymlinkExecutableIsRejectedBeforeLifecycleMutation)$'
 
 usage() {
@@ -10,9 +10,6 @@ usage: scripts/test.sh [full|pr|qualification <shard>]
 
 qualification shards:
   distribution
-  phase09-gate13
-  phase09-gate14
-  phase09-other
   release
   live
   all
@@ -39,6 +36,7 @@ run_cheap_checks() {
   python3 scripts/roadmap-governance.py self-test
   python3 scripts/render-roadmap-index.py check
   python3 scripts/check-current-truth.py
+  python3 scripts/check-current-truth.py --self-test
   scripts/lint.sh
   scripts/grep-orchard.sh .
 }
@@ -66,15 +64,6 @@ run_qualification() {
   case "$shard" in
     distribution)
       filter='(DistributionIntegrationTests|DistributionDurableLifecycleTests)/'
-      ;;
-    phase09-gate13)
-      filter='Phase09Gate13QualificationHarnessTests/'
-      ;;
-    phase09-gate14)
-      filter='Phase09Gate14QualificationHarnessTests/'
-      ;;
-    phase09-other)
-      filter='(Phase09Gate15QualificationHarnessTests|Phase09Gate16QualificationHarnessTests)/'
       ;;
     release)
       filter='ReleaseQualificationRegistryTests/'

@@ -1,3 +1,4 @@
+import HostwrightTestSupport
 import Foundation
 import XCTest
 import HostwrightCore
@@ -153,21 +154,17 @@ private func runReleaseQualificationGit(
 func makeDocumentationSnapshotRepository() throws -> URL {
     let source = ReleaseQualificationTestSupport.repositoryRoot()
     let root = try ReleaseQualificationTestSupport.temporaryDirectory()
-    for directory in ["docs", "examples", "schemas", "contracts", "Sources"] {
-        try FileManager.default.copyItem(
-            at: source.appendingPathComponent(directory, isDirectory: true),
-            to: root.appendingPathComponent(directory, isDirectory: true)
-        )
-    }
-    for path in [
-        "README.md",
-        "CONTRIBUTING.md",
-        "GOVERNANCE.md",
-        "SECURITY.md",
-        "scripts/check-doc-links.py",
-        "scripts/check-current-truth.py",
+    let prefixes = ["docs/", "examples/", "schemas/", "contracts/", "Sources/"]
+    let required = [
+        "README.md", "CONTRIBUTING.md", "GOVERNANCE.md", "SECURITY.md",
+        "scripts/check-doc-links.py", "scripts/check-current-truth.py",
         "scripts/phase09-gate16-qualification.sh",
-    ] {
+        "docs/design/adr-0016-release-focused-test-suite.md",
+    ]
+    let paths = Set(try RepositoryTestInputs.trackedFiles(in: source).filter { path in
+        prefixes.contains { path.hasPrefix($0) }
+    }).union(required)
+    for path in paths.sorted() {
         let destination = root.appendingPathComponent(path)
         let parent = destination.deletingLastPathComponent()
         if !FileManager.default.fileExists(atPath: parent.path) {
@@ -1642,7 +1639,8 @@ final class ReleaseQualificationRegistryTests: XCTestCase {
     }
 
     func testDocumentationLaneRecordsOnlyBoundedCommandEvidence() throws {
-        let root = ReleaseQualificationTestSupport.repositoryRoot()
+        let root = try makeDocumentationSnapshotRepository()
+        defer { try? FileManager.default.removeItem(at: root) }
         let lane = try XCTUnwrap(
             ReleaseQualificationDefaultRegistry.registry.lanes.first {
                 $0.id == "documentation-source-contracts"
@@ -1694,7 +1692,7 @@ final class ReleaseQualificationRegistryTests: XCTestCase {
             $0 == "feec8f5d501dcce89dcc6ee2b5b155dfd9b1dbb4408efb02399f9b2adfebf588"
         })
         XCTAssertTrue(validators[1].identity.arguments.contains {
-            $0 == "9ef66e62b83c6ad9556c50a70da9d041d1c2acc847dc23b58cd01b7734635b80"
+            $0 == "8e5425c09326fb80705e459ffee008f3406ae3163b3266e3d8e85476f05fa98d"
         })
         XCTAssertEqual(validators[0].durationMilliseconds, 42)
         XCTAssertEqual(validators[0].standardOutputBytes, 22)
@@ -1762,7 +1760,8 @@ final class ReleaseQualificationRegistryTests: XCTestCase {
     }
 
     func testDocumentationLanePreservesFirstObservationWhenSecondCommandTimesOut() throws {
-        let root = ReleaseQualificationTestSupport.repositoryRoot()
+        let root = try makeDocumentationSnapshotRepository()
+        defer { try? FileManager.default.removeItem(at: root) }
         let lane = try XCTUnwrap(
             ReleaseQualificationDefaultRegistry.registry.lanes.first {
                 $0.id == "documentation-source-contracts"

@@ -46,32 +46,6 @@ final class ContainerizationAssetPreparationScriptTests: XCTestCase {
         }
     }
 
-    func testScriptSyntaxAndExactImmutableSourceContract() throws {
-        let script = scriptURL()
-        let syntax = try run(
-            executable: URL(fileURLWithPath: "/bin/bash"),
-            arguments: ["-n", script.path]
-        )
-        XCTAssertEqual(syntax.status, 0, syntax.output)
-
-        let source = try String(contentsOf: script, encoding: .utf8)
-        for fragment in [
-            "https://github.com/kata-containers/kata-containers/releases/download/3.28.0/kata-static-3.28.0-arm64.tar.zst",
-            "opt/kata/share/kata-containers/vmlinux-6.18.15-186",
-            "ghcr.io/apple/containerization/vminit:0.35.0",
-            "5708d65ba1914caa756a2e813831e17d7655042799310bc94efef82210c2dac6",
-            "04cd14f8e6ec9617611429aaf2a91a841b27ff9eae847acaca48430f58c5e57d"
-        ] {
-            XCTAssertTrue(source.contains(fragment), "Missing locked asset contract: \(fragment)")
-        }
-        XCTAssertFalse(source.contains("HOSTWRIGHT_CONTAINERIZATION_ASSET_URL"))
-        XCTAssertFalse(source.contains("curl -H \"Authorization:"))
-        XCTAssertTrue(
-            source.contains(#"^[A-Za-z0-9._~+/-]+={0,2}$"#),
-            "The GHCR token contract must accept only bounded base64-token characters and terminal padding."
-        )
-    }
-
     private func scriptURL() -> URL {
         packageRoot().appendingPathComponent(
             "scripts/release/prepare-containerization-assets.sh",

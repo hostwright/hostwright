@@ -1,3 +1,4 @@
+import HostwrightTestSupport
 import XCTest
 @testable import HostwrightManifest
 
@@ -250,11 +251,7 @@ final class ManifestMigrationTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-        let examples = try FileManager.default.contentsOfDirectory(
-            at: root.appendingPathComponent("examples"),
-            includingPropertiesForKeys: nil
-        ).map { $0.appendingPathComponent("hostwright.yaml") }
-            .filter { FileManager.default.fileExists(atPath: $0.path) }
+        let examples = try RepositoryTestInputs.exampleManifests(in: root)
 
         XCTAssertFalse(examples.isEmpty)
         for path in examples {

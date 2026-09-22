@@ -29,7 +29,7 @@ final class OCIReferrerFetchTests: XCTestCase {
             ]
         )
         let manifestDigest = try OCIContentDigest.sha256(of: manifest)
-        let transport = ReferrerFetchTransport([
+        let transport = RecordingRegistryTransport([
             discoveryResponse(
                 manifestDigest: manifestDigest,
                 manifestBytes: manifest.count
@@ -88,7 +88,7 @@ final class OCIReferrerFetchTests: XCTestCase {
             layers: []
         )
         let manifestDigest = try OCIContentDigest.sha256(of: manifest)
-        let transport = ReferrerFetchTransport([
+        let transport = RecordingRegistryTransport([
             discoveryResponse(
                 manifestDigest: manifestDigest,
                 manifestBytes: manifest.count
@@ -120,7 +120,7 @@ final class OCIReferrerFetchTests: XCTestCase {
         let declaredDigest = try OCIContentDigest.sha256(
             of: Data("different".utf8)
         )
-        let mismatch = ReferrerFetchTransport([
+        let mismatch = RecordingRegistryTransport([
             discoveryResponse(
                 manifestDigest: declaredDigest,
                 manifestBytes: content.count
@@ -167,7 +167,7 @@ final class OCIReferrerFetchTests: XCTestCase {
         let rootDigest = try OCIContentDigest.sha256(
             of: oversizedGraphManifest
         )
-        let oversized = ReferrerFetchTransport([
+        let oversized = RecordingRegistryTransport([
             discoveryResponse(
                 manifestDigest: rootDigest,
                 manifestBytes: oversizedGraphManifest.count
@@ -209,7 +209,7 @@ final class OCIReferrerFetchTests: XCTestCase {
     }
 
     private func makeClient(
-        _ transport: ReferrerFetchTransport
+        _ transport: RecordingRegistryTransport
     ) -> OCIReferrerRegistryClient {
         OCIReferrerRegistryClient(
             authenticationClient: RegistryAuthenticationClient(
@@ -290,35 +290,5 @@ final class OCIReferrerFetchTests: XCTestCase {
             "digest": digest,
             "size": size
         ]
-    }
-}
-
-private final class ReferrerFetchTransport:
-    RegistrySynchronousHTTPTransporting,
-    @unchecked Sendable
-{
-    private let lock = NSLock()
-    private var responses: [RegistryTransportResponse]
-    private var recordedRequests: [RegistryTransportRequest] = []
-
-    init(_ responses: [RegistryTransportResponse]) {
-        self.responses = responses
-    }
-
-    var requests: [RegistryTransportRequest] {
-        lock.withLock { recordedRequests }
-    }
-
-    func send(
-        _ request: RegistryTransportRequest,
-        cancellation: RegistryTransportCancellation
-    ) throws -> RegistryTransportResponse {
-        try lock.withLock {
-            recordedRequests.append(request)
-            guard !responses.isEmpty else {
-                throw RegistryTransportError.transportFailed
-            }
-            return responses.removeFirst()
-        }
     }
 }

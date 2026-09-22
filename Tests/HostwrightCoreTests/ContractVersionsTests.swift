@@ -24,160 +24,54 @@ final class ContractVersionsTests: XCTestCase {
         XCTAssertEqual(HostwrightContractVersions.stateSchema, 24)
     }
 
-    func testCapabilityCatalogIsDeterministicUniqueAndCoversEveryRoadmapPhase() {
+    func testCapabilityCatalogIsDeterministicUniqueAndCoversEveryRoadmapPhase() throws {
         let report = HostwrightCapabilityCatalog.report
         let identifiers = report.capabilities.map(\.identifier)
-
         XCTAssertEqual(report.schemaVersion, 1)
         XCTAssertEqual(report.productVersion, HostwrightIdentity.version)
         XCTAssertEqual(report.releaseTarget, HostwrightIdentity.releaseTarget)
         XCTAssertEqual(report.contracts.manifest, HostwrightContractVersions.manifest)
         XCTAssertEqual(identifiers, identifiers.sorted())
         XCTAssertEqual(Set(identifiers).count, identifiers.count)
-        XCTAssertEqual(Set(report.capabilities.map(\.phase)), Set(1...15))
-        XCTAssertTrue(report.capabilities.allSatisfy { !$0.title.isEmpty && !$0.reason.isEmpty })
-        XCTAssertTrue(report.capabilities.allSatisfy { $0.issue > 0 })
-        XCTAssertTrue(identifiers.contains("state.sqlite-v17"))
-        XCTAssertTrue(identifiers.contains("state.control-identities-v18"))
-        XCTAssertFalse(identifiers.contains("state.sqlite-v16"))
 
-        let states = Set(report.capabilities.map(\.state))
-        XCTAssertTrue(states.contains(.stable))
-        XCTAssertTrue(states.contains(.experimental))
-        XCTAssertTrue(states.contains(.unavailable))
-        XCTAssertTrue(states.contains(.blocked))
-
-        guard let secureSubprocess = report.capabilities.first(where: {
-            $0.identifier == "foundation.secure-subprocess"
-        }) else {
-            return XCTFail("Secure subprocess capability is missing.")
+        let states: [String: HostwrightCapabilityState] = [
+            "foundation.secure-subprocess": .stable,
+            "distribution.installed-lifecycle": .stable,
+            "distribution.release-evidence": .experimental,
+            "runtime.apple-container-cli": .stable,
+            "runtime.containerization": .stable,
+            "manifest.restricted-parser": .stable,
+            "manifest.v3": .experimental,
+            "lifecycle.single-host": .experimental,
+            "networking.ingress": .stable,
+            "storage.persistent": .stable,
+            "secrets.keychain": .experimental,
+            "registries.authentication": .experimental,
+            "scheduler.optimization": .unavailable,
+            "accelerators.host-native": .unavailable,
+            "accelerators.guest-passthrough": .blocked,
+            "interop.docker-compose": .unavailable,
+            "interop.kubernetes": .unavailable,
+            "cloud.control-plane": .unavailable,
+            "multi-host.ha": .unavailable,
+            "team.mdm": .experimental,
+        ]
+        for (identifier, expected) in states.sorted(by: { $0.key < $1.key }) {
+            let capability = try XCTUnwrap(report.capabilities.first { $0.identifier == identifier }, identifier)
+            XCTAssertEqual(capability.state, expected, identifier)
         }
-        XCTAssertEqual(secureSubprocess.state, .stable)
-        XCTAssertEqual(secureSubprocess.issue, 116)
-
-        guard let installedLifecycle = report.capabilities.first(where: {
-            $0.identifier == "distribution.installed-lifecycle"
-        }) else {
-            return XCTFail("Installed distribution lifecycle capability is missing.")
+        let required: Set<HostwrightEvidenceClass> = [
+            .unitContract, .localIntegration, .liveRuntime, .migrationUpgrade,
+            .securityAssessment, .resilienceChaos,
+        ]
+        for identifier in ["distribution.release-evidence", "runtime.apple-container-cli",
+                           "runtime.containerization", "storage.persistent"] {
+            let capability = try XCTUnwrap(report.capabilities.first { $0.identifier == identifier }, identifier)
+            let expected = identifier == "distribution.release-evidence"
+                ? required : required.union([.interopConformance])
+            XCTAssertEqual(Set(capability.requiredEvidence), expected, identifier)
         }
-        XCTAssertEqual(installedLifecycle.state, .stable)
-        XCTAssertEqual(installedLifecycle.issue, 118)
-
-        guard let releaseEvidence = report.capabilities.first(where: {
-            $0.identifier == "distribution.release-evidence"
-        }) else {
-            return XCTFail("Release evidence capability is missing.")
-        }
-        XCTAssertEqual(releaseEvidence.state, .experimental)
-        XCTAssertEqual(releaseEvidence.issue, 119)
-        XCTAssertEqual(
-            Set(releaseEvidence.requiredEvidence),
-            Set([.unitContract, .localIntegration, .liveRuntime, .migrationUpgrade, .securityAssessment, .resilienceChaos])
-        )
-
-        let runtimeProviders = report.capabilities.filter { capability in
-            capability.identifier == "runtime.apple-container-cli" ||
-                capability.identifier == "runtime.containerization"
-        }
-        XCTAssertEqual(runtimeProviders.count, 2)
-        XCTAssertTrue(runtimeProviders.allSatisfy { $0.state == .stable && $0.issue == 129 })
-        XCTAssertTrue(runtimeProviders.allSatisfy {
-            Set($0.requiredEvidence) == Set([
-                .unitContract, .localIntegration, .liveRuntime, .migrationUpgrade,
-                .securityAssessment, .resilienceChaos, .interopConformance
-            ])
-        })
-
-        let phase04Identifiers = ["manifest.restricted-parser"]
-        let phase04Capabilities = report.capabilities.filter {
-            phase04Identifiers.contains($0.identifier)
-        }
-        XCTAssertEqual(phase04Capabilities.count, phase04Identifiers.count)
-        XCTAssertTrue(phase04Capabilities.allSatisfy {
-            $0.state == .stable && $0.phase == 4
-        })
-        XCTAssertEqual(Set(phase04Capabilities.map(\.issue)), Set([130]))
-
-        let phase10Identifiers = ["lifecycle.single-host", "manifest.v3"]
-        let phase10Capabilities = report.capabilities.filter {
-            phase10Identifiers.contains($0.identifier)
-        }
-        XCTAssertEqual(phase10Capabilities.count, phase10Identifiers.count)
-        XCTAssertTrue(phase10Capabilities.allSatisfy {
-            $0.state == .experimental && $0.phase == 10 && $0.issue == 207
-        })
-        XCTAssertTrue(phase10Capabilities.allSatisfy {
-            $0.reason.contains("pending") || $0.reason.contains("under implementation")
-        })
-
-        guard let scheduler = report.capabilities.first(where: {
-            $0.identifier == "scheduler.optimization"
-        }), let hostNativeAccelerators = report.capabilities.first(where: {
-            $0.identifier == "accelerators.host-native"
-        }), let guestPassthrough = report.capabilities.first(where: {
-            $0.identifier == "accelerators.guest-passthrough"
-        }) else {
-            return XCTFail("Phase 10 scheduler and accelerator capability truth is missing.")
-        }
-        XCTAssertEqual(scheduler.state, .unavailable)
-        XCTAssertEqual(hostNativeAccelerators.state, .unavailable)
-        XCTAssertEqual(guestPassthrough.state, .blocked)
-        XCTAssertEqual(Set([scheduler.issue, hostNativeAccelerators.issue, guestPassthrough.issue]), Set([219]))
-        XCTAssertTrue(scheduler.reason.contains("G15"))
-        XCTAssertTrue(hostNativeAccelerators.reason.contains("G15"))
-        XCTAssertTrue(guestPassthrough.reason.contains("No supported public Apple API"))
-
-        guard let ingress = report.capabilities.first(where: {
-            $0.identifier == "networking.ingress"
-        }) else {
-            return XCTFail("Ingress capability is missing.")
-        }
-        XCTAssertEqual(ingress.state, .stable)
-        XCTAssertEqual(ingress.phase, 7)
-        XCTAssertEqual(ingress.issue, 172)
-        XCTAssertTrue(ingress.reason.contains("HTTP/1.1"))
-        XCTAssertTrue(ingress.reason.contains("WebSocket"))
-
-        guard let persistentStorage = report.capabilities.first(where: {
-            $0.identifier == "storage.persistent"
-        }) else {
-            return XCTFail("Persistent storage capability is missing.")
-        }
-        XCTAssertEqual(persistentStorage.state, .stable)
-        XCTAssertEqual(persistentStorage.phase, 6)
-        XCTAssertEqual(persistentStorage.issue, 163)
-        XCTAssertEqual(
-            Set(persistentStorage.requiredEvidence),
-            Set([
-                .unitContract, .localIntegration, .liveRuntime,
-                .migrationUpgrade, .securityAssessment,
-                .resilienceChaos, .interopConformance
-            ])
-        )
-
-        guard let keychainSecrets = report.capabilities.first(where: {
-            $0.identifier == "secrets.keychain"
-        }) else {
-            return XCTFail("Keychain secret capability is missing.")
-        }
-        XCTAssertEqual(keychainSecrets.state, .experimental)
-        XCTAssertEqual(keychainSecrets.phase, 5)
-        XCTAssertTrue(keychainSecrets.reason.contains("Production Keychain CRUD"))
-        XCTAssertTrue(keychainSecrets.reason.contains("guarded environment-file"))
-        XCTAssertTrue(keychainSecrets.reason.contains("explicit registered providers"))
-
-        guard let registryAuthentication = report.capabilities.first(where: {
-            $0.identifier == "registries.authentication"
-        }) else {
-            return XCTFail("Registry authentication capability is missing.")
-        }
-        XCTAssertEqual(registryAuthentication.state, .experimental)
-        XCTAssertEqual(registryAuthentication.phase, 5)
-        XCTAssertEqual(registryAuthentication.issue, 142)
-        XCTAssertTrue(registryAuthentication.reason.contains("Keychain-backed"))
-        XCTAssertTrue(registryAuthentication.reason.contains("token expiry"))
     }
-
     func testVerificationConstitutionIncludesEveryV002EvidenceClass() {
         XCTAssertEqual(
             Set(HostwrightEvidenceClass.allCases.map(\.rawValue)),

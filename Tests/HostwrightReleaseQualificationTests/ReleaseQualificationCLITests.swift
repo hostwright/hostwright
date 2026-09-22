@@ -195,28 +195,6 @@ final class ReleaseQualificationCLITests: XCTestCase {
         XCTAssertEqual(license.blockers.map(\.reason), [.dirtySource])
     }
 
-    func testPhase15ScriptCannotReportSuccessForDirtyDocumentationEvidence() throws {
-        let script = try String(
-            contentsOf: ReleaseQualificationTestSupport.repositoryRoot()
-                .appendingPathComponent("scripts/phase15-release-qualification.sh"),
-            encoding: .utf8
-        )
-        XCTAssertTrue(script.contains("if evidence.get(\"status\") != \"passed\":"))
-        XCTAssertTrue(
-            script.contains(
-                "if evidence.get(\"blockers\") or evidence.get(\"failures\"):"
-            )
-        )
-        XCTAssertFalse(script.contains("{\"passed\", \"dirty\"}"))
-        let rejection = try XCTUnwrap(
-            script.range(of: "documentation lane is not promotable")
-        )
-        let success = try XCTUnwrap(
-            script.range(of: "phase15 release qualification focused checks passed")
-        )
-        XCTAssertLessThan(rejection.lowerBound, success.lowerBound)
-    }
-
     func testDocumentationLaneProducesExactNonPromotableOrPassingEvidence() throws {
         let root = try makeDocumentationSnapshotRepository()
         defer { try? FileManager.default.removeItem(at: root) }

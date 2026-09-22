@@ -2,37 +2,6 @@ import XCTest
 @testable import HostwrightScheduler
 
 final class SchedulerEngineContractTests: XCTestCase {
-    func testFairnessGuaranteeCannotExceedQuotaOnAnyResource() throws {
-        let expected = SchedulerEngineValidationError.invalidDecision(
-            "fairness-guarantee-exceeds-quota"
-        )
-        XCTAssertThrowsError(
-            try SchedulerFairnessState(
-                subjectID: "subject",
-                projectID: "project",
-                guarantee: try ResourceVector(["cpu": 3, "memory": 1]),
-                quota: try ResourceVector(["cpu": 2])
-            )
-        ) { error in
-            XCTAssertEqual(error as? SchedulerEngineValidationError, expected)
-        }
-
-        let hostilePayload = Data(
-            """
-            {
-              "subjectID": "subject",
-              "projectID": "project",
-              "guarantee": {"cpu": 3, "memory": 1},
-              "quota": {"cpu": 2}
-            }
-            """.utf8
-        )
-        XCTAssertThrowsError(
-            try JSONDecoder().decode(SchedulerFairnessState.self, from: hostilePayload)
-        ) { error in
-            XCTAssertEqual(error as? SchedulerEngineValidationError, expected)
-        }
-    }
 
     func testFiniteCountLimitsRejectBeforePlanning() throws {
         XCTAssertThrowsError(

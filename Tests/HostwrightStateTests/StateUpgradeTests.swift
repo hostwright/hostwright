@@ -8,7 +8,7 @@ import XCTest
 
 final class StateUpgradeTests: XCTestCase {
     func testBootstrapContinuityRejectsRetainedExternalAuthorityBeforeLegacyMigration() throws {
-        try withTemporaryStore(throughVersion: 7) { store, _ in
+        try withTemporaryStateStore(prefix: "hostwright-state-upgrade", throughVersion: 7) { store, _ in
             let keys = InMemoryAuditSigningKeyStore()
             XCTAssertNoThrow(try store.verifyIdentityBootstrapContinuity(keyStore: keys, requireEmptyAuthority: true))
             _ = try keys.activeKey()
@@ -21,7 +21,7 @@ final class StateUpgradeTests: XCTestCase {
     }
 
     func testBootstrapContinuityRejectsCorruptModernAuditWithEmptyIdentities() throws {
-        try withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) { store, _ in
+        try withTemporaryStateStore(prefix: "hostwright-state-upgrade", throughVersion: MigrationRunner.latestSchemaVersion) { store, _ in
             let keys = InMemoryAuditSigningKeyStore()
             let trail = TamperEvidentAuditTrail(store: store, keyStore: keys)
             _ = try trail.append(AuditAppendInput(subjectID: "owner", requestID: "audit-preflight",
@@ -37,7 +37,7 @@ final class StateUpgradeTests: XCTestCase {
     }
 
     func testAbsentUninstallRecoveryRequiresExactSnapshotAuditAnchor() throws {
-        try withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) { store, directory in
+        try withTemporaryStateStore(prefix: "hostwright-state-upgrade", throughVersion: MigrationRunner.latestSchemaVersion) { store, directory in
             let keys = InMemoryAuditSigningKeyStore()
             let trail = TamperEvidentAuditTrail(store: store, keyStore: keys)
             let service = StateUpgradeService(store: store)
@@ -73,7 +73,7 @@ final class StateUpgradeTests: XCTestCase {
     }
 
     func testAbsentUninstallRecoveryPublishesOnlyRevokedSessionsAndCredentialsBeforeInterruption() throws {
-        try withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) { store, directory in
+        try withTemporaryStateStore(prefix: "hostwright-state-upgrade", throughVersion: MigrationRunner.latestSchemaVersion) { store, directory in
             let keys = InMemoryAuditSigningKeyStore()
             let code = CodeIdentity(teamIdentifier: "993YC3JY4Q", signingIdentifier: "dev.hostwright.owner",
                 codeDirectoryHash: String(repeating: "a", count: 64), validationMode: .installedRequirement)
@@ -127,7 +127,7 @@ final class StateUpgradeTests: XCTestCase {
 
     func testIdentityAuthorityInspectionDoesNotMigrateCompatibleOlderStores() throws {
         for version in [7, 18, MigrationRunner.latestSchemaVersion] {
-            try withTemporaryStore(throughVersion: version) { store, _ in
+            try withTemporaryStateStore(prefix: "hostwright-state-upgrade", throughVersion: version) { store, _ in
                 XCTAssertFalse(try store.controlIdentities.hasEstablishedIdentityAuthority())
                 XCTAssertEqual(try store.schemaVersion(), version)
             }
@@ -135,7 +135,7 @@ final class StateUpgradeTests: XCTestCase {
     }
 
     func testAuditContinuousRollbackRestoresStateAndRetainsNewerExternalHead() throws {
-        try withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) { store, directory in
+        try withTemporaryStateStore(prefix: "hostwright-state-upgrade", throughVersion: MigrationRunner.latestSchemaVersion) { store, directory in
             let keys = InMemoryAuditSigningKeyStore()
             let trail = TamperEvidentAuditTrail(store: store, keyStore: keys)
             func input(_ id: String) -> AuditAppendInput {
@@ -302,7 +302,7 @@ final class StateUpgradeTests: XCTestCase {
     }
 
     func testAuditContinuousRollbackPreservesIndependentNativeHashRevocation() throws {
-        try withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) { store, directory in
+        try withTemporaryStateStore(prefix: "hostwright-state-upgrade", throughVersion: MigrationRunner.latestSchemaVersion) { store, directory in
             let keys = InMemoryAuditSigningKeyStore()
             let codeA = CodeIdentity(teamIdentifier: "993YC3JY4Q", signingIdentifier: "dev.hostwright.client",
                 codeDirectoryHash: String(repeating: "a", count: 64), validationMode: .installedRequirement)
@@ -336,7 +336,7 @@ final class StateUpgradeTests: XCTestCase {
     }
 
     func testAuditContinuousRollbackRefusesTamperedCurrentChainBeforeStateReplacement() throws {
-        try withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) { store, directory in
+        try withTemporaryStateStore(prefix: "hostwright-state-upgrade", throughVersion: MigrationRunner.latestSchemaVersion) { store, directory in
             let keys = InMemoryAuditSigningKeyStore()
             let trail = TamperEvidentAuditTrail(store: store, keyStore: keys)
             _ = try trail.append(AuditAppendInput(subjectID: "owner", requestID: "A", action: .authentication,
@@ -358,7 +358,7 @@ final class StateUpgradeTests: XCTestCase {
     }
 
     func testSchemaV16MigratesRestartBudgetsToV17WithSafeDefaults() throws {
-        try withTemporaryStore(throughVersion: 16) { store, _ in
+        try withTemporaryStateStore(prefix: "hostwright-state-upgrade", throughVersion: 16) { store, _ in
             try store.withConnection { connection in
                 try connection.run(
                     """
@@ -416,7 +416,7 @@ final class StateUpgradeTests: XCTestCase {
     func testSchemaV13MigratesAdditivelyToV14ContentCacheState()
         throws
     {
-        try withTemporaryStore(throughVersion: 13) { store, _ in
+        try withTemporaryStateStore(prefix: "hostwright-state-upgrade", throughVersion: 13) { store, _ in
             try store.withConnection { connection in
                 try connection.run(
                     """
@@ -476,7 +476,7 @@ final class StateUpgradeTests: XCTestCase {
     func testSchemaV10MigratesToV11ImageSBOMStateWithoutGaps()
         throws
     {
-        try withTemporaryStore(throughVersion: 10) { store, _ in
+        try withTemporaryStateStore(prefix: "hostwright-state-upgrade", throughVersion: 10) { store, _ in
             XCTAssertEqual(try store.schemaVersion(), 10)
 
             try store.migrate()
@@ -520,7 +520,7 @@ final class StateUpgradeTests: XCTestCase {
     func testSchemaV8MigratesThroughV11ReferrerStateWithoutGaps()
         throws
     {
-        try withTemporaryStore(throughVersion: 8) { store, _ in
+        try withTemporaryStateStore(prefix: "hostwright-state-upgrade", throughVersion: 8) { store, _ in
             XCTAssertEqual(try store.schemaVersion(), 8)
 
             try store.migrate()
@@ -569,7 +569,7 @@ final class StateUpgradeTests: XCTestCase {
     }
 
     func testExclusiveLifecycleFenceRejectsConcurrentWriterAndAllowsNestedStateWork() throws {
-        try withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) { store, _ in
+        try withTemporaryStateStore(prefix: "hostwright-state-upgrade", throughVersion: MigrationRunner.latestSchemaVersion) { store, _ in
             let finished = expectation(description: "concurrent state writer refused")
             let outcome = Mutex<String?>(nil)
 
@@ -595,7 +595,7 @@ final class StateUpgradeTests: XCTestCase {
     }
 
     func testSynchronousExclusiveLifecycleFenceAuthorityPropagatesToInheritingTask() throws {
-        try withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) { store, _ in
+        try withTemporaryStateStore(prefix: "hostwright-state-upgrade", throughVersion: MigrationRunner.latestSchemaVersion) { store, _ in
             let outcome = TaskOutcome()
 
             try StateUpgradeService(store: store).withExclusiveLifecycleFence {
@@ -619,7 +619,7 @@ final class StateUpgradeTests: XCTestCase {
     }
 
     func testInheritedLifecycleFenceAuthorityIsRevokedWhenTheFenceReturns() async throws {
-        try await withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) {
+        try await withTemporaryStateStore(prefix: "hostwright-state-upgrade", throughVersion: MigrationRunner.latestSchemaVersion) {
             store, _ in
             try store.configuration.prepareStateAccessFoundation()
             let lockPath = try store.configuration.maintenancePaths().accessLockPath
@@ -651,7 +651,7 @@ final class StateUpgradeTests: XCTestCase {
     func testAsyncLifecycleFenceAllowsNestedAccessAcrossAwaitAndExcludesCompetingAccessor()
         async throws
     {
-        try await withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) {
+        try await withTemporaryStateStore(prefix: "hostwright-state-upgrade", throughVersion: MigrationRunner.latestSchemaVersion) {
             store, _ in
             let service = StateUpgradeService(store: store)
 
@@ -680,7 +680,7 @@ final class StateUpgradeTests: XCTestCase {
     }
 
     func testSerializedLifecycleMutationDoesNotBlockOrdinarySharedStateAccess() throws {
-        try withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) { store, _ in
+        try withTemporaryStateStore(prefix: "hostwright-state-upgrade", throughVersion: MigrationRunner.latestSchemaVersion) { store, _ in
             let readerFinished = expectation(description: "ordinary state reader completes")
             let readerOutcome = Mutex<String?>(nil)
 
@@ -705,7 +705,7 @@ final class StateUpgradeTests: XCTestCase {
     }
 
     func testSerializedLifecycleMutationsFailClosedAtTheirWaitBound() throws {
-        try withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) { store, _ in
+        try withTemporaryStateStore(prefix: "hostwright-state-upgrade", throughVersion: MigrationRunner.latestSchemaVersion) { store, _ in
             let service = StateUpgradeService(store: store)
             let enteredFirstMutation = DispatchSemaphore(value: 0)
             let releaseFirstMutation = DispatchSemaphore(value: 0)
@@ -748,7 +748,7 @@ final class StateUpgradeTests: XCTestCase {
     func testEscapedInheritedSerializedLifecycleMutationAuthorityIsRevoked()
         async throws
     {
-        try await withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) {
+        try await withTemporaryStateStore(prefix: "hostwright-state-upgrade", throughVersion: MigrationRunner.latestSchemaVersion) {
             store, _ in
             let service = StateUpgradeService(store: store)
             let permitEscapedAttempt = LifecycleMutationGate()
@@ -801,7 +801,7 @@ final class StateUpgradeTests: XCTestCase {
     func testAsyncExclusiveLifecycleFenceWaitsBehindMutationAndIsNestedReentrant()
         async throws
     {
-        try await withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) {
+        try await withTemporaryStateStore(prefix: "hostwright-state-upgrade", throughVersion: MigrationRunner.latestSchemaVersion) {
             store, _ in
             let service = StateUpgradeService(store: store)
             let mutationEntered = DispatchSemaphore(value: 0)
@@ -846,7 +846,7 @@ final class StateUpgradeTests: XCTestCase {
     func testBoundedStateAccessWaitPropagatesAcrossAwaitWithoutBypassingTheFence()
         async throws
     {
-        try await withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) {
+        try await withTemporaryStateStore(prefix: "hostwright-state-upgrade", throughVersion: MigrationRunner.latestSchemaVersion) {
             store, _ in
             try store.configuration.prepareStateAccessFoundation()
             let lockPath = try store.configuration.maintenancePaths().accessLockPath
@@ -873,7 +873,7 @@ final class StateUpgradeTests: XCTestCase {
     }
 
     func testBoundedStateAccessWaitRejectsUnboundedWaits() throws {
-        try withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) {
+        try withTemporaryStateStore(prefix: "hostwright-state-upgrade", throughVersion: MigrationRunner.latestSchemaVersion) {
             store, _ in
             for timeout in [0, 30_001] {
                 do {
@@ -890,7 +890,7 @@ final class StateUpgradeTests: XCTestCase {
     }
 
     func testExclusiveLifecycleFenceSupportsBoundedControlPlaneWait() throws {
-        try withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) { store, _ in
+        try withTemporaryStateStore(prefix: "hostwright-state-upgrade", throughVersion: MigrationRunner.latestSchemaVersion) { store, _ in
             try store.configuration.prepareStateAccessFoundation()
             let lockPath = try store.configuration.maintenancePaths().accessLockPath
             let descriptor = open(lockPath, O_RDWR | O_NOFOLLOW | O_CLOEXEC)
@@ -915,7 +915,7 @@ final class StateUpgradeTests: XCTestCase {
     }
 
     func testExclusiveLifecycleFenceRejectsUnboundedWaits() throws {
-        try withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) { store, _ in
+        try withTemporaryStateStore(prefix: "hostwright-state-upgrade", throughVersion: MigrationRunner.latestSchemaVersion) { store, _ in
             for timeout in [0, 30_001] {
                 XCTAssertThrowsError(
                     try StateUpgradeService(store: store).withExclusiveLifecycleFence(
@@ -931,7 +931,7 @@ final class StateUpgradeTests: XCTestCase {
     }
 
     func testVerifiedStateRemovalDeletesOnlyTheManagedSQLiteFileSet() throws {
-        try withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) { store, _ in
+        try withTemporaryStateStore(prefix: "hostwright-state-upgrade", throughVersion: MigrationRunner.latestSchemaVersion) { store, _ in
             let result = try StateDatabaseRemovalService(store: store).removeVerifiedDatabase()
 
             XCTAssertEqual(result.kind, "stateDatabaseRemovalResult")
@@ -946,7 +946,7 @@ final class StateUpgradeTests: XCTestCase {
     }
 
     func testVerifiedStateRemovalRefusesForeignSQLiteWithoutDeletingIt() throws {
-        try withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) { store, _ in
+        try withTemporaryStateStore(prefix: "hostwright-state-upgrade", throughVersion: MigrationRunner.latestSchemaVersion) { store, _ in
             let foreignID = 0x0BAD_F00D
             let connection = try SQLiteConnection(
                 path: store.path,
@@ -966,7 +966,7 @@ final class StateUpgradeTests: XCTestCase {
     }
 
     func testVerifiedStandaloneWALSnapshotInspectionDoesNotCreateSidecars() throws {
-        try withTemporaryStore(throughVersion: MigrationRunner.latestSchemaVersion) { store, directory in
+        try withTemporaryStateStore(prefix: "hostwright-state-upgrade", throughVersion: MigrationRunner.latestSchemaVersion) { store, directory in
             let rollback = directory.appendingPathComponent("rollback")
             try FileManager.default.createDirectory(at: rollback, withIntermediateDirectories: false,
                 attributes: [.posixPermissions: 0o700])
@@ -994,7 +994,7 @@ final class StateUpgradeTests: XCTestCase {
     }
 
     func testVerifiedV16SnapshotMigratesAndRestoresExactPriorSchema() throws {
-        try withTemporaryStore(throughVersion: 16) { store, directory in
+        try withTemporaryStateStore(prefix: "hostwright-state-upgrade", throughVersion: 16) { store, directory in
             let snapshotURL = directory.appendingPathComponent("rollback/state.sqlite")
             try FileManager.default.createDirectory(
                 at: snapshotURL.deletingLastPathComponent(),
@@ -1062,7 +1062,7 @@ final class StateUpgradeTests: XCTestCase {
     }
 
     func testTamperedUpgradeSnapshotCannotReplaceCurrentState() throws {
-        try withTemporaryStore(throughVersion: 6) { store, directory in
+        try withTemporaryStateStore(prefix: "hostwright-state-upgrade", throughVersion: 6) { store, directory in
             let rollback = directory.appendingPathComponent("rollback", isDirectory: true)
             try FileManager.default.createDirectory(
                 at: rollback,
@@ -1093,7 +1093,7 @@ final class StateUpgradeTests: XCTestCase {
     }
 
     func testV17SnapshotMigratesToLatestAndRestoresExactV17() throws {
-        try withTemporaryStore(throughVersion: 17) { store, directory in
+        try withTemporaryStateStore(prefix: "hostwright-state-upgrade", throughVersion: 17) { store, directory in
             let rollback = directory.appendingPathComponent("rollback", isDirectory: true)
             try FileManager.default.createDirectory(
                 at: rollback,
@@ -1127,7 +1127,7 @@ final class StateUpgradeTests: XCTestCase {
     }
 
     func testV17MigrationCreatesVerifiedRollbackPackageAndReachesLatestSchema() throws {
-        try withTemporaryStore(throughVersion: 17) { store, directory in
+        try withTemporaryStateStore(prefix: "hostwright-state-upgrade", throughVersion: 17) { store, directory in
             let service = StateUpgradeService(store: store)
 
             let result = try service.migrateToLatestWithVerifiedBackup()
@@ -1202,40 +1202,6 @@ final class StateUpgradeTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: store.path))
         XCTAssertEqual(try store.schemaVersion(), MigrationRunner.latestSchemaVersion)
         XCTAssertFalse(FileManager.default.fileExists(atPath: rollbackRoot.path))
-    }
-
-    private func withTemporaryStore(
-        throughVersion: Int,
-        _ body: (SQLiteStateStore, URL) throws -> Void
-    ) throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("hostwright-state-upgrade-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: false,
-            attributes: [.posixPermissions: 0o700]
-        )
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let store = SQLiteStateStore(path: directory.appendingPathComponent("state.sqlite").path)
-        try MigrationRunner().apply(to: store, throughVersion: throughVersion)
-        try body(store, directory)
-    }
-
-    private func withTemporaryStore(
-        throughVersion: Int,
-        _ body: (SQLiteStateStore, URL) async throws -> Void
-    ) async throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("hostwright-state-upgrade-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: false,
-            attributes: [.posixPermissions: 0o700]
-        )
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let store = SQLiteStateStore(path: directory.appendingPathComponent("state.sqlite").path)
-        try MigrationRunner().apply(to: store, throughVersion: throughVersion)
-        try await body(store, directory)
     }
 
     private func permissions(_ path: String) -> Int {

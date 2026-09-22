@@ -315,9 +315,9 @@ public struct ReleaseQualificationDefaultRegistry {
             id: "documentation-current-truth-validator",
             relativePath: "scripts/check-current-truth.py",
             sha256: try! ReleaseQualificationSHA256(
-                "9ef66e62b83c6ad9556c50a70da9d041d1c2acc847dc23b58cd01b7734635b80"
+                "8e5425c09326fb80705e459ffee008f3406ae3163b3266e3d8e85476f05fa98d"
             ),
-            sizeBytes: 14_332,
+            sizeBytes: 7_149,
             expectation: .accept
         )
         return ReleaseQualificationRegistry(lanes: [

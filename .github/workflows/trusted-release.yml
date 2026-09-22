@@ -178,7 +178,11 @@ jobs:
           test -f "$archive"
           test ! -L "$archive"
           test "$(find "$download" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" = 1
+          assets="$RUNNER_TEMP/runtime-assets-$RELEASE_COMMIT-$RELEASE_RUNTIME_PROVENANCE_RUN-$attempt"
+          python3 scripts/release/materialize-runtime-assets.py \
+            --archive "$archive" --output "$assets" --source-commit "$RELEASE_COMMIT"
           echo "archive=$archive" >> "$GITHUB_OUTPUT"
+          echo "assets=$assets" >> "$GITHUB_OUTPUT"
 
       - name: Prepare pinned corresponding-source bytes from the clean reviewed checkout
         id: source
@@ -204,6 +208,8 @@ jobs:
       - name: Build the trusted release twice and verify every trust stage
         id: release
         shell: bash
+        env:
+          HOSTWRIGHT_CONTAINERIZATION_ASSET_ROOT: ${{ steps.runtime-source.outputs.assets }}
         run: |
           set -euo pipefail
           bundle="$RUNNER_TEMP/hostwright-publish-bundle-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"

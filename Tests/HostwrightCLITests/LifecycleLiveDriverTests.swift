@@ -506,6 +506,36 @@ final class LifecycleLiveDriverTests: XCTestCase {
         }
     }
 
+    func testLocalSchedulerDefersFreshBlockedPressureWithEvidenceBeforeReservationsOrEffects() throws {
+        let cases: [(SchedulerPressurePosture, SchedulerHostPressureReasonCode, SchedulerEnergyPosture)] = [
+            (.critical, .diskCritical, .balanced),
+            (.unavailable, .hostUnavailable, .unknown),
+        ]
+        for (posture, reason, energy) in cases {
+            try withFixture { fixture in
+                let environment = try fixture.localSchedulerEnvironment(
+                    pressurePosture: posture, pressureReason: reason, energy: energy
+                )
+                let preview = fixture.options(command: .up, dryRun: true)
+                let driver = LifecycleLiveDriver(environment: environment, options: preview)
+                let preparation = try driver.prepare(options: preview)
+                let compiled = try LifecycleCommandPlanCompiler().compile(options: preview, preparation: preparation)
+                let options = fixture.options(command: .up, dryRun: false, confirmation: compiled.plan.planSHA256)
+                XCTAssertThrowsError(try driver.execute(compiled: compiled, preparation: preparation, options: options)) {
+                    XCTAssertEqual(
+                        $0 as? RuntimeAdapterError,
+                        .mutationUnavailableByPolicy(
+                            "scheduler-pressure-deferred: posture=\(posture.rawValue); reasons=\(reason.rawValue)"
+                        )
+                    )
+                }
+                XCTAssertTrue(try fixture.store.desiredStates.loadDesiredServices(projectID: fixture.projectID).isEmpty)
+                XCTAssertTrue(try fixture.store.schedulerAdmissions.activeReservations().isEmpty)
+                XCTAssertTrue(try fixture.adapterSnapshot().mutations.isEmpty)
+            }
+        }
+    }
+
     func testFreshSchedulerWorkloadsBindConfirmedRuntimeIdentityWithoutInventingOwnership() throws {
         try withFixture { fixture in
             let options = fixture.options(command: .up, dryRun: true)
@@ -4427,7 +4457,13 @@ struct LifecycleLiveDriverFixture {
         }
     }
 
-    func localSchedulerEnvironment(capacity: ResourceVector? = nil, labels: [String: String] = [:]) throws -> CLIEnvironment {
+    func localSchedulerEnvironment(
+        capacity: ResourceVector? = nil,
+        labels: [String: String] = [:],
+        pressurePosture: SchedulerPressurePosture = .nominal,
+        pressureReason: SchedulerHostPressureReasonCode = .allowed,
+        energy: SchedulerEnergyPosture = .balanced
+    ) throws -> CLIEnvironment {
         let nodeID = UUID(uuidString: "00000000-0000-0000-0000-000000009002")!
         let store = self.store
         let snapshot = try store.schedulerAdmissions.recordNodeCapacity(snapshot: SchedulerNodeCapacitySnapshot(
@@ -4438,19 +4474,20 @@ struct LifecycleLiveDriverFixture {
         result.lifecycleScheduler = LifecycleSchedulerContext(subjectID: "owner") {
             let now = Date()
             let old = try store.schedulerAdmissions.hostPressure(nodeID: nodeID)
-            let pressure = try store.schedulerAdmissions.recordHostPressure(record: SchedulerHostPressureRecord(
-                nodeID: nodeID, posture: SchedulerHostPosture(), generation: (old?.generation ?? 0) + 1,
+            let pressureRecord = try store.schedulerAdmissions.recordHostPressure(record: SchedulerHostPressureRecord(
+                nodeID: nodeID, posture: SchedulerHostPosture(pressure: pressurePosture, energy: energy), generation: (old?.generation ?? 0) + 1,
                 observedAt: ISO8601DateFormatter().string(from: Date(
                     timeIntervalSince1970: floor(now.timeIntervalSince1970)
                 )), evidenceDigest: String(repeating: "a", count: 64),
                 policyState: SchedulerHostPressurePolicyState(
-                    version: 1, reasonCodes: [.allowed], nextHysteresisState: SchedulerHostPressureHysteresisState(
-                        posture: .allowed, consecutiveClearObservations: 0, version: 1
+                    version: 1, reasonCodes: [pressureReason], nextHysteresisState: SchedulerHostPressureHysteresisState(
+                        posture: pressurePosture == .nominal ? .allowed : (pressurePosture == .elevated ? .deweighted : .blocked),
+                        consecutiveClearObservations: 0, version: 1
                     )
                 )
             ))
             return LifecycleSchedulerHostSnapshot(
-                capacity: snapshot, pressure: pressure, configDigest: String(repeating: "c", count: 64),
+                capacity: snapshot, pressure: pressureRecord, configDigest: String(repeating: "c", count: 64),
                 profileDigest: String(repeating: "d", count: 64), labels: labels, observedAt: now
             )
         }

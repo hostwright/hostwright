@@ -435,10 +435,16 @@ final class LifecycleSchedulerSession: @unchecked Sendable {
               Date().timeIntervalSince(snapshot.observedAt) >= -1,
               Date().timeIntervalSince(snapshot.observedAt) <= 5,
               snapshot.capacity.nodeID == snapshot.pressure.nodeID,
-              [.nominal, .elevated].contains(snapshot.pressure.posture.pressure),
               try store.schedulerAdmissions.nodeCapacity(nodeID: snapshot.capacity.nodeID) == snapshot.capacity,
               try store.schedulerAdmissions.hostPressure(nodeID: snapshot.capacity.nodeID) == snapshot.pressure else {
             throw SchedulerAdmissionError.staleInput(field: "lifecycle-host-authority")
+        }
+        guard [.nominal, .elevated].contains(snapshot.pressure.posture.pressure) else {
+            let posture = snapshot.pressure.posture.pressure.rawValue
+            let reasons = snapshot.pressure.policyState.reasonCodes.map(\.rawValue).joined(separator: ",")
+            throw RuntimeAdapterError.mutationUnavailableByPolicy(
+                "scheduler-pressure-deferred: posture=\(posture); reasons=\(reasons)"
+            )
         }
     }
 

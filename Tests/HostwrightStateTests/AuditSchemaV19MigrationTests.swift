@@ -5,7 +5,7 @@ import XCTest
 
 final class AuditSchemaV19MigrationTests: XCTestCase {
     func testV18UpgradeCreatesExactAuditSchemaAndVerifiedRollbackRestoresV18() throws {
-        try withTemporaryStore(throughVersion: 18) { store, directory in
+        try withTemporaryStateStore(prefix: "hostwright-audit-schema-v19", throughVersion: 18) { store, directory in
             XCTAssertEqual(try store.schemaVersion(), 18)
             let service = StateUpgradeService(store: store)
 
@@ -84,7 +84,7 @@ final class AuditSchemaV19MigrationTests: XCTestCase {
     }
 
     func testV19MigrationChecksumTamperingFailsClosedWithoutFurtherWrites() throws {
-        try withTemporaryStore(throughVersion: 19) { store, directory in
+        try withTemporaryStateStore(prefix: "hostwright-audit-schema-v19", throughVersion: 19) { store, directory in
             let connection = try SQLiteConnection(
                 path: store.path,
                 createIfNeeded: false,
@@ -117,24 +117,6 @@ final class AuditSchemaV19MigrationTests: XCTestCase {
                 )
             }
         }
-    }
-
-    private func withTemporaryStore(
-        throughVersion: Int,
-        _ body: (SQLiteStateStore, URL) throws -> Void
-    ) throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("hostwright-audit-schema-v19-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: false,
-            attributes: [.posixPermissions: 0o700]
-        )
-        defer { try? FileManager.default.removeItem(at: directory) }
-
-        let store = SQLiteStateStore(path: directory.appendingPathComponent("state.sqlite").path)
-        try MigrationRunner().apply(to: store, throughVersion: throughVersion)
-        try body(store, directory)
     }
 
     private func permissions(_ path: String) -> Int {

@@ -6,7 +6,7 @@ import XCTest
 
 final class SchedulerSchemaV22MigrationTests: XCTestCase {
     func testV21UpgradeAddsSchedulerSchemaWithoutChangingPriorRows() throws {
-        try withTemporaryStore(throughVersion: 21) { store, _ in
+        try withTemporaryStateStore(prefix: "hostwright-scheduler-schema-v22", throughVersion: 21) { store, _ in
             let projectUUID = UUID().uuidString.lowercased()
             try insertProject(id: "phase10-project", resourceUUID: projectUUID, in: store)
 
@@ -72,7 +72,7 @@ final class SchedulerSchemaV22MigrationTests: XCTestCase {
     }
 
     func testV22MigrationRollsBackAllSchedulerObjectsWhenOneStatementFails() throws {
-        try withTemporaryStore(throughVersion: 21) { store, _ in
+        try withTemporaryStateStore(prefix: "hostwright-scheduler-schema-v22", throughVersion: 21) { store, _ in
             try store.withConnection { connection in
                 try connection.execute("CREATE TABLE scheduler_decisions (unexpected INTEGER)")
             }
@@ -127,7 +127,7 @@ final class SchedulerSchemaV22MigrationTests: XCTestCase {
     }
 
     func testV22ChecksumTamperingRefusesReopenAndFurtherMigration() throws {
-        try withTemporaryStore(throughVersion: 23) { store, _ in
+        try withTemporaryStateStore(prefix: "hostwright-scheduler-schema-v22", throughVersion: 23) { store, _ in
             try store.withConnection { connection in
                 try connection.run(
                     "UPDATE schema_migrations SET checksum = 'tampered-v22' WHERE version = 22"
@@ -153,7 +153,7 @@ final class SchedulerSchemaV22MigrationTests: XCTestCase {
     }
 
     func testFutureSchemaVersionRefusalRemainsFailClosedAfterV22() throws {
-        try withTemporaryStore(throughVersion: 23) { store, _ in
+        try withTemporaryStateStore(prefix: "hostwright-scheduler-schema-v22", throughVersion: 23) { store, _ in
             try store.withConnection { connection in
                 try connection.run(
                     """
@@ -183,7 +183,7 @@ final class SchedulerSchemaV22MigrationTests: XCTestCase {
     }
 
     func testV22FencingSchemaUsesPairedTokensAndRejectsInvalidFenceState() throws {
-        try withTemporaryStore(throughVersion: 23) { store, _ in
+        try withTemporaryStateStore(prefix: "hostwright-scheduler-schema-v22", throughVersion: 23) { store, _ in
             let stateColumns = try store.withConnection(
                 createIfNeeded: false,
                 readOnly: true
@@ -265,25 +265,4 @@ final class SchedulerSchemaV22MigrationTests: XCTestCase {
         }
     }
 
-    private func withTemporaryStore(
-        throughVersion: Int,
-        _ body: (SQLiteStateStore, URL) throws -> Void
-    ) throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "hostwright-scheduler-schema-v22-\(UUID().uuidString)",
-            isDirectory: true
-        )
-        try FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: false,
-            attributes: [.posixPermissions: 0o700]
-        )
-        defer { try? FileManager.default.removeItem(at: directory) }
-
-        let store = SQLiteStateStore(
-            path: directory.appendingPathComponent("state.sqlite").path
-        )
-        try MigrationRunner().apply(to: store, throughVersion: throughVersion)
-        try body(store, directory)
-    }
 }

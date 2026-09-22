@@ -16,13 +16,14 @@ control="$bin_dir/hostwright-control"
 "$hostwright" --version >/dev/null
 "$hostwright" --help >/dev/null
 
-for manifest in examples/*/hostwright.yaml; do
+while IFS= read -r -d '' manifest; do
+  [[ "$manifest" =~ ^examples/[^/]+/hostwright\.yaml$ ]] || continue
   request_id="docs-${manifest//[^A-Za-z0-9]/-}"
   printf '{"apiVersion":2,"requestID":"%s","operation":"plan"}\n' "$request_id" \
     | "$control" --manifest "$root/$manifest" \
     | /usr/bin/jq -e --arg request_id "$request_id" \
       '.apiVersion == 2 and .requestID == $request_id and .operation == "plan" and .success == true' \
       >/dev/null
-done
+done < <(git ls-files -z -- examples)
 
 echo "documentation quickstarts: local help/version and revision-2.0 plan compatibility validated every example manifest"

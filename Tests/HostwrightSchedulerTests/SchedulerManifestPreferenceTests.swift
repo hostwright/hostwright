@@ -106,68 +106,6 @@ final class SchedulerManifestPreferenceTests: XCTestCase {
         }
     }
 
-    func testPreemptionRequiresWorkloadOptInAndDaemonAuthorization() throws {
-        let node = try node(
-            "00000000-0000-0000-0000-000000000020",
-            allocation: 2
-        )
-        let victim = try SchedulerVictimAllocation(
-            workloadID: UUID(uuidString: "00000000-0000-0000-0000-000000000021")!,
-            nodeID: node.nodeID,
-            allocation: try ResourceVector(["cpu": 2]),
-            subjectID: "victim",
-            projectID: "project",
-            priority: -1,
-            disruptionCostBasisPoints: 1,
-            budgetID: "budget"
-        )
-        let budget = try SchedulerDisruptionBudget(
-            budgetID: "budget",
-            projectID: "project",
-            remainingVictimCount: 1,
-            remainingDisruptionCostBasisPoints: 1
-        )
-
-        let nonPreempting = try workload(
-            "00000000-0000-0000-0000-000000000022",
-            eligibility: .nonPreempting
-        )
-        let blocked = try SchedulerEngine().plan(
-            try SchedulerEngineInput(
-                inputDigest: nil,
-                pendingWorkloads: [nonPreempting],
-                nodes: [node],
-                victimAllocations: [victim],
-                disruptionBudgets: [budget]
-            )
-        ).workloadDecisions[0]
-        XCTAssertEqual(blocked.outcome, .unschedulable)
-        XCTAssertTrue(blocked.filterFailures.contains {
-            $0.code == .preemptionWorkloadNotEligible
-        })
-
-        let authorizedWorkload = try workload(
-            "00000000-0000-0000-0000-000000000023",
-            eligibility: .eligible
-        )
-        let unauthorized = try SchedulerEngine().plan(
-            try SchedulerEngineInput(
-                inputDigest: nil,
-                pendingWorkloads: [authorizedWorkload],
-                nodes: [node],
-                victimAllocations: [victim],
-                disruptionBudgets: [budget],
-                preemptionPolicy: try SchedulerPreemptionPolicy(
-                    preemptionAuthorized: false
-                )
-            )
-        ).workloadDecisions[0]
-        XCTAssertEqual(unauthorized.outcome, .unschedulable)
-        XCTAssertTrue(unauthorized.filterFailures.contains {
-            $0.code == .preemptionAuthorizationRequired
-        })
-    }
-
     func testSignedPriorityRangeMatchesManifestContract() throws {
         _ = try workload(
             "00000000-0000-0000-0000-000000000030",

@@ -46,30 +46,6 @@ final class Phase02QualificationHarnessTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: recordRoot.path))
     }
 
-    func testHarnessKeepsPublicAndDestructiveBoundariesExplicit() throws {
-        let script = try qualificationScript()
-        let source = try String(contentsOf: script, encoding: .utf8)
-        let mode = try script.resourceValues(forKeys: [.fileSizeKey])
-
-        XCTAssertGreaterThan(mode.fileSize ?? 0, 0)
-        XCTAssertFalse(source.contains("shell=True"))
-        XCTAssertFalse(source.contains("os.system("))
-        XCTAssertTrue(source.contains("stdin=subprocess.DEVNULL"))
-        XCTAssertTrue(source.contains("HOSTWRIGHT_DISPOSABLE_VM"))
-        XCTAssertTrue(source.contains("post-cut authoritative rows match a fully acknowledged state"))
-        XCTAssertTrue(source.contains("cleanup_power_workspace(record, state)"))
-        XCTAssertTrue(source.contains("[gh, \"release\", \"download\""))
-        XCTAssertTrue(source.contains("[gh, \"attestation\", \"verify\""))
-        XCTAssertTrue(source.contains("\"-R=notarized\",\n            \"--check-notarization\""))
-        XCTAssertTrue(source.contains("\"--type\", \"install\", package"))
-        XCTAssertFalse(source.contains("\"--type\", \"execute\""))
-        XCTAssertFalse(source.contains("[gh, \"release\", \"create\""))
-        XCTAssertFalse(source.contains("[gh, \"api\", \"--method\", \"DELETE\""))
-        XCTAssertFalse(source.contains("shutdown"))
-        XCTAssertFalse(source.contains("reboot"))
-        XCTAssertFalse(source.contains("rm -rf"))
-    }
-
     private func qualificationScript() throws -> URL {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

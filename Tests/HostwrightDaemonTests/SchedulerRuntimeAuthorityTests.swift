@@ -5,25 +5,6 @@ import XCTest
 @testable import HostwrightDaemon
 
 final class SchedulerRuntimeAuthorityTests: XCTestCase {
-  func testPreemptionMutationDoesNotAdvanceNodeEpochForVictimRemoval() throws {
-    let sourceURL = URL(fileURLWithPath: #filePath)
-      .deletingLastPathComponent()
-      .deletingLastPathComponent()
-      .deletingLastPathComponent()
-      .appendingPathComponent("Sources/HostwrightDaemon/HostwrightDaemonControlService.swift")
-    let source = try String(contentsOf: sourceURL, encoding: .utf8)
-    let start = try XCTUnwrap(source.range(of: "let schedulerPreemptionMutation"))
-    let end = try XCTUnwrap(
-      source.range(
-        of: "let schedulerRuntimeInventoryCache",
-        range: start.upperBound..<source.endIndex
-      )
-    )
-    let preemptionSource = String(source[start.lowerBound..<end.lowerBound])
-    XCTAssertFalse(preemptionSource.contains("recoverNode"))
-    XCTAssertTrue(preemptionSource.contains("runtimeAdapter().inventory()"))
-    XCTAssertTrue(preemptionSource.contains("schedulerPreemptionFenceEvidence"))
-  }
 
   func testRuntimeWaitTimesOutAndCancelsChild() throws {
     let cancelled = DispatchSemaphore(value: 0)

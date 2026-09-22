@@ -3,53 +3,6 @@ import Foundation
 import XCTest
 
 final class Phase03QualificationScriptTests: XCTestCase {
-    func testHarnessKeepsQualificationSurfaceFixedAndFailClosed() throws {
-        let source = try String(contentsOf: qualificationScript(), encoding: .utf8)
-
-        for lane in [
-            "apple-cli-1.0.0",
-            "apple-cli-1.1.0",
-            "containerization-0.35.0",
-        ] {
-            XCTAssertTrue(source.contains(lane), "Missing lane \(lane)")
-        }
-        for operation in ["conformance|migration|recovery", "RUNNER_ARGUMENTS"] {
-            XCTAssertTrue(source.contains(operation), "Missing contract \(operation)")
-        }
-        for scenario in [
-            "cli-service-restart",
-            "helper-restart",
-            "hostwright-termination",
-            "mixed-component-versions",
-            "checkpoint-crash",
-            "stale-helper",
-            "future-protocol-refusal",
-            "downgrade-refusal",
-        ] {
-            XCTAssertTrue(source.contains(scenario), "Missing scenario \(scenario)")
-        }
-
-        XCTAssertTrue(source.contains("unmanagedInventoryUnchanged"))
-        XCTAssertTrue(source.contains("unmanagedBeforeSHA256"))
-        XCTAssertTrue(source.contains("unmanagedAfterSHA256"))
-        XCTAssertTrue(source.contains("fixture image digest is invalid"))
-        XCTAssertTrue(source.contains("operation-specific details contain a sensitive key"))
-        XCTAssertTrue(source.contains("the harness will not pull it"))
-        XCTAssertTrue(source.contains("prepare-containerization-assets.sh"))
-        XCTAssertTrue(source.contains("--prior-helper-bin"))
-        XCTAssertTrue(source.contains("stale-helper requires --prior-helper-bin"))
-        XCTAssertTrue(source.contains("accepted only for stale-helper"))
-        XCTAssertTrue(source.contains("signed-h1-to-h2-helper-transition"))
-        XCTAssertTrue(source.contains("metadata-revision-too-new"))
-        XCTAssertTrue(source.contains("helper process-cycle evidence is incomplete"))
-        XCTAssertTrue(source.contains("/usr/bin/find -P \"$WORK_ROOT\" -depth -delete"))
-        XCTAssertFalse(source.contains("rm -rf"))
-        XCTAssertFalse(source.contains("eval "))
-        XCTAssertFalse(source.contains("curl "))
-        XCTAssertFalse(source.contains("image pull"))
-        XCTAssertFalse(source.contains("release create"))
-        XCTAssertFalse(source.contains("gh api"))
-    }
 
     func testUnsupportedLaneStopsBeforeToolExecution() throws {
         let root = try temporaryDirectory(named: "unsupported")

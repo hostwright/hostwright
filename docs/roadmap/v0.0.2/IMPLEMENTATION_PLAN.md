@@ -7,7 +7,7 @@ until the release gates pass. Scope decision: [ADR 0015](../../design/adr-0015-r
 The ledger preserves one master issue, 15 phase epics, and 167 child workstreams.
 Of the 78 issues open at the scope decision, 28 remain required and 50 are deferred.
 Phases 01–09 remain closed with their historical evidence; later changes receive
-regression coverage. A deferred closure is not completed implementation.
+regression coverage for the supported local product under [ADR 0016](../../design/adr-0016-release-focused-test-suite.md). A deferred closure is not completed implementation.
 
 The original daily targets, 2026-07-13 through 2026-07-27, are historical. Delivery
 now follows dependencies: scope reset → Phase 10 → Phase 13 → Phase 14 → Phase 15.
@@ -18,7 +18,7 @@ There is no replacement calendar deadline or promise for deferred work.
 | Phase / epic | Required for v0.0.2 | Deferred issues |
 | --- | --- | --- |
 | 10 / #219 | #207–#209 and #213–#215: local CPU/memory admission/release, hard filters, deterministic packing, stable placement, explanations and safe pressure deferral. | #210–#212 and #216–#218: fairness guarantees, topology optimization, automatic preemption, VM reclamation and accelerators. |
-| 11 / #235 | Preserve development code and tests with explicit unsupported status. | #220–#235: all multi-Mac, consensus, remote operations, HA and cluster recovery requirements. |
+| 11 / #235 | Preserve development code with explicit unsupported status and release-boundary tests under ADR 0016. | #220–#235: all multi-Mac, consensus, remote operations, HA and cluster recovery requirements. |
 | 12 / #247 | Preserve development contracts without Kubernetes compatibility claims. | #236–#247: sandbox VM, CRI/CNI/CSI, kubelet, Helm and conformance. |
 | 13 / #257 | #250: existing Compose subset import/export/update planning, explicit loss reports, and real execution through normal Hostwright lifecycle commands. | #248–#249 and #251–#256: Docker socket/API, Podman, Testcontainers and dedicated CI/IDE integrations. |
 | 14 / #270 | #258–#262: signed local SwiftUI/menu-bar app, manifest selection, services/health/logs/events, reviewed up/down/restart, accessibility and package upgrade/rollback. | #263–#269: team/MDM/cloud/SSO/fleet/remote support. Full CLI parity and automatic updates are removed from retained requirements. |

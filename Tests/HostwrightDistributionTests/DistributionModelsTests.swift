@@ -4,6 +4,15 @@ import HostwrightCore
 import XCTest
 
 final class DistributionModelsTests: XCTestCase {
+    func testSupportedPackageExcludesDeferredServiceExecutables() {
+        let deferred = ["hostwright-accelerator", "hostwright-accelerator-xpc-service",
+                        "hostwright-docker-proxy", "hostwright-cluster", "hostwright-pod-sandbox"]
+        for executable in deferred {
+            XCTAssertFalse(DistributionLayout.shippedExecutableNames.contains(executable), executable)
+            XCTAssertFalse(DistributionLayout.payloadModes.keys.contains { $0.contains(executable) }, executable)
+        }
+    }
+
     func testInstallManifestPreservesPriorShippedLayoutAndEmitsCurrentLayout() throws {
         let sourceCommit = String(repeating: "a", count: 40)
         let prior = DistributionInstallManifest(

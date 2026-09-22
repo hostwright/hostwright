@@ -1089,10 +1089,4 @@ private actor ImageCoordinatorProvider: RuntimeImageLifecycleProviding {
         return "sha256:\(value)"
     }
 
-    private static func shortHash(_ value: String) -> String {
-        let bytes = Array(value.utf8)
-        return (0..<8).map { index in
-            String(format: "%02x", bytes[index % bytes.count])
-        }.joined()
-    }
 }

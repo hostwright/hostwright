@@ -4,7 +4,7 @@ import XCTest
 
 final class RegistryAuthorizedRequestTests: XCTestCase {
     func testBearerChallengeAuthorizesExactRegistryRequest() throws {
-        let transport = AuthorizedRequestTransport([
+        let transport = RecordingRegistryTransport([
             Self.bearerChallenge(),
             Self.tokenResponse(),
             RegistryTransportResponse(
@@ -54,7 +54,7 @@ final class RegistryAuthorizedRequestTests: XCTestCase {
     }
 
     func testAuthorizedRequestReturnsRegistry404WithoutReclassifyingIt() throws {
-        let transport = AuthorizedRequestTransport([
+        let transport = RecordingRegistryTransport([
             RegistryTransportResponse(
                 statusCode: 404,
                 headers: ["content-type": "application/json"],
@@ -84,7 +84,7 @@ final class RegistryAuthorizedRequestTests: XCTestCase {
 
     func testAuthorizedRequestRejectsCrossOriginAndCallerAuthorization() throws {
         let endpoint = try! RegistryEndpoint("registry.example.com")
-        let transport = AuthorizedRequestTransport([])
+        let transport = RecordingRegistryTransport([])
         let client = RegistryAuthenticationClient(transport: transport)
         let crossOrigin = RegistryTransportRequest(
             url: URL(string: "https://evil.example.com/v2/team/app/manifests/x")!,
@@ -125,7 +125,7 @@ final class RegistryAuthorizedRequestTests: XCTestCase {
     }
 
     func testAuthorizedRequestReusesScopedTokenAndHonorsCancellation() throws {
-        let transport = AuthorizedRequestTransport([
+        let transport = RecordingRegistryTransport([
             Self.bearerChallenge(),
             Self.tokenResponse(),
             RegistryTransportResponse(statusCode: 200, headers: [:], body: Data()),
@@ -205,35 +205,5 @@ final class RegistryAuthorizedRequestTests: XCTestCase {
                 """.utf8
             )
         )
-    }
-}
-
-private final class AuthorizedRequestTransport:
-    RegistrySynchronousHTTPTransporting,
-    @unchecked Sendable
-{
-    private let lock = NSLock()
-    private var responses: [RegistryTransportResponse]
-    private var recordedRequests: [RegistryTransportRequest] = []
-
-    init(_ responses: [RegistryTransportResponse]) {
-        self.responses = responses
-    }
-
-    var requests: [RegistryTransportRequest] {
-        lock.withLock { recordedRequests }
-    }
-
-    func send(
-        _ request: RegistryTransportRequest,
-        cancellation: RegistryTransportCancellation
-    ) throws -> RegistryTransportResponse {
-        try lock.withLock {
-            recordedRequests.append(request)
-            guard !responses.isEmpty else {
-                throw RegistryTransportError.transportFailed
-            }
-            return responses.removeFirst()
-        }
     }
 }

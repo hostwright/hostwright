@@ -565,6 +565,8 @@ struct RuntimeQualificationMigrationDriver {
             let desired = DesiredRuntimeService(
                 identity: identity,
                 image: specification.localImage,
+                cpuCount: 1,
+                memoryBytes: 512 * 1_024 * 1_024,
                 command: ["sleep", "3600"]
             )
             let sourceOwnership = RuntimeInventoryOwnershipEvidence(

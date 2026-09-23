@@ -1,5 +1,7 @@
 # Privacy-Safe Support Bundles
 
+For database incidents, follow the [local state recovery runbook](local-recovery.md) before collecting a new bundle. Bundle recovery below applies to bundle file effects, while state recovery handles interrupted database maintenance.
+
 Phase 08 Gate 15 adds a schema-v1, local-only support-bundle workflow under `hostwright diagnostics support` over the current schema-v24 state database. It preserves the earlier `hostwright diagnostics --bundle <path>` diagnostics-v1 export. Support bundles add preview and confirmation, optional macOS CMS encryption, durable file-effect recovery, retained ownership evidence, and receipt-proven exact deletion. They add no listener, uploader, hosted support service, credential-store reader, state migration, or Phase 09 API.
 
 ## Preview and create

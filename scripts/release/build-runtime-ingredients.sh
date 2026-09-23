@@ -88,6 +88,10 @@ curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' --tlsv1
   https://download.swift.org/swift-6.3-release/static-sdk/swift-6.3-RELEASE/swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle.tar.gz
 printf '%s  %s\n' "$swift_sdk_sha" "$work/swift-static-sdk.tar.gz" | sha256sum --check --status
 swift sdk install "$work/swift-static-sdk.tar.gz" --checksum "$swift_sdk_sha"
+mv "$work/swift-static-sdk.tar.gz" "$work/evidence/swift-static-sdk.tar.gz"
+mkdir -m 700 "$work/evidence/kernel-inputs"
+cp "$kernel_inputs/linux-6.18.15.tar.xz" "$kernel_inputs/linux-6.18.15.tar.sign" \
+  "$kernel_inputs/gregkh-pinned-public-key.asc" "$work/evidence/kernel-inputs/"
 
 export GIT_COMMIT="$containerization_commit" GIT_TAG=0.35.0 BUILD_TIME="$build_time" SOURCE_DATE_EPOCH=1767225600
 for pass in first second; do

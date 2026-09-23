@@ -335,6 +335,33 @@ public struct DesktopControlAPIClient: Sendable {
         try transport.connectSession()
     }
 
+    public func logStreamRequest(
+        manifestPath: String,
+        serviceName: String,
+        tail: Int
+    ) throws -> ControlStreamOpenRequest {
+        let path = try Self.validatedManifestPath(manifestPath)
+        let arguments = ["logs", serviceName, path, "--tail", String(tail)]
+        let command = try CLICommand.parse(arguments: arguments)
+        let scope = try authorizationScope(command, arguments)
+        guard let target = scope.resourceIdentifier,
+              HostwrightResourceUUID.isValid(target) else {
+            throw DesktopControlFailure(
+                code: "logs.unavailable",
+                message: "The selected service has no authorized runtime resource for logs."
+            )
+        }
+        return ControlStreamOpenRequest(
+            source: .logs,
+            target: target,
+            filter: .object([
+                "manifestPath": .string(path),
+                "serviceName": .string(serviceName),
+                "tail": .integer(Int64(tail)),
+            ])
+        )
+    }
+
     public func lifecyclePreview(
         action: DesktopLifecycleAction,
         manifestPath: String,
@@ -598,10 +625,13 @@ public final class DesktopOperationsModel: ObservableObject {
     public init(
         endpoint: DesktopControlEndpoint? = nil,
         transport: any DesktopControlTransport,
+        authorizationScope: @escaping @Sendable (
+            CLICommand, [String]
+        ) throws -> CLIControlAuthorizationScope = HostwrightCommandTransportEnvironment.live.authorizationScope,
         reconnectDelaysMilliseconds: [UInt64] = [250, 1_000, 2_000, 5_000]
     ) {
         self.endpoint = endpoint
-        self.api = DesktopControlAPIClient(transport: transport)
+        self.api = DesktopControlAPIClient(transport: transport, authorizationScope: authorizationScope)
         self.reconnectDelaysMilliseconds = reconnectDelaysMilliseconds.isEmpty
             ? [1_000]
             : reconnectDelaysMilliseconds.map { min($0, 60_000) }
@@ -1005,7 +1035,7 @@ public final class DesktopOperationsModel: ObservableObject {
         cancelLogStream()
         guard let project = projects.first,
             let service = project.services.first(where: { $0.id == serviceID }),
-            let target = service.resourceIdentifier
+            service.resourceIdentifier != nil
         else {
             record(error: DesktopControlFailure(
                 code: "logs.unavailable",
@@ -1030,7 +1060,6 @@ public final class DesktopOperationsModel: ObservableObject {
             let reader = Task.detached {
                 try Self.readLogs(
                     api: api,
-                    target: target,
                     manifestPath: manifestPath,
                     serviceName: serviceID,
                     tail: tail
@@ -1292,19 +1321,14 @@ public final class DesktopOperationsModel: ObservableObject {
 
     nonisolated private static func readLogs(
         api: DesktopControlAPIClient,
-        target: String,
         manifestPath: String,
         serviceName: String,
         tail: Int
     ) throws -> [DesktopLogChunk] {
-        let request = ControlStreamOpenRequest(
-            source: .logs,
-            target: target,
-            filter: .object([
-                "manifestPath": .string(manifestPath),
-                "serviceName": .string(serviceName),
-                "tail": .integer(Int64(tail)),
-            ])
+        let request = try api.logStreamRequest(
+            manifestPath: manifestPath,
+            serviceName: serviceName,
+            tail: tail
         )
         let session = try api.connectSession()
         let streamID = "desktop-logs-\(UUID().uuidString.lowercased())"

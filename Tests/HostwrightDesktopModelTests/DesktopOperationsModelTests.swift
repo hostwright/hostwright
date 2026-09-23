@@ -3,6 +3,7 @@ import XCTest
 import HostwrightControlPlane
 import HostwrightControlTransport
 import HostwrightCore
+import HostwrightCLI
 
 @MainActor
 final class DesktopOperationsModelTests: XCTestCase {
@@ -363,7 +364,10 @@ final class DesktopOperationsModelTests: XCTestCase {
             },
             session: session
         )
-        let model = DesktopOperationsModel(transport: transport)
+        let model = DesktopOperationsModel(
+            transport: transport,
+            authorizationScope: Self.logAuthorizationScope
+        )
         model.connect()
         for _ in 0..<20 {
             if !model.projects.isEmpty { break }
@@ -384,6 +388,7 @@ final class DesktopOperationsModelTests: XCTestCase {
         XCTAssertEqual(model.events.first?.message, "Observed web.")
         XCTAssertEqual(model.logChunks.first?.text, "hello\n")
         XCTAssertEqual(session.openedSources, [.events, .logs])
+        XCTAssertEqual(session.openedTargets, [nil, Self.logResourceUUID])
         XCTAssertEqual(session.acknowledgements.map(\.credit), [1, 1])
         XCTAssertEqual(session.acknowledgements.map(\.cursor), ["event-cursor", "log-cursor"])
         XCTAssertEqual(session.openedInitialCredits, [32, 16])
@@ -1130,7 +1135,7 @@ final class DesktopOperationsModelTests: XCTestCase {
             responseProvider: { request in
                 Self.connectionResponse(request: request, generation: 3, projectName: "demo")
             }, sessionProvider: { streams.makeSession() }
-        ))
+        ), authorizationScope: Self.logAuthorizationScope)
         model.connect()
         await model.connectionTaskForTesting?.value
         model.startEventStream()
@@ -1174,6 +1179,17 @@ final class DesktopOperationsModelTests: XCTestCase {
     """
 
     nonisolated private static let statusJSON = statusJSON(projectName: "demo")
+
+    nonisolated private static let logResourceUUID = "00000000-0000-4000-8000-000000000123"
+
+    nonisolated private static func logAuthorizationScope(
+        command: CLICommand, arguments: [String]
+    ) -> CLIControlAuthorizationScope {
+        CLIControlAuthorizationScope(
+            projectIdentifier: HostwrightResourceUUID.legacy(kind: "project", identifier: "project-demo"),
+            resourceIdentifier: logResourceUUID
+        )
+    }
 
     nonisolated private static func statusJSON(
         projectName: String,
@@ -1442,7 +1458,8 @@ final class DesktopOperationsModelTests: XCTestCase {
                     )
                 },
                 sessionProvider: { streams.makeSession() }
-            )
+            ),
+            authorizationScope: Self.logAuthorizationScope
         )
         model.connect()
         guard let connectionTask = model.connectionTaskForTesting else {
@@ -1964,6 +1981,7 @@ private final class ScriptedStreamSession: DesktopControlSession, @unchecked Sen
     private let blocksEvents: Bool
     private var activeSource: ControlStreamSource?
     private(set) var openedSources: [ControlStreamSource] = []
+    private(set) var openedTargets: [String?] = []
     private(set) var openedInitialCredits: [Int] = []
     private(set) var acknowledgements: [Acknowledgement] = []
     private(set) var cancelCount = 0
@@ -1987,6 +2005,7 @@ private final class ScriptedStreamSession: DesktopControlSession, @unchecked Sen
         lock.lock()
         defer { lock.unlock() }
         openedSources.append(request.source)
+        openedTargets.append(request.target)
         openedInitialCredits.append(initialCredit)
         activeSource = request.source
         activeFrames = request.source == .events ? eventFrames : logFrames

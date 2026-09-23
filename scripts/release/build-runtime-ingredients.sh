@@ -77,7 +77,11 @@ swift sdk install "$work/swift-static-sdk.tar.gz" --checksum "$swift_sdk_sha"
 
 export GIT_COMMIT="$containerization_commit" GIT_TAG=0.35.0 BUILD_TIME="$build_time" SOURCE_DATE_EPOCH=1767225600
 for pass in first second; do
-  tree="$work/containerization-$pass"
+  tree="$work/containerization-build"
+  if [[ -e "$tree" ]]; then
+    [[ -d "$tree" && ! -L "$tree" ]] || die "unsafe previous runtime build tree"
+    find "$tree" -depth -delete
+  fi
   git clone --shared "$work/sources/containerization" "$tree"
   git -C "$tree" checkout --detach "$containerization_commit"
   (
@@ -99,18 +103,10 @@ cmp "$work/vmexec-first" "$work/vmexec-second"
 install -m 0755 "$work/vminitd-first" "$work/payloads/vminitd"
 install -m 0755 "$work/vmexec-first" "$work/payloads/vmexec"
 
-(
-  cd "$work/sources/containerization"
-  swift build -v -c release --disable-automatic-resolution --product cctl
-  cctl_bin=$(swift build -c release --disable-automatic-resolution --show-bin-path)/cctl
-  cp "$cctl_bin" "$work/evidence/cctl"
-) >"$work/evidence/cctl-build.log" 2>&1
 for pass in first second; do
-  "$work/evidence/cctl" rootfs create \
+  python3 scripts/release/create-runtime-rootfs.py \
     --vminitd "$work/vminitd-$pass" --vmexec "$work/vmexec-$pass" \
-    --ext4 "$work/init-$pass.ext4" \
-    --label org.opencontainers.image.source=https://github.com/apple/containerization \
-    --image vminit:0.35.0 "$work/vminit-$pass.rootfs.tar.gz" \
+    --output "$work/vminit-$pass.rootfs.tar.gz" \
     >"$work/evidence/rootfs-$pass.log" 2>&1
 done
 cmp "$work/vminit-first.rootfs.tar.gz" "$work/vminit-second.rootfs.tar.gz"

@@ -331,6 +331,8 @@ Provides the complete local state-maintenance surface. These commands never insp
 
 `state restore`, `state repair`, `state recover`, and `state compact` use a bounded offline entry point in the signed `hostwrightd` executable while the daemon is stopped. This preserves the executable identity that owns the audit Keychain items. Stop the managed daemon with `hostwright daemon stop`, or stop the foreground daemon, before requesting a dry-run. Keep it stopped through confirmation, then restart it after successful recovery. A per-database process lock rejects recovery while a daemon is active and prevents daemon startup during recovery. Preview and confirmation keep the exact database fingerprint; control-session, request, and audit bookkeeping cannot change it between these offline calls. Other state commands retain the authenticated persistent transport.
 
+For the complete stop, recover, restore, and restart sequence, see the [local state recovery runbook](local-recovery.md).
+
 ### `state integrity`
 
 Runs bounded SQLite structure, foreign-key, migration-ledger/checksum, required-table, authoritative-record, runtime-observation projection, and health-projection checks. JSON is a versioned `stateIntegrityReport` with `health` equal to `healthy`, `degraded`, or `unrecoverable`, plus the database digest/size, every check, affected-row counts, repairable projection tables, and recommended action.

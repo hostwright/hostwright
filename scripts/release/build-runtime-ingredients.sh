@@ -63,8 +63,14 @@ test "$(cat "$work/sources/kata/tools/packaging/kernel/kata_config_version")" = 
 git -C "$work/sources/kata" archive --format=tar "$kata_commit" | gzip -n > "$work/evidence/kata-source.tar.gz"
 
 export KBUILD_BUILD_TIMESTAMP="$build_time" KBUILD_BUILD_USER=hostwright KBUILD_BUILD_HOST=github-arm64
+export KBUILD_BUILD_VERSION=1 SOURCE_DATE_EPOCH=1767225600
+export KCFLAGS="-fdebug-prefix-map=$work=/hostwright-runtime-build" KAFLAGS="-fdebug-prefix-map=$work=/hostwright-runtime-build"
 for pass in first second; do
-  root="$work/kernel-$pass"
+  root="$work/kernel-build"
+  if [[ -e "$root" ]]; then
+    [[ -d "$root" && ! -L "$root" ]] || die "unsafe previous kernel build tree"
+    find "$root" -depth -delete
+  fi
   mkdir -m 700 "$root"
   cp -a "$work/sources/kata" "$root/kata"
   (
@@ -158,7 +164,7 @@ aarch64-linux-gnu-gcc --version > "$work/evidence/aarch64-linux-gnu-gcc.version"
 python3 - "$work/evidence/build-environment.json" <<'PY'
 import json, os, platform, sys
 allowed = ['BUILD_TIME','GIT_COMMIT','GIT_TAG','KBUILD_BUILD_HOST','KBUILD_BUILD_TIMESTAMP',
-           'KBUILD_BUILD_USER','SOURCE_DATE_EPOCH','SWIFTLY_HOME_DIR']
+           'KBUILD_BUILD_USER','KBUILD_BUILD_VERSION','KCFLAGS','KAFLAGS','SOURCE_DATE_EPOCH','SWIFTLY_HOME_DIR']
 value = {'environment': {name: os.environ[name] for name in allowed if name in os.environ},
          'machine': platform.machine(), 'system': platform.system(), 'release': platform.release()}
 with open(sys.argv[1], 'x', encoding='utf-8') as stream:

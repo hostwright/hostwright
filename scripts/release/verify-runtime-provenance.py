@@ -120,11 +120,14 @@ def spdx(expression):
         while cursor<len(tokens) and tokens[cursor] in ('AND','OR'):cursor+=1;term()
     sequence();require(cursor==len(tokens), 'invalid SPDX expression');return expression
 
-def authenticate(filename, producer, source_commit):
-    """Use the same GitHub trust roots as release promotion, with exact run extensions."""
+def producer_binding(producer, source_commit):
     require(re.fullmatch('[a-f0-9]{40}', producer['commit']) is not None and
             producer['commit'] == source_commit and type(producer['runID']) is int and producer['runID'] > 0
             and type(producer['attempt']) is int and producer['attempt'] > 0, 'invalid producer binding')
+
+def authenticate(filename, producer, source_commit):
+    """Use the same GitHub trust roots as release promotion, with exact run extensions."""
+    producer_binding(producer,source_commit)
     identity = 'https://github.com/'+REPO+'/'+WORKFLOW+'@refs/heads/main'
     command = ['gh','attestation','verify',str(filename),'--repo',REPO,'--hostname','github.com',
                '--signer-digest',source_commit,
@@ -482,7 +485,7 @@ def go_loader(loader, output, projects, fetch, tools=None):
             require(source['project']==package['project'] and source['project'] in projects and
                     source['path'] in projects[source['project']] and projects[source['project']][source['path']]['sha256']==source['sha256'], 'Go package trace source mismatch')
 
-def verify(manifest_data, runtime, payloads, fetch, source_commit):
+def verify(manifest_data, runtime, payloads, fetch, source_commit, require_authentication=True):
     manifest=parse(manifest_data)
     validate_schema(manifest)
     require(manifest_data==canonical(manifest) and manifest['kind']==KIND and manifest['schemaVersion']==1
@@ -499,12 +502,15 @@ def verify(manifest_data, runtime, payloads, fetch, source_commit):
     expected={path(r['path']):r for r in manifest['payloads']}
     require(len(expected)==len(manifest['payloads']) and set(expected)==set(payloads) and 0<len(expected)<=4096, 'runtime subject coverage mismatch')
     producer=manifest['producer']
-    with tempfile.TemporaryDirectory() as temporary:
-        temporary=pathlib.Path(temporary); item=temporary/'runtime-provenance.json'; item.write_bytes(manifest_data)
-        authenticate(item,producer,source_commit)
-        for index,(name,data) in enumerate(payloads.items()):
-            bound(expected[name],lambda _:data)
-            item=temporary/('payload-'+str(index)); item.write_bytes(data); authenticate(item,producer,source_commit)
+    require(type(require_authentication) is bool, 'invalid authentication mode')
+    producer_binding(producer,source_commit)
+    for name,data in payloads.items():bound(expected[name],lambda _,data=data:data)
+    if require_authentication:
+        with tempfile.TemporaryDirectory() as temporary:
+            temporary=pathlib.Path(temporary); item=temporary/'runtime-provenance.json'; item.write_bytes(manifest_data)
+            authenticate(item,producer,source_commit)
+            for index,(name,data) in enumerate(payloads.items()):
+                item=temporary/('payload-'+str(index)); item.write_bytes(data); authenticate(item,producer,source_commit)
     projects={}
     for project in manifest['sourceProjects']:
         require(project['identity'] not in projects, 'duplicate source project')

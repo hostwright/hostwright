@@ -8,6 +8,117 @@ on:
 permissions: {}
 
 jobs:
+  runtime-build-ingredients:
+    name: Rebuild pinned kernel and vminit ingredients
+    if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - name: Check out the exact main commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Install and record build prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes \
+            bc bison clang cpio dwarves flex gcc gcc-aarch64-linux-gnu git gpg jq libelf-dev libssl-dev \
+            lld make pkg-config rsync xz-utils
+          test "$(uname -m)" = aarch64
+      - name: Set up the pinned Go toolchain
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: 1.25.8
+          cache: false
+      - name: Install the exact Kata YAML tool
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GOBIN="$RUNNER_TEMP/pinned-tools"
+          mkdir -m 700 "$GOBIN"
+          go install github.com/mikefarah/yq/v4@v4.40.7
+          test "$("$GOBIN/yq" --version)" = "yq (https://github.com/mikefarah/yq/) version v4.40.7"
+          printf '%s\n' "$GOBIN" >> "$GITHUB_PATH"
+      - name: Install the exact signed Swift toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          export SWIFTLY_HOME_DIR="$RUNNER_TEMP/swiftly"
+          export SWIFTLY_BIN_DIR="$RUNNER_TEMP/swiftly/bin"
+          mkdir -m 700 "$SWIFTLY_HOME_DIR"
+          bootstrap="$RUNNER_TEMP/swift-bootstrap"
+          mkdir -m 700 "$bootstrap"
+          cd "$bootstrap"
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            --output swiftly.tar.gz https://download.swift.org/swiftly/linux/swiftly-1.1.2-aarch64.tar.gz
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            --output swiftly.tar.gz.sig https://download.swift.org/swiftly/linux/swiftly-1.1.2-aarch64.tar.gz.sig
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            --output swift-signing-keys.asc https://www.swift.org/keys/all-keys.asc
+          export GNUPGHOME="$RUNNER_TEMP/swift-bootstrap-gnupg"
+          mkdir -m 700 "$GNUPGHOME"
+          gpg --batch --import swift-signing-keys.asc
+          gpg --batch --verify swiftly.tar.gz.sig swiftly.tar.gz
+          tar -xzf swiftly.tar.gz swiftly
+          ./swiftly init --quiet-shell-followup --skip-install
+          . "$SWIFTLY_HOME_DIR/env.sh"
+          swiftly install 6.3.0
+          [[ "$(swift --version | head -1)" == "Swift version 6.3"* ]]
+          printf '%s\n' "$SWIFTLY_BIN_DIR" >> "$GITHUB_PATH"
+          printf 'SWIFTLY_HOME_DIR=%s\nSWIFTLY_BIN_DIR=%s\n' "$SWIFTLY_HOME_DIR" "$SWIFTLY_BIN_DIR" >> "$GITHUB_ENV"
+      - name: Retain authenticated kernel inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/kernel-signature-inputs"
+          mkdir -m 700 "$root"
+          cp scripts/release/keys/gregkh-pinned-public-key.asc "$root/"
+          for name in linux-6.18.15.tar.xz linux-6.18.15.tar.sign; do
+            curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' --tlsv1.2 \
+              --output "$root/$name" "https://cdn.kernel.org/pub/linux/kernel/v6.x/$name"
+          done
+          printf '%s  %s\n' \
+            7c716216c3c4134ed0de69195701e677577bbcdd3979f331c182acd06bf2f170 "$root/linux-6.18.15.tar.xz" \
+            d42cfc8e2edea41feb14e28dbc6b962da59a4fc0808b25b1157e1063be6984b3 "$root/linux-6.18.15.tar.sign" \
+            d3494056bb1a9726366499d790dfd44555d9f6e354cd4549143bf9c0b7ccb99c "$root/gregkh-pinned-public-key.asc" \
+            | sha256sum --check --status
+      - name: Rebuild deterministic runtime ingredients
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          [[ "$(swift --version | head -1)" == "Swift version 6.3"* ]]
+          scripts/release/build-runtime-ingredients.sh \
+            --kernel-inputs "$RUNNER_TEMP/kernel-signature-inputs" \
+            --output "$RUNNER_TEMP/runtime-build-ingredients"
+          mkdir -m 700 "$RUNNER_TEMP/runtime-build-ingredients/evidence/swift-bootstrap"
+          cp "$RUNNER_TEMP/swift-bootstrap/swiftly.tar.gz" \
+             "$RUNNER_TEMP/swift-bootstrap/swiftly.tar.gz.sig" \
+             "$RUNNER_TEMP/swift-bootstrap/swift-signing-keys.asc" \
+             "$RUNNER_TEMP/runtime-build-ingredients/evidence/swift-bootstrap/"
+          dpkg-query -W -f='${binary:Package}\t${Version}\n' \
+            > "$RUNNER_TEMP/runtime-build-ingredients/evidence/ubuntu-package-versions.tsv"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+      - name: Attest rebuilt ingredients and retained evidence
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/runtime-build-ingredients/**
+      - name: Retain rebuilt ingredients for the reviewed pin update
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: runtime-build-ingredients-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/runtime-build-ingredients/
+          retention-days: 30
+          if-no-files-found: error
+
   guest-loader:
     name: Build and attest the guest loader
     if: ${{ github.ref == 'refs/heads/main' }}

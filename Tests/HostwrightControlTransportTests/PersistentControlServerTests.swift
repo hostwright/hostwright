@@ -386,6 +386,77 @@ final class PersistentControlServerTests: XCTestCase {
     XCTAssertNil(serverResult.error)
   }
 
+  func testAcceptedMutationRejectionPersistsAsErrorAndReplaysOnProtocol22() throws {
+    let root = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let invocations = InvocationCounter()
+    let server = try minimalServer(root: root, handler: { _, request, _ in
+      invocations.increment()
+      return ControlResponseEnvelope(
+        protocolRevision: request.protocolRevision!,
+        requestID: request.requestID,
+        status: .rejected,
+        reasonCode: .internalError,
+        error: SanitizedError(code: "mutationFailed", message: "The operation failed.")
+      )
+    })
+    let store = SQLiteStateStore(path: root.appendingPathComponent("state.sqlite").path)
+    let repository = ControlRequestRepository(store: store)
+    let pair = try socketPair()
+    defer {
+      _ = Darwin.close(pair.client)
+      _ = Darwin.close(pair.server)
+    }
+    try ControlFrameCodec.configureNoSigPipe(descriptor: pair.client)
+    let serverResult = ServerResult()
+    let serverFinished = expectation(description: "persistent server exits after peer close")
+    DispatchQueue.global().async {
+      defer { serverFinished.fulfill() }
+      do {
+        try server.serve(descriptor: pair.server)
+      } catch {
+        serverResult.error = error
+      }
+    }
+
+    try completeAuthentication(descriptor: pair.client)
+    let request = ControlRequestEnvelope(
+      protocolRevision: .current,
+      requestID: "mutation-rejected-22",
+      operation: "service.start",
+      timeoutMilliseconds: 1_000,
+      idempotencyKey: "mutation-rejected-22-key"
+    )
+    let requestData = try ControlPlaneCanonicalJSON.encode(request)
+    try writeRequest(requestData, descriptor: pair.client)
+    let first = try readResponse(descriptor: pair.client)
+    XCTAssertEqual(first.protocolRevision, .current)
+    XCTAssertEqual(first.status, .error)
+    XCTAssertEqual(first.reasonCode, .internalError)
+    XCTAssertEqual(first.error?.code, "mutationFailed")
+    let persisted = try XCTUnwrap(repository.load(request.requestID))
+    XCTAssertEqual(persisted.status, .error)
+    XCTAssertEqual(persisted.operationReference, first.operationRef)
+    XCTAssertEqual(
+      try JSONDecoder().decode(ControlResponseEnvelope.self, from: XCTUnwrap(persisted.responseCanonicalJSON)),
+      first
+    )
+
+    try writeRequest(requestData, descriptor: pair.client)
+    let replay = try readResponse(descriptor: pair.client)
+    XCTAssertEqual(replay, first)
+    XCTAssertEqual(invocations.value, 1)
+    XCTAssertEqual(
+      try repository.load(
+        subjectID: "control-test-subject", idempotencyKey: request.idempotencyKey!)?.status,
+      .error
+    )
+
+    _ = Darwin.close(pair.client)
+    wait(for: [serverFinished], timeout: 2)
+    XCTAssertNil(serverResult.error)
+  }
+
   func testDifferentRequestIDForSameIdempotencyKeyIsRejectedWithoutInvokingHandler() throws {
     let root = try temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: root) }

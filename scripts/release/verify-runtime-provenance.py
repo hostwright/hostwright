@@ -560,7 +560,12 @@ def verify(manifest_data, runtime, payloads, fetch, source_commit, require_authe
         names=set()
         for member in members:
             name=path(member.name.rstrip('/')); require(name not in names, 'duplicate OCI layer member'); names.add(name)
-            require(member.isfile() or member.isdir(), 'unsupported OCI layer special entry')
+            require(not name.startswith('proc/self/exe/'), 'OCI entry descends through the runtime symlink')
+            if member.issym():
+                require(name=='proc/self/exe' and member.linkname=='sbin/vminitd' and member.size==0,
+                        'unsupported OCI layer symlink')
+            else:
+                require(member.isfile() or member.isdir(), 'unsupported OCI layer special entry')
             if member.isfile():
                 require(member.size<=MAX_FILE, 'oversized OCI payload'); data=archive.extractfile(member).read()
                 regular[name]=data

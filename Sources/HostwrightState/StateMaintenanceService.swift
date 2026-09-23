@@ -14,6 +14,16 @@ public struct StateMaintenanceService {
         StateIntegrityService(store: store).inspect()
     }
 
+    public func acquireDaemonLease() throws -> StateServiceLease {
+        try StateAccessCoordinator(configuration: store.configuration)
+            .acquireServiceLease(exclusive: false)
+    }
+
+    public func acquireOfflineRecoveryLease() throws -> StateServiceLease {
+        try StateAccessCoordinator(configuration: store.configuration)
+            .acquireServiceLease(exclusive: true)
+    }
+
     public func createBackup() throws -> StateBackupRecord {
         guard !sqliteCurrentTaskIsCancelled() else {
             throw StateMaintenanceError.cancelled

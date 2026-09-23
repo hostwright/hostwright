@@ -1582,6 +1582,10 @@ final class HostwrightDaemonCoreTests: XCTestCase {
                 clock: ManualDaemonClock(),
                 instanceLock: FileDaemonInstanceLock(path: configuration.lockFilePath),
                 readConfig: {
+                    let recovery = try StateMaintenanceService(
+                        store: SQLiteStateStore(path: configuration.stateDatabasePath)
+                    )
+                    XCTAssertThrowsError(try recovery.acquireOfflineRecoveryLease())
                     let manifestText = try String(contentsOfFile: $0, encoding: .utf8)
                     let reservations = try seedDaemonSchedulerAuthority(
                         databasePath: configuration.stateDatabasePath,
@@ -1602,6 +1606,10 @@ final class HostwrightDaemonCoreTests: XCTestCase {
 
             XCTAssertEqual(summary.successfulIterations, 1)
             XCTAssertEqual(configuration.stateStoreConfiguration.origin, .applicationSupportDefault)
+            let recovery = try StateMaintenanceService(
+                store: SQLiteStateStore(path: configuration.stateDatabasePath)
+            ).acquireOfflineRecoveryLease()
+            recovery.release()
             XCTAssertEqual(try permissions(configuration.stateDatabasePath), 0o600)
             XCTAssertEqual(try permissions(configuration.lockFilePath), 0o600)
             let resolution = try XCTUnwrap(configuration.stateStoreConfiguration.localPathResolution)

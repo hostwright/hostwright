@@ -168,7 +168,7 @@ Catalog reads revalidate directory/file ownership, modes, ACLs, link counts, exa
 
 Normal backup artifacts must be `healthy`. A pre-repair snapshot may be `degraded` only in the exact reconstructible projections and is marked rollback-only, never general-purpose restorable.
 
-Restore has a mandatory two-step contract:
+Restore has a mandatory two-step contract with the daemon stopped. Restore, repair, maintenance recovery, and compaction use the signed daemon's offline bootstrap entry point instead of recording requests in the database they inspect or replace. Using the same executable preserves the audit Keychain access identity. A shared daemon lifetime lease and exclusive offline recovery lease use the same private per-database lock, including when a daemon uses a custom instance-lock path. Daemon startup and offline recovery exclude one another. Existing state-access fences and stale-confirmation checks still apply.
 
 ```bash
 hostwright state restore --backup <id> --dry-run

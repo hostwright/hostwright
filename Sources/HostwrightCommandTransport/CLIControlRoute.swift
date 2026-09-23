@@ -47,6 +47,9 @@ public struct CLIControlRoute: Equatable, Sendable {
         case .daemon:
             transport = .bootstrapAPI
             execution = .unary
+        case .state(let action, _, _) where action.requiresOfflineRecovery:
+            transport = .bootstrapAPI
+            execution = .unary
         case .interactive(let options):
             transport = .persistentControlAPI
             switch options.command {

@@ -73,7 +73,12 @@ public struct HostwrightCommandTransportEnvironment: @unchecked Sendable {
             try PersistentControlClient(socketPath: socketPath).send(request)
         },
         bootstrapSend: { request in
-            try BootstrapControlClient().send(request)
+            let route = try CLIControlRoute.validate(request: request, expectedTransport: .bootstrapAPI)
+            let recovery: Bool
+            if let route, case .state(let action, _, _) = try CLICommand.parse(arguments: route.arguments) {
+                recovery = action.requiresOfflineRecovery
+            } else { recovery = false }
+            return try BootstrapControlClient(offlineRecovery: recovery).send(request)
         },
         streamRun: { socketPath, route, requestID in
             try CLIControlStreamClient(socketPath: socketPath)

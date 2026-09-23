@@ -20,6 +20,21 @@ private actor StateMaintenanceCancellationGate {
 }
 
 final class StateMaintenanceTests: XCTestCase {
+    func testDaemonAndOfflineRecoveryLeasesExcludeEachOther() throws {
+        try withStore { store, _ in
+            let maintenance = try StateMaintenanceService(store: store)
+            let daemon = try maintenance.acquireDaemonLease()
+            XCTAssertThrowsError(try maintenance.acquireOfflineRecoveryLease())
+            daemon.release()
+            let recovery = try maintenance.acquireOfflineRecoveryLease()
+            XCTAssertThrowsError(try maintenance.acquireDaemonLease())
+            XCTAssertThrowsError(try maintenance.acquireOfflineRecoveryLease())
+            recovery.release()
+            let restarted = try maintenance.acquireDaemonLease()
+            restarted.release()
+        }
+    }
+
     func testIntegrityAndVerifiedOnlineBackupRoundTrip() throws {
         try withStore { store, _ in
             try appendEvent("before-backup", to: store)

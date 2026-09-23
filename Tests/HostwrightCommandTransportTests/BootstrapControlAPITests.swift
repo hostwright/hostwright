@@ -7,8 +7,72 @@ import HostwrightControlPlane
 import HostwrightCore
 import HostwrightDaemonCore
 import HostwrightObservability
+import HostwrightState
 
 final class BootstrapControlAPITests: XCTestCase {
+    func testBootstrapEntryPointsRejectEachOthersCommands() throws {
+        for (arguments, offline) in [(["daemon", "status"], true), (["state", "recover"], false)] {
+            let route = try CLIControlRoute.classify(arguments: arguments)
+            let request = ControlRequestEnvelope(
+                requestID: "wrong-entry", operation: route.operation, timeoutMilliseconds: 1_000,
+                idempotencyKey: route.mutating ? "wrong-entry" : nil, body: route.requestBody()
+            )
+            let data = try ControlPlaneCanonicalJSON.encode(request)
+            let response = try decode(offline
+                ? BootstrapControlAPI.runOfflineRecovery(requestData: data)
+                : BootstrapControlAPI.run(requestData: data))
+            XCTAssertEqual(response.status, .rejected)
+            XCTAssertEqual(response.reasonCode, .invalidRequest)
+        }
+    }
+
+    func testOfflineRestorePreservesConfirmationAndRefusesLiveDaemonOrStaleState() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-bootstrap-restore-\(UUID().uuidString)", isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = SQLiteStateStore(path: root.appendingPathComponent("state.sqlite").path)
+        try store.migrate()
+        let maintenance = try StateMaintenanceService(store: store)
+        let backup = try maintenance.createBackup()
+        func send(_ confirmation: [String]) throws -> CLIRunResult {
+            let route = try CLIControlRoute.classify(arguments: [
+                "state", "restore", "--backup", backup.backupID,
+                "--state-db", store.path, "--json"
+            ] + confirmation)
+            let request = ControlRequestEnvelope(
+                requestID: "offline-restore", operation: route.operation,
+                timeoutMilliseconds: 1_000, idempotencyKey: "offline-restore",
+                body: route.requestBody()
+            )
+            return try CLIControlResultContract.result(from: decode(BootstrapControlAPI.runOfflineRecovery(
+                requestData: ControlPlaneCanonicalJSON.encode(request)
+            )))
+        }
+        let daemon = try maintenance.acquireDaemonLease()
+        let refused = try send(["--dry-run"])
+        XCTAssertEqual(refused.exitCode, CLIExitCode.stateUnavailable.rawValue)
+        XCTAssertTrue(refused.standardError.contains("stop hostwrightd"))
+        daemon.release()
+        let preview = try send(["--dry-run"])
+        XCTAssertEqual(preview.exitCode, 0, preview.standardError)
+        let plan = try JSONDecoder().decode(StateRestorePlan.self, from: Data(preview.standardOutput.utf8))
+        try store.events.append([EventRecord(
+            id: "after-preview", timestamp: "2026-09-23T12:00:00Z", severity: .info,
+            type: "state.test", source: "bootstrap-test", projectID: nil, serviceName: nil,
+            runtimeAdapter: nil, message: "state changed", payloadJSONRedacted: "{}"
+        )])
+        XCTAssertNotEqual(try send(["--confirm-restore", plan.confirmationToken]).exitCode, 0)
+        XCTAssertTrue(try store.events.loadAll().contains { $0.id == "after-preview" })
+        let fresh = try send(["--dry-run"])
+        let freshPlan = try JSONDecoder().decode(StateRestorePlan.self, from: Data(fresh.standardOutput.utf8))
+        let restored = try send(["--confirm-restore", freshPlan.confirmationToken])
+        XCTAssertEqual(restored.exitCode, 0, restored.standardError)
+        XCTAssertFalse(try store.events.loadAll().contains { $0.id == "after-preview" })
+        XCTAssertEqual(maintenance.integrity().health, .healthy)
+    }
+
     func testDockerEnvelopeCannotSmuggleCommandsThroughBootstrapTransport() throws {
         for arguments in [["daemon", "stop"], ["state", "backup"], ["capabilities"]] {
             let route = try CLIControlRoute.docker(

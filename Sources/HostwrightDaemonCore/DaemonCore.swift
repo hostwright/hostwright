@@ -284,6 +284,8 @@ public struct DaemonLoopRunner {
         defer { configurationMonitor?.stop() }
 
         let store = SQLiteStateStore(configuration: configuration.stateStoreConfiguration)
+        let serviceLease = try StateMaintenanceService(store: store).acquireDaemonLease()
+        defer { serviceLease.release() }
         _ = try StateUpgradeService(store: store)
             .withBoundedStateAccessWait(lockWaitMilliseconds: 30_000) {
                 try StateUpgradeService(store: store)

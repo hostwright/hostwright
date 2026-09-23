@@ -8,6 +8,26 @@ import XCTest
 @testable import HostwrightState
 
 extension HostwrightCLITests {
+    func testStatusUnavailableProviderExplainsRecoveryInTextAndJSON() throws {
+        for (provider, output) in [("auto", "text"), ("auto", "json"), ("apple-cli", "text"), ("apple-cli", "json")] {
+            try withCLITestDatabase(prefix: "hostwright-cli-unavailable-provider") { databasePath in
+                let files = FileBox(files: [HostwrightIdentity.manifestFileName: singleServiceManifest])
+                var unavailable = environment(files: files)
+                unavailable.runtimeProviderProbes = { [] }
+                let result = HostwrightCLI.run(
+                    arguments: ["status", "--state-db", databasePath, "--output", output, "--runtime-provider", provider],
+                    environment: unavailable
+                )
+                XCTAssertEqual(result.exitCode, CLIExitCode.runtimeUnavailable.rawValue)
+                XCTAssertTrue(result.standardError.contains(HostwrightErrorCode.runtimeUnavailable.rawValue))
+                XCTAssertTrue(result.standardError.contains("hostwright doctor"))
+                XCTAssertTrue(result.standardError.contains("restore or start the supported runtime"))
+                XCTAssertFalse(result.standardError.contains("noCompatibleProvider"))
+                XCTAssertFalse(result.standardError.contains("providerUnavailable"))
+            }
+        }
+    }
+
     func testStatusWithStateDatabaseObservesAndRecordsEvent() throws {
         try withCLITestDatabase(prefix: "hostwright-cli-xctest") { databasePath in
             let observed = ObservedRuntimeState(

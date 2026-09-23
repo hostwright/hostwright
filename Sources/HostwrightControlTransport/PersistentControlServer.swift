@@ -889,11 +889,13 @@ public struct PersistentControlConnectionServer: Sendable {
       {
         throw PersistentControlServerError.persistenceFailed
       }
+      // Accepted rejections persist as errors so their operation reference remains durable
+      // for replay and restart recovery; pre-admission denials return above unchanged.
       response = ControlResponseEnvelope(
         apiVersion: response.apiVersion,
         protocolRevision: requestRevision,
         requestID: response.requestID,
-        status: response.status,
+        status: response.status == .rejected ? .error : response.status,
         reasonCode: response.reasonCode,
         operationRef: durableMutationOperationReference,
         result: response.result,

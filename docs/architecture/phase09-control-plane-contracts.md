@@ -118,7 +118,11 @@ identity are collected before the challenge and remain authoritative.
 The normal CLI is a client of this API. Local help/version rendering may remain
 local. The Bootstrap API v2.2 handles identity setup and the exact current-user
 service lifecycle, including status, start and recovery while the daemon socket
-is absent. Authenticated workload reads and mutations use the persistent socket.
+is absent. It also handles offline state restore, repair, maintenance recovery,
+and compaction, guarded by a per-database lease that excludes a running daemon.
+These commands keep confirmation fingerprints independent of transport bookkeeping
+and avoid replacing the persistent request store while a request is executing.
+Authenticated workload reads and mutations use the persistent socket.
 Docker envelopes cannot execute CLI commands through either entry point.
 The complete frozen command classification is
 [`phase09-cli-parity-inventory.json`](../../contracts/v0.0.2/phase09-cli-parity-inventory.json).

@@ -56,6 +56,27 @@ private enum StateAccessExecutionContext {
     @TaskLocal static var waitTimeoutNanoseconds: UInt64?
 }
 
+public final class StateServiceLease: @unchecked Sendable {
+    private let descriptor: Int32
+    private let lock = NSLock()
+    private var released = false
+
+    fileprivate init(descriptor: Int32) {
+        self.descriptor = descriptor
+    }
+
+    public func release() {
+        lock.withLock {
+            guard !released else { return }
+            released = true
+            _ = flock(descriptor, LOCK_UN)
+            close(descriptor)
+        }
+    }
+
+    deinit { release() }
+}
+
 public final class OperationMutationFence: @unchecked Sendable {
     private let descriptor: Int32
     private let lock = NSLock()
@@ -403,6 +424,29 @@ struct StateAccessCoordinator {
             throw StateStoreError.maintenanceRecoveryRequired(journalPath: journal)
         }
         return try body()
+    }
+
+    func acquireServiceLease(exclusive: Bool) throws -> StateServiceLease {
+        try configuration.prepareStateAccessFoundation()
+        let parent = (configuration.databasePath as NSString).deletingLastPathComponent
+        let canonicalDatabase = URL(fileURLWithPath: parent, isDirectory: true)
+            .resolvingSymlinksInPath()
+            .appendingPathComponent((configuration.databasePath as NSString).lastPathComponent).path
+        // The service fence is identical for default, explicit, and root-owned alias paths.
+        let paths = try StateStoreConfiguration(explicitDatabasePath: canonicalDatabase).maintenancePaths()
+        let descriptor = try openSecureLock(paths.accessLockPath + ".service")
+        do {
+            try acquire(
+                descriptor,
+                operation: exclusive ? LOCK_EX : LOCK_SH,
+                deadline: DispatchTime.now().uptimeNanoseconds + 250_000_000,
+                role: "offline recovery fence; stop hostwrightd before state recovery"
+            )
+            return StateServiceLease(descriptor: descriptor)
+        } catch {
+            close(descriptor)
+            throw error
+        }
     }
 
     func acquireOperationMutationFence(

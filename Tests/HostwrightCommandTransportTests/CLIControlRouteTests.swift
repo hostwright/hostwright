@@ -111,7 +111,14 @@ final class CLIControlRouteTests: XCTestCase {
     func testEveryNestedParsedActionHasExactTextAndJSONRouteParity() throws {
         for entry in nestedActionInventory {
             let jsonRoute = try CLIControlRoute.classify(arguments: entry.jsonArguments)
-            XCTAssertEqual(jsonRoute.transport, .persistentControlAPI, entry.name)
+            let offline = ["state.restore", "state.repair", "state.recover", "state.compact"].contains(entry.name)
+            XCTAssertEqual(jsonRoute.transport, offline ? .bootstrapAPI : .persistentControlAPI, entry.name)
+            if offline {
+                XCTAssertThrowsError(try CLIControlRoute.validate(request: request(route: jsonRoute)))
+                XCTAssertEqual(try CLIControlRoute.validate(
+                    request: request(route: jsonRoute), expectedTransport: .bootstrapAPI
+                ), jsonRoute)
+            }
             XCTAssertEqual(jsonRoute.execution, .unary, entry.name)
             XCTAssertEqual(jsonRoute.operation, entry.operation, entry.name)
             XCTAssertEqual(jsonRoute.subcommand, entry.subcommand, entry.name)

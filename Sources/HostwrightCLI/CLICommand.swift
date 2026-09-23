@@ -3077,6 +3077,13 @@ public enum StateCLIAction: Equatable, Sendable {
         confirmation: StateMutationConfirmation,
         evaluatedAt: String?
     )
+
+    public var requiresOfflineRecovery: Bool {
+        switch self {
+        case .restore, .repair, .recover, .compact: return true
+        case .integrity, .backup, .backups, .retention: return false
+        }
+    }
 }
 
 public enum StateMutationConfirmation: Equatable, Sendable {

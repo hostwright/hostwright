@@ -14,6 +14,9 @@ struct StateMaintenanceCommandRunner {
         do {
             let store = SQLiteStateStore(configuration: stateStoreConfiguration)
             let maintenance = try StateMaintenanceService(store: store)
+            let recoveryLease = try action.requiresOfflineRecovery
+                ? maintenance.acquireOfflineRecoveryLease() : nil
+            defer { recoveryLease?.release() }
             switch action {
             case .integrity:
                 let report = maintenance.integrity()

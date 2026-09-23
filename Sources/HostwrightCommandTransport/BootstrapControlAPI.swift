@@ -35,11 +35,10 @@ public enum BootstrapControlAPI {
             guard let route = try CLIControlRoute.validate(
                 request: request,
                 expectedTransport: .bootstrapAPI
-            ), route.transport == .bootstrapAPI,
-               case .daemon = try CLICommand.parse(arguments: route.arguments) else {
+            ), route.transport == .bootstrapAPI else {
                 throw HostwrightDiagnostic(
                     code: .controlAPIInvalid,
-                    message: "The Bootstrap API requires one classified daemon command."
+                    message: "The Bootstrap API requires one classified daemon or offline state-recovery command."
                 )
             }
             let commandEnvironment = try environment.resolvingRelativePaths(

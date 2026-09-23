@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import HostwrightCLI
 import HostwrightControlPlane
 import HostwrightControlSecurity
 import HostwrightCore
@@ -24,14 +25,17 @@ public struct BootstrapControlClient: Sendable {
 
     public let companionPath: String
     private let companionIdentity: SecureExecutableIdentity
+    private let offlineRecovery: Bool
     private let runSubprocess: SubprocessRun
 
-    public init(companionPath: String? = nil) throws {
-        let resolvedPath = try companionPath ?? Self.defaultCompanionPath()
-        let executableIdentity = try Self.validateCompanion(path: resolvedPath)
-        let codeIdentity = try Self.validateCodeIdentity(path: resolvedPath)
+    public init(companionPath: String? = nil, offlineRecovery: Bool = false) throws {
+        let name = offlineRecovery ? "hostwrightd" : Self.companionName
+        let resolvedPath = try companionPath ?? Self.defaultCompanionPath(name: name)
+        let executableIdentity = try Self.validateCompanion(path: resolvedPath, name: name)
+        let codeIdentity = try Self.validateCodeIdentity(path: resolvedPath, name: name)
         self.companionPath = resolvedPath
         self.companionIdentity = executableIdentity
+        self.offlineRecovery = offlineRecovery
         self.runSubprocess = { request, identity in
             try SecureSubprocessRunner().run(
                 request,
@@ -49,10 +53,12 @@ public struct BootstrapControlClient: Sendable {
     init(
         testingCompanionPath companionPath: String,
         identity: SecureExecutableIdentity,
+        offlineRecovery: Bool = false,
         runSubprocess: @escaping SubprocessRun
     ) {
         self.companionPath = companionPath
         self.companionIdentity = identity
+        self.offlineRecovery = offlineRecovery
         self.runSubprocess = runSubprocess
     }
 
@@ -63,6 +69,11 @@ public struct BootstrapControlClient: Sendable {
         ), route.transport == .bootstrapAPI else {
             throw BootstrapControlClientError.invalidResponse
         }
+        let recovery: Bool
+        if case .state(let action, _, _) = try CLICommand.parse(arguments: route.arguments) {
+            recovery = action.requiresOfflineRecovery
+        } else { recovery = false }
+        guard recovery == offlineRecovery else { throw BootstrapControlClientError.invalidResponse }
         let requestData = try ControlPlaneCanonicalJSON.encode(request)
         let timeout = min(
             request.timeoutMilliseconds ?? ControlPlaneContract.maximumUnaryDeadlineMilliseconds,
@@ -70,7 +81,7 @@ public struct BootstrapControlClient: Sendable {
         )
         let subprocessRequest = SecureSubprocessRequest(
             executablePath: companionIdentity.path,
-            arguments: ["--bootstrap"],
+            arguments: [offlineRecovery ? "--bootstrap-state-recovery" : "--bootstrap"],
             environment: try Self.bootstrapEnvironment(),
             workingDirectory: "/",
             standardInput: requestData,
@@ -120,7 +131,7 @@ public struct BootstrapControlClient: Sendable {
         return response
     }
 
-    static func defaultCompanionPath() throws -> String {
+    static func defaultCompanionPath(name: String = companionName) throws -> String {
         var required: UInt32 = 0
         _ = _NSGetExecutablePath(nil, &required)
         guard required > 0 else {
@@ -134,10 +145,10 @@ public struct BootstrapControlClient: Sendable {
         defer { free(resolved) }
         let directory = URL(fileURLWithPath: String(cString: resolved))
             .deletingLastPathComponent()
-        return directory.appendingPathComponent(companionName).path
+        return directory.appendingPathComponent(name).path
     }
 
-    static func validateCompanion(path: String) throws -> SecureExecutableIdentity {
+    static func validateCompanion(path: String, name: String = companionName) throws -> SecureExecutableIdentity {
         guard path.hasPrefix("/"),
               URL(fileURLWithPath: path).standardizedFileURL.path == path else {
             throw BootstrapControlClientError.unsafeCompanion
@@ -159,7 +170,7 @@ public struct BootstrapControlClient: Sendable {
         guard identity.path == path else {
             throw BootstrapControlClientError.unsafeCompanion
         }
-        _ = try validateCodeIdentity(path: path)
+        _ = try validateCodeIdentity(path: path, name: name)
         do {
             try SecureExecutableResolver.verifyUnchanged(identity)
         } catch {
@@ -188,7 +199,7 @@ public struct BootstrapControlClient: Sendable {
         return result
     }
 
-    private static func validateCodeIdentity(path: String) throws -> CodeIdentity {
+    private static func validateCodeIdentity(path: String, name: String) throws -> CodeIdentity {
         var candidate: SecStaticCode?
         guard SecStaticCodeCreateWithPath(
             URL(fileURLWithPath: path) as CFURL,
@@ -218,11 +229,11 @@ public struct BootstrapControlClient: Sendable {
         let candidateHash = unique.map { String(format: "%02x", $0) }.joined()
         let validationMode: CodeValidationMode
         if let team {
-            guard team == "993YC3JY4Q", signingIdentifier == companionName else {
+            guard team == "993YC3JY4Q", signingIdentifier == name else {
                 throw BootstrapControlClientError.unsafeCompanion
             }
             var requirement: SecRequirement?
-            let source = "anchor apple generic and certificate leaf[subject.OU] = \"993YC3JY4Q\" and identifier \"hostwright-control\""
+            let source = "anchor apple generic and certificate leaf[subject.OU] = \"993YC3JY4Q\" and identifier \"\(name)\""
             guard SecRequirementCreateWithString(
                 source as CFString,
                 SecCSFlags(),
@@ -240,7 +251,7 @@ public struct BootstrapControlClient: Sendable {
         } else {
             guard isAdHocSourceIdentifier(
                 signingIdentifier,
-                base: companionName
+                base: name
             ) else {
                 throw BootstrapControlClientError.unsafeCompanion
             }

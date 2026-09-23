@@ -8,7 +8,11 @@ public enum BootstrapControlAPI {
         run(requestData: requestData, environment: .live)
     }
 
-    static func run(requestData: Data, environment: CLIEnvironment) -> Data {
+    public static func runOfflineRecovery(requestData: Data) -> Data {
+        run(requestData: requestData, environment: .live, offlineRecovery: true)
+    }
+
+    static func run(requestData: Data, environment: CLIEnvironment, offlineRecovery: Bool = false) -> Data {
         var requestID = "bootstrap-invalid"
         do {
             guard !requestData.isEmpty,
@@ -44,6 +48,13 @@ public enum BootstrapControlAPI {
             let commandEnvironment = try environment.resolvingRelativePaths(
                 against: route.workingDirectory
             )
+            let recovery: Bool
+            if case .state(let action, _, _) = try CLICommand.parse(arguments: route.arguments) {
+                recovery = action.requiresOfflineRecovery
+            } else { recovery = false }
+            guard recovery == offlineRecovery else {
+                throw HostwrightDiagnostic(code: .controlAPIInvalid, message: "The command requires its exact bootstrap entry point.")
+            }
             let result = HostwrightCLI.run(
                 arguments: route.arguments,
                 environment: commandEnvironment

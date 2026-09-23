@@ -10,6 +10,22 @@ import HostwrightObservability
 import HostwrightState
 
 final class BootstrapControlAPITests: XCTestCase {
+    func testBootstrapEntryPointsRejectEachOthersCommands() throws {
+        for (arguments, offline) in [(["daemon", "status"], true), (["state", "recover"], false)] {
+            let route = try CLIControlRoute.classify(arguments: arguments)
+            let request = ControlRequestEnvelope(
+                requestID: "wrong-entry", operation: route.operation, timeoutMilliseconds: 1_000,
+                idempotencyKey: route.mutating ? "wrong-entry" : nil, body: route.requestBody()
+            )
+            let data = try ControlPlaneCanonicalJSON.encode(request)
+            let response = try decode(offline
+                ? BootstrapControlAPI.runOfflineRecovery(requestData: data)
+                : BootstrapControlAPI.run(requestData: data))
+            XCTAssertEqual(response.status, .rejected)
+            XCTAssertEqual(response.reasonCode, .invalidRequest)
+        }
+    }
+
     func testOfflineRestorePreservesConfirmationAndRefusesLiveDaemonOrStaleState() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(
             "hostwright-bootstrap-restore-\(UUID().uuidString)", isDirectory: true
@@ -30,7 +46,7 @@ final class BootstrapControlAPITests: XCTestCase {
                 timeoutMilliseconds: 1_000, idempotencyKey: "offline-restore",
                 body: route.requestBody()
             )
-            return try CLIControlResultContract.result(from: decode(BootstrapControlAPI.run(
+            return try CLIControlResultContract.result(from: decode(BootstrapControlAPI.runOfflineRecovery(
                 requestData: ControlPlaneCanonicalJSON.encode(request)
             )))
         }

@@ -2,6 +2,7 @@ import Darwin
 import Dispatch
 import Foundation
 import HostwrightCLI
+import HostwrightCommandTransport
 import HostwrightControl
 import HostwrightControlPlane
 import HostwrightControlSecurity
@@ -16,6 +17,20 @@ import HostwrightState
 struct HostwrightDaemonEntrypoint {
     static func main() async {
         let arguments = Array(CommandLine.arguments.dropFirst())
+        if arguments == ["--bootstrap-state-recovery"] {
+            do {
+                let request = try LocalControlInputReader.read(maximumBytes: ControlPlaneContract.maximumRequestBytes)
+                let response = BootstrapControlAPI.runOfflineRecovery(requestData: request)
+                guard !response.isEmpty, response.count <= ControlPlaneContract.maximumResponseOrFrameBytes else {
+                    throw BootstrapControlClientError.invalidResponse
+                }
+                FileHandle.standardOutput.write(response)
+                return
+            } catch {
+                FileHandle.standardError.write(Data("HW-API-003: Offline state recovery failed safely.\n".utf8))
+                Foundation.exit(70)
+            }
+        }
         if arguments.contains("--service") {
             do {
                 let homeDirectory = try DaemonCommand.currentUserHomeDirectory()

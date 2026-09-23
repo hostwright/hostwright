@@ -60,16 +60,16 @@ jobs:
             --output swiftly.tar.gz https://download.swift.org/swiftly/linux/swiftly-1.1.2-aarch64.tar.gz
           curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' --tlsv1.2 \
             --output swiftly.tar.gz.sig https://download.swift.org/swiftly/linux/swiftly-1.1.2-aarch64.tar.gz.sig
-          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' --tlsv1.2 \
+          curl --fail --location --compressed --retry 3 --proto '=https' --proto-redir '=https' --tlsv1.2 \
             --output swift-signing-keys.asc https://www.swift.org/keys/all-keys.asc
           export GNUPGHOME="$RUNNER_TEMP/swift-bootstrap-gnupg"
           mkdir -m 700 "$GNUPGHOME"
           gpg --batch --import swift-signing-keys.asc
           gpg --batch --verify swiftly.tar.gz.sig swiftly.tar.gz
           tar -xzf swiftly.tar.gz swiftly
-          ./swiftly init --quiet-shell-followup --skip-install
+          ./swiftly init --assume-yes --no-modify-profile --quiet-shell-followup --skip-install
           . "$SWIFTLY_HOME_DIR/env.sh"
-          swiftly install 6.3.0
+          swiftly install --assume-yes 6.3.0
           [[ "$(swift --version | head -1)" == "Swift version 6.3"* ]]
           printf '%s\n' "$SWIFTLY_BIN_DIR" >> "$GITHUB_PATH"
           printf 'SWIFTLY_HOME_DIR=%s\nSWIFTLY_BIN_DIR=%s\n' "$SWIFTLY_HOME_DIR" "$SWIFTLY_BIN_DIR" >> "$GITHUB_ENV"
@@ -110,12 +110,17 @@ jobs:
       - name: Attest rebuilt ingredients and retained evidence
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          subject-path: ${{ runner.temp }}/runtime-build-ingredients/**
+          subject-path: |
+            ${{ runner.temp }}/runtime-build-ingredients/payloads/**
+            ${{ runner.temp }}/runtime-build-ingredients/evidence/**
       - name: Retain rebuilt ingredients for the reviewed pin update
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: runtime-build-ingredients-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/runtime-build-ingredients/
+          path: |
+            ${{ runner.temp }}/runtime-build-ingredients/payloads/
+            ${{ runner.temp }}/runtime-build-ingredients/evidence/
+            ${{ runner.temp }}/runtime-build-ingredients/checksums.sha256
           retention-days: 30
           if-no-files-found: error
 

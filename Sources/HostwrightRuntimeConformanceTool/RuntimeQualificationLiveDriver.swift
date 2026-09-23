@@ -706,7 +706,7 @@ actor RuntimeQualificationLiveDriver: RuntimeProviderLiveQualificationDriver {
         _ kind: PlannedRuntimeActionKind,
         destructive: Bool
     ) async throws {
-        let operationID = "phase03-\(kind.rawValue)-\(UUID().uuidString.lowercased())"
+        let operationID = "phase03-\(fencingToken)"
         let context = RuntimeMutationContext(
             providerID: providerID,
             capabilitySHA256: capabilitySHA256,

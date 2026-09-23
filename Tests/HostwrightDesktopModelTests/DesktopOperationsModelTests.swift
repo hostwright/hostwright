@@ -233,6 +233,81 @@ final class DesktopOperationsModelTests: XCTestCase {
         }
     }
 
+    func testCLIErrorDetailsAreValidatedRedactedAndBounded() throws {
+        for exitCode in [70, 0] {
+            let transport = ScriptedTransport { request in
+                ControlResponseEnvelope(
+                    requestID: request.requestID,
+                    status: .error,
+                    reasonCode: .internalError,
+                    result: .object([
+                        "exitCode": .integer(Int64(exitCode)),
+                        "resultSchemaVersion": .integer(1),
+                        "standardOutput": .string(""),
+                        "standardError": .string(
+                            "The plan changed. Review a fresh plan. token=secret-value "
+                                + String(repeating: "detail ", count: 100)
+                        ),
+                    ]),
+                    error: SanitizedError(
+                        code: "cliExitNonZero",
+                        message: "The delegated CLI command returned a non-zero exit status."
+                    )
+                )
+            }
+            XCTAssertThrowsError(
+                try DesktopControlAPIClient(transport: transport).lifecyclePreview(
+                    action: .up,
+                    manifestPath: "/tmp/hostwright.yaml",
+                    authorizationProjectID: "project-demo",
+                    cancellation: PersistentControlRequestCancellation()
+                )
+            ) { error in
+                let failure = error as? DesktopControlFailure
+                XCTAssertEqual(failure?.code, "cliExitNonZero")
+                XCTAssertEqual(failure?.message.contains("Review a fresh plan."), exitCode != 0)
+                XCTAssertFalse(failure?.message.contains("secret-value") == true)
+                XCTAssertLessThanOrEqual(failure?.message.count ?? 0, 256)
+            }
+        }
+    }
+
+    func testStructuredCLIErrorShowsRecoveryWithoutJSONOrUnredactedSecrets() throws {
+        for code in [HostwrightErrorCode.confirmationMismatch, .runtimeUnavailable] {
+            let transport = ScriptedTransport { request in
+                let diagnostic = try JSONSerialization.data(withJSONObject: [
+                    "kind": "error", "code": code.rawValue, "exitCode": 70,
+                    "message": "Runtime unavailable token=secret-value",
+                ])
+                return ControlResponseEnvelope(
+                    requestID: request.requestID, status: .error, reasonCode: .internalError,
+                    result: .object([
+                        "exitCode": .integer(70), "resultSchemaVersion": .integer(1),
+                        "standardOutput": .string(""),
+                        "standardError": .string(String(decoding: diagnostic, as: UTF8.self)),
+                    ]),
+                    error: SanitizedError(code: "cliExitNonZero", message: "CLI failed.")
+                )
+            }
+            XCTAssertThrowsError(
+                try DesktopControlAPIClient(transport: transport).projectStatus()
+            ) { error in
+                let failure = error as? DesktopControlFailure
+                XCTAssertEqual(failure?.code, code.rawValue)
+                XCTAssertFalse(failure?.message.contains("secret-value") == true)
+                XCTAssertFalse(failure?.message.contains("{") == true)
+                if code == .confirmationMismatch {
+                    XCTAssertEqual(
+                        failure?.message,
+                        "The reviewed plan is out of date. Review a fresh plan before confirming."
+                    )
+                } else {
+                    XCTAssertTrue(failure?.message.contains("Runtime unavailable") == true)
+                }
+            }
+        }
+    }
+
     func testModelConnectsThroughTheClientAndKeepsStatusFailureVisible() async throws {
         let transport = ScriptedTransport { request in
             if request.operation == "daemon" {

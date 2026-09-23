@@ -60,6 +60,13 @@ private struct DesktopLifecycleCLIResult {
     let exitCode: Int32
 }
 
+private struct DesktopCLIErrorWire: Decodable {
+    let kind: String
+    let code: String
+    let message: String
+    let exitCode: Int32
+}
+
 public struct DesktopControlAPIClient: Sendable {
     public let transport: any DesktopControlTransport
     private let authorizationScope: @Sendable (
@@ -540,13 +547,30 @@ public struct DesktopControlAPIClient: Sendable {
         }
         guard response.status == .completed else {
             let error = response.error
+            var code = error?.code
+            let message: String?
+            if error?.code == "cliExitNonZero",
+               let result = try? CLIControlResultContract.result(from: response) {
+                if let diagnostic = try? JSONDecoder().decode(
+                    DesktopCLIErrorWire.self, from: Data(result.standardError.utf8)
+                ), diagnostic.kind == "error", diagnostic.exitCode == result.exitCode {
+                    code = diagnostic.code
+                    message = diagnostic.code == HostwrightErrorCode.confirmationMismatch.rawValue
+                        ? "The reviewed plan is out of date. Review a fresh plan before confirming."
+                        : diagnostic.message
+                } else {
+                    message = result.standardError
+                }
+            } else {
+                message = error?.message
+            }
             throw DesktopControlFailure(
                 code: DesktopModelBoundary.safeCode(
-                    error?.code,
+                    code,
                     fallback: "control.requestFailed"
                 ),
                 message: DesktopModelBoundary.redactedMessage(
-                    error?.message,
+                    message,
                     fallback: "The control request did not complete."
                 )
             )

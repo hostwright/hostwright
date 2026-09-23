@@ -36,7 +36,21 @@ done
 parent=$(dirname "$output")
 [[ -d "$parent" && ! -L "$parent" ]] || die "runtime ingredient output parent is unsafe"
 work=$(mktemp -d "$parent/.runtime-ingredients.XXXXXXXX")
-trap 'status=$?; trap - EXIT; if [[ -d "$work" && ! -L "$work" ]]; then find "$work" -depth -delete; fi; exit "$status"' EXIT
+cleanup() {
+  status=$?
+  trap - EXIT
+  if [[ -d "$work" && ! -L "$work" ]]; then
+    if (( status != 0 )); then
+      for log in "$work"/evidence/*.log; do
+        [[ -f "$log" && ! -L "$log" ]] || continue
+        tail -n 80 "$log" >&2
+      done
+    fi
+    find "$work" -depth -delete
+  fi
+  exit "$status"
+}
+trap cleanup EXIT
 mkdir -m 700 "$work/evidence" "$work/payloads" "$work/sources"
 
 python3 scripts/release/verify-kernel-source-signature.py \

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import copy, gzip, hashlib, importlib.util, io, pathlib, struct, subprocess, tarfile, unittest
+import copy, gzip, hashlib, importlib.util, io, pathlib, struct, subprocess, tarfile, tempfile, unittest
 from unittest import mock
 spec=importlib.util.spec_from_file_location('validator',pathlib.Path(__file__).with_name('verify-runtime-provenance.py'))
 v=importlib.util.module_from_spec(spec);spec.loader.exec_module(v)
@@ -36,7 +36,7 @@ def tar(files):
    item=tarfile.TarInfo(name);item.size=len(data);archive.addfile(item,io.BytesIO(data))
  return buffer.getvalue()
 
-def fixture():
+def fixture(rootfs_layer=None):
  files={}
  def add(name,data):
   files[name]=data
@@ -65,7 +65,7 @@ def fixture():
  def blob(data):
   digest=v.digest(data);payloads[prefix+'/blobs/sha256/'+digest]=data
   return dict(digest='sha256:'+digest,size=len(data))
- layer=blob(tar({'sbin/vminitd':elf(),'sbin/vmexec':elf()}));layer['mediaType']='application/vnd.oci.image.layer.v1.tar+gzip'
+ layer=blob(rootfs_layer if rootfs_layer is not None else tar({'sbin/vminitd':elf(),'sbin/vmexec':elf()}));layer['mediaType']='application/vnd.oci.image.layer.v1.tar+gzip'
  config=blob(v.canonical(dict(architecture='arm64',os='linux',rootfs=dict(type='layers',diff_ids=['sha256:'+v.digest(gzip.decompress(payloads[prefix+'/blobs/sha256/'+layer['digest'][7:]]))]))));config['mediaType']='application/vnd.oci.image.config.v1+json'
  image=blob(v.canonical(dict(schemaVersion=2,mediaType='application/vnd.oci.image.manifest.v1+json',config=config,layers=[layer])));image['mediaType']='application/vnd.oci.image.manifest.v1+json'
  payloads[prefix+'/index.json']=v.canonical(dict(schemaVersion=2,mediaType='application/vnd.oci.image.index.v1+json',manifests=[image]))
@@ -81,6 +81,29 @@ def fixture():
  return manifest,runtime,payloads,files
 
 class RuntimeProvenanceTests(unittest.TestCase):
+ def test_producer_rootfs_accepts_only_the_exact_runtime_symlink(self):
+  spec=importlib.util.spec_from_file_location('rootfs',pathlib.Path(__file__).with_name('create-runtime-rootfs.py'))
+  rootfs=importlib.util.module_from_spec(spec);spec.loader.exec_module(rootfs)
+  with tempfile.TemporaryDirectory() as temporary:
+   root=pathlib.Path(temporary);binary=root/'binary';binary.write_bytes(elf());layer=root/'layer.tar.gz'
+   rootfs.create(binary,binary,layer)
+   data=layer.read_bytes()
+  manifest,runtime,payloads,files=fixture(data)
+  v.verify(v.canonical(manifest),runtime,payloads,files.__getitem__,manifest['sourceCommit'],require_authentication=False)
+  for change in ('target','path','hardlink','descendant'):
+   buffer=io.BytesIO()
+   with tarfile.open(fileobj=io.BytesIO(data),mode='r:gz') as source,tarfile.open(fileobj=buffer,mode='w:gz') as destination:
+    for member in source.getmembers():
+     content=source.extractfile(member) if member.isfile() else None
+     if member.name=='proc/self/exe':
+      if change=='target':member.linkname='../../sbin/vminitd'
+      elif change=='path':member.name='sbin/alias'
+      elif change=='hardlink':member.type=tarfile.LNKTYPE
+     destination.addfile(member,content)
+    if change=='descendant':destination.addfile(tarfile.TarInfo('proc/self/exe/child'))
+   manifest,runtime,payloads,files=fixture(buffer.getvalue())
+   with self.subTest(change=change),self.assertRaisesRegex(ValueError,'OCI (layer|entry)'):
+    v.verify(v.canonical(manifest),runtime,payloads,files.__getitem__,manifest['sourceCommit'],require_authentication=False)
  def test_static_archive_rejects_nonprogressing_sizes_and_bad_boundaries(self):
   header=b'main.o/         '+b'0           '+b'0     '+b'0     '+b'644     '
   for size,payload in ((b'-60',b''),(b'3',b'a'),(b'1',b'a'),(b'0',b'')):

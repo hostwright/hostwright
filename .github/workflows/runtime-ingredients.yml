@@ -60,16 +60,16 @@ jobs:
             --output swiftly.tar.gz https://download.swift.org/swiftly/linux/swiftly-1.1.2-aarch64.tar.gz
           curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' --tlsv1.2 \
             --output swiftly.tar.gz.sig https://download.swift.org/swiftly/linux/swiftly-1.1.2-aarch64.tar.gz.sig
-          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' --tlsv1.2 \
+          curl --fail --location --compressed --retry 3 --proto '=https' --proto-redir '=https' --tlsv1.2 \
             --output swift-signing-keys.asc https://www.swift.org/keys/all-keys.asc
           export GNUPGHOME="$RUNNER_TEMP/swift-bootstrap-gnupg"
           mkdir -m 700 "$GNUPGHOME"
           gpg --batch --import swift-signing-keys.asc
           gpg --batch --verify swiftly.tar.gz.sig swiftly.tar.gz
           tar -xzf swiftly.tar.gz swiftly
-          ./swiftly init --quiet-shell-followup --skip-install
+          ./swiftly init --assume-yes --no-modify-profile --quiet-shell-followup --skip-install
           . "$SWIFTLY_HOME_DIR/env.sh"
-          swiftly install 6.3.0
+          swiftly install --assume-yes 6.3.0
           [[ "$(swift --version | head -1)" == "Swift version 6.3"* ]]
           printf '%s\n' "$SWIFTLY_BIN_DIR" >> "$GITHUB_PATH"
           printf 'SWIFTLY_HOME_DIR=%s\nSWIFTLY_BIN_DIR=%s\n' "$SWIFTLY_HOME_DIR" "$SWIFTLY_BIN_DIR" >> "$GITHUB_ENV"

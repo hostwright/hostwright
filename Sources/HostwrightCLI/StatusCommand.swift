@@ -158,6 +158,8 @@ struct StatusCommandRunner {
             return CLIRunResult(standardError: error.issues.map(\.rendered).joined(separator: "\n") + "\n", exitCode: CLIExitCode.validation.rawValue)
         } catch let error as StateStoreError {
             return failure(code: .stateStoreUnavailable, message: RuntimeRedactionPolicy.default.redact(String(describing: error)))
+        } catch RuntimeProviderSelectionError.noCompatibleProvider {
+            return failure(code: .runtimeUnavailable, message: "No compatible local runtime is available. Run hostwright doctor, restore or start the supported runtime, then retry.")
         } catch {
             return failure(code: .runtimeUnavailable, message: RuntimeRedactionPolicy.default.redact(String(describing: error)))
         }

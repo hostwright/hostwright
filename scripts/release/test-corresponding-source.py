@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-import hashlib,importlib.util,io,pathlib,tarfile,unittest
+import contextlib,hashlib,importlib.util,io,json,pathlib,tarfile,tempfile,types,unittest,sys
+from unittest import mock
 HERE=pathlib.Path(__file__).parent
 
 def load(name):
@@ -48,6 +49,46 @@ class SourceBundleTests(unittest.TestCase):
  def test_version_ranges(self):
   for version in ['0.0.2','0.0.2-dev.1','0.0.2-dev.999','0.0.2-rc.1','0.0.2-rc.99']:self.assertTrue(bundle.valid_version(version))
   for version in ['0.0.2-dev.0','0.0.2-dev.1000','0.0.2-rc.0','0.0.2-rc.100','0.0.2-rc.01','0.0.3']:self.assertFalse(bundle.valid_version(version))
+ def test_prepare_runtime_archive_carries_verified_new_runtime_bytes(self):
+  with tempfile.TemporaryDirectory() as temporary:
+   root=pathlib.Path(temporary);out_parent=root.parent/(root.name+'-out');out_parent.mkdir();incoming=root/'runtime.tar.gz'
+   manifest=dict(kind='hostwright.corresponding-source.new-runtime.v1',schemaVersion=1,releaseSourceRevision='a'*40,version='0.0.2',status='prepared-not-release-qualified',publicationRoute='same-github-release-alongside-binaries',upstreamSignatureVerified=True,preparedSourceState=dict(head='a'*40,clean=True,gitStatusSHA256=hashlib.sha256(b'').hexdigest()),files=[])
+   manifest_data=bundle.canonical(manifest)
+   with tarfile.open(incoming,'w:gz') as archive:
+    item=tarfile.TarInfo('source-manifest.json');item.size=len(manifest_data);archive.addfile(item,io.BytesIO(manifest_data))
+   args=types.SimpleNamespace(root=root,runtime_provenance_archive=incoming,output_parent=out_parent,source='a'*40,version='0.0.2',gpg=None,gpg_sha256=None,kernel_inputs=None,kata_recipes=None,loader_receipt=None)
+   original=incoming.read_bytes()
+   def verify_snapshot(path, **_):
+    incoming.write_bytes(b'tampered after snapshot')
+    return dict(archiveSHA256=bundle.digest_file(path),manifestSHA256=hashlib.sha256(manifest_data).hexdigest(),sizeBytes=path.stat().st_size,version='0.0.2',releaseSourceRevision='a'*40,status='prepared-not-release-qualified')
+   with mock.patch.object(bundle,'source_state',return_value=manifest['preparedSourceState']),mock.patch.object(bundle,'verify',side_effect=verify_snapshot):
+    result=bundle.prepare(args)
+   staged=pathlib.Path(result['directory']);name='hostwright-0.0.2-'+'a'*12+'-corresponding-source.tar.gz'
+   self.assertEqual((staged/'source-manifest.json').read_bytes(),manifest_data)
+   self.assertEqual((staged/name).read_bytes(),original)
+   self.assertEqual((staged/'SOURCE_SHA256SUMS').read_text().splitlines()[0].split()[0],bundle.digest_file(staged/name))
+   self.assertTrue((staged/'source-bundle-receipt.json').is_file())
+   import shutil;shutil.rmtree(out_parent)
+ def test_prepare_cli_prints_runtime_handoff_json(self):
+  args=['corresponding-source.py','prepare','--root','/tmp/root','--runtime-provenance-archive','/tmp/runtime.tar.gz','--output-parent','/tmp/out','--version','0.0.2','--source','a'*40]
+  expected={'directory':'/tmp/out/prepared','archive':'/tmp/out/prepared/archive.tar.gz'}
+  output=io.StringIO()
+  with mock.patch.object(bundle,'prepare',return_value=expected),mock.patch.object(sys,'argv',args),contextlib.redirect_stdout(output):
+   bundle.main()
+  self.assertEqual(json.loads(output.getvalue()),expected)
+ def test_prepare_runtime_archive_uses_real_verifier_and_rejects_incomplete_bundle(self):
+  with tempfile.TemporaryDirectory() as temporary:
+   root=pathlib.Path(temporary);out_parent=root.parent/(root.name+'-out');out_parent.mkdir();incoming=root/'runtime.tar.gz'
+   manifest=dict(kind='hostwright.corresponding-source.new-runtime.v1',schemaVersion=1,releaseSourceRevision='a'*40,version='0.0.2',status='prepared-not-release-qualified',publicationRoute='same-github-release-alongside-binaries',upstreamSignatureVerified=True,preparedSourceState=dict(head='a'*40,clean=True,gitStatusSHA256=hashlib.sha256(b'').hexdigest()),files=[])
+   manifest_data=bundle.canonical(manifest)
+   with tarfile.open(incoming,'w:gz') as archive:
+    item=tarfile.TarInfo('source-manifest.json');item.size=len(manifest_data);archive.addfile(item,io.BytesIO(manifest_data))
+   args=types.SimpleNamespace(root=root,runtime_provenance_archive=incoming,output_parent=out_parent,source='a'*40,version='0.0.2',gpg=None,gpg_sha256=None,kernel_inputs=None,kata_recipes=None,loader_receipt=None)
+   with mock.patch.object(bundle,'source_state',return_value=dict(head='a'*40,clean=True,gitStatusSHA256=hashlib.sha256(b'').hexdigest())):
+    with self.assertRaisesRegex(ValueError,'missing regular provenance evidence'):
+     bundle.prepare(args)
+   self.assertFalse(list(out_parent.glob('hostwright-runtime-source-*')))
+   import shutil;shutil.rmtree(out_parent)
  def test_pinned_signature_status(self):
   valid='[GNUPG:] VALIDSIG '+signature.FINGERPRINT+' 2026-02-27 1772226351 0 4 0 1 10 00 '+signature.FINGERPRINT
   signature.valid_status(valid,0)

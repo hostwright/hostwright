@@ -21,6 +21,13 @@ verifier, never a script extracted from the bundle. Promotion
 must obtain the expected archive and manifest digests from authenticated staged
 inventory and acceptance evidence; an editable local receipt is not authority.
 
+The trusted release workflow consumes a prepared
+`hostwright.corresponding-source.new-runtime.v1` archive through
+`--runtime-provenance-archive`. That path verifies the authenticated runtime
+provenance and carries the exact archive bytes into staging; the legacy bundle
+path remains available for historical source preparation but is refused by
+release staging.
+
 Use `verify-kernel-source-signature.py --inputs <kernel-input-directory> --output
 <new-receipt-path>` to independently verify the source's detached signature against
 the kernel.org stable signing fingerprint. The script disables key retrieval and

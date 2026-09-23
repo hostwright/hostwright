@@ -54,6 +54,7 @@ final class DesktopAccessibilityContractTests: XCTestCase {
             DesktopAccessibilityIdentifier.reconnect,
             DesktopAccessibilityIdentifier.disconnect,
             DesktopAccessibilityIdentifier.statusRefresh,
+            DesktopAccessibilityIdentifier.manifestSelect,
             DesktopAccessibilityIdentifier.lifecycleUp,
             DesktopAccessibilityIdentifier.lifecycleDown,
             DesktopAccessibilityIdentifier.lifecycleRestart,
@@ -107,6 +108,8 @@ final class DesktopAccessibilityContractTests: XCTestCase {
         ] {
             XCTAssertTrue(source.contains(expected), "missing UI contract: \(expected)")
         }
+        XCTAssertTrue(source.contains(".fileImporter("))
+        XCTAssertTrue(source.contains("Manifest Selection Failed"))
         XCTAssertFalse(source.contains("model.cancelStreams()"))
     }
 }

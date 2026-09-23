@@ -78,7 +78,9 @@ jobs:
     timeout-minutes: 180
     permissions:
       contents: read
+      attestations: read
     env:
+      GH_TOKEN: ${{ github.token }}
       RELEASE_COMMIT: ${{ inputs.commit }}
       RELEASE_VERSION: ${{ inputs.version }}
       RELEASE_TAG: ${{ inputs.tag }}
@@ -86,9 +88,7 @@ jobs:
       RELEASE_INSTALLER_IDENTITY: ${{ vars.RELEASE_INSTALLER_IDENTITY }}
       RELEASE_TEAM_ID: ${{ vars.RELEASE_TEAM_ID }}
       RELEASE_NOTARY_PROFILE: ${{ vars.RELEASE_NOTARY_PROFILE }}
-      RELEASE_KERNEL_SOURCE_INPUTS: ${{ vars.RELEASE_KERNEL_SOURCE_INPUTS }}
-      RELEASE_KATA_SOURCE_RECIPES: ${{ vars.RELEASE_KATA_SOURCE_RECIPES }}
-      RELEASE_GUEST_BUILD_RECEIPT: ${{ vars.RELEASE_GUEST_BUILD_RECEIPT }}
+      RELEASE_RUNTIME_PROVENANCE_ARCHIVE: ${{ vars.RELEASE_RUNTIME_PROVENANCE_ARCHIVE }}
       RELEASE_GPG: ${{ vars.RELEASE_GPG }}
       RELEASE_GPG_SHA256: ${{ vars.RELEASE_GPG_SHA256 }}
     steps:
@@ -149,7 +149,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for path in "$RELEASE_KERNEL_SOURCE_INPUTS" "$RELEASE_KATA_SOURCE_RECIPES" "$RELEASE_GUEST_BUILD_RECEIPT"; do [[ "$path" == /* ]]; done
+          [[ "$RELEASE_RUNTIME_PROVENANCE_ARCHIVE" == /* ]]
+          test -f "$RELEASE_RUNTIME_PROVENANCE_ARCHIVE"
           test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
           gpg_arguments=()
@@ -157,7 +158,7 @@ jobs:
             [[ "$RELEASE_GPG" == /* && "$RELEASE_GPG_SHA256" =~ ^[a-f0-9]{64}$ ]]
             gpg_arguments=(--gpg "$RELEASE_GPG" --gpg-sha256 "$RELEASE_GPG_SHA256")
           fi
-          python3 scripts/release/corresponding-source.py prepare --root "$GITHUB_WORKSPACE" --kernel-inputs "$RELEASE_KERNEL_SOURCE_INPUTS" --kata-recipes "$RELEASE_KATA_SOURCE_RECIPES" --loader-receipt "$RELEASE_GUEST_BUILD_RECEIPT" --output-parent "$RUNNER_TEMP" --version "$RELEASE_VERSION" --source "$RELEASE_COMMIT" "${gpg_arguments[@]}" > "$RUNNER_TEMP/corresponding-source-preparation.json"
+          python3 scripts/release/corresponding-source.py prepare --root "$GITHUB_WORKSPACE" --runtime-provenance-archive "$RELEASE_RUNTIME_PROVENANCE_ARCHIVE" --output-parent "$RUNNER_TEMP" --version "$RELEASE_VERSION" --source "$RELEASE_COMMIT" "${gpg_arguments[@]}" > "$RUNNER_TEMP/corresponding-source-preparation.json"
           prepared="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["directory"])' "$RUNNER_TEMP/corresponding-source-preparation.json")"
           test -d "$prepared"
           echo "prepared=$prepared" >> "$GITHUB_OUTPUT"

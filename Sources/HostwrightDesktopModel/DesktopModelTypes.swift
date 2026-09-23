@@ -14,6 +14,7 @@ public enum DesktopAccessibilityIdentifier {
     public static let reconnect = "desktop.connection.reconnect"
     public static let disconnect = "desktop.connection.disconnect"
     public static let statusRefresh = "desktop.status.refresh"
+    public static let manifestSelect = "desktop.manifest.select"
     public static let lifecycleUp = "desktop.lifecycle.up.preview"
     public static let lifecycleDown = "desktop.lifecycle.down.preview"
     public static let lifecycleRestart = "desktop.lifecycle.restart.preview"

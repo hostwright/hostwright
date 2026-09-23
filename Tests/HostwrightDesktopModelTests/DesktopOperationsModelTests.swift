@@ -2,6 +2,8 @@ import XCTest
 @testable import HostwrightDesktopModel
 import HostwrightControlPlane
 import HostwrightControlTransport
+import HostwrightCore
+import HostwrightCLI
 
 @MainActor
 final class DesktopOperationsModelTests: XCTestCase {
@@ -84,6 +86,130 @@ final class DesktopOperationsModelTests: XCTestCase {
         XCTAssertEqual(transport.requests.map(\.operation), ["daemon", "status"])
     }
 
+    func testAPIUsesSelectedManifestThroughAuthenticatedCLIControlRoute() throws {
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hostwright-desktop-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+        let manifestURL = temporaryDirectory.appendingPathComponent("hostwright.yaml")
+        try Data("version: 3\nproject: selected\nservices:\n  web:\n    image: local/selected:latest\n    resources:\n      requests: {cpus: 1, memory: 512MiB}\n      limits: {cpus: 1, memory: 512MiB}\n".utf8).write(to: manifestURL)
+
+        let transport = ScriptedTransport { request in
+            Self.cliCompleted(
+                request: request,
+                standardOutput: String(
+                    decoding: try! ControlPlaneCanonicalJSON.encode(
+                        Self.statusJSON(
+                            projectName: "selected",
+                            manifestPath: manifestURL.path
+                        )
+                    ),
+                    as: UTF8.self
+                )
+            )
+        }
+        let project = try DesktopControlAPIClient(
+            transport: transport,
+            authorizationScope: { _, _ in
+                .init(
+                    projectIdentifier: HostwrightResourceUUID.legacy(
+                        kind: "project",
+                        identifier: "project-selected"
+                    ),
+                    resourceIdentifier: nil
+                )
+            }
+        )
+            .projectStatus(manifestPath: manifestURL.path)
+        XCTAssertEqual(project.name, "selected")
+        XCTAssertEqual(project.manifestPath, manifestURL.path)
+
+        let request = try XCTUnwrap(transport.requests.first)
+        XCTAssertEqual(request.operation, "status")
+        guard case .object(let fields) = request.body,
+              case .array(let arguments) = fields["arguments"] else {
+            return XCTFail("selected manifest must use the authenticated CLI route")
+        }
+        XCTAssertEqual(arguments.first, .string("status"))
+        XCTAssertEqual(arguments.dropFirst().first, .string(manifestURL.path))
+        XCTAssertEqual(fields["authorizationProjectID"], .string(
+            HostwrightResourceUUID.legacy(kind: "project", identifier: "project-selected")
+        ))
+    }
+
+    func testAPIRejectsSelectedManifestResponseForAnotherPath() throws {
+        let manifestURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hostwright-desktop-\(UUID().uuidString).yaml")
+        try Data("version: 3\nproject: selected\nservices:\n  web:\n    image: local/selected:latest\n    resources:\n      requests: {cpus: 1, memory: 512MiB}\n      limits: {cpus: 1, memory: 512MiB}\n".utf8).write(to: manifestURL)
+        defer { try? FileManager.default.removeItem(at: manifestURL) }
+
+        let transport = ScriptedTransport { request in
+            Self.cliCompleted(
+                request: request,
+                standardOutput: String(
+                    decoding: try! ControlPlaneCanonicalJSON.encode(Self.statusJSON(projectName: "selected")),
+                    as: UTF8.self
+                )
+            )
+        }
+
+        XCTAssertThrowsError(
+            try DesktopControlAPIClient(
+                transport: transport,
+                authorizationScope: { _, _ in
+                    .init(
+                        projectIdentifier: HostwrightResourceUUID.legacy(
+                            kind: "project",
+                            identifier: "project-selected"
+                        ),
+                        resourceIdentifier: nil
+                    )
+                }
+            )
+                .projectStatus(manifestPath: manifestURL.path)
+        ) { error in
+            XCTAssertEqual((error as? DesktopControlFailure)?.code, "status.manifestMismatch")
+        }
+    }
+
+    func testAPIRejectsManifestSymlinkDirectoryAndInvalidUTF8() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hostwright-desktop-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let target = root.appendingPathComponent("target.yaml")
+        let symlink = root.appendingPathComponent("link.yaml")
+        let directory = root.appendingPathComponent("directory.yaml", isDirectory: true)
+        let invalid = root.appendingPathComponent("invalid.yaml")
+        try Data("version: 3\nproject: selected\nservices:\n  web:\n    image: local/selected:latest\n    resources:\n      requests: {cpus: 1, memory: 512MiB}\n      limits: {cpus: 1, memory: 512MiB}\n".utf8).write(to: target)
+        try FileManager.default.createSymbolicLink(at: symlink, withDestinationURL: target)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data([0xff, 0xfe]).write(to: invalid)
+        let api = DesktopControlAPIClient(transport: ScriptedTransport { request in
+            Self.cliCompleted(request: request, standardOutput: "{}")
+        })
+
+        for (path, code) in [
+            (symlink.path, "manifest.unreadable"),
+            (directory.path, "manifest.unsafeFile"),
+            (invalid.path, "manifest.invalidUTF8"),
+        ] {
+            XCTAssertThrowsError(try api.projectStatus(manifestPath: path)) { error in
+                XCTAssertEqual((error as? DesktopControlFailure)?.code, code)
+            }
+        }
+    }
+
+    func testAPIRejectsRelativeSelectedManifestPath() {
+        XCTAssertThrowsError(
+            try DesktopControlAPIClient(transport: ScriptedTransport { request in
+                Self.completed(request: request, result: Self.statusJSON)
+            }).projectStatus(manifestPath: "hostwright.yaml")
+        ) { error in
+            XCTAssertEqual((error as? DesktopControlFailure)?.code, "manifest.invalidPath")
+        }
+    }
+
     func testControlErrorsStayRedactedAtTheDesktopBoundary() throws {
         let transport = ScriptedTransport { request in
             ControlResponseEnvelope(
@@ -104,6 +230,81 @@ final class DesktopOperationsModelTests: XCTestCase {
             XCTAssertEqual(failure?.code, "runtimeLogsUnavailable")
             XCTAssertFalse(failure?.message.contains("secret-value") == true)
             XCTAssertFalse(failure?.message.contains("another-secret") == true)
+        }
+    }
+
+    func testCLIErrorDetailsAreValidatedRedactedAndBounded() throws {
+        for exitCode in [70, 0] {
+            let transport = ScriptedTransport { request in
+                ControlResponseEnvelope(
+                    requestID: request.requestID,
+                    status: .error,
+                    reasonCode: .internalError,
+                    result: .object([
+                        "exitCode": .integer(Int64(exitCode)),
+                        "resultSchemaVersion": .integer(1),
+                        "standardOutput": .string(""),
+                        "standardError": .string(
+                            "The plan changed. Review a fresh plan. token=secret-value "
+                                + String(repeating: "detail ", count: 100)
+                        ),
+                    ]),
+                    error: SanitizedError(
+                        code: "cliExitNonZero",
+                        message: "The delegated CLI command returned a non-zero exit status."
+                    )
+                )
+            }
+            XCTAssertThrowsError(
+                try DesktopControlAPIClient(transport: transport).lifecyclePreview(
+                    action: .up,
+                    manifestPath: "/tmp/hostwright.yaml",
+                    authorizationProjectID: "project-demo",
+                    cancellation: PersistentControlRequestCancellation()
+                )
+            ) { error in
+                let failure = error as? DesktopControlFailure
+                XCTAssertEqual(failure?.code, "cliExitNonZero")
+                XCTAssertEqual(failure?.message.contains("Review a fresh plan."), exitCode != 0)
+                XCTAssertFalse(failure?.message.contains("secret-value") == true)
+                XCTAssertLessThanOrEqual(failure?.message.count ?? 0, 256)
+            }
+        }
+    }
+
+    func testStructuredCLIErrorShowsRecoveryWithoutJSONOrUnredactedSecrets() throws {
+        for code in [HostwrightErrorCode.confirmationMismatch, .runtimeUnavailable] {
+            let transport = ScriptedTransport { request in
+                let diagnostic = try JSONSerialization.data(withJSONObject: [
+                    "kind": "error", "code": code.rawValue, "exitCode": 70,
+                    "message": "Runtime unavailable token=secret-value",
+                ])
+                return ControlResponseEnvelope(
+                    requestID: request.requestID, status: .error, reasonCode: .internalError,
+                    result: .object([
+                        "exitCode": .integer(70), "resultSchemaVersion": .integer(1),
+                        "standardOutput": .string(""),
+                        "standardError": .string(String(decoding: diagnostic, as: UTF8.self)),
+                    ]),
+                    error: SanitizedError(code: "cliExitNonZero", message: "CLI failed.")
+                )
+            }
+            XCTAssertThrowsError(
+                try DesktopControlAPIClient(transport: transport).projectStatus()
+            ) { error in
+                let failure = error as? DesktopControlFailure
+                XCTAssertEqual(failure?.code, code.rawValue)
+                XCTAssertFalse(failure?.message.contains("secret-value") == true)
+                XCTAssertFalse(failure?.message.contains("{") == true)
+                if code == .confirmationMismatch {
+                    XCTAssertEqual(
+                        failure?.message,
+                        "The reviewed plan is out of date. Review a fresh plan before confirming."
+                    )
+                } else {
+                    XCTAssertTrue(failure?.message.contains("Runtime unavailable") == true)
+                }
+            }
         }
     }
 
@@ -238,7 +439,10 @@ final class DesktopOperationsModelTests: XCTestCase {
             },
             session: session
         )
-        let model = DesktopOperationsModel(transport: transport)
+        let model = DesktopOperationsModel(
+            transport: transport,
+            authorizationScope: Self.logAuthorizationScope
+        )
         model.connect()
         for _ in 0..<20 {
             if !model.projects.isEmpty { break }
@@ -259,6 +463,7 @@ final class DesktopOperationsModelTests: XCTestCase {
         XCTAssertEqual(model.events.first?.message, "Observed web.")
         XCTAssertEqual(model.logChunks.first?.text, "hello\n")
         XCTAssertEqual(session.openedSources, [.events, .logs])
+        XCTAssertEqual(session.openedTargets, [nil, Self.logResourceUUID])
         XCTAssertEqual(session.acknowledgements.map(\.credit), [1, 1])
         XCTAssertEqual(session.acknowledgements.map(\.cursor), ["event-cursor", "log-cursor"])
         XCTAssertEqual(session.openedInitialCredits, [32, 16])
@@ -620,6 +825,78 @@ final class DesktopOperationsModelTests: XCTestCase {
         )
     }
 
+    func testSelectingManifestClearsOldProjectAuthorityWhenReplacementStatusFails() async throws {
+        let model = DesktopOperationsModel(
+            transport: ScriptedTransport { request in
+                if request.operation == "daemon" {
+                    return Self.completed(
+                        request: request,
+                        result: .object([
+                            "exitCode": .integer(0),
+                            "resultSchemaVersion": .integer(1),
+                            "standardError": .string(""),
+                            "standardOutput": .string(Self.daemonHealthJSON),
+                        ])
+                    )
+                }
+                return Self.completed(request: request, result: Self.statusJSON)
+            }
+        )
+
+        model.connect()
+        for _ in 0..<20 {
+            if model.connectionState == .connected && !model.projects.isEmpty { break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(model.projects.first?.id, "project-demo")
+        let context = DesktopActionAvailabilityContext(projectID: "project-demo")
+        XCTAssertEqual(
+            model.actionAvailability(
+                for: DesktopAccessibilityIdentifier.lifecycleUp,
+                context: context
+            ).state,
+            .available
+        )
+
+        let invalidPath = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hostwright-missing-\(UUID().uuidString).yaml")
+            .path
+        model.selectManifest(at: invalidPath)
+
+        XCTAssertTrue(model.projects.isEmpty)
+        XCTAssertEqual(
+            model.actionAvailability(
+                for: DesktopAccessibilityIdentifier.lifecycleUp,
+                context: context
+            ).reason,
+            .requiresProject
+        )
+        XCTAssertEqual(
+            model.actionAvailability(
+                for: DesktopAccessibilityIdentifier.selectedLogsOpen,
+                context: DesktopActionAvailabilityContext(
+                    projectID: "project-demo",
+                    serviceID: "web"
+                )
+            ).reason,
+            .requiresProject
+        )
+
+        for _ in 0..<20 {
+            if model.lastFailure?.code == "manifest.unreadable" { break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(model.lastFailure?.code, "manifest.unreadable")
+        XCTAssertTrue(model.projects.isEmpty)
+        XCTAssertEqual(
+            model.actionAvailability(
+                for: DesktopAccessibilityIdentifier.lifecycleUp,
+                context: context
+            ).reason,
+            .requiresProject
+        )
+    }
+
     func testLifecycleAPIUsesManifestBoundPreviewAndExactConfirmationRoutes() throws {
         let hashA = String(repeating: "a", count: 64)
         let hashB = String(repeating: "b", count: 64)
@@ -933,7 +1210,7 @@ final class DesktopOperationsModelTests: XCTestCase {
             responseProvider: { request in
                 Self.connectionResponse(request: request, generation: 3, projectName: "demo")
             }, sessionProvider: { streams.makeSession() }
-        ))
+        ), authorizationScope: Self.logAuthorizationScope)
         model.connect()
         await model.connectionTaskForTesting?.value
         model.startEventStream()
@@ -978,13 +1255,26 @@ final class DesktopOperationsModelTests: XCTestCase {
 
     nonisolated private static let statusJSON = statusJSON(projectName: "demo")
 
+    nonisolated private static let logResourceUUID = "00000000-0000-4000-8000-000000000123"
+
+    nonisolated private static func logAuthorizationScope(
+        command: CLICommand, arguments: [String]
+    ) -> CLIControlAuthorizationScope {
+        CLIControlAuthorizationScope(
+            projectIdentifier: HostwrightResourceUUID.legacy(kind: "project", identifier: "project-demo"),
+            resourceIdentifier: logResourceUUID
+        )
+    }
+
     nonisolated private static func statusJSON(
-        projectName: String, planHash: String = "sha256:plan"
+        projectName: String,
+        planHash: String = "sha256:plan",
+        manifestPath: String = "/Users/tester/project.yml"
     ) -> ControlPlaneJSONValue {
         .object([
             "manifest": .object([
                 "exists": .bool(true),
-                "path": .string("/Users/tester/project.yml"),
+                "path": .string(manifestPath),
                 "valid": .bool(true),
             ]),
             "planHash": .string(planHash),
@@ -1243,7 +1533,8 @@ final class DesktopOperationsModelTests: XCTestCase {
                     )
                 },
                 sessionProvider: { streams.makeSession() }
-            )
+            ),
+            authorizationScope: Self.logAuthorizationScope
         )
         model.connect()
         guard let connectionTask = model.connectionTaskForTesting else {
@@ -1765,6 +2056,7 @@ private final class ScriptedStreamSession: DesktopControlSession, @unchecked Sen
     private let blocksEvents: Bool
     private var activeSource: ControlStreamSource?
     private(set) var openedSources: [ControlStreamSource] = []
+    private(set) var openedTargets: [String?] = []
     private(set) var openedInitialCredits: [Int] = []
     private(set) var acknowledgements: [Acknowledgement] = []
     private(set) var cancelCount = 0
@@ -1788,6 +2080,7 @@ private final class ScriptedStreamSession: DesktopControlSession, @unchecked Sen
         lock.lock()
         defer { lock.unlock() }
         openedSources.append(request.source)
+        openedTargets.append(request.target)
         openedInitialCredits.append(initialCredit)
         activeSource = request.source
         activeFrames = request.source == .events ? eventFrames : logFrames

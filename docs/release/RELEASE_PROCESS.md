@@ -96,6 +96,8 @@ The release publishes only artifacts produced from the final clean tag by the re
 - verification instructions and compatibility manifest;
 - vendor-tap formula bound to the released digest.
 
+The trusted stage requires an authenticated `hostwright.corresponding-source.new-runtime.v1` archive for the exact release commit. The staging verifier checks that archive against the shipped runtime payloads and refuses the legacy source bundle, so a release cannot fall back to license metadata without actual runtime byte provenance.
+
 Unsigned developer `hostwright-dist` output is useful local integration evidence, not a public release artifact.
 
 The protected workflow retains its exact verified bundle for 90 days. Published release assets and the corresponding checksums, SBOMs, provenance, manifest, detached signatures, and evidence are retained indefinitely and are not replaced in place. Exceptional removal is a separate reviewed repository action; it is never an automatic workflow cleanup step.

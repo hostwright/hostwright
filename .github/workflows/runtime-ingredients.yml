@@ -29,7 +29,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install --yes \
-            bc bison clang cpio dwarves flex gcc gcc-aarch64-linux-gnu git gpg jq libelf-dev libssl-dev \
+            bc bison clang cpio dwarves flex gcc gcc-aarch64-linux-gnu git gpg jq libcurl4-openssl-dev libelf-dev libssl-dev \
             lld make pkg-config rsync xz-utils
           test "$(uname -m)" = aarch64
       - name: Set up the pinned Go toolchain

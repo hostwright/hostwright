@@ -24,8 +24,21 @@ done
 [[ "$output" == /* && "$kernel_inputs" == /* ]] || usage
 [[ ! -e "$output" && ! -L "$output" ]] || die "runtime ingredient output already exists"
 [[ "$(uname -s)" == Linux && "$(uname -m)" == aarch64 ]] || die "runtime ingredients require Linux arm64" 69
-for tool in aarch64-linux-gnu-gcc bison clang flex gcc git jq ld.lld make python3 sha256sum swift yq; do command -v "$tool" >/dev/null || die "missing producer tool: $tool" 69; done
+for tool in aarch64-linux-gnu-gcc bison clang flex gcc git jq ld.lld make python3 sha256sum swift swiftly yq; do command -v "$tool" >/dev/null || die "missing producer tool: $tool" 69; done
 [[ "$(swift --version | head -1)" == *"Swift version 6.3"* ]] || die "runtime ingredients require Swift 6.3" 69
+
+# Swiftly stores toolchains separately from its configuration directory.
+swift_toolchain=$(swiftly use --print-location)
+[[ "$swift_toolchain" == /* && -d "$swift_toolchain" ]] || die "missing selected Swiftly toolchain"
+swift_toolchain=$(readlink -f "$swift_toolchain")
+swift_bin="$swift_toolchain/usr/bin/swift"
+swiftc_bin="$swift_toolchain/usr/bin/swiftc"
+swift_real=$(readlink -f "$swift_bin")
+swiftc_real=$(readlink -f "$swiftc_bin")
+for real in "$swift_real" "$swiftc_real"; do
+  [[ "$real" == "$swift_toolchain/"* && -f "$real" && -x "$real" ]] \
+    || die "Swift entrypoint resolves outside the verified toolchain"
+done
 
 for name in linux-6.18.15.tar.xz linux-6.18.15.tar.sign gregkh-pinned-public-key.asc; do
   [[ -f "$kernel_inputs/$name" && ! -L "$kernel_inputs/$name" ]] || die "missing retained kernel input: $name"
@@ -145,20 +158,10 @@ python3 scripts/release/create-runtime-oci.py \
 
 cp "$(command -v clang)" "$work/evidence/clang"
 cp "$(command -v ld.lld)" "$work/evidence/ld.lld"
-[[ -n "${SWIFTLY_HOME_DIR:-}" && -d "$SWIFTLY_HOME_DIR/toolchains" ]] || die "missing verified Swiftly toolchain root"
-mapfile -t swift_bins < <(find "$SWIFTLY_HOME_DIR/toolchains" -path '*/usr/bin/swift' -print)
-mapfile -t swiftc_bins < <(find "$SWIFTLY_HOME_DIR/toolchains" -path '*/usr/bin/swiftc' -print)
-(( ${#swift_bins[@]} == 1 && ${#swiftc_bins[@]} == 1 )) || die "ambiguous real Swift toolchain binaries"
-swift_real=$(readlink -f "${swift_bins[0]}")
-swiftc_real=$(readlink -f "${swiftc_bins[0]}")
-for real in "$swift_real" "$swiftc_real"; do
-  [[ "$real" == "$SWIFTLY_HOME_DIR/toolchains/"* && -f "$real" && -x "$real" ]] \
-    || die "Swift entrypoint resolves outside the verified toolchain"
-done
 cp "$swift_real" "$work/evidence/swift"
 cp "$swiftc_real" "$work/evidence/swiftc"
-printf '%s\n' "${swift_bins[0]} -> $swift_real" > "$work/evidence/swift-entrypoint.txt"
-printf '%s\n' "${swiftc_bins[0]} -> $swiftc_real" > "$work/evidence/swiftc-entrypoint.txt"
+printf '%s\n' "$swift_bin -> $swift_real" > "$work/evidence/swift-entrypoint.txt"
+printf '%s\n' "$swiftc_bin -> $swiftc_real" > "$work/evidence/swiftc-entrypoint.txt"
 cp "$(command -v gcc)" "$work/evidence/gcc"
 cp "$(command -v aarch64-linux-gnu-gcc)" "$work/evidence/aarch64-linux-gnu-gcc"
 clang --version > "$work/evidence/clang.version"
@@ -176,7 +179,7 @@ value = {'environment': {name: os.environ[name] for name in allowed if name in o
 with open(sys.argv[1], 'x', encoding='utf-8') as stream:
     json.dump(value, stream, sort_keys=True, separators=(',', ':')); stream.write('\n')
 PY
-find "$work/payloads" "$work/evidence" -type f -print0 | sort -z | xargs -0 sha256sum > "$work/checksums.sha256"
+(cd "$work"; find payloads evidence -type f -print0 | sort -z | xargs -0 sha256sum) > "$work/checksums.sha256"
 mv "$work" "$output"
 trap - EXIT
 printf 'runtime build ingredients prepared: %s\n' "$output"

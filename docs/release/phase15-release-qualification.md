@@ -110,4 +110,4 @@ scripts/phase15-critical-fuzz.sh
 
 The executable also supports deterministic corpus replay without libFuzzer. Set `HOSTWRIGHT_FUZZ_TARGET` to one frozen target and pass one or more corpus files to `hostwright-critical-fuzzer`.
 
-Remaining Phase 15 evidence gates include final convergence, long-duration fuzz/soak runs, physical multi-host and hardware qualification, independent security assessment, signing/notarization, trusted GA artifacts, and Homebrew submission.
+Remaining Phase 15 gates follow the [accepted local release scope](../design/adr-0015-reduced-local-release.md): ten lifecycle cycles per supported provider, one checkpointed 30-minute physical-host soak, five minutes of fuzzing per shipped critical parser/protocol with retained corpus replay, supported sanitizers, and one clean release candidate with independent signed-artifact lifecycle verification. Qualification uses one physical M4 Pro Mac and one macOS VM, alongside the required security, recovery, signing/notarization and provenance evidence. Multi-Mac qualification and Homebrew-core submission are deferred.

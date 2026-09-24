@@ -110,9 +110,12 @@ for pass in first second; do
   git -C "$tree" checkout --detach "$containerization_commit"
   (
     cd "$tree/vminitd"
+    # Header timestamps otherwise change Clang module signatures and Swift object hashes.
     swift build -v -c release --swift-sdk aarch64-swift-linux-musl --disable-automatic-resolution \
+      -Xcc -Xclang -Xcc -fno-pch-timestamp \
       --product vminitd -Xlinker -s -Xlinker -Map="$work/evidence/vminitd-$pass.map"
     swift build -v -c release --swift-sdk aarch64-swift-linux-musl --disable-automatic-resolution \
+      -Xcc -Xclang -Xcc -fno-pch-timestamp \
       --product vmexec -Xlinker -s -Xlinker -Map="$work/evidence/vmexec-$pass.map"
     bin=$(swift build -c release --swift-sdk aarch64-swift-linux-musl --disable-automatic-resolution --show-bin-path)
     cp "$bin/vminitd" "$work/vminitd-$pass"

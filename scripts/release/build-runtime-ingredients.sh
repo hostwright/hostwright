@@ -111,9 +111,9 @@ for pass in first second; do
   (
     cd "$tree/vminitd"
     swift build -v -c release --swift-sdk aarch64-swift-linux-musl --disable-automatic-resolution \
-      --product vminitd -Xlinker -Map="$work/evidence/vminitd-$pass.map"
+      --product vminitd -Xlinker -s -Xlinker -Map="$work/evidence/vminitd-$pass.map"
     swift build -v -c release --swift-sdk aarch64-swift-linux-musl --disable-automatic-resolution \
-      --product vmexec -Xlinker -Map="$work/evidence/vmexec-$pass.map"
+      --product vmexec -Xlinker -s -Xlinker -Map="$work/evidence/vmexec-$pass.map"
     bin=$(swift build -c release --swift-sdk aarch64-swift-linux-musl --disable-automatic-resolution --show-bin-path)
     cp "$bin/vminitd" "$work/vminitd-$pass"
     cp "$bin/vmexec" "$work/vmexec-$pass"

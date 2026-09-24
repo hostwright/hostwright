@@ -1,0 +1,38 @@
+diff --git a/vminitd/Package.resolved b/vminitd/Package.resolved
+index e37bc3ad..3bde48b6 100644
+--- a/vminitd/Package.resolved
++++ b/vminitd/Package.resolved
+@@ -105,8 +105,7 @@
+       "kind" : "remoteSourceControl",
+       "location" : "https://github.com/apple/swift-crypto.git",
+       "state" : {
+-        "revision" : "e8d6eba1fef23ae5b359c46b03f7d94be2f41fed",
+-        "version" : "3.12.3"
++        "revision" : "da9d28d69ebe3894b18376c8f2395c2f37b8448f"
+       }
+     },
+     {
+@@ -168,8 +167,8 @@
+       "kind" : "remoteSourceControl",
+       "location" : "https://github.com/apple/swift-nio-http2.git",
+       "state" : {
+-        "revision" : "5e9e99ec96c53bc2c18ddd10c1e25a3cd97c55e5",
+-        "version" : "1.38.0"
++        "revision" : "45bdf670248be5f16ec0340e125dca285536f0fb",
++        "version" : "1.45.0"
+       }
+     },
+     {
+diff --git a/vminitd/Package.swift b/vminitd/Package.swift
+index 673a48c6..572e67b5 100644
+--- a/vminitd/Package.swift
++++ b/vminitd/Package.swift
+@@ -35,6 +35,8 @@ let package = Package(
+         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.7.0"),
+         .package(url: "https://github.com/apple/swift-log.git", from: "1.10.1"),
+         .package(url: "https://github.com/apple/swift-system.git", from: "1.6.4"),
++        .package(url: "https://github.com/apple/swift-crypto.git", revision: "da9d28d69ebe3894b18376c8f2395c2f37b8448f"),
++        .package(url: "https://github.com/apple/swift-nio-http2.git", exact: "1.45.0"),
+         .package(name: "containerization", path: "../"),
+     ],
+     targets: [

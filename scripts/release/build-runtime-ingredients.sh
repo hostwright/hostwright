@@ -100,6 +100,7 @@ cp "$kernel_inputs/linux-6.18.15.tar.xz" "$kernel_inputs/linux-6.18.15.tar.sign"
   "$kernel_inputs/gregkh-pinned-public-key.asc" "$work/evidence/kernel-inputs/"
 
 export GIT_COMMIT="$containerization_commit" GIT_TAG=0.35.0 BUILD_TIME="$build_time" SOURCE_DATE_EPOCH=1767225600
+cp scripts/release/patches/containerization-guest-security.patch "$work/evidence/"
 for pass in first second; do
   tree="$work/containerization-build"
   if [[ -e "$tree" ]]; then
@@ -108,6 +109,8 @@ for pass in first second; do
   fi
   git clone --shared "$work/sources/containerization" "$tree"
   git -C "$tree" checkout --detach "$containerization_commit"
+  git -C "$tree" apply --check "$work/evidence/containerization-guest-security.patch"
+  git -C "$tree" apply "$work/evidence/containerization-guest-security.patch"
   (
     cd "$tree/vminitd"
     # Header timestamps otherwise change Clang module signatures and Swift object hashes.

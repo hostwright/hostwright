@@ -299,7 +299,7 @@ require_internal_persistent_path() {
 }
 
 managed_runtime_count() {
-  /usr/bin/jq -er '[.[] | select((.configuration.labels["dev.hostwright.managed"] // "") == "true")] | length'
+  /usr/bin/jq -r '[.[] | select((.configuration.labels["dev.hostwright.managed"] // "") == "true")] | length'
 }
 
 require_empty_managed_runtime_inventory() {

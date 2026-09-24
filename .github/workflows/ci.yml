@@ -18,11 +18,45 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          fetch-depth: 2
+      - name: Select pull-request checks
+        id: check-scope
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          run_regression=true
+          if [[ "$EVENT_NAME" == pull_request || "$EVENT_NAME" == push ]] && [[ -n "$BASE_SHA" && -n "$HEAD_SHA" ]]; then
+            if changed_files="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")" && [[ -n "$changed_files" ]]; then
+              run_regression=false
+              while IFS= read -r file; do
+                case "$file" in
+                  README.md|AGENTS.md|CHANGELOG.md|CONTRIBUTING.md|docs/*|ThirdPartyLicenses/*) ;;
+                  *) run_regression=true; break ;;
+                esac
+              done <<< "$changed_files"
+            fi
+          fi
+          printf 'run_regression=%s\n' "$run_regression" >> "$GITHUB_OUTPUT"
+          if [[ "$EVENT_NAME" == pull_request || "$EVENT_NAME" == push ]] \
+            && [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ && "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] \
+            && [[ "$BASE_SHA" != 0000000000000000000000000000000000000000 ]] \
+            && git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null \
+            && git cat-file -e "$HEAD_SHA^{commit}" 2>/dev/null; then
+            git diff --check "$BASE_SHA" "$HEAD_SHA"
+          else
+            git diff --check
+          fi
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: steps.check-scope.outputs.run_regression == 'true'
         with:
           go-version-file: Guest/HostwrightNetfilter/go.mod
           cache-dependency-path: Guest/HostwrightNetfilter/go.sum
       - name: Guest network-policy loader
+        if: steps.check-scope.outputs.run_regression == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -49,6 +83,7 @@ jobs:
               >hostwright-netfilter-linux-arm64.sha256
           )
       - name: Retain guest policy loader for live qualification
+        if: steps.check-scope.outputs.run_regression == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: hostwright-netfilter-linux-arm64
@@ -58,6 +93,7 @@ jobs:
           retention-days: 1
           if-no-files-found: error
       - name: Pull-request regression gate
+        if: steps.check-scope.outputs.run_regression == 'true'
         shell: bash
         env:
           HOSTWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/hostwright-test-results
@@ -67,7 +103,7 @@ jobs:
           scripts/test.sh pr 2>&1 \
             | tee "$HOSTWRIGHT_TEST_RESULTS_DIR/pr.log"
       - name: Retain pull-request logs and results
-        if: ${{ always() }}
+        if: ${{ always() && steps.check-scope.outputs.run_regression == 'true' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ci-test-results-${{ github.run_id }}-${{ github.run_attempt }}

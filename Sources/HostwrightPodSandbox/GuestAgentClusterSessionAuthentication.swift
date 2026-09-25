@@ -1,7 +1,7 @@
 import Foundation
 import HostwrightCluster
 
-/// Binds one credential-free Phase 11 handoff to the guest-agent request owner.
+/// Binds one credential-free cluster handoff to the guest-agent request owner.
 /// The authority revalidates the handoff immediately before guest dispatch.
 public struct ClusterSessionGuestAgentAuthenticationBoundary:
     GuestAgentAuthenticationBoundary,

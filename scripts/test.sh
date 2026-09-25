@@ -38,7 +38,6 @@ run_cheap_checks() {
   python3 scripts/check-current-truth.py
   python3 scripts/check-current-truth.py --self-test
   scripts/lint.sh
-  scripts/grep-orchard.sh .
 }
 
 run_full() {

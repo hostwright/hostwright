@@ -21,7 +21,7 @@ The Hostwright-controlled package-manager command is:
 brew install hostwright/tap/hostwright
 ```
 
-That command is available through [`hostwright/homebrew-tap`](https://github.com/hostwright/homebrew-tap) and installs the immutable unsupported qualification release. Phase 15 submits an unqualified Homebrew-core formula. Literal `brew install hostwright` remains contingent on Homebrew acceptance; the vendor tap is the fallback Hostwright controls.
+That command uses [`hostwright/homebrew-tap`](https://github.com/hostwright/homebrew-tap) and installs an immutable unsupported qualification release. Homebrew-core submission is deferred from v0.0.2; use the vendor tap rather than `brew install hostwright`.
 
 ## Current Source Build
 
@@ -118,4 +118,4 @@ Phase 02 qualification passed on a clean macOS 26 Apple-silicon VM. Evidence cov
 
 All production installer, distribution, extension, tool-inspection, and Apple-runtime subprocesses use the [secure process execution boundary](process-execution.md). The trusted distribution tool propagates one cancellation token through identity lookup, both clean builds, archive/package operations, notarization, verification, install lifecycle, and cleanup; SIGINT/SIGTERM enter the same path. Phase 02 issue #116 implements that shared boundary, and the credentialed qualification pipeline passed it for both immutable prereleases.
 
-Phase 02 issue #113 implements secure local defaults and legacy-state migration. Issue #114 adds managed integrity, online backup, catalog verification, confirmation-bound restore, projection-only repair, fencing, and recovery. Issue #118 adds the explicit-prefix and Apple Installer lifecycle documented above. The trusted artifact/formula implementation is recorded in [devlog 0044](../devlog/0044-trusted-release-and-homebrew-foundation.md). Credentialed releases, vendor-tap publication, signed Apple Installer/reboot execution, clean-Mac lifecycle, state, doctor, and abrupt-power qualification all passed before Phase 02 closure.
+The immutable dev.11/dev.12 prereleases passed their recorded signing, vendor-tap, clean-Mac lifecycle, state recovery, doctor, and interruption checks. Current RC and GA artifacts require new evidence through [staged release promotion](release-promotion.md). See [installed lifecycle](installed-lifecycle.md) for package ownership, upgrade, rollback, and recovery.

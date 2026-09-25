@@ -711,6 +711,34 @@ final class StorageCommandTests: XCTestCase {
                 .lifecycleState,
             .deleted
         )
+        let integrity = harness.run(["state", "integrity"])
+        XCTAssertEqual(integrity.exitCode, 0, integrity.standardOutput)
+        let stateBackup = harness.run(["state", "backup"])
+        XCTAssertEqual(stateBackup.exitCode, 0, stateBackup.standardError)
+        if stateBackup.exitCode == 0 {
+            XCTAssertTrue(try JSONDecoder().decode(
+                StateBackupRecord.self,
+                from: Data(stateBackup.standardOutput.utf8)
+            ).restorable)
+        }
+    }
+
+    func testBackupHonorsExistingProjectFence() async throws {
+        let harness = try await StorageDataProtectionCLIHarness.make(
+            volumeID: volume1
+        )
+        defer { harness.cleanup() }
+        try harness.holdProjectFence()
+        let result = harness.run([
+            "volume", "backup", "create",
+            "--volume", volume1,
+            "--backup-id", backup,
+            "--name", "blocked-backup",
+            "--key-ref", "keychain://hostwright/backup",
+        ])
+        XCTAssertNotEqual(result.exitCode, 0)
+        XCTAssertTrue(result.standardError.contains("project fence"))
+        XCTAssertTrue(try harness.state.loadBackups(volumeID: volume1).isEmpty)
     }
 
     func testMultiVolumeBackupRestoreUsesRecordedSourceSet()
@@ -854,8 +882,7 @@ private final class StorageDataProtectionCLIHarness {
                     StorageDataProtectionCLIKeyResolver()
             )
             let projectUUID = UUID(
-                uuidString:
-                    "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+                uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
             )!
             let client = try StorageProviderClient(
                 provider: provider
@@ -875,6 +902,20 @@ private final class StorageDataProtectionCLIHarness {
                 )
             )
             try store.migrate()
+            try store.desiredStates.registerProjectForAdmission(
+                StateProjectRecord(
+                    id: "project-storage-test",
+                    name: "storage-test",
+                    manifestPath: nil,
+                    manifestHash: String(repeating: "a", count: 64),
+                    createdAt: "2026-07-25T12:00:00Z",
+                    updatedAt: "2026-07-25T12:00:00Z",
+                    resourceUUID: projectUUID.uuidString.lowercased(),
+                    manifestVersion: 3,
+                    mutationProvider: "apple-container-cli",
+                    providerGeneration: 1
+                )
+            )
             let state = StorageStateRepository(store: store)
             for (index, volumeID) in volumeIDs.sorted().enumerated() {
                 let fence = HostwrightResourceUUID.legacy(
@@ -966,6 +1007,32 @@ private final class StorageDataProtectionCLIHarness {
         )
     }
 
+    func holdProjectFence() throws {
+        let store = SQLiteStateStore(path: stateDatabasePath)
+        let id = UUID().uuidString.lowercased()
+        let group = OperationGroupRecord(
+            id: id,
+            operationID: id,
+            groupKind: "lifecycle-v1",
+            projectID: "project-storage-test",
+            serviceName: nil,
+            plannedActionType: "up",
+            status: .active,
+            groupIdempotencyKey: id,
+            planHash: String(repeating: "d", count: 64),
+            checkpoint: "intent-persisted",
+            lockOwner: "storage-cli-test",
+            lockExpiresAt: "2030-07-25T12:00:00Z",
+            rollbackAvailable: false,
+            manualRecoveryHintRedacted: "",
+            createdAt: "2026-07-25T12:00:00Z",
+            updatedAt: "2026-07-25T12:00:00Z",
+            metadataJSONRedacted: "{}",
+            fencingToken: UUID().uuidString.lowercased()
+        )
+        XCTAssertNotNil(try store.operationGroups.acquire(group).acquired)
+    }
+
     func cleanup() {
         try? FileManager.default.removeItem(at: root)
     }
@@ -983,7 +1050,7 @@ private final class StorageDataProtectionCLIHarness {
             id: operationID,
             operationID: operationID,
             groupKind: "storage-volume-create",
-            projectID: volume.projectID,
+            projectID: "project-storage-test",
             serviceName: nil,
             plannedActionType: "storage-volume-create",
             status: .active,
@@ -1011,7 +1078,7 @@ private final class StorageDataProtectionCLIHarness {
         try state.saveVolume(
             StorageStateVolumeRecord(
                 id: volume.volumeID,
-                projectID: volume.projectID,
+                projectID: "project-storage-test",
                 name: volume.name,
                 providerID: volume.providerID,
                 providerVolumeID: volume.volumeID,

@@ -194,7 +194,7 @@ def apply_patch_bytes(patch_data, contents):
         contents[name]=b''.join(result+original[cursor:]); changed=True
     require(changed, 'missing actual source patch changes')
 
-def source_project(project, fetch):
+def source_project(project, fetch, project_commits=None):
     """Reconstruct the complete Git tree from actual retained source leaves."""
     commit = bound(project['commitObject'], fetch)
     require(git_object('commit',commit) == project['commit'], 'source commit object mismatch')
@@ -223,6 +223,23 @@ def source_project(project, fetch):
             require(name.split('/')[-1] not in node, 'source tree collision')
             node[name.split('/')[-1]] = (record['gitMode'],record['gitBlobSHA1'])
         require(set(files) == set(leaves), 'source archive/inventory coverage mismatch')
+    submodules=project.get('submodules',[])
+    require(len(leaves)+len(submodules)<=MAX_FILES, 'oversized source tree')
+    link_paths=set()
+    for link in submodules:
+        name=path(link['path'])
+        require(name not in link_paths and name not in leaves, 'duplicate source submodule path')
+        link_paths.add(name)
+        require(project_commits is not None and link['project'] in project_commits and
+                link['project']!=project['identity'] and
+                project_commits[link['project']]==link['commit'], 'submodule lacks exact captured source project')
+        require(re.fullmatch('[a-f0-9]{40}',link['commit']) is not None, 'invalid submodule commit')
+        node=tree
+        for component in name.split('/')[:-1]:
+            require(not isinstance(node.get(component),tuple), 'source tree collision')
+            node=node.setdefault(component,{})
+        require(name.split('/')[-1] not in node, 'source tree collision')
+        node[name.split('/')[-1]]=('160000',link['commit'])
     def tree_hash(node):
         entries=[]
         for name,value in node.items():
@@ -513,9 +530,10 @@ def verify(manifest_data, runtime, payloads, fetch, source_commit, require_authe
             for index,(name,data) in enumerate(payloads.items()):
                 item=temporary/('payload-'+str(index)); item.write_bytes(data); authenticate(item,producer,source_commit)
     projects={}
+    project_commits={p['identity']:p['commit'] for p in manifest['sourceProjects']}
     for project in manifest['sourceProjects']:
         require(project['identity'] not in projects, 'duplicate source project')
-        projects[project['identity']]=source_project(project,fetch)
+        projects[project['identity']]=source_project(project,fetch,project_commits)
     require(projects, 'missing complete corresponding sources')
     tools=toolchain(manifest,fetch)
     oci=manifest['oci']; prefix=path(oci['prefix'])

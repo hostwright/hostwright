@@ -25,7 +25,7 @@ def git(repository, *arguments):
     return subprocess.check_output(["git", "-C", str(repository), *arguments])
 
 
-def capture(repository, commit, output):
+def capture(repository, commit, output, submodules=None):
     if not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise ValueError("an exact Git commit is required")
     if output.exists() or output.is_symlink():
@@ -37,15 +37,28 @@ def capture(repository, commit, output):
         raise ValueError("source commit object mismatch")
     tree = git(repository, "rev-parse", commit + "^{tree}").decode().strip()
     entries = []
+    links = []
+    submodules = {} if submodules is None else submodules
+    if not isinstance(submodules, dict) or not all(
+        isinstance(name, str) and isinstance(identity, str) and identity.strip()
+        for name, identity in submodules.items()
+    ):
+        raise ValueError("submodules must map source paths to captured project identities")
     for row in git(repository, "ls-tree", "-r", "-z", "--full-tree", commit).split(b"\0"):
         if not row:
             continue
         metadata, name = row.split(b"\t", 1)
         mode, kind, oid = metadata.decode("ascii").split()
+        name = VERIFIER.path(name.decode("utf-8"))
+        if mode == "160000" and kind == "commit" and name in submodules:
+            links.append(dict(path=name, project=submodules[name], commit=oid))
+            continue
         if mode not in ("100644", "100755", "120000") or kind != "blob":
-            raise ValueError("source tree requires separately captured submodule: " + name.decode())
-        entries.append((VERIFIER.path(name.decode("utf-8")), mode, oid))
-    if not 0 < len(entries) <= VERIFIER.MAX_FILES:
+            raise ValueError("source tree requires separately captured submodule: " + name)
+        entries.append((name, mode, oid))
+    if set(submodules) != {link["path"] for link in links}:
+        raise ValueError("submodule mapping differs from the exact Git tree")
+    if not entries or len(entries) + len(links) > VERIFIER.MAX_FILES:
         raise ValueError("source tree leaf count exceeds the provenance bound")
 
     with tempfile.TemporaryDirectory(prefix=".runtime-source-", dir=output.parent) as temporary:
@@ -105,6 +118,8 @@ def capture(repository, commit, output):
 
         source = dict(commit=commit, tree=tree, commitObject=record("commit.object"),
                       archive=record("source.tar.gz"), inventory=record("source-inventory.json"))
+        if links:
+            source["submodules"] = sorted(links, key=lambda link: link["path"])
         (staging / "source.json").write_bytes(VERIFIER.canonical(source))
         os.rename(staging, output)
     return source
@@ -115,8 +130,11 @@ def main():
     parser.add_argument("--repository", type=Path, required=True)
     parser.add_argument("--commit", required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--submodules", type=Path,
+                        help="JSON mapping of Git submodule paths to separately captured project identities")
     args = parser.parse_args()
-    capture(args.repository, args.commit, args.output)
+    submodules = VERIFIER.parse(args.submodules.read_bytes()) if args.submodules else None
+    capture(args.repository, args.commit, args.output, submodules)
 
 
 if __name__ == "__main__":

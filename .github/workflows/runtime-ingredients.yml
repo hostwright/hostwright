@@ -26,6 +26,7 @@ jobs:
       - name: Verify complete source capture
         run: |
           python3 scripts/release/test-capture-runtime-source.py
+          python3 scripts/release/test-capture-package-sources.py
           python3 scripts/release/test-runtime-provenance.py
       - name: Install and record build prerequisites
         shell: bash

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import copy
 import importlib.util
 import io
 import json
@@ -89,6 +90,52 @@ class SourceCaptureTests(unittest.TestCase):
         commit = self.commit_tree()
         with self.assertRaisesRegex(ValueError, "submodule"):
             CAPTURE.capture(self.repository, commit, self.root / "capture")
+        self.assertFalse((self.root / "capture").exists())
+
+    def test_submodule_tree_requires_the_exact_separately_captured_project(self):
+        child = self.commit
+        self.git("update-index", "--add", "--cacheinfo", "160000," + child + ",vendor/dependency")
+        parent = self.commit_tree()
+        output = self.root / "parent"
+        source = CAPTURE.capture(self.repository, parent, output, {"vendor/dependency": "dependency"})
+        project = self.project(output, source)
+        fetch = lambda name: (output / name).read_bytes()
+        commits = {"source-test": parent, "dependency": child}
+        leaves = V.source_project(project, fetch, commits)
+        self.assertNotIn("vendor/dependency", leaves)
+        self.assertEqual(source["submodules"], [{"path": "vendor/dependency", "project": "dependency", "commit": child}])
+        child_output = self.root / "child"
+        child_source = CAPTURE.capture(self.repository, child, child_output)
+        V.source_project(self.project(child_output, child_source), lambda name: (child_output / name).read_bytes())
+        for identities in (None, {}, {"dependency": "0" * 40}):
+            with self.subTest(identities=identities), self.assertRaisesRegex(ValueError, "exact captured source"):
+                V.source_project(project, fetch, identities)
+        for path in ("wrong", "LICENSE", "LICENSE/child", "../escape"):
+            changed = copy.deepcopy(project)
+            changed["submodules"][0]["path"] = path
+            with self.subTest(path=path), self.assertRaises(ValueError):
+                V.source_project(changed, fetch, commits)
+        changed = copy.deepcopy(project)
+        changed["submodules"] *= 2
+        with self.assertRaisesRegex(ValueError, "duplicate"):
+            V.source_project(changed, fetch, commits)
+        changed = copy.deepcopy(project)
+        del changed["submodules"]
+        with self.assertRaisesRegex(ValueError, "incomplete or wrong source Git tree"):
+            V.source_project(changed, fetch, commits)
+
+    def test_submodule_mapping_cannot_add_untracked_dependencies(self):
+        with self.assertRaisesRegex(ValueError, "mapping differs"):
+            CAPTURE.capture(self.repository, self.commit, self.root / "capture", {"invented": "dependency"})
+        self.assertFalse((self.root / "capture").exists())
+
+    def test_gitlink_only_tree_is_refused_before_publishing(self):
+        for name in ("LICENSE", ".gitattributes", "run.sh", "link"):
+            self.git("update-index", "--force-remove", name)
+        self.git("update-index", "--add", "--cacheinfo", "160000," + self.commit + ",dependency")
+        commit = self.commit_tree()
+        with self.assertRaisesRegex(ValueError, "leaf count"):
+            CAPTURE.capture(self.repository, commit, self.root / "capture", {"dependency": "dependency"})
         self.assertFalse((self.root / "capture").exists())
 
     def test_inventory_limit_is_separate_from_general_metadata(self):

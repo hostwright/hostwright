@@ -2,6 +2,7 @@
 set -euo pipefail
 umask 077
 readonly source_capture="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/capture-runtime-source.py"
+readonly package_capture="$(dirname -- "$source_capture")/capture-package-sources.py"
 
 readonly containerization_commit=44bec8b9933bc491d0cbf44abac90a1f6aaebf6b
 readonly kata_commit=660e3bb6535b141c84430acb25b159857278d596
@@ -149,6 +150,8 @@ for pass in first second; do
       | gzip -n > "$work/evidence/vminit-link-inputs-$pass.tar.gz"
     if [[ "$pass" == first ]]; then
       cp Package.resolved "$work/evidence/vminit-Package.resolved"
+      python3 "$package_capture" --lockfile Package.resolved --checkouts .build/checkouts \
+        --output "$work/evidence/source-trees/vminit-packages"
     fi
   ) >"$work/evidence/vminit-$pass.log" 2>&1
 done

@@ -1,40 +1,23 @@
-# Release Process
+# Release process
 
-The active release target is `v0.0.2`. The working binary remains on the
-`0.0.2-dev` line until release qualification is complete. Phase 02 preserves
-immutable `v0.0.2-dev.11` (`7d97d6c9ff878ec567c88e6993d4543ab8f0ad95`)
-and `v0.0.2-dev.12` (`71414005104933d8ee3591e8c91bc831bce2e2a2`)
-qualification builds for upgrade evidence.
+The active target is `v0.0.2`. Development builds remain on the `0.0.2-dev` line until candidate qualification. Immutable `v0.0.2-dev.11` and `v0.0.2-dev.12` prereleases supply upgrade baselines; they remain unsupported and are not promoted in place.
 
 ## Tag Policy
 
-- `phase-*` tags are optional internal engineering checkpoints and never receive GitHub Releases.
-- `v*` tags are public releases or explicitly marked release candidates.
-- Phase 02 created the immutable `v0.0.2-dev.11` and `v0.0.2-dev.12` GitHub prereleases through the protected trusted-release workflow solely to qualify signed public bytes and the vendor-tap upgrade path. They remain unsupported, cannot be moved or replaced, and do not advance the release ladder.
-- Do not create `v0.0.2`, publish a supported package/channel claim, or change the binary to `0.0.2` before the Phase 15 gate.
-- Never tag from a dirty tree, an unreviewed commit, or a commit whose required evidence is blocked.
-- Never force-move a public release tag.
+Public releases and candidates use `v*` tags. Optional `phase-*` checkpoints have no GitHub Release. Create a public tag only for a reviewed, clean commit with the required evidence. Published tags and assets must not be moved or replaced.
 
 ## Release Ladder
 
-1. the `0.0.2-dev` line throughout implementation, including the preserved Phase 02 dev.11 and dev.12 qualification builds;
-2. `v0.0.2-rc.1` after required local implementation issues reach verification and the Phase 15 lanes are ready;
-3. fix RC defects and repeat affected qualification on the corrected candidate;
-4. `v0.0.2` after one clean complete RC qualification, independent signed-artifact lifecycle verification, final-version qualification and maintainer approval. Release artifact and master issues close after publication verification.
-
-An RC tag is a pre-release, not a partial implementation escape hatch. It uses the same supported-scope contract as GA and may differ only by resolved defects and repeated evidence.
-
-The two Phase 02 `v0.0.2-dev.11` and `v0.0.2-dev.12` qualification artifacts are not RCs or betas and are never promoted in place. Their only purpose is to prove the real installation and upgrade path required for Phase 02 qualification; later implementation continues on the `0.0.2-dev` line, and Phase 15 produces new immutable RC/GA artifacts from its exact qualified commits.
+1. Finish required implementation and prepare the qualification lanes on the development line.
+2. Qualify `v0.0.2-rc.1` against the intended GA scope. Fix defects and repeat affected checks on the corrected candidate.
+3. After one complete RC qualification and independent artifact lifecycle verification, prepare the final `0.0.2` version change.
+4. Qualify the final-version bytes, obtain maintainer approval, and publish through protected promotion. Close release-artifact and parent issues after public-byte and installation verification.
 
 ## Active Roadmap Authority
 
-- [v0.0.2 implementation plan](../roadmap/v0.0.2/IMPLEMENTATION_PLAN.md)
-- [machine-readable issue manifest](../roadmap/v0.0.2/issues.json)
-- [testing and evidence contract](../reference/testing-evidence.md)
-- [evidence JSON schema](../../schemas/hostwright-evidence.schema.json)
-- [master release issue #284](https://github.com/hostwright/hostwright/issues/284)
+The [release plan](../roadmap/v0.0.2/IMPLEMENTATION_PLAN.md), [issue manifest](../roadmap/v0.0.2/issues.json), [testing contract](../reference/testing-evidence.md), and [evidence schema](../../schemas/hostwright-evidence.schema.json) define the requirements for [master issue #284](https://github.com/hostwright/hostwright/issues/284).
 
-Every required child issue, phase epic, and master gate closes through a final `status:verification` PR and clean evidence comment. Deferred issues close explicitly as `not_planned` under the merged [ADR 0015](../design/adr-0015-reduced-local-release.md), with matching child dispositions; they are not completed implementation. Intermediate implementation, research, design, and documentation PRs use `Refs #NN`; only the final evidence PR uses `Closes #NN`.
+Required issues close through a final `status:verification` PR and clean evidence comment. Intermediate PRs use `Refs #NN`; final evidence PRs use `Closes #NN`. Deferred issues close as `not_planned` under [ADR 0015](../design/adr-0015-reduced-local-release.md). Parents require completed required children and correctly deferred children. Governance checks enforce these rules.
 
 ## Baseline Gate for Every Phase and RC
 
@@ -42,27 +25,7 @@ Every required child issue, phase epic, and master gate closes through a final `
 scripts/test.sh pr
 ```
 
-The owning phase adds its required live, migration, security, resilience, declared interoperability, accessibility, distribution, and performance lanes. A command that is unavailable, skipped, blocked, fixture-only, mock-only, dirty, or cleanup-failed is recorded honestly and fails that implementation/release gate.
-
-## Governance Gate
-
-Roadmap manifest validation, issue-parent/label/assignee checks, final-PR evidence enforcement, child closure, security review triggers, and exact public claims must pass. The executable workflow reopens required issues without valid evidence and deferred issues without an explicit recorded not-planned scope decision. Required parents require completed required children and correctly deferred children.
-
-## Distribution Readiness Gate
-
-Phase 02 turned the former unsigned developer lane into signed/notarized archives, a `.pkg`, vendor tap, secure install state, and the [strict reversible installed lifecycle](../reference/installed-lifecycle.md). Its credentialed dev.11/dev.12 releases, public-byte verification, vendor-tap install/upgrade, clean macOS 26 lifecycle, state, doctor, abrupt-power, and exact-cleanup gates passed. Phase 15 repeats those checks from the final clean tag. The historical `distribution-readiness.md` does not satisfy the GA gate.
-
-## Benchmark Gate
-
-Phase 10 qualifies local admission and safe pressure deferral; Phase 15 records bounded local timings and resource stability on the M4 Pro. Broad density, energy, accelerator and cluster-scale claims are deferred. No benchmark, capacity, efficiency, or comparison claim is published from a dirty, incomplete, blocked, scripted, or cleanup-failed report.
-
-## Public Education Gate
-
-Current core docs and `hostwright capabilities --json` are the product-truth source. The separate website must typecheck, build, pass internal-link checks, execute every documented quickstart, and agree on version, install, limitation, compatibility, and roadmap claims.
-
-## Beta Readiness Gate
-
-The former beta checklist is historical. The active pre-GA gate is a complete `v0.0.2-rc.*` qualification run over the same intended GA scope; an RC cannot omit a retained requirement or downgrade a blocker into a known limitation. Deferred requirements are explicitly recorded in the issue manifest.
+Run the owning workstream's required lanes as well. Trusted staging runs the full regression suite. Unavailable, skipped, blocked, simulated, dirty-source, or cleanup-failed results cannot satisfy a required release gate.
 
 ## v0.0.2 GA Gate
 
@@ -86,47 +49,37 @@ All of the following are required:
 
 ## Artifact and Package Policy
 
-The release publishes only artifacts produced from the final clean tag by the reviewed release workflow:
+The reviewed staging workflow builds from an exact clean commit already merged to `main`. It produces signed/notarized Apple-silicon archive and package payloads, checksums, SPDX SBOMs, signed provenance, corresponding source, verification metadata, and a vendor-tap formula bound to the archive digest.
 
-- signed/notarized Apple-silicon archive containing the local CLI, desktop app and required helpers;
-- signed/notarized `.pkg`;
-- checksums;
-- SPDX SBOM;
-- signed provenance/attestation;
-- verification instructions and compatibility manifest;
-- vendor-tap formula bound to the released digest.
+Staging requires an authenticated runtime-provenance archive from the exact source commit. It verifies the `hostwright.corresponding-source.new-runtime.v1` manifest and payloads against the shipped runtime bytes. Ingredient-only runs and legacy source bundles cannot satisfy this input.
 
-The trusted stage requires the successful `Authenticated runtime ingredients` run ID for the exact release commit. It downloads that run's uniquely named archive and verifies its authenticated `hostwright.corresponding-source.new-runtime.v1` manifest and payloads against the shipped runtime bytes. The legacy source bundle is refused, so a release cannot fall back to license metadata without actual runtime byte provenance.
+The protected workflow retains staged bundles for 90 days. Published assets, signatures, provenance, inventories, checksums, and release evidence are retained indefinitely. Exceptional removal requires a separate reviewed action.
 
-Unsigned developer `hostwright-dist` output is useful local integration evidence, not a public release artifact.
-
-The protected workflow retains its exact verified bundle for 90 days. Published release assets and the corresponding checksums, SBOMs, provenance, manifest, detached signatures, and evidence are retained indefinitely and are not replaced in place. Exceptional removal is a separate reviewed repository action; it is never an automatic workflow cleanup step.
-
-`brew install hostwright` depends on Homebrew-core acceptance. Homebrew-core submission is deferred from v0.0.2. The Hostwright-controlled qualification channel is available now as `brew install hostwright/tap/hostwright`; documentation must not claim the unqualified command before core acceptance.
+Homebrew-core submission is deferred. Publish only the verified `brew install hostwright/tap/hostwright` channel; do not claim `brew install hostwright` before core acceptance.
 
 ## Final Evidence Record
 
-The final evidence comment contains:
+Include this marker in the final evidence comment:
 
 ```text
 <!-- hostwright-evidence-gate:v1 -->
 ```
 
-It records the full commit, `Dirty: false`, OS/build/architecture/hardware, runtime/framework/tool versions, every command and raw outcome, failures, blockers, cleanup and exact resource identifiers, artifact links, and documentation/compatibility updates. Public logs are redacted without removing result counts or the ability to audit the claim.
+Record the full commit, `Dirty: false`, OS build, architecture, hardware, runtime and tool versions, commands and raw outcomes, failures, blockers, cleanup identities, artifact links, and documentation changes. Redact secrets and private details while preserving auditable results.
+
+Gate receipts bind the source commit, version, clean state, and hashed raw attachments. Artifact-dependent gates also bind the staged inventory. Keep complete inventories and their referenced files together. See [staged release promotion](../reference/release-promotion.md) for the exact receipt and attestation contracts.
 
 ## Promotion Steps
 
-Only after the final RC evidence and approval:
+1. Verify the reviewed candidate or final-version commit is on protected `main` and matches its clean qualification source.
+2. Run the complete authenticated runtime producer for that commit and verify its archive.
+3. Dispatch trusted staging with the commit, version, unused tag, and producer run ID. Staging builds twice, signs, notarizes, staples, verifies, and retains the exact bytes without publishing a tag or release.
+4. Qualify those staged artifacts, including the independent macOS VM lifecycle, and retain the complete evidence export. Obtain protected acceptance of the exact inventory and independent review report.
+5. After maintainer approval, promote the accepted bytes without rebuilding. Verify the public downloads against staging, publish the matching vendor-tap formula, and test installation and upgrade from the public channel.
+6. Retain post-release canary/support results and close the publication and parent issues when their evidence passes.
 
-1. verify the release commit is on protected `main`, clean, signed according to policy, and identical to the qualified commit;
-2. set the product version from `0.0.2-dev` to `0.0.2` in a reviewed release PR and rerun the complete release gate;
-3. dispatch the protected trusted-release workflow for the exact qualified commit/version/tag and its successful authenticated runtime-provenance run ID;
-4. let that workflow build, sign, notarize, staple, verify, create the immutable annotated tag, publish, download, compare, and attest the exact bytes;
-5. verify clean installation, upgrade, rollback, and uninstall from the published channel;
-6. publish the GitHub Release and vendor-tap formula only after artifact verification;
-7. retain the explicit Homebrew-core deferral and publish only the verified vendor-tap installation claim;
-8. run the post-release canary/support checks and retain release evidence according to policy.
+RC receipts cannot promote GA: the final version requires its own source, staged bytes, and qualification.
 
 ## Immutable Historical Releases
 
-Historical release notes keep their original text and claims. `docs/release/IMMUTABLE_RELEASES.json` records their SHA-256. They may be annotated through separate index/current docs but are not rewritten to make history resemble the current roadmap. The former alpha plan and development logs are historical evidence, not active release instructions.
+`docs/release/IMMUTABLE_RELEASES.json` records the hashes of historical release notes. Preserve their original bytes. Current references can explain their status; Git history retains superseded planning and development narratives.

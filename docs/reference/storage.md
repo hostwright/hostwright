@@ -1,6 +1,6 @@
 # Storage
 
-Hostwright manages persistent storage on one Mac through Storage Provider API v1 and current schema-v23 state, retaining the historical schema-v17 storage rows. The shipped provider ID is `hostwright-local`. It stores only Hostwright-owned data below:
+Hostwright manages persistent storage on one Mac through Storage Provider API v1 and current schema-v24 state, retaining the historical schema-v17 storage rows. The shipped provider ID is `hostwright-local`. It stores only Hostwright-owned data below:
 
 ```text
 ~/Library/Application Support/Hostwright/storage/providers/hostwright-local
@@ -146,8 +146,8 @@ Recovery resumes only the persisted operation, authority, plan, and provider jou
 
 ## Control API and Provider Boundary
 
-The one-shot Control API v2 exposes the same non-interactive `volume` operations and validation as the CLI. It does not add a listener or alternate mutation path.
+The authenticated Control API 2.2 exposes the same non-interactive `volume` operations and validation as the CLI. Storage mutations use the same provider authority and confirmation checks.
 
 `hostwright-storage-helper` is the signed out-of-process boundary for provider requests. Frames are bounded and canonical; peer UID, process identity, executable signature, protocol version, capability digest, deadlines, request IDs, idempotency keys, and mutation context are verified. Revocation, replay, malformed frames, unsafe sockets, cancellation, crash, and helper replacement fail closed.
 
-Remote/shared volumes, network storage systems, multi-Mac attachment authority, Kubernetes CSI adapters, and unmanaged/global garbage collection are not Phase 06 capabilities.
+Remote/shared volumes, network storage systems, multi-Mac attachment authority, Kubernetes CSI adapters, and unmanaged/global garbage collection are outside the local release scope.

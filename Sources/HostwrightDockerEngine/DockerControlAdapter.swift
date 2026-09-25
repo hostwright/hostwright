@@ -11,7 +11,7 @@ public enum DockerControlAdapterError: Error, Equatable, Sendable {
     case unsupportedEndpoint
 }
 
-/// The Docker surface is deliberately a client of the authenticated Phase 09
+/// The Docker surface is deliberately a client of the authenticated local
 /// Control API. It has no runtime, state, or filesystem authority of its own.
 public struct DockerControlAdapter: Sendable {
     public typealias RequestSender = @Sendable (

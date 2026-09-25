@@ -163,6 +163,7 @@ func makeDocumentationSnapshotRepository() throws -> URL {
     ]
     let paths = Set(try RepositoryTestInputs.trackedFiles(in: source).filter { path in
         prefixes.contains { path.hasPrefix($0) }
+            && FileManager.default.fileExists(atPath: source.appendingPathComponent(path).path)
     }).union(required)
     for path in paths.sorted() {
         let destination = root.appendingPathComponent(path)

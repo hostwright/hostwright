@@ -119,7 +119,7 @@ Remote backup publishes one exact backup-scoped manifest and its encrypted chunk
 
 Deleting a backup removes only encrypted chunks no longer referenced by any remaining verified backup set. Unknown or malformed catalog entries fail cleanup closed instead of making an unreferenced-content assumption.
 
-Restore always targets a new volume identity. Hostwright verifies the complete backup before promotion, rechecks target ownership and fencing, and preserves the prior authoritative target until the new target is proven. It refuses in-place overwrite, source/target aliasing, changed evidence, or ambiguous effects.
+Restore requires a distinct target volume in the same project and project generation as the backup or snapshot. Provision the target through a manifest with a different volume name, then stop and remove its workload with the volume's `retain` policy before restoring. Hostwright verifies the complete backup before promotion, rechecks target ownership and fencing, and preserves the prior target until the restored data is proven. It refuses source/target aliasing, cross-project restore, changed evidence, or ambiguous effects.
 
 ## Capacity and Pressure
 

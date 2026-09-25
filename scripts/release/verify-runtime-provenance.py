@@ -6,6 +6,7 @@ REPO = 'hostwright/hostwright'
 WORKFLOW = '.github/workflows/runtime-ingredients.yml'
 KIND = 'hostwright.runtime-provenance.v1'
 MAX_METADATA = 16 * 1024**2
+MAX_SOURCE_INVENTORY = 64 * 1024**2
 MAX_FILE = 2 * 1024**3
 MAX_FILES = 250000
 
@@ -15,14 +16,14 @@ def require(condition, message):
 def canonical(value):
     return (json.dumps(value, sort_keys=True, separators=(',', ':'))+'\n').encode()
 
-def parse(data):
+def parse(data, *, limit=MAX_METADATA):
     def pairs(items):
         result = {}
         for key, value in items:
             require(key not in result, 'duplicate provenance JSON key')
             result[key] = value
         return result
-    require(len(data) <= MAX_METADATA, 'oversized provenance metadata')
+    require(len(data) <= limit, 'oversized provenance metadata')
     return json.loads(data, object_pairs_hook=pairs)
 
 def path(name):
@@ -198,7 +199,7 @@ def source_project(project, fetch):
     commit = bound(project['commitObject'], fetch)
     require(git_object('commit',commit) == project['commit'], 'source commit object mismatch')
     require(commit.splitlines()[0] == b'tree '+project['tree'].encode(), 'source commit tree mismatch')
-    inventory = parse(bound(project['inventory'],fetch))
+    inventory = parse(bound(project['inventory'],fetch), limit=MAX_SOURCE_INVENTORY)
     require(isinstance(inventory,list) and 0 < len(inventory) <= MAX_FILES, 'missing complete source inventory')
     leaves = {}; tree = {}; contents={}
     with tarfile.open(fileobj=io.BytesIO(bound(project['archive'],fetch)),mode='r:*') as archive:

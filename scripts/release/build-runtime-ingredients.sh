@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 umask 077
+readonly source_capture="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/capture-runtime-source.py"
 
 readonly containerization_commit=44bec8b9933bc491d0cbf44abac90a1f6aaebf6b
 readonly kata_commit=660e3bb6535b141c84430acb25b159857278d596
@@ -65,6 +66,7 @@ cleanup() {
 }
 trap cleanup EXIT
 mkdir -m 700 "$work/evidence" "$work/payloads" "$work/sources"
+mkdir -m 700 "$work/evidence/source-trees"
 
 python3 scripts/release/verify-kernel-source-signature.py \
   --inputs "$kernel_inputs" --output "$work/evidence/kernel-source-signature.json"
@@ -74,6 +76,8 @@ git -C "$work/sources/kata" checkout --detach "$kata_commit"
 test "$(git -C "$work/sources/kata" rev-parse HEAD)" = "$kata_commit"
 test "$(cat "$work/sources/kata/tools/packaging/kernel/kata_config_version")" = "$kernel_config_version"
 git -C "$work/sources/kata" archive --format=tar "$kata_commit" | gzip -n > "$work/evidence/kata-source.tar.gz"
+python3 "$source_capture" --repository "$work/sources/kata" --commit "$kata_commit" \
+  --output "$work/evidence/source-trees/kata"
 
 export KBUILD_BUILD_TIMESTAMP="$build_time" KBUILD_BUILD_USER=hostwright KBUILD_BUILD_HOST=github-arm64
 export KBUILD_BUILD_VERSION=1 SOURCE_DATE_EPOCH=1767225600
@@ -102,6 +106,8 @@ git clone --filter=blob:none https://github.com/apple/containerization.git "$wor
 git -C "$work/sources/containerization" checkout --detach "$containerization_commit"
 test "$(git -C "$work/sources/containerization" rev-parse HEAD)" = "$containerization_commit"
 git -C "$work/sources/containerization" archive --format=tar "$containerization_commit" | gzip -n > "$work/evidence/containerization-source.tar.gz"
+python3 "$source_capture" --repository "$work/sources/containerization" --commit "$containerization_commit" \
+  --output "$work/evidence/source-trees/containerization"
 curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' --tlsv1.2 \
   --output "$work/swift-static-sdk.tar.gz" \
   https://download.swift.org/swift-6.3-release/static-sdk/swift-6.3-RELEASE/swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle.tar.gz
@@ -136,9 +142,14 @@ for pass in first second; do
     bin=$(swift build -c release --swift-sdk aarch64-swift-linux-musl --disable-automatic-resolution --show-bin-path)
     cp "$bin/vminitd" "$work/vminitd-$pass"
     cp "$bin/vmexec" "$work/vmexec-$pass"
-    find .build -type f \( -name '*.a' -o -name '*.o' -o -name '*.resp' -o -name '*.rsp' \) -print0 \
+    find .build -type f \( -name '*.a' -o -name '*.o' -o -name '*.resp' -o -name '*.rsp' \
+      -o -name '*.LinkFileList' -o -name '*.autolink' -o -name sources \
+      -o -name output-file-map.json -o -name description.json -o -name release.yaml \) -print0 \
       | sort -z | tar --null -T - --sort=name --mtime=@1767225600 --owner=0 --group=0 --numeric-owner -cf - \
       | gzip -n > "$work/evidence/vminit-link-inputs-$pass.tar.gz"
+    if [[ "$pass" == first ]]; then
+      cp Package.resolved "$work/evidence/vminit-Package.resolved"
+    fi
   ) >"$work/evidence/vminit-$pass.log" 2>&1
 done
 cmp "$work/vminitd-first" "$work/vminitd-second"

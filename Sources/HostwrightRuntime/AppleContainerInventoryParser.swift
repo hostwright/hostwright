@@ -452,8 +452,8 @@ public enum AppleContainerInventoryParser {
             executable: process.executable,
             arguments: process.arguments,
             environment: environment,
-            workingDirectory: process.workingDirectory,
-            user: process.user.description,
+            workingDirectory: process.workingDirectory.isEmpty ? nil : process.workingDirectory,
+            user: process.user.description.isEmpty ? nil : process.user.description,
             terminal: process.terminal
         )
     }

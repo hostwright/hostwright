@@ -142,6 +142,35 @@ final class AppleContainerInventoryParserTests: XCTestCase {
         XCTAssertEqual(container.networks[0].addresses, [])
     }
 
+    func testAcceptsEmptyImageDefaultsWithoutInferringUserOrWorkingDirectory() throws {
+        for version in ["1.0.0", "1.1.0"] {
+            var payload = try XCTUnwrap(JSONSerialization.jsonObject(
+                with: Data(try fixture("apple-container-\(version)-inventory-containers.json").utf8)
+            ) as? [[String: Any]])
+            let index = try XCTUnwrap(payload.firstIndex {
+                $0["id"] as? String == managedLookingUnownedContainerID
+            })
+            var configuration = try XCTUnwrap(payload[index]["configuration"] as? [String: Any])
+            var process = try XCTUnwrap(configuration["initProcess"] as? [String: Any])
+            process["workingDirectory"] = ""
+            process["user"] = ["raw": ["userString": ""]]
+            configuration["initProcess"] = process
+            payload[index]["configuration"] = configuration
+            let containers = String(decoding: try JSONSerialization.data(withJSONObject: payload), as: UTF8.self)
+
+            let inventory = try AppleContainerInventoryParser.parse(
+                outputs: outputs(version: version, containers: containers)
+            )
+            let container = try XCTUnwrap(inventory.containers.first {
+                $0.runtimeID == managedLookingUnownedContainerID
+            })
+            XCTAssertEqual(inventory.containers.count, 2)
+            XCTAssertNil(container.initConfiguration.workingDirectory)
+            XCTAssertNil(container.initConfiguration.user)
+            XCTAssertNil(container.ownership)
+        }
+    }
+
     func testRejectsPartialOrConflictingOwnershipWithoutNameFallback() throws {
         let valid = try fixture("apple-container-1.1.0-inventory-containers.json")
         let mutations = [

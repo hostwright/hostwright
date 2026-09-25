@@ -81,6 +81,43 @@ def fixture(rootfs_layer=None):
  return manifest,runtime,payloads,files
 
 class RuntimeProvenanceTests(unittest.TestCase):
+ def test_submodule_projects_are_independently_verified_by_full_validator(self):
+  manifest,runtime,payloads,files=fixture()
+  parent=manifest['sourceProjects'][0];child=copy.deepcopy(parent);child['identity']='child-project'
+  child['commitObject']=dict(child['commitObject'],path='proof/child.commit')
+  files['proof/child.commit']=files['proof/source.commit']
+  child['archive']=dict(child['archive'],path='proof/child.tar.gz')
+  files['proof/child.tar.gz']=files['proof/source.tar.gz']
+  for notice in child['licenses']+child['notices']:notice['component']='child-project'
+  leaves=v.parse(files['proof/source-inventory.json'])
+  entries=[(r['path'],r['gitMode'],r['gitBlobSHA1']) for r in leaves]
+  entries.append(('dependency','160000',child['commit']))
+  tree=v.git_object('tree',b''.join(mode.encode()+b' '+name.encode()+b'\0'+bytes.fromhex(oid)
+                                  for name,mode,oid in sorted(entries)))
+  commit=files['proof/source.commit'].replace(parent['tree'].encode(),tree.encode(),1)
+  files['proof/source.commit']=commit
+  parent['tree']=tree;parent['commit']=v.git_object('commit',commit)
+  parent['commitObject'].update(sha256=v.digest(commit),sizeBytes=len(commit))
+  parent['submodules']=[dict(path='dependency',project='child-project',commit=child['commit'])]
+  manifest['sourceProjects'].append(child)
+  manifest['sourceCommit']=parent['commit'];manifest['producer']['commit']=parent['commit']
+  def verify(value):v.verify(v.canonical(value),runtime,payloads,files.__getitem__,manifest['sourceCommit'],require_authentication=False)
+  verify(manifest)
+  missing=copy.deepcopy(manifest);missing['sourceProjects'].pop()
+  with self.assertRaisesRegex(ValueError,'exact captured source'):verify(missing)
+  wrong=copy.deepcopy(manifest);wrong['sourceProjects'][1]['commit']='0'*40
+  with self.assertRaisesRegex(ValueError,'exact captured source'):verify(wrong)
+  tampered=copy.deepcopy(manifest)
+  data=tar({'LICENSE':b'changed upstream source','NOTICE':b'Fixture notice text\n','main.c':b'int main() { return 0; }\n'})
+  files['proof/child.tar.gz']=data;tampered['sourceProjects'][1]['archive'].update(sha256=v.digest(data),sizeBytes=len(data))
+  with self.assertRaisesRegex(ValueError,'source leaf mismatch'):verify(tampered)
+  files['proof/child.tar.gz']=files['proof/source.tar.gz']
+  patched=copy.deepcopy(manifest)
+  before=v.digest(v.canonical({'LICENSE':v.digest(b'Fixture license text\n'),'NOTICE':v.digest(b'Fixture notice text\n'),'main.c':v.digest(b'int main() { return 0; }\n')}))
+  patch=b'--- a/dependency\n+++ b/dependency\n@@ -1 +1 @@\n-old\n+new\n'
+  files['proof/submodule.patch']=patch
+  patched['sourceProjects'][0]['patches']=[dict(path='proof/submodule.patch',sha256=v.digest(patch),sizeBytes=len(patch),beforeInventorySHA256=before,afterInventorySHA256=before)]
+  with self.assertRaises(ValueError):verify(patched)
  def test_producer_rootfs_accepts_only_the_exact_runtime_symlink(self):
   spec=importlib.util.spec_from_file_location('rootfs',pathlib.Path(__file__).with_name('create-runtime-rootfs.py'))
   rootfs=importlib.util.module_from_spec(spec);spec.loader.exec_module(rootfs)

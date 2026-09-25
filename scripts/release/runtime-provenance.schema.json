@@ -334,6 +334,32 @@
           "minLength": 1,
           "type": "string"
         },
+        "submodules": {
+          "items": {
+            "properties": {
+              "commit": {
+                "pattern": "^[a-f0-9]{40}$",
+                "type": "string"
+              },
+              "path": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "project": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "project",
+              "commit"
+            ],
+            "type": "object"
+          },
+          "maxItems": 250000,
+          "type": "array"
+        },
         "tree": {
           "pattern": "^[a-f0-9]{40}$",
           "type": "string"

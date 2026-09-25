@@ -23,6 +23,11 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+      - name: Verify complete source capture
+        run: |
+          python3 scripts/release/test-capture-runtime-source.py
+          python3 scripts/release/test-capture-package-sources.py
+          python3 scripts/release/test-runtime-provenance.py
       - name: Install and record build prerequisites
         shell: bash
         run: |
@@ -152,6 +157,9 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
           mkdir -p "$RUNNER_TEMP/runtime-ingredients"
+          python3 scripts/release/capture-runtime-source.py \
+            --repository "$GITHUB_WORKSPACE" --commit "$GITHUB_SHA" \
+            --output "$RUNNER_TEMP/runtime-ingredients/source-tree"
           cd Guest/HostwrightNetfilter
           test -z "$(gofmt -l .)"
           GOTOOLCHAIN=local go test -mod=readonly ./...
@@ -181,6 +189,7 @@ jobs:
             ${{ runner.temp }}/runtime-ingredients/hostwright-netfilter-buildinfo.txt
             ${{ runner.temp }}/runtime-ingredients/go-environment.json
             ${{ runner.temp }}/runtime-ingredients/hostwright-netfilter.sha256
+            ${{ runner.temp }}/runtime-ingredients/source-tree/**
       - name: Retain the attested loader and build inputs
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

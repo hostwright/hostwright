@@ -9,22 +9,25 @@ readonly kata_commit=660e3bb6535b141c84430acb25b159857278d596
 readonly kernel_version=6.18.15
 readonly kernel_config_version=186
 readonly kernel_source_sha=7c716216c3c4134ed0de69195701e677577bbcdd3979f331c182acd06bf2f170
-readonly swift_sdk_sha=d2078b69bdeb5c31202c10e9d8a11d6f66f82938b51a4b75f032ccb35c4c286c
 readonly build_time=2026-01-01T00:00:00Z
 
 die() { printf '%s\n' "$1" >&2; exit "${2:-70}"; }
-usage() { die "usage: build-runtime-ingredients.sh --output ABSOLUTE_DIR --kernel-inputs ABSOLUTE_DIR" 64; }
+usage() { die "usage: build-runtime-ingredients.sh --output ABSOLUTE_DIR --kernel-inputs ABSOLUTE_DIR --swift-sdk ABSOLUTE_FILE --swift-sdk-sha256 SHA256" 64; }
 
-output= kernel_inputs=
+output= kernel_inputs= swift_sdk= swift_sdk_sha=
 while (( $# )); do
   case "$1" in
     --output) (( $# >= 2 )) || usage; output=$2; shift 2 ;;
     --kernel-inputs) (( $# >= 2 )) || usage; kernel_inputs=$2; shift 2 ;;
+    --swift-sdk) (( $# >= 2 )) || usage; swift_sdk=$2; shift 2 ;;
+    --swift-sdk-sha256) (( $# >= 2 )) || usage; swift_sdk_sha=$2; shift 2 ;;
     *) usage ;;
   esac
 done
-[[ "$output" == /* && "$kernel_inputs" == /* ]] || usage
+[[ "$output" == /* && "$kernel_inputs" == /* && "$swift_sdk" == /* && "$swift_sdk_sha" =~ ^[a-f0-9]{64}$ ]] || usage
 [[ ! -e "$output" && ! -L "$output" ]] || die "runtime ingredient output already exists"
+[[ -f "$swift_sdk" && ! -L "$swift_sdk" ]] || die "missing regular source-built Swift SDK archive"
+[[ "$(sha256sum "$swift_sdk" | awk '{print $1}')" == "$swift_sdk_sha" ]] || die "Swift SDK archive digest mismatch"
 [[ "$(uname -s)" == Linux && "$(uname -m)" == aarch64 ]] || die "runtime ingredients require Linux arm64" 69
 for tool in aarch64-linux-gnu-gcc bison clang flex gcc git jq ld.lld make python3 sha256sum swift swiftly yq; do command -v "$tool" >/dev/null || die "missing producer tool: $tool" 69; done
 [[ "$(swift --version | head -1)" == *"Swift version 6.3"* ]] || die "runtime ingredients require Swift 6.3" 69
@@ -109,9 +112,7 @@ test "$(git -C "$work/sources/containerization" rev-parse HEAD)" = "$containeriz
 git -C "$work/sources/containerization" archive --format=tar "$containerization_commit" | gzip -n > "$work/evidence/containerization-source.tar.gz"
 python3 "$source_capture" --repository "$work/sources/containerization" --commit "$containerization_commit" \
   --output "$work/evidence/source-trees/containerization"
-curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' --tlsv1.2 \
-  --output "$work/swift-static-sdk.tar.gz" \
-  https://download.swift.org/swift-6.3-release/static-sdk/swift-6.3-RELEASE/swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle.tar.gz
+cp "$swift_sdk" "$work/swift-static-sdk.tar.gz"
 printf '%s  %s\n' "$swift_sdk_sha" "$work/swift-static-sdk.tar.gz" | sha256sum --check --status
 swift sdk install "$work/swift-static-sdk.tar.gz" --checksum "$swift_sdk_sha"
 mv "$work/swift-static-sdk.tar.gz" "$work/evidence/swift-static-sdk.tar.gz"

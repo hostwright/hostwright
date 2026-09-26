@@ -28,6 +28,28 @@ CORRESPONDING_SOURCE = load("corresponding_source", "corresponding-source.py")
 class RuntimeProvenanceAssemblerTests(unittest.TestCase):
     """Exercise archive closure only; synthetic bytes are not producer evidence."""
 
+    def test_go_capture_retains_nested_tool_input_and_archive_records(self):
+        files = {}
+        def add(name, data):
+            files["go/" + name] = data
+            return dict(path=name, sha256=VERIFIER_TEST.v.digest(data), sizeBytes=len(data))
+        archive = add("files/package", b"package bytes")
+        source = add("files/source", b"source bytes")
+        command = add("commands/compile.json", VERIFIER_TEST.v.canonical(dict(
+            inputs=[dict(originalPath="/source.go", file=source)],
+            outputs=[dict(originalPath="/package.a", file=archive)])))
+        packages = add("packages.json", VERIFIER_TEST.v.canonical([dict(retainedSources=[dict(file=source)])]))
+        capture = add("build.json", VERIFIER_TEST.v.canonical(dict(
+            kind="hostwright.go-build-capture.v1", commands=[command], packages=packages)))
+        manifest = dict(loader=dict(buildCapture=dict(capture, path="go/build.json")))
+        closure = ASSEMBLER.evidence_records(manifest, files.__getitem__)
+        self.assertEqual(set(closure), set(files))
+        for name, record in closure.items():
+            self.assertEqual(record["sha256"], VERIFIER_TEST.v.digest(files[name]))
+        files["go/commands/compile.json"] += b"changed"
+        with self.assertRaisesRegex(ValueError, "evidence bytes mismatch"):
+            ASSEMBLER.evidence_records(manifest, files.__getitem__)
+
     def fixture(self, root):
         manifest, inventory, payloads, files = VERIFIER_TEST.fixture()
         files = dict(files)

@@ -299,22 +299,22 @@ class RuntimeProvenanceTests(unittest.TestCase):
     old=cert[field];cert[field]=value
     with self.assertRaisesRegex(ValueError,'wrong authenticated runtime'):v.authenticate(pathlib.Path(__file__),producer,'a'*40)
     cert[field]=old
- def test_go_loader_reads_actual_inline_module_info_and_rejects_invented_module(self):
-  manifest,runtime,payloads,files=fixture();project=manifest['sourceProjects'][0]
-  info=b'0'*16+b'mod\texample.invalid/fixture\tv1.0.0\th1:fixture\n'+b'0'*16
+ def test_go_build_info_normalizes_main_module_and_requires_dependency_checksums(self):
   def string(data):
    self.assertLess(len(data),128);return bytes([len(data)])+data
   header=bytearray(32);header[:14]=b'\xff Go buildinf:';header[14]=8;header[15]=2
-  output=elf()+b'0'*8+bytes(header)+string(b'go1.26.5')+string(info)
-  loader=dict(format='go-buildinfo-v1',path=manifest['loader']['path'],outputSHA256=v.digest(output),project=project['identity'],goRuntimeProject=project['identity'],goVersion='go1.26.5',
-   modules=[dict(project=project['identity'],revision=project['commit'],buildInfo=['example.invalid/fixture','v1.0.0','h1:fixture'])],moduleRevisions={project['identity']:project['commit']},packageTrace=dict(path='proof/package-trace',sha256='',sizeBytes=0),sourceFiles=manifest['loader']['selectedInputs'][0]['sourceFiles'],commands=manifest['loader']['commands'],compiler=manifest['kernel']['compiler'])
-  pkg=b'go object linux arm64 go1.26.5\n';pkg_header=b'__.PKGDEF/      '+b'0           '+b'0     '+b'0     '+b'644     '+str(len(pkg)).encode().ljust(10)+b'`\n';pkg_archive=b'!<arch>\n'+pkg_header+pkg+(b'\n' if len(pkg)%2 else b'');files['proof/go-package.a']=pkg_archive
-  trace=v.canonical([dict(project=project['identity'],archive=dict(path='proof/go-package.a',sha256=v.digest(pkg_archive),sizeBytes=len(pkg_archive)),sourceFiles=loader['sourceFiles'])]);files['proof/package-trace']=trace;loader['packageTrace'].update(sha256=v.digest(trace),sizeBytes=len(trace))
-  tools=v.toolchain(manifest,files.__getitem__)
-  with mock.patch.object(v,'authenticate'):
-   v.go_loader(loader,output,{project['identity']:v.source_project(project,files.__getitem__)},files.__getitem__,tools)
-   loader['modules'][0]['buildInfo'][1]='v2.0.0'
-   with self.assertRaisesRegex(ValueError,'module coverage'):v.go_loader(loader,output,{project['identity']:v.source_project(project,files.__getitem__)},files.__getitem__,tools)
+  def output(line):return elf()+b'0'*8+bytes(header)+string(b'go1.26.5')+string(b'0'*16+line+b'0'*16)
+  self.assertEqual(v.go_build_info(output(b'mod\texample.invalid/main\t(devel)\t\n')),
+                   ('go1.26.5',[['example.invalid/main','(devel)']]))
+  for line in (b'dep\texample.invalid/module\tv1.0.0\t\n',b'dep\texample.invalid/module\tv1.0.0\n'):
+   with self.assertRaisesRegex(ValueError,'missing Go dependency checksum'):v.go_build_info(output(line))
+ def test_go_and_native_archive_padding_are_not_interchangeable(self):
+  header=b'odd.o/          '+b'0           '+b'0     '+b'0     '+b'644     '+b'1         '+b'`\n'
+  for padding in (b'\0',b'\n'):
+   archive=b'!<arch>\n'+header+b'x'+padding
+   self.assertEqual(v.archive_members(archive,padding=padding),{'odd.o':b'x'})
+   with self.assertRaisesRegex(ValueError,'archive padding'):
+    v.archive_members(archive,padding=b'\n' if padding==b'\0' else b'\0')
  def test_empty_authenticated_toolchain_argv_and_kernel_inputs_never_qualify(self):
   for change in ('toolchain','executable','argv','kernel-config','kernel-compiler','kernel-commands','map','response'):
    manifest,runtime,payloads,files=fixture()

@@ -8,9 +8,103 @@ on:
 permissions: {}
 
 jobs:
+  source-built-swift-sdk:
+    name: Build and attest the pinned static Swift SDK
+    if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 360
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - name: Check out the exact main commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Install pinned Swift SDK build prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes autoconf automake bison build-essential ca-certificates cmake curl file flex git gnupg libcurl4-openssl-dev libedit-dev libicu-dev libncurses-dev libsqlite3-dev libtool libxml2-dev ninja-build pkg-config python3-dev rsync strace tzdata unzip uuid-dev uuid-runtime xz-utils
+          test "$(uname -m)" = aarch64
+      - name: Install the exact signed Swift bootstrap toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          export SWIFTLY_HOME_DIR="$RUNNER_TEMP/swiftly"
+          export SWIFTLY_BIN_DIR="$RUNNER_TEMP/swiftly/bin"
+          mkdir -m 700 "$SWIFTLY_HOME_DIR"
+          bootstrap="$RUNNER_TEMP/swift-bootstrap"
+          mkdir -m 700 "$bootstrap"
+          cd "$bootstrap"
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            --output swiftly.tar.gz https://download.swift.org/swiftly/linux/swiftly-1.1.2-aarch64.tar.gz
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            --output swiftly.tar.gz.sig https://download.swift.org/swiftly/linux/swiftly-1.1.2-aarch64.tar.gz.sig
+          curl --fail --location --compressed --retry 3 --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            --output swift-signing-keys.asc https://www.swift.org/keys/all-keys.asc
+          export GNUPGHOME="$RUNNER_TEMP/swift-bootstrap-gnupg"
+          mkdir -m 700 "$GNUPGHOME"
+          gpg --batch --import swift-signing-keys.asc
+          gpg --batch --verify swiftly.tar.gz.sig swiftly.tar.gz
+          tar -xzf swiftly.tar.gz swiftly
+          ./swiftly init --assume-yes --no-modify-profile --quiet-shell-followup --skip-install
+          . "$SWIFTLY_HOME_DIR/env.sh"
+          swiftly install --assume-yes 6.3.0
+          [[ "$(swift --version | head -1)" == "Swift version 6.3"* ]]
+          printf '%s\n' "$SWIFTLY_BIN_DIR" >> "$GITHUB_PATH"
+          printf 'SWIFTLY_HOME_DIR=%s\n' "$SWIFTLY_HOME_DIR" >> "$GITHUB_ENV"
+      - name: Materialize the exact Swift source revisions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/release/materialize-swift-sdk-sources.py --root "$RUNNER_TEMP/swift-sdk-sources"
+      - name: Build the source-pinned static Swift SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/release/build-static-swift-sdk.sh \
+            --root "$RUNNER_TEMP/swift-sdk-sources" --repo-root "$GITHUB_WORKSPACE" \
+            --build-dir "$RUNNER_TEMP/swift-sdk-build" \
+            --products-dir "$RUNNER_TEMP/swift-sdk-products" \
+            --records "$RUNNER_TEMP/swift-sdk-records"
+          cp "$RUNNER_TEMP/swift-sdk-sources/source-revisions.json" "$RUNNER_TEMP/swift-sdk-records/"
+          cp "$RUNNER_TEMP/swift-bootstrap/swiftly.tar.gz" \
+            "$RUNNER_TEMP/swift-bootstrap/swiftly.tar.gz.sig" \
+            "$RUNNER_TEMP/swift-bootstrap/swift-signing-keys.asc" \
+            "$RUNNER_TEMP/swift-sdk-records/"
+          dpkg-query -W -f='${binary:Package}\t${Version}\n' \
+            > "$RUNNER_TEMP/swift-sdk-records/ubuntu-package-versions.tsv"
+          (cd "$RUNNER_TEMP/swift-sdk-records" && \
+            find . -type f ! -name checksums.sha256 -print0 | sort -z | xargs -0 sha256sum) \
+            > "$RUNNER_TEMP/swift-sdk-records/checksums.sha256"
+      - name: Attest the source-built SDK and retained build records
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            ${{ runner.temp }}/swift-sdk-records/swift-static-sdk.tar.gz
+            ${{ runner.temp }}/swift-sdk-records/source-revisions.json
+            ${{ runner.temp }}/swift-sdk-records/build.trace
+            ${{ runner.temp }}/swift-sdk-records/build.log
+            ${{ runner.temp }}/swift-sdk-records/toolchain-and-patches.txt
+            ${{ runner.temp }}/swift-sdk-records/build-environment.json
+            ${{ runner.temp }}/swift-sdk-records/ubuntu-package-versions.tsv
+            ${{ runner.temp }}/swift-sdk-records/checksums.sha256
+      - name: Retain the signed SDK and build records
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: runtime-swift-sdk-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/swift-sdk-records/
+          retention-days: 30
+          if-no-files-found: error
+
   runtime-build-ingredients:
     name: Rebuild pinned kernel and vminit ingredients
     if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' }}
+    needs: source-built-swift-sdk
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 120
     permissions:
@@ -23,6 +117,23 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+      - name: Download the authenticated source-built Swift SDK
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: runtime-swift-sdk-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/swift-sdk-records
+      - name: Verify the source-built SDK attestation
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd "$RUNNER_TEMP/swift-sdk-records" && sha256sum --check checksums.sha256)
+          gh attestation verify "$RUNNER_TEMP/swift-sdk-records/swift-static-sdk.tar.gz" \
+            --repo "$GITHUB_REPOSITORY" --hostname github.com \
+            --signer-digest "$GITHUB_SHA" --source-digest "$GITHUB_SHA" \
+            --source-ref refs/heads/main \
+            --cert-identity "https://github.com/$GITHUB_REPOSITORY/.github/workflows/runtime-ingredients.yml@refs/heads/main" \
+            --cert-oidc-issuer https://token.actions.githubusercontent.com \
+            --deny-self-hosted-runners
       - name: Verify complete source capture
         run: |
           python3 scripts/release/test-capture-runtime-source.py
@@ -103,6 +214,8 @@ jobs:
           [[ "$(swift --version | head -1)" == "Swift version 6.3"* ]]
           scripts/release/build-runtime-ingredients.sh \
             --kernel-inputs "$RUNNER_TEMP/kernel-signature-inputs" \
+            --swift-sdk "$RUNNER_TEMP/swift-sdk-records/swift-static-sdk.tar.gz" \
+            --swift-sdk-sha256 "$(awk '{print $1}' "$RUNNER_TEMP/swift-sdk-records/swift-static-sdk.sha256")" \
             --output "$RUNNER_TEMP/runtime-build-ingredients"
           mkdir -m 700 "$RUNNER_TEMP/runtime-build-ingredients/evidence/swift-bootstrap"
           cp "$RUNNER_TEMP/swift-bootstrap/swiftly.tar.gz" \
@@ -144,11 +257,30 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      - name: Set up the locked Go toolchain
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: Guest/HostwrightNetfilter/go.mod
-          cache-dependency-path: Guest/HostwrightNetfilter/go.sum
+      - name: Prepare the pinned Go toolchain and complete sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes strace
+          mkdir -m 700 "$RUNNER_TEMP/runtime-ingredients"
+          python3 scripts/release/test-capture-go-runtime-sources.py
+          python3 scripts/release/capture-go-runtime-sources.py \
+            --fetch --repositories "$RUNNER_TEMP/go-source-repositories" \
+            --source-root "$GITHUB_WORKSPACE" --source-commit "$GITHUB_SHA" \
+            --output "$RUNNER_TEMP/runtime-ingredients/source-projects"
+          pins=scripts/release/runtime-go-sources.json
+          archive_url="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["go"]["archiveURL"])' "$pins")"
+          archive_sha="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["go"]["archiveSHA256"])' "$pins")"
+          source_commit="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["go"]["commit"])' "$pins")"
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            --output "$RUNNER_TEMP/go-linux-arm64.tar.gz" "$archive_url"
+          python3 scripts/release/capture-go-build.py prepare \
+            --repository "$RUNNER_TEMP/go-source-repositories/go-runtime.git" \
+            --commit "$source_commit" --toolchain-archive "$RUNNER_TEMP/go-linux-arm64.tar.gz" \
+            --toolchain-sha256 "$archive_sha" --output "$RUNNER_TEMP/go-source-toolchain"
+          cp "$RUNNER_TEMP/go-source-toolchain/tool-overlay.json" "$RUNNER_TEMP/runtime-ingredients/"
+          printf '%s\n' "$RUNNER_TEMP/go-source-toolchain/toolchain/bin" >> "$GITHUB_PATH"
       - name: Build, test and retain actual loader inputs
         shell: bash
         run: |
@@ -156,18 +288,17 @@ jobs:
           test "$GITHUB_REPOSITORY" = hostwright/hostwright
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
-          mkdir -p "$RUNNER_TEMP/runtime-ingredients"
-          python3 scripts/release/capture-runtime-source.py \
-            --repository "$GITHUB_WORKSPACE" --commit "$GITHUB_SHA" \
-            --output "$RUNNER_TEMP/runtime-ingredients/source-tree"
+          export GO_CAPTURE_TEST_GO="$RUNNER_TEMP/go-source-toolchain/toolchain/bin/go"
+          python3 scripts/release/test-capture-go-build.py
           cd Guest/HostwrightNetfilter
           test -z "$(gofmt -l .)"
           GOTOOLCHAIN=local go test -mod=readonly ./...
           for build in first second; do
-            GOTOOLCHAIN=local GOOS=linux GOARCH=arm64 CGO_ENABLED=0 \
-              go build -mod=readonly -trimpath -buildvcs=false \
-                -ldflags='-buildid= -s -w' \
-                -o "$RUNNER_TEMP/runtime-ingredients/hostwright-netfilter-$build" .
+            python3 "$GITHUB_WORKSPACE/scripts/release/capture-go-build.py" build \
+              --go "$GO_CAPTURE_TEST_GO" --source "$PWD" --jobs 1 \
+              --output "$RUNNER_TEMP/runtime-ingredients/capture-$build"
+            cp "$RUNNER_TEMP/runtime-ingredients/capture-$build/payload" \
+              "$RUNNER_TEMP/runtime-ingredients/hostwright-netfilter-$build"
           done
           cmp "$RUNNER_TEMP/runtime-ingredients/hostwright-netfilter-first" \
             "$RUNNER_TEMP/runtime-ingredients/hostwright-netfilter-second"
@@ -179,6 +310,12 @@ jobs:
             > "$RUNNER_TEMP/runtime-ingredients/go-environment.json"
           sha256sum "$RUNNER_TEMP/runtime-ingredients/hostwright-netfilter-first" \
             > "$RUNNER_TEMP/runtime-ingredients/hostwright-netfilter.sha256"
+          python3 "$GITHUB_WORKSPACE/scripts/release/prepare-go-runtime-provenance.py" \
+            --root "$RUNNER_TEMP/runtime-ingredients" --source-commit "$GITHUB_SHA"
+          tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
+            -czf "$RUNNER_TEMP/runtime-ingredients/loader-build-inputs.tar.gz" \
+            -C "$RUNNER_TEMP/runtime-ingredients" \
+            capture-first capture-second source-projects tool-overlay.json loader-evidence loader-provenance.json
           test -z "$(git -C ../.. status --porcelain=v1 --untracked-files=all)"
       - name: Attest the built loader and its retained build inputs
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
@@ -189,11 +326,15 @@ jobs:
             ${{ runner.temp }}/runtime-ingredients/hostwright-netfilter-buildinfo.txt
             ${{ runner.temp }}/runtime-ingredients/go-environment.json
             ${{ runner.temp }}/runtime-ingredients/hostwright-netfilter.sha256
-            ${{ runner.temp }}/runtime-ingredients/source-tree/**
+            ${{ runner.temp }}/runtime-ingredients/loader-build-inputs.tar.gz
       - name: Retain the attested loader and build inputs
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: runtime-guest-loader-${{ github.sha }}
-          path: ${{ runner.temp }}/runtime-ingredients/
+          path: |
+            ${{ runner.temp }}/runtime-ingredients/hostwright-netfilter-*
+            ${{ runner.temp }}/runtime-ingredients/hostwright-netfilter.sha256
+            ${{ runner.temp }}/runtime-ingredients/go-environment.json
+            ${{ runner.temp }}/runtime-ingredients/loader-build-inputs.tar.gz
           retention-days: 30
           if-no-files-found: error

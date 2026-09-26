@@ -2,6 +2,9 @@
   "$defs": {
     "goLoader": {
       "properties": {
+        "buildCapture": {
+          "$ref": "#/$defs/record"
+        },
         "commands": {
           "items": {
             "$ref": "#/$defs/record"
@@ -91,7 +94,8 @@
         "commands",
         "compiler",
         "moduleRevisions",
-        "packageTrace"
+        "packageTrace",
+        "buildCapture"
       ],
       "type": "object"
     },

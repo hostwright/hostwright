@@ -1,0 +1,172 @@
+[
+  {
+    "destination": "libxml2",
+    "repository": "https://github.com/GNOME/libxml2.git",
+    "commit": "74f3154320df8950eceae4951975cc9dfc3a254d"
+  },
+  {
+    "destination": "swift-project/swift-argument-parser",
+    "repository": "https://github.com/apple/swift-argument-parser.git",
+    "commit": "309a47b2b1d9b5e991f36961c983ecec72275be3"
+  },
+  {
+    "destination": "swift-project/swift-asn1",
+    "repository": "https://github.com/apple/swift-asn1.git",
+    "commit": "a54383ada6cecde007d374f58f864e29370ba5c3"
+  },
+  {
+    "destination": "swift-project/swift-async-algorithms",
+    "repository": "https://github.com/apple/swift-async-algorithms.git",
+    "commit": "6ae9a051f76b81cc668305ceed5b0e0a7fd93d20"
+  },
+  {
+    "destination": "swift-project/swift-atomics",
+    "repository": "https://github.com/apple/swift-atomics.git",
+    "commit": "cd142fd2f64be2100422d658e7411e39489da985"
+  },
+  {
+    "destination": "swift-project/swift-certificates",
+    "repository": "https://github.com/apple/swift-certificates.git",
+    "commit": "386001a92200c70fd06217b3ccad58d7226edb84"
+  },
+  {
+    "destination": "swift-project/swift-collections",
+    "repository": "https://github.com/apple/swift-collections.git",
+    "commit": "c11818f3cae0780656baa430b49e7f163f08dffd"
+  },
+  {
+    "destination": "swift-project/swift-crypto",
+    "repository": "https://github.com/apple/swift-crypto.git",
+    "commit": "d79c573e1b400d670ed12c0cb29d33f2c0f5ab70"
+  },
+  {
+    "destination": "swift-project/swift-system",
+    "repository": "https://github.com/apple/swift-system.git",
+    "commit": "61e4ca4b81b9e09e2ec863b00c340eb13497dac6"
+  },
+  {
+    "destination": "curl",
+    "repository": "https://github.com/curl/curl.git",
+    "commit": "cfbfb65047e85e6b08af65fe9cdbcf68e9ad496a"
+  },
+  {
+    "destination": "boringssl",
+    "repository": "https://github.com/google/boringssl.git",
+    "commit": "817ab07ebb53da35afea409ab9328f578492832d"
+  },
+  {
+    "destination": "libarchive",
+    "repository": "https://github.com/libarchive/libarchive.git",
+    "commit": "9525f90ca4bd14c7b335e2f8c84a4607b0af6bdf"
+  },
+  {
+    "destination": "zlib",
+    "repository": "https://github.com/madler/zlib.git",
+    "commit": "51b7f2abdade71cd9bb0e7a373ef2610ec6f9daf"
+  },
+  {
+    "destination": "mimalloc",
+    "repository": "https://github.com/microsoft/mimalloc.git",
+    "commit": "fbd8b99c2b828428947d70fdc046bb55609be93e"
+  },
+  {
+    "destination": "swift-project/llvm-project",
+    "repository": "https://github.com/swiftlang/llvm-project.git",
+    "commit": "944ef77b000119f9dfa308fb7171dd0772bc3fc2"
+  },
+  {
+    "destination": "swift-project/swift",
+    "repository": "https://github.com/swiftlang/swift.git",
+    "commit": "aa782beb23b8bd83bd16fca831532a05dd6cea39"
+  },
+  {
+    "destination": "swift-project/cmark",
+    "repository": "https://github.com/swiftlang/swift-cmark.git",
+    "commit": "924936d0427cb25a61169739a7660230bffa6ea6"
+  },
+  {
+    "destination": "swift-project/swift-corelibs-blocksruntime",
+    "repository": "https://github.com/swiftlang/swift-corelibs-blocksruntime.git",
+    "commit": "63319b62157ceb7642d91d42eac22b99555568f8"
+  },
+  {
+    "destination": "swift-project/swift-corelibs-foundation",
+    "repository": "https://github.com/swiftlang/swift-corelibs-foundation.git",
+    "commit": "58ed1c970a179b3564e2f29963870e0aa25a3e0a"
+  },
+  {
+    "destination": "swift-project/swift-corelibs-libdispatch",
+    "repository": "https://github.com/swiftlang/swift-corelibs-libdispatch.git",
+    "commit": "6cdb083f7f380368e402eee504fb84d9ea0bcd59"
+  },
+  {
+    "destination": "builder",
+    "repository": "https://github.com/swiftlang/swift-docker.git",
+    "commit": "ea31a3331dd0a3346ae7cc114daffe4f6be35415"
+  },
+  {
+    "destination": "swift-project/swift-driver",
+    "repository": "https://github.com/swiftlang/swift-driver.git",
+    "commit": "7d6b844f0c2497a997770a11536598b187066be9"
+  },
+  {
+    "destination": "swift-project/swift-experimental-string-processing",
+    "repository": "https://github.com/swiftlang/swift-experimental-string-processing.git",
+    "commit": "efe8986824694c53fd5e94a4c634f20b3682baeb"
+  },
+  {
+    "destination": "swift-project/swift-foundation",
+    "repository": "https://github.com/swiftlang/swift-foundation.git",
+    "commit": "60bd7a1d8a730ebdeab2cb037b0519ef3b010ed3"
+  },
+  {
+    "destination": "swift-project/swift-foundation-icu",
+    "repository": "https://github.com/swiftlang/swift-foundation-icu.git",
+    "commit": "2e2854eee567589ed44c5f3c85c7343e6d91978d"
+  },
+  {
+    "destination": "swift-project/llbuild",
+    "repository": "https://github.com/swiftlang/swift-llbuild.git",
+    "commit": "e38525ae3519021f014ad91e7bf86e7ae86044f5"
+  },
+  {
+    "destination": "swift-project/swift-syntax",
+    "repository": "https://github.com/swiftlang/swift-syntax.git",
+    "commit": "2b59c0c741e9184ab057fd22950b491076d42e91"
+  },
+  {
+    "destination": "swift-project/swift-toolchain-sqlite",
+    "repository": "https://github.com/swiftlang/swift-toolchain-sqlite.git",
+    "commit": "b45b80b943e88db3cb8ddea798fa3fa9912375ff"
+  },
+  {
+    "destination": "swift-project/swift-tools-support-core",
+    "repository": "https://github.com/swiftlang/swift-tools-support-core.git",
+    "commit": "dc45701bfc1e4d08b917fd338399b5cfd8810d28"
+  },
+  {
+    "destination": "xz",
+    "repository": "https://github.com/tukaani-project/xz.git",
+    "commit": "a522a226545730551f7e7c2685fab27cf567746c"
+  },
+  {
+    "destination": "musl-fts",
+    "repository": "https://github.com/void-linux/musl-fts.git",
+    "commit": "0bde52df588e8969879a2cae51c3a4774ec62472"
+  },
+  {
+    "destination": "musl",
+    "repository": "https://git.musl-libc.org/git/musl",
+    "commit": "0784374d561435f7c787a555aeab8ede699ed298"
+  },
+  {
+    "destination": "bzip2",
+    "repository": "https://sourceware.org/git/bzip2",
+    "commit": "6a8690fc8d26c815e798c588f796eabe9d684cf0"
+  },
+  {
+    "destination": "swift-project/cmake",
+    "repository": "https://github.com/Kitware/CMake.git",
+    "commit": "d88682dff6bf053e5bbdc10accf5d6825303e656"
+  }
+]

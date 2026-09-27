@@ -53,7 +53,9 @@ loader-only push run is insufficient. The manual run must complete the source-bu
 Swift SDK, native runtime, loader and final provenance jobs. The final artifact is
 `runtime-provenance-<source SHA>-<run ID>-<attempt>` and contains exactly
 `runtime-provenance.tar.gz`. The manifest and every runtime payload receive GitHub
-attestations from that workflow.
+attestations from that workflow. Retry with all jobs: each attempt has distinct
+artifact names, so successful jobs from an earlier attempt cannot supply a later
+attempt's handoff.
 
 The signing consumer verifies the exact source commit, repository, main ref,
 workflow, run, attempt and payload digests. A valid attestation from another run or
@@ -77,6 +79,21 @@ publication remains Phase 15 work.
 Run `python3 scripts/release/validate-third-party-notices.py --root "$PWD"` for the
 light source pin/text check. Add `--require-qualified` for release acceptance; it refuses blocked assets or
 missing corresponding-source evidence.
+
+The producer also compares the freshly verified runtime inventory and public
+notices with the committed qualified files. To prepare a reviewed runtime refresh,
+use a complete prepared proof and a clean checkout at that proof's exact source
+commit:
+
+```bash
+python3 scripts/release/qualify-runtime-inventory.py \
+  --prepared-root "$PREPARED_RUNTIME" --source-root "$CLEAN_SOURCE" \
+  --output "$NEW_INVENTORY_OUTPUT"
+```
+
+The output directory must be new and absolute. Review its inventories, notices,
+and kernel configuration together with the actual runtime digest and size updates
+before committing. This local verification does not authenticate a workflow run.
 
 Regenerate from read-only, exact-revision SwiftPM checkouts and Go caches with
 `scripts/release/collect-third-party-notices.py`. Its required arguments are

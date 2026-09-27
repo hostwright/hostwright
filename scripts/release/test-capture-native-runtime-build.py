@@ -51,6 +51,22 @@ class NativeCaptureTests(unittest.TestCase):
         self.evidence = self.root / "evidence"
         self.evidence.mkdir()
 
+    def test_kernel_capture_ignores_directory_symlinks_named_like_dependency_files(self):
+        tree = self.root / "kernel-tree"
+        dependency_directory = tree / "tools/testing/selftests/alsa"
+        dependency_directory.mkdir(parents=True)
+        (dependency_directory / "conf.d-real").mkdir()
+        (dependency_directory / "conf.d-real" / "settings").write_text("test\n")
+        (dependency_directory / "conf.d").symlink_to("conf.d-real", target_is_directory=True)
+        (tree / ".config").write_text("CONFIG_ARM64=y\n")
+        (tree / ".fixture.o.cmd").write_text(
+            "savedcmd_fixture.o := " + shlex.quote(shutil.which("gcc")) + " --version\n")
+
+        capture = C.retain_build(self.evidence, "kernel", tree)
+
+        self.assertEqual([item["originalPath"] for item in capture["metadata"]],
+                         [str(tree / ".fixture.o.cmd"), str(tree / ".config")])
+
     def test_compilation_database_reads_real_dependency_file_and_rejects_changed_source(self):
         obj = self.root / "helper.o"
         obj.write_bytes(b"object mapping test")

@@ -409,7 +409,8 @@ def retain_build(root, kind, tree, traces=(), maps=(), linker_invocations=None):
     tool_paths = set()
     unresolved = []
     if kind == "kernel":
-        candidates = sorted(tree.rglob("*.cmd")) + sorted(tree.rglob("*.d")) + [tree / ".config"]
+        candidates = [item for pattern in ("*.cmd", "*.d") for item in sorted(tree.rglob(pattern))
+                      if item.is_file()] + [tree / ".config"]
     else:
         build = tree / ".build"
         V.require(build.is_dir(), "missing Swift build directory")

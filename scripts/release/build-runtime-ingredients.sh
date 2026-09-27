@@ -18,6 +18,7 @@ readonly build_time=2026-01-01T00:00:00Z
 
 die() { printf '%s\n' "$1" >&2; exit "${2:-70}"; }
 usage() { die "usage: build-runtime-ingredients.sh --output ABSOLUTE_DIR --work-dir ABSOLUTE_DIR --kernel-inputs ABSOLUTE_DIR --swift-sdk ABSOLUTE_FILE --swift-sdk-sha256 SHA256 --sdk-object-sources ABSOLUTE_FILE --sdk-source-map-root ABSOLUTE_DIR [--sdk-source-captures ABSOLUTE_DIR]" 64; }
+trap 'status=$?; printf "runtime ingredient producer failed at line %s: %s (status %s)\\n" "$LINENO" "$BASH_COMMAND" "$status" >&2' ERR
 
 output= workdir= kernel_inputs= swift_sdk= swift_sdk_sha= sdk_object_sources= sdk_source_map_root= sdk_source_captures=
 while (( $# )); do
@@ -83,10 +84,12 @@ cleanup() {
   trap - EXIT
   if [[ -d "$work" && ! -L "$work" ]]; then
     if (( status != 0 )); then
+      printf 'runtime ingredient work retained for diagnosis: %s\n' "$work" >&2
       for log in "$work"/evidence/*.log; do
         [[ -f "$log" && ! -L "$log" ]] || continue
         tail -n 80 "$log" >&2
       done
+      exit "$status"
     fi
     find "$work" -depth -delete
   fi

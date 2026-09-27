@@ -119,6 +119,31 @@ jobs:
           include-hidden-files: true
           retention-days: 30
           if-no-files-found: error
+      - name: Retain failed Swift SDK build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: runtime-swift-sdk-failure-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/swift-sdk-records/build.log
+            ${{ runner.temp }}/swift-sdk-records/build.trace
+            ${{ runner.temp }}/swift-sdk-records/build-environment.json
+            ${{ runner.temp }}/swift-sdk-records/build-started
+            ${{ runner.temp }}/swift-sdk-records/build-finished
+            ${{ runner.temp }}/swift-sdk-records/build-exit-status
+            ${{ runner.temp }}/swift-sdk-records/build-working-directory
+            ${{ runner.temp }}/swift-sdk-records/product-archives.txt
+            ${{ runner.temp }}/swift-sdk-records/toolchain-and-patches.txt
+            ${{ runner.temp }}/swift-sdk-records/source-revisions.json
+            ${{ runner.temp }}/swift-sdk-records/ubuntu-package-versions.tsv
+            ${{ runner.temp }}/swift-sdk-records/runtime-disk-preflight.txt
+            ${{ runner.temp }}/swift-sdk-records/swift-static-sdk.sha256
+            ${{ runner.temp }}/swift-sdk-records/checksums.sha256
+            ${{ runner.temp }}/swift-sdk-records/build-inputs/sdk-object-sources.json
+            ${{ runner.temp }}/runtime-disk-preflight.txt
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: warn
 
   runtime-build-ingredients:
     name: Rebuild pinned kernel and vminit ingredients
@@ -318,6 +343,59 @@ jobs:
           path: ${{ runner.temp }}/runtime-build-ingredients/
           retention-days: 30
           if-no-files-found: error
+      - name: Retain failed native build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: runtime-build-ingredients-failure-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            /workspace/runtime-build/evidence/*.log
+            /workspace/runtime-build/evidence/*.trace
+            /workspace/runtime-build/evidence/*.map
+            /workspace/runtime-build/evidence/*.json
+            /workspace/runtime-build/evidence/*.config
+            /workspace/runtime-build/evidence/*.txt
+            /workspace/runtime-build/evidence/*.tsv
+            /workspace/runtime-build/evidence/vminit-link-inputs-*.tar.gz
+            /workspace/runtime-build/evidence/source-map/**
+            /workspace/runtime-build/evidence/native-source-map-first/**
+            /workspace/runtime-build/evidence/native-source-map-second/**
+            /workspace/runtime-build/evidence/linker-invocations-first/**
+            /workspace/runtime-build/evidence/linker-invocations-second/**
+            /workspace/runtime-build/evidence/rebuilds/**
+            /workspace/runtime-build/kernel-*.Image
+            /workspace/runtime-build/vminitd-first
+            /workspace/runtime-build/vminitd-second
+            /workspace/runtime-build/vmexec-first
+            /workspace/runtime-build/vmexec-second
+            /workspace/runtime-build/payloads/vmlinux-*
+            /workspace/runtime-build/payloads/vminitd
+            /workspace/runtime-build/payloads/vmexec
+            ${{ runner.temp }}/runtime-build-ingredients/evidence/*.log
+            ${{ runner.temp }}/runtime-build-ingredients/evidence/*.trace
+            ${{ runner.temp }}/runtime-build-ingredients/evidence/*.map
+            ${{ runner.temp }}/runtime-build-ingredients/evidence/*.json
+            ${{ runner.temp }}/runtime-build-ingredients/evidence/*.config
+            ${{ runner.temp }}/runtime-build-ingredients/evidence/*.txt
+            ${{ runner.temp }}/runtime-build-ingredients/evidence/*.tsv
+            ${{ runner.temp }}/runtime-build-ingredients/evidence/vminit-link-inputs-*.tar.gz
+            ${{ runner.temp }}/runtime-build-ingredients/evidence/source-map/**
+            ${{ runner.temp }}/runtime-build-ingredients/evidence/native-source-map-first/**
+            ${{ runner.temp }}/runtime-build-ingredients/evidence/native-source-map-second/**
+            ${{ runner.temp }}/runtime-build-ingredients/evidence/linker-invocations-first/**
+            ${{ runner.temp }}/runtime-build-ingredients/evidence/linker-invocations-second/**
+            ${{ runner.temp }}/runtime-build-ingredients/evidence/rebuilds/**
+            ${{ runner.temp }}/runtime-build-ingredients/kernel-*.Image
+            ${{ runner.temp }}/runtime-build-ingredients/vminitd-first
+            ${{ runner.temp }}/runtime-build-ingredients/vminitd-second
+            ${{ runner.temp }}/runtime-build-ingredients/vmexec-first
+            ${{ runner.temp }}/runtime-build-ingredients/vmexec-second
+            ${{ runner.temp }}/runtime-build-ingredients/payloads/vmlinux-*
+            ${{ runner.temp }}/runtime-build-ingredients/payloads/vminitd
+            ${{ runner.temp }}/runtime-build-ingredients/payloads/vmexec
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: warn
 
   guest-loader:
     name: Build and attest the guest loader

@@ -1,0 +1,81 @@
+diff --git a/swift-ci/sdks/static-linux/scripts/build.sh b/swift-ci/sdks/static-linux/scripts/build.sh
+index 1ce2f3d..b35b2c0 100755
+--- a/swift-ci/sdks/static-linux/scripts/build.sh
++++ b/swift-ci/sdks/static-linux/scripts/build.sh
+@@ -178,33 +178,6 @@ resource_dir="${script_dir}/../resources"
+ # Find the version numbers of the various dependencies
+ function describe {
+-    pushd $1 >/dev/null 2>&1
+-
+-    desc=$(git describe --tags)
+-    extra=
+-
+-    # Although git describe is documented as returning the newest tag,
+-    # if a given revision has multiple tags, it will actually return
+-    # the first one it finds, so we have some more work to do here.
+-
+-    # If we aren't pointing directly at a tag, git describe will append
+-    # -<number-of-commits>-g<truncated-hash> to the nearest tag.  Strip
+-    # this, but keep a note of it for later.
+-    if [[ $desc =~ '-[0-9]+-g[0-9a-f]{11}$' ]]; then
+-        stripped=${desc%-*-g*}
+-        extra=${desc#$stripped}
+-        desc=$stripped
+-    fi
+-
+-    # Get the hash for the tag
+-    rev=$(git rev-list -n 1 tags/$desc)
+-
+-    # Now find the newest tag at that hash, using version number ordering
+-    latest_tag=$(git tag --points-at $rev | sort -V | tail -n 1)
+-
+-    # Stick it all back together
+-    echo $latest_tag$extra
+-
+-    popd >/dev/null 2>&1
++    git -C "$1" describe --tags --always
+ }
+ function versionFromTag {
+     desc=$(describe $1)
+@@ -293,8 +266,8 @@ run cmake -G 'Ninja' ./ \
+     -DCMAKE_USE_OPENSSL=OFF \
+     -DBUILD_CursesDialog=OFF \
+     -DBUILD_TESTING=OFF
+-run ninja -C ${build_dir}/cmake/build
+-run ninja -C ${build_dir}/cmake/build install
++run ninja -j1 -C ${build_dir}/cmake/build
++run ninja -j1 -C ${build_dir}/cmake/build install
+ run export PATH="${build_dir}/cmake/install/bin:$PATH"
+ quiet_popd
+ run cmake --version
+@@ -831,8 +804,8 @@ EOF
+     # will build a Clang of its own, but that Clang needs to be set up to build
+     # for the static SDK (which means we need a .cfg file)
+     build_arch=$(uname -m)
+-    llvm_bin=${build_dir}/swift/Ninja-RelWithDebInfoAssert/llvm-linux-${build_arch}/bin
+-    swift_bin=${build_dir}/swift/Ninja-RelWithDebInfoAssert/swift-linux-${build_arch}/bin
++    llvm_bin=${build_dir}/swift/Ninja-ReleaseAssert+stdlib-RelWithDebInfoAssert/llvm-linux-${build_arch}/bin
++    swift_bin=${build_dir}/swift/Ninja-ReleaseAssert+stdlib-RelWithDebInfoAssert/swift-linux-${build_arch}/bin
+     mkdir -p $llvm_bin $swift_bin
+     cat >> $llvm_bin/${arch}-swift-linux-musl-clang.cfg <<EOF
+ --sysroot ${sdk_root}
+@@ -856,6 +829,11 @@ EOF
+     SWIFT_SOURCE_ROOT="${source_dir}/swift-project" \
+     SWIFT_BUILD_ROOT="${build_dir}/swift" \
+-    run ${source_dir}/swift-project/swift/utils/build-script -r \
++    run ${source_dir}/swift-project/swift/utils/build-script -R -a \
++        --jobs="${HOSTWRIGHT_SDK_BUILD_JOBS}" \
++        --llvm-build-type="${HOSTWRIGHT_SDK_HOST_TOOLS_BUILD_TYPE}" \
++        --swift-build-type="${HOSTWRIGHT_SDK_HOST_TOOLS_BUILD_TYPE}" \
++        --swift-stdlib-build-type="${HOSTWRIGHT_SDK_TARGET_STDLIB_BUILD_TYPE}" \
++        --swift-stdlib-enable-assertions=true \
+         --reconfigure \
+         --compiler-vendor=apple \
+         --bootstrapping hosttools \
+@@ -867,5 +845,5 @@ EOF
+         --install-destdir=$sdk_root \
+         --install-prefix=/usr \
+         --swift-install-components="libexec;stdlib;sdk-overlay" \
+-        --extra-cmake-options="-DSWIFT_SHOULD_BUILD_EMBEDDED_STDLIB=NO -DLLVM_USE_LINKER=lld -DLLVM_NO_DEAD_STRIP=On" \
++        --extra-cmake-options="-DSWIFT_SHOULD_BUILD_EMBEDDED_STDLIB=NO -DLLVM_USE_LINKER=lld -DLLVM_NO_DEAD_STRIP=On -DCMAKE_C_FLAGS_RELEASE='-O2 -DNDEBUG' -DCMAKE_CXX_FLAGS_RELEASE='-O2 -DNDEBUG'" \
+         $build_script_lto

@@ -77,8 +77,6 @@ struct RuntimeLicenseInventory: Codable, Equatable {
     let frameworkRevision: String
     let noticesSHA256: String
     let kernelSourceEvidence: RuntimeKernelSourceEvidence
-    let kernelArchiveURL: String
-    let kernelArchiveSHA256: String
     let initImageReference: String
     let initImageConfigurationSHA256: String
     let initImageLayerSHA256: String
@@ -205,8 +203,6 @@ enum DistributionThirdPartyNotices {
               runtime.noticesSHA256 == inventory.noticesSHA256,
               runtime.frameworkVersion == ContainerizationRuntimeAssetContract.frameworkVersion,
               runtime.frameworkRevision == ContainerizationRuntimeAssetContract.frameworkRevision,
-              runtime.kernelArchiveURL == ContainerizationRuntimeAssetContract.kernelArchiveURL,
-              runtime.kernelArchiveSHA256 == ContainerizationRuntimeAssetContract.kernelArchiveSHA256,
               runtime.initImageReference == ContainerizationRuntimeAssetContract.initImageReference,
               runtime.initImageConfigurationSHA256 == ContainerizationRuntimeAssetContract.initImageConfigurationDigest,
               runtime.initImageLayerSHA256 == ContainerizationRuntimeAssetContract.initImageLayerDigest,
@@ -220,20 +216,23 @@ enum DistributionThirdPartyNotices {
               runtime.assets.map(\.identity) == ["kata-linux-kernel", "apple-vminit-oci", "hostwright-netfilter-loader"],
               runtime.assets[0].sha256 == ContainerizationRuntimeAssetContract.kernelSHA256,
               runtime.assets[0].sizeBytes == ContainerizationRuntimeAssetContract.kernelSize,
-              runtime.assets[1].sha256 == ContainerizationRuntimeAssetContract.initImageIndexDigest,
-              runtime.assets[1].sizeBytes == ContainerizationRuntimeAssetContract.initImageIndexSize else {
+              runtime.assets[1].sha256 == ContainerizationRuntimeAssetContract.initImageManifestDigest,
+              runtime.assets[1].sizeBytes == ContainerizationRuntimeAssetContract.initImageManifestSize else {
             throw DistributionError.invalidArtifact("Third-party notices or runtime inventory have invalid pin, digest, or coverage bindings.")
         }
         guard runtime.retainedLoaderSourceFiles.count == 20, isHash(runtime.retainedLoaderBinarySHA256),
               runtime.retainedLoaderLinkedModules.count == 6,
               runtime.retainedLoaderLinkedModules.allSatisfy({ runtime.goDependencies.contains($0) }),
               runtime.retainedLoaderBuildSettings["CGO_ENABLED"] == "0",
+              runtime.retainedLoaderBuildSettings["-gcflags"] == "all=-buildid=",
               runtime.retainedLoaderBuildSettings["GOARCH"] == "arm64",
               runtime.retainedLoaderBuildSettings["GOOS"] == "linux" else {
             throw DistributionError.invalidArtifact("Retained loader binary inventory is incomplete or inconsistent.")
         }
         guard runtime.kernelSourceEvidence.configurationVersion == "186",
+              runtime.kernelSourceEvidence.sourceArchiveURL.hasPrefix("https://"),
               isHash(runtime.kernelSourceEvidence.sourceArchiveSHA256),
+              runtime.kernelSourceEvidence.sourceArchiveSizeBytes > 0,
               isHash(runtime.kernelSourceEvidence.actualConfigurationSHA256),
               inventory.runtimeDocuments.contains(where: {
                   $0.sourcePath == "runtime-build-recipe/kernel-actual-config-6.18.15-186" &&

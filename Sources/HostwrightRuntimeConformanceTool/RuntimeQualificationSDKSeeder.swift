@@ -44,8 +44,8 @@ enum RuntimeQualificationSDKSeeder {
                   let config = try JSONSerialization.jsonObject(with: configurationData) as? [String: Any],
                   config["schema"] as? Int == 1, config["framework"] as? String == ContainerizationRuntimeAssetContract.frameworkVersion,
                   config["initImageReference"] as? String == ContainerizationRuntimeAssetContract.initImageReference,
-                  config["initImageDescriptorDigest"] as? String == "sha256:" + ContainerizationRuntimeAssetContract.initImageIndexDigest,
-                  config["initImageVariantDigest"] as? String == "sha256:" + ContainerizationRuntimeAssetContract.initImageVariantDigest,
+                  config["initImageDescriptorDigest"] as? String == ContainerizationRuntimeAssetContract.initImageDescriptorDigest,
+                  config["initImageVariantDigest"] as? String == ContainerizationRuntimeAssetContract.initImageDescriptorDigest,
                   let rootPath = config["dataRootPath"] as? String,
                   let runtimePath = config["runtimeDirectoryPath"] as? String,
                   let kernelPath = config["kernelPath"] as? String,
@@ -56,22 +56,36 @@ enum RuntimeQualificationSDKSeeder {
             try safeAncestry(root, allowMissingLeaf: true)
             try safeAncestry(runtime, allowMissingLeaf: true)
             try safeAncestry(options.layout, allowMissingLeaf: false)
+            let kernelBytes = try readSafe(URL(fileURLWithPath: kernelPath))
             guard rootPath.hasPrefix("/"), runtimePath.hasPrefix("/"),
                   !FileManager.default.fileExists(atPath: root.path), root.path != "/",
                   !overlap(root, runtime), !overlap(root, options.layout), !overlap(root, options.config),
                   !overlap(root, URL(fileURLWithPath: initPath, isDirectory: true)),
                   !overlap(root, URL(fileURLWithPath: kernelPath)),
                   kernelDigest == ContainerizationRuntimeAssetContract.kernelSHA256,
-                  digest(try readSafe(URL(fileURLWithPath: kernelPath))) == kernelDigest else {
+                  Int64(kernelBytes.count) == ContainerizationRuntimeAssetContract.kernelSize,
+                  digest(kernelBytes) == kernelDigest else {
                 throw RuntimeQualificationCommandError.blocked("SDK seed root exists, overlaps inputs/runtime, or kernel binding changed")
             }
             let initRoot = URL(fileURLWithPath: initPath, isDirectory: true)
-            for expected in [ContainerizationRuntimeAssetContract.initImageIndexDigest,
-                             ContainerizationRuntimeAssetContract.initImageVariantDigest,
-                             ContainerizationRuntimeAssetContract.initImageConfigurationDigest,
-                             ContainerizationRuntimeAssetContract.initImageLayerDigest] {
-                guard digest(try readSafe(initRoot.appendingPathComponent("blobs/sha256/" + expected))) == expected else {
+            let expectedBlobs: [(String, Int64)] = [
+                (ContainerizationRuntimeAssetContract.initImageManifestDigest, ContainerizationRuntimeAssetContract.initImageManifestSize),
+                (ContainerizationRuntimeAssetContract.initImageConfigurationDigest, ContainerizationRuntimeAssetContract.initImageConfigurationSize),
+                (ContainerizationRuntimeAssetContract.initImageLayerDigest, ContainerizationRuntimeAssetContract.initImageLayerSize)
+            ]
+            for (expected, expectedSize) in expectedBlobs {
+                let bytes = try readSafe(initRoot.appendingPathComponent("blobs/sha256/" + expected))
+                guard Int64(bytes.count) == expectedSize, digest(bytes) == expected else {
                     throw RuntimeQualificationCommandError.blocked("SDK init image blob binding mismatch")
+                }
+            }
+            for (name, expectedDigest, expectedSize) in [
+                ("oci-layout", ContainerizationRuntimeAssetContract.initImageLayoutSHA256, ContainerizationRuntimeAssetContract.initImageLayoutSize),
+                ("index.json", ContainerizationRuntimeAssetContract.initImageIndexJSONSHA256, ContainerizationRuntimeAssetContract.initImageIndexJSONSize)
+            ] {
+                let bytes = try readSafe(initRoot.appendingPathComponent(name))
+                guard Int64(bytes.count) == expectedSize, digest(bytes) == expectedDigest else {
+                    throw RuntimeQualificationCommandError.blocked("SDK init image layout binding mismatch")
                 }
             }
             var parentMetadata = stat()

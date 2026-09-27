@@ -12,14 +12,16 @@ struct ContainerizationHelperBootstrapAssetLock: Equatable, Sendable {
 
     let frameworkVersion: String
     let kernel: File
+    let guestNetworkPolicyLoader: File
     let initImageReference: String
-    let initImageIndex: File
-    let initImageVariant: File
+    let initImageLayout: File
+    let initImageIndexJSON: File
+    let initImageManifest: File
     let initImageConfiguration: File
     let initImageLayer: File
 
-    var initImageDescriptorDigest: String { "sha256:\(initImageIndex.sha256)" }
-    var initImageVariantDigest: String { "sha256:\(initImageVariant.sha256)" }
+    var initImageDescriptorDigest: String { "sha256:\(initImageManifest.sha256)" }
+    var initImageVariantDigest: String { "sha256:\(initImageManifest.sha256)" }
 
     static let pinned = ContainerizationHelperBootstrapAssetLock(
         frameworkVersion: ContainerizationRuntimeAssetContract.frameworkVersion,
@@ -28,16 +30,26 @@ struct ContainerizationHelperBootstrapAssetLock: Equatable, Sendable {
             sha256: ContainerizationRuntimeAssetContract.kernelSHA256,
             size: ContainerizationRuntimeAssetContract.kernelSize
         ),
-        initImageReference: ContainerizationRuntimeAssetContract.initImageReference,
-        initImageIndex: File(
-            name: ContainerizationRuntimeAssetContract.initImageIndexDigest,
-            sha256: ContainerizationRuntimeAssetContract.initImageIndexDigest,
-            size: ContainerizationRuntimeAssetContract.initImageIndexSize
+        guestNetworkPolicyLoader: File(
+            name: ContainerizationRuntimeAssetContract.guestNetworkPolicyLoaderFileName,
+            sha256: ContainerizationRuntimeAssetContract.guestNetworkPolicyLoaderSHA256,
+            size: ContainerizationRuntimeAssetContract.guestNetworkPolicyLoaderSize
         ),
-        initImageVariant: File(
-            name: ContainerizationRuntimeAssetContract.initImageVariantDigest,
-            sha256: ContainerizationRuntimeAssetContract.initImageVariantDigest,
-            size: ContainerizationRuntimeAssetContract.initImageVariantSize
+        initImageReference: ContainerizationRuntimeAssetContract.initImageReference,
+        initImageLayout: File(
+            name: "oci-layout",
+            sha256: ContainerizationRuntimeAssetContract.initImageLayoutSHA256,
+            size: ContainerizationRuntimeAssetContract.initImageLayoutSize
+        ),
+        initImageIndexJSON: File(
+            name: "index.json",
+            sha256: ContainerizationRuntimeAssetContract.initImageIndexJSONSHA256,
+            size: ContainerizationRuntimeAssetContract.initImageIndexJSONSize
+        ),
+        initImageManifest: File(
+            name: ContainerizationRuntimeAssetContract.initImageManifestDigest,
+            sha256: ContainerizationRuntimeAssetContract.initImageManifestDigest,
+            size: ContainerizationRuntimeAssetContract.initImageManifestSize
         ),
         initImageConfiguration: File(
             name: ContainerizationRuntimeAssetContract.initImageConfigurationDigest,
@@ -236,7 +248,8 @@ enum ContainerizationHelperBootstrap {
                 ContainerizationRuntimeAssetContract
                     .guestNetworkPolicyLoaderFileName,
                 maximumBytes: 64 * 1_024 * 1_024,
-                expectedUserID: expectedUserID
+                expectedUserID: expectedUserID,
+                requirement: assetLock.guestNetworkPolicyLoader
             )
         } catch let error as ContainerizationHelperClientError {
             throw error
@@ -250,6 +263,8 @@ enum ContainerizationHelperBootstrap {
         assetLock: ContainerizationHelperBootstrapAssetLock,
         expectedUserID: uid_t
     ) throws {
+        try layout.requireFile(assetLock.initImageLayout, expectedUserID: expectedUserID)
+        try layout.requireFile(assetLock.initImageIndexJSON, expectedUserID: expectedUserID)
         let layoutData = try layout.readBoundedFile(
             "oci-layout",
             maximumBytes: 4 * 1_024,
@@ -268,14 +283,14 @@ enum ContainerizationHelperBootstrap {
         )
         guard let index = try JSONSerialization.jsonObject(with: indexData) as? [String: Any],
               index["schemaVersion"] as? Int == 2,
+              index["mediaType"] as? String == "application/vnd.oci.image.index.v1+json",
               let manifests = index["manifests"] as? [[String: Any]],
               manifests.count == 1,
               let descriptor = manifests.first,
-              descriptor["mediaType"] as? String == "application/vnd.oci.image.index.v1+json",
+              descriptor["mediaType"] as? String == "application/vnd.oci.image.manifest.v1+json",
               descriptor["digest"] as? String == assetLock.initImageDescriptorDigest,
-              descriptor["size"] as? Int == Int(assetLock.initImageIndex.size),
-              let annotations = descriptor["annotations"] as? [String: String],
-              annotations["org.opencontainers.image.ref.name"] == assetLock.initImageReference else {
+              descriptor["size"] as? Int == Int(assetLock.initImageManifest.size),
+              descriptor["annotations"] == nil else {
             throw ContainerizationHelperClientError.helperLaunchFailed
         }
 
@@ -290,8 +305,7 @@ enum ContainerizationHelperBootstrap {
             trustedRootOwner: true
         )
         for requirement in [
-            assetLock.initImageIndex,
-            assetLock.initImageVariant,
+            assetLock.initImageManifest,
             assetLock.initImageConfiguration,
             assetLock.initImageLayer
         ] {
@@ -550,7 +564,8 @@ private final class BootstrapDirectory {
     func requireLinuxARM64Executable(
         _ name: String,
         maximumBytes: Int64,
-        expectedUserID: uid_t
+        expectedUserID: uid_t,
+        requirement: ContainerizationHelperBootstrapAssetLock.File
     ) throws -> String {
         let (file, metadata) = try openRegularFile(
             name,
@@ -558,6 +573,7 @@ private final class BootstrapDirectory {
         )
         defer { Darwin.close(file) }
         guard metadata.st_mode & S_IXUSR != 0,
+              metadata.st_size == requirement.size,
               metadata.st_size >= 20,
               metadata.st_size <= maximumBytes else {
             throw ContainerizationHelperClientError.unsafeExecutable
@@ -581,7 +597,11 @@ private final class BootstrapDirectory {
               machine == 183 else {
             throw ContainerizationHelperClientError.unsafeExecutable
         }
-        return try sha256(file)
+        let digest = try sha256(file)
+        guard digest == requirement.sha256 else {
+            throw ContainerizationHelperClientError.helperLaunchFailed
+        }
+        return digest
     }
 
     func requireFile(

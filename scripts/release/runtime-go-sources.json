@@ -1,0 +1,107 @@
+{
+  "go": {
+    "archiveSHA256": "fe4789e92b1f33358680864bbe8704289e7bb5fc207d80623c308935bd696d49",
+    "archiveURL": "https://go.dev/dl/go1.26.5.linux-arm64.tar.gz",
+    "commit": "c19862e5f8415b4f24b189d065ed739517c548ba",
+    "identity": "go-runtime",
+    "licenses": [
+      "LICENSE"
+    ],
+    "notices": [
+      "LICENSE",
+      "PATENTS"
+    ],
+    "repository": "https://go.googlesource.com/go",
+    "spdx": "BSD-3-Clause",
+    "version": "go1.26.5"
+  },
+  "modules": [
+    {
+      "commit": "6f574e7fd1b4d07006d1c598cdb9b22789e5e541",
+      "identity": "go-github-com-google-nftables",
+      "licenses": [
+        "LICENSE"
+      ],
+      "module": "github.com/google/nftables",
+      "notices": [
+        "LICENSE"
+      ],
+      "repository": "https://github.com/google/nftables",
+      "spdx": "Apache-2.0",
+      "version": "v0.3.0"
+    },
+    {
+      "commit": "fbb4dce95f420edbb843b2801504350559a4fa18",
+      "identity": "go-github-com-mdlayher-netlink",
+      "licenses": [
+        "LICENSE.md"
+      ],
+      "module": "github.com/mdlayher/netlink",
+      "notices": [
+        "LICENSE.md"
+      ],
+      "repository": "https://github.com/mdlayher/netlink",
+      "spdx": "MIT",
+      "version": "v1.7.3-0.20250113171957-fbb4dce95f42"
+    },
+    {
+      "commit": "18f45b55db258c8db998cab787ca7a11529105b6",
+      "identity": "go-github-com-mdlayher-socket",
+      "licenses": [
+        "LICENSE.md"
+      ],
+      "module": "github.com/mdlayher/socket",
+      "notices": [
+        "LICENSE.md"
+      ],
+      "repository": "https://github.com/mdlayher/socket",
+      "spdx": "MIT",
+      "version": "v0.5.0"
+    },
+    {
+      "commit": "dfc720dfe0cfc125116068c20efcdcb5e4eab464",
+      "identity": "go-golang-org-x-net",
+      "licenses": [
+        "LICENSE"
+      ],
+      "module": "golang.org/x/net",
+      "notices": [
+        "LICENSE",
+        "PATENTS"
+      ],
+      "repository": "https://go.googlesource.com/net",
+      "spdx": "BSD-3-Clause",
+      "version": "v0.33.0"
+    },
+    {
+      "commit": "59c1ca1e4661ed4452be4069ceea3c233f4deec1",
+      "identity": "go-golang-org-x-sync",
+      "licenses": [
+        "LICENSE"
+      ],
+      "module": "golang.org/x/sync",
+      "notices": [
+        "LICENSE",
+        "PATENTS"
+      ],
+      "repository": "https://go.googlesource.com/sync",
+      "spdx": "BSD-3-Clause",
+      "version": "v0.6.0"
+    },
+    {
+      "commit": "fe16172d1123f5350a8c5585395465de6866de4c",
+      "identity": "go-golang-org-x-sys",
+      "licenses": [
+        "LICENSE"
+      ],
+      "module": "golang.org/x/sys",
+      "notices": [
+        "LICENSE",
+        "PATENTS"
+      ],
+      "repository": "https://go.googlesource.com/sys",
+      "spdx": "BSD-3-Clause",
+      "version": "v0.28.0"
+    }
+  ]
+}

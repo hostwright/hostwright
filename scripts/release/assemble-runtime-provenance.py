@@ -56,6 +56,41 @@ def records(value):
     return found
 
 
+def evidence_records(manifest, fetch):
+    found = records(manifest)
+
+    def include(document, prefix):
+        for name, record in records(document).items():
+            qualified = dict(record, path=prefix + name)
+            if qualified["path"] in found and found[qualified["path"]] != qualified:
+                fail("conflicting nested provenance record")
+            found[qualified["path"]] = qualified
+
+    for link in [manifest.get("loader", {}), *manifest.get("oci", {}).get("links", [])]:
+        for selected in link.get("selectedInputs", []):
+            if "compilerInputs" in selected:
+                document, prefix = VERIFIER.compiler_input_document(selected, fetch)
+                VERIFIER.native_source_files(selected, fetch)
+                include(document, prefix)
+    capture_record = manifest.get("loader", {}).get("buildCapture")
+    if capture_record is None:
+        return found
+    prefix = capture_record["path"].rsplit("/", 1)[0] + "/" if "/" in capture_record["path"] else ""
+
+    def local(name):
+        return fetch(prefix + VERIFIER.path(name))
+
+    capture = VERIFIER.parse(VERIFIER.substantive(capture_record, fetch))
+    if capture.get("kind") != "hostwright.go-build-capture.v1":
+        fail("wrong Go build capture")
+    documents = [capture]
+    for record in capture["commands"] + [capture["packages"]]:
+        documents.append(VERIFIER.parse(VERIFIER.substantive(record, local)))
+    for document in documents:
+        include(document, prefix)
+    return found
+
+
 def assemble(input_root, output, version, prepared_source_state, signature_receipt_data):
     if input_root.is_symlink():
         fail("runtime provenance input root must not be a symlink")
@@ -109,7 +144,7 @@ def assemble(input_root, output, version, prepared_source_state, signature_recei
         (record["path"], record["sha256"], record["sizeBytes"])
         for record in manifest["oci"]["files"]
     }
-    for name, record in records(manifest).items():
+    for name, record in evidence_records(manifest, lambda name: regular(input_root, name).read_bytes()).items():
         if (name, record["sha256"], record["sizeBytes"]) in layer_files:
             continue
         archive_name = name

@@ -1,0 +1,9 @@
+diff --git a/Utilities/build-script-helper.py b/Utilities/build-script-helper.py
+index 1509f93..593c2f6 100755
+--- a/Utilities/build-script-helper.py
++++ b/Utilities/build-script-helper.py
+@@ -539,3 +539,3 @@
+   # Invoke Ninja
+-  ninja_cmd = [args.ninja_bin]
++  ninja_cmd = [args.ninja_bin, "-j1"]
+   if args.verbose:

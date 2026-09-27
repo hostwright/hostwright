@@ -28,6 +28,28 @@ CORRESPONDING_SOURCE = load("corresponding_source", "corresponding-source.py")
 class RuntimeProvenanceAssemblerTests(unittest.TestCase):
     """Exercise archive closure only; synthetic bytes are not producer evidence."""
 
+    def test_go_capture_retains_nested_tool_input_and_archive_records(self):
+        files = {}
+        def add(name, data):
+            files["go/" + name] = data
+            return dict(path=name, sha256=VERIFIER_TEST.v.digest(data), sizeBytes=len(data))
+        archive = add("files/package", b"package bytes")
+        source = add("files/source", b"source bytes")
+        command = add("commands/compile.json", VERIFIER_TEST.v.canonical(dict(
+            inputs=[dict(originalPath="/source.go", file=source)],
+            outputs=[dict(originalPath="/package.a", file=archive)])))
+        packages = add("packages.json", VERIFIER_TEST.v.canonical([dict(retainedSources=[dict(file=source)])]))
+        capture = add("build.json", VERIFIER_TEST.v.canonical(dict(
+            kind="hostwright.go-build-capture.v1", commands=[command], packages=packages)))
+        manifest = dict(loader=dict(buildCapture=dict(capture, path="go/build.json")))
+        closure = ASSEMBLER.evidence_records(manifest, files.__getitem__)
+        self.assertEqual(set(closure), set(files))
+        for name, record in closure.items():
+            self.assertEqual(record["sha256"], VERIFIER_TEST.v.digest(files[name]))
+        files["go/commands/compile.json"] += b"changed"
+        with self.assertRaisesRegex(ValueError, "evidence bytes mismatch"):
+            ASSEMBLER.evidence_records(manifest, files.__getitem__)
+
     def fixture(self, root):
         manifest, inventory, payloads, files = VERIFIER_TEST.fixture()
         files = dict(files)
@@ -52,6 +74,33 @@ class RuntimeProvenanceAssemblerTests(unittest.TestCase):
                  "gitStatusSHA256": VERIFIER_TEST.v.digest(b"")}
         receipt = (source / "upstream/kernel-source-signature.json").read_bytes()
         return ASSEMBLER.assemble(source, output, "0.0.2", state, receipt)
+
+    def test_compiler_input_sidecars_and_nested_records_survive_archive(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            source = root / "input"
+            source.mkdir()
+            manifest, _, payloads, files = self.fixture(source)
+            record, _ = VERIFIER_TEST.compiler_inputs_fixture(manifest, files)
+            files["runtime-provenance/manifest.json"] = VERIFIER_TEST.v.canonical(manifest)
+            for name, data in files.items():
+                destination = source / name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(data)
+            closure = ASSEMBLER.evidence_records(manifest, lambda name: (source / name).read_bytes())
+            self.assertIn("proof/headers/copied.h", closure)
+            self.assertIn("proof/headers/empty.h", closure)
+            self.assertIn("proof/headers/main.d", closure)
+            output = root / "source.tar.gz"
+            self.assemble(source, output, manifest)
+            with tarfile.open(output) as archive:
+                for name in (record["compilerInputs"]["path"], "proof/headers/copied.h", "proof/headers/main.d"):
+                    self.assertEqual(archive.extractfile(name).read(), files[name])
+                with mock.patch.object(VERIFIER_TEST.v, "authenticate"):
+                    VERIFIER_TEST.v.verify_source_bundle(archive, manifest["sourceCommit"], payloads)
+            (source / "proof/headers/main.d").write_bytes(b"changed")
+            with self.assertRaisesRegex(ValueError, "evidence bytes mismatch"):
+                self.assemble(source, root / "tampered.tar.gz", manifest)
 
     def test_assembly_is_deterministic_and_verifier_consumable(self):
         with tempfile.TemporaryDirectory() as temporary:

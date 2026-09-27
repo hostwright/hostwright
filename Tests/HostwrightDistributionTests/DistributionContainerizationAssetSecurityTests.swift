@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import HostwrightCore
 import XCTest
 @testable import HostwrightDistribution
 
@@ -75,6 +76,26 @@ final class DistributionContainerizationAssetSecurityTests: XCTestCase {
                 guard case DistributionError.invalidArtifact = $0 else {
                     return XCTFail("Expected invalidArtifact, received \($0)")
                 }
+            }
+        }
+    }
+
+    func testLoadRejectsModifiedGuestLoaderEvenWhenELFShapeIsValid() throws {
+        try withTemporaryDirectory { temporary in
+            let root = try makeDistributionTestContainerizationAssetRoot(at: temporary)
+            let loader = root.appendingPathComponent("guest/hostwright-netfilter")
+            var modifiedLoader = Data(repeating: 0, count: Int(ContainerizationRuntimeAssetContract.guestNetworkPolicyLoaderSize))
+            modifiedLoader.replaceSubrange(0..<20, with: [
+                0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 183, 0
+            ])
+            try modifiedLoader.write(to: loader)
+
+            XCTAssertThrowsError(try DistributionContainerizationAssets.load(root: root)) {
+                XCTAssertEqual(
+                    $0 as? DistributionError,
+                    .checksumMismatch("guest/hostwright-netfilter")
+                )
             }
         }
     }

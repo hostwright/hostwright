@@ -30,11 +30,13 @@ def lexical_path(value, role):
     return candidate
 
 
-def materialize(archive_path, output, source_commit):
+def materialize(archive_path, output, source_commit, run_id, attempt):
     archive_path = lexical_path(archive_path, "runtime provenance archive")
     output = lexical_path(output, "runtime asset output")
     if not re.fullmatch(r"[a-f0-9]{40}", source_commit):
         fail("invalid runtime asset source commit")
+    expected_producer = dict(commit=source_commit, runID=run_id, attempt=attempt)
+    VERIFIER.producer_binding(expected_producer, source_commit)
     if not archive_path.is_file():
         fail("runtime provenance archive must be a regular file")
     if output.exists():
@@ -60,6 +62,8 @@ def materialize(archive_path, output, source_commit):
 
         manifest_data = fetch("runtime-provenance/manifest.json")
         manifest = VERIFIER.parse(manifest_data)
+        if manifest.get("producer") != expected_producer:
+            fail("runtime provenance differs from the requested producer run/attempt")
         inventory = VERIFIER.parse(fetch("licenses/runtime-license-inventory.json"))
         payloads = {
             record["path"]: fetch("runtime-provenance/payloads/" + VERIFIER.path(record["path"]))
@@ -99,5 +103,8 @@ if __name__ == "__main__":
     parser.add_argument("--archive", type=pathlib.Path, required=True)
     parser.add_argument("--output", type=pathlib.Path, required=True)
     parser.add_argument("--source-commit", required=True)
+    parser.add_argument("--run-id", type=int, required=True)
+    parser.add_argument("--attempt", type=int, required=True)
     arguments = parser.parse_args()
-    print(VERIFIER.canonical(materialize(arguments.archive, arguments.output, arguments.source_commit)).decode(), end="")
+    print(VERIFIER.canonical(materialize(arguments.archive, arguments.output, arguments.source_commit,
+                                        arguments.run_id, arguments.attempt)).decode(), end="")

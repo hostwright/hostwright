@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Verify new source-built runtime ingredients; receipt flags are never authority."""
-import hashlib, io, json, os, pathlib, re, struct, subprocess, tarfile, tempfile
+import hashlib, io, json, os, pathlib, re, shlex, struct, subprocess, tarfile, tempfile
 
 REPO = 'hostwright/hostwright'
 WORKFLOW = '.github/workflows/runtime-ingredients.yml'
@@ -32,6 +32,26 @@ def path(name):
     return name
 
 def digest(data): return hashlib.sha256(data).hexdigest()
+
+def is_go_cgroup_cpu_max_path(filename):
+    """Recognize only Go's cgroup-v2 CPU quota resource path, not arbitrary /sys reads."""
+    if not isinstance(filename, str) or not filename.startswith('/sys/fs/cgroup/') or '\\' in filename:
+        return False
+    if re.search(r'[\x00-\x1f\x7f]', filename):
+        return False
+    components = filename.split('/')
+    return (len(components) >= 5 and components[:4] == ['', 'sys', 'fs', 'cgroup'] and
+            components[-1] == 'cpu.max' and
+            all(component not in ('', '.', '..') for component in components[1:]))
+
+def is_go_runtime_resource_read(filename, home):
+    """Match Go 1.26 runtime resource probes observed in assembler traces."""
+    return (re.fullmatch(r'/proc/[0-9]+/(cgroup|mountinfo)', filename) is not None or
+            is_go_cgroup_cpu_max_path(filename) or filename in {
+                '/sys/kernel/mm/transparent_hugepage/hpage_pmd_size',
+                str(pathlib.Path(home) / '.config/go/telemetry/local/weekends'),
+                str(pathlib.Path(home) / '.config/go/telemetry/mode')
+            })
 
 def bound(record, fetch):
     name = path(record['path'])
@@ -98,11 +118,14 @@ def toolchain(manifest, fetch):
     require({'compiler','linker'}<=identities, 'missing authenticated compiler/linker toolchain')
     return tools
 
+REVIEWED_LICENSE_REFS={'LicenseRef-Adam-Costello-Punycode'}
+
+
 def spdx(expression):
-    supported={'0BSD','Apache-2.0','BSD-2-Clause','BSD-3-Clause','MIT','ISC','bzip2-1.0.6','GPL-2.0-only','GPL-2.0-or-later',
+    supported={'0BSD','Apache-2.0','BSD-2-Clause','BSD-3-Clause','MIT','ISC','bzip2-1.0.6','curl','GPL-2.0-only','GPL-2.0-or-later',
                'GPL-3.0-only','GPL-3.0-or-later','LGPL-2.1-only','LGPL-2.1-or-later','LGPL-3.0-only',
-               'Zlib','OpenSSL','Unicode-3.0','Unicode-DFS-2016','ICU','MPL-2.0','CC0-1.0','PSF-2.0',
-               'LLVM-exception','Swift-exception'}
+               'Zlib','OpenSSL','Unicode-3.0','Unicode-DFS-2016','ICU','MPL-2.0','CC0-1.0','PSF-2.0','SunPro',
+               'bcrypt-Solar-Designer','NAIST-2003','LLVM-exception','Swift-exception'} | REVIEWED_LICENSE_REFS
     tokens=re.findall(r'[A-Za-z0-9.-]+|[()]',expression)
     require(''.join(tokens)==re.sub(r'\s','',expression) and tokens, 'malformed SPDX expression')
     cursor=0
@@ -194,6 +217,15 @@ def apply_patch_bytes(patch_data, contents):
         contents[name]=b''.join(result+original[cursor:]); changed=True
     require(changed, 'missing actual source patch changes')
 
+BORINGSSL_PIN_PREFIX = (b'This directory is derived from BoringSSL cloned from '
+                        b'https://boringssl.googlesource.com/boringssl at revision ')
+
+def verify_embedded_source_pin(data, commit):
+    """Require the complete, recognized BoringSSL hash.txt record for this revision."""
+    match=re.fullmatch(re.escape(BORINGSSL_PIN_PREFIX)+rb'([a-f0-9]{40})\r?\n?',data)
+    require(match is not None and match.group(1).decode()==commit,
+            'embedded source pin does not exactly name the captured source commit')
+
 def source_project(project, fetch, project_commits=None):
     """Reconstruct the complete Git tree from actual retained source leaves."""
     commit = bound(project['commitObject'], fetch)
@@ -261,10 +293,47 @@ def source_project(project, fetch, project_commits=None):
     for name,data in contents.items():leaves[name]=dict(leaves[name],sha256=digest(data),sizeBytes=len(data))
     for item in project['licenses']+project['notices']:
         data=substantive(item,fetch); source_name=path(item['sourcePath'])
+        if 'sourceProject' in item or 'embeddedPinPath' in item or 'embeddedCommit' in item:
+            require(all(key in item for key in ('sourceProject','embeddedPinPath','embeddedCommit')) and
+                    item['sourceProject']!=project['identity'] and
+                    re.fullmatch('[a-f0-9]{40}',item['embeddedCommit']) is not None and
+                    (project_commits is None or item['sourceProject'] not in project_commits or
+                     project_commits[item['sourceProject']]==item['embeddedCommit']),
+                    'embedded license lacks an exact captured source project')
+            pin_path=path(item['embeddedPinPath'])
+            require(pin_path in contents and leaves[pin_path]['gitMode']!='120000' and
+                    item['component']==project['identity'] and item['spdx']==project['spdx'],
+                    'embedded license source is not bound to the exact source pin')
+            verify_embedded_source_pin(contents[pin_path],item['embeddedCommit'])
+            continue
         require(source_name in leaves and leaves[source_name]['gitMode']!='120000' and
                 leaves[source_name]['sha256']==digest(data) and item['component']==project['identity'] and
                 item['spdx']==project['spdx'], 'license/notice is not bound to exact source leaf/component/SPDX')
+    if 'LicenseRef-Adam-Costello-Punycode' in project['spdx']:
+        data=contents.get('icuSources/common/punycode.cpp',b'')
+        retained=any(item['sourcePath']=='icuSources/common/punycode.cpp'
+                     for item in project['licenses']+project['notices'])
+        require(b'Adam M. Costello' in data and b'irrevocable permission' in data and retained,
+                'Punycode LicenseRef lacks its exact source grant evidence')
     return leaves
+
+def verify_embedded_license_documents(projects, fetch):
+    """Bind copied embedded license bytes to a captured source pin and its exact source leaf."""
+    by_identity={project['identity']:project for project in projects}
+    for project in projects:
+        for item in project['licenses']+project['notices']:
+            if 'sourceProject' not in item:
+                continue
+            source=by_identity.get(item['sourceProject'])
+            require(source is not None and source['commit']==item['embeddedCommit'],
+                    'embedded license source project is absent or has the wrong commit')
+            matches=[record for record in source['licenses']+source['notices']
+                     if record['sourcePath']==item['sourcePath']]
+            require(matches, 'embedded license source leaf is not declared by its source project')
+            data=substantive(item,fetch)
+            require(any(substantive(record,fetch)==data and record['sha256']==item['sha256'] and
+                        record['sizeBytes']==item['sizeBytes'] for record in matches),
+                    'embedded license bytes differ from the exact captured source leaf')
 
 def elf(data, relocatable=False):
     require(len(data)>=64 and data[:7]==b'\x7fELF\x02\x01\x01', 'expected ELF64 little-endian bytes')
@@ -291,7 +360,7 @@ def arm64_image(data):
             res2==res3==res4==0 and text_offset<image_size,
             'invalid arm64 Linux Image header')
 
-def archive_entries(data):
+def archive_entries(data, *, padding=b'\n'):
     require(data.startswith(b'!<arch>\n'), 'expected actual static archive')
     result=[]; names=b''; offset=8
     while offset<len(data):
@@ -313,13 +382,13 @@ def archive_entries(data):
             result.append((name,offset,raw))
         offset+=60+size
         if size%2:
-            require(offset<len(data) and data[offset:offset+1]==b'\n', 'invalid static archive padding')
+            require(offset<len(data) and data[offset:offset+1]==padding, 'invalid static archive padding')
             offset+=1
     return result
 
-def archive_members(data, selected=None):
+def archive_members(data, selected=None, *, padding=b'\n'):
     result={}
-    for name,offset,raw in archive_entries(data):
+    for name,offset,raw in archive_entries(data,padding=padding):
         if name in result:
             require(selected is not None and name not in selected, 'ambiguous duplicate archive member')
         else:result[name]=raw
@@ -403,6 +472,198 @@ def lld_map_inputs(data):
     require(selected, 'empty actual LLD selected input set')
     return selected
 
+def expand_response_arguments(arguments, records, fetch, cwd=None):
+    responses={}
+    for record in records:
+        name=record.get('originalPath')
+        require(isinstance(name,str) and name and '\0' not in name, 'response file lacks original invocation path')
+        require(name not in responses, 'duplicate response file invocation path')
+        responses[name]=substantive(record,fetch).decode()
+    def expand(values, active):
+        result=[]
+        for value in values:
+            if not value.startswith('@'):
+                result.append(value);continue
+            name=value[1:]
+            if name not in responses and cwd is not None:name=os.path.normpath(os.path.join(cwd,name))
+            require(name in responses, 'linker response file was not retained')
+            require(name not in active, 'recursive linker response file')
+            result.extend(expand(shlex.split(responses[name]),active|{name}))
+        return result
+    return expand(arguments,set())
+
+def compiler_input_document(record, fetch):
+    metadata=record['compilerInputs']
+    name=path(metadata['path'])
+    document=parse(substantive(metadata,fetch))
+    require(isinstance(document,dict) and document.get('objectSHA256')==record['objectSHA256'],
+            'compiler input object mismatch')
+    require({'objectSHA256','sourceFiles','translationUnits'}<=document.keys()
+            and document.keys()<={'objectSHA256','sourceFiles','translationUnits','generatedHeaders','compilerResponseFiles','compilerModuleFiles'},
+            'invalid compiler input metadata')
+    return document,name.rsplit('/',1)[0]+'/' if '/' in name else ''
+
+NATIVE_SOURCE_ALIASES = {
+    ("swift-sdk/swift-project/cmake", "Utilities/cmbzip2/blocksort.c"): ("swift-sdk/bzip2", "blocksort.c"),
+    ("swift-sdk/swift-project/cmake", "Utilities/cmbzip2/bzlib.h"): ("swift-sdk/bzip2", "bzlib.h"),
+    ("swift-sdk/swift-project/cmake", "Utilities/cmbzip2/crctable.c"): ("swift-sdk/bzip2", "crctable.c"),
+    ("swift-sdk/swift-project/cmake", "Utilities/cmbzip2/decompress.c"): ("swift-sdk/bzip2", "decompress.c"),
+    ("swift-sdk/swift-project/cmake", "Utilities/cmbzip2/huffman.c"): ("swift-sdk/bzip2", "huffman.c"),
+    ("swift-sdk/swift-project/cmake", "Utilities/cmbzip2/randtable.c"): ("swift-sdk/bzip2", "randtable.c"),
+    ("swift-sdk/swift-project/cmake", "Utilities/cmcurl/include/curl/header.h"):
+        ("swift-sdk/curl", "include/curl/header.h"),
+    ("swift-sdk/swift-project/cmake", "Utilities/cmcurl/include/curl/options.h"):
+        ("swift-sdk/curl", "include/curl/options.h"),
+}
+
+
+def native_source_files(record, fetch):
+    def sources(values):
+        require(isinstance(values,list) and 0<len(values)<=MAX_FILES, 'missing native compiler sources')
+        result=set()
+        for source in values:
+            require(isinstance(source,dict) and {'project','path','sha256'}<=source.keys(), 'invalid native compiler source')
+            identity=(path(source['project']),path(source['path']),source['sha256'])
+            require(re.fullmatch('[a-f0-9]{64}',identity[2]) is not None, 'invalid native compiler source digest')
+            require(identity not in result, 'duplicate native compiler source')
+            result.add(identity)
+        return result
+    compact=sources(record['sourceFiles'])
+    document=record
+    local=fetch
+    if 'compilerInputs' in record:
+        require('generatedHeaders' not in record, 'compiler input metadata is duplicated inline')
+        document,prefix=compiler_input_document(record,fetch)
+        local=lambda name:fetch(prefix+path(name))
+        raw_compact=compact
+        raw_complete=sources(document['sourceFiles'])
+        raw_units=sources(document['translationUnits'])
+        require(raw_units<=raw_complete and raw_compact<=raw_complete,
+                'compact native sources or translation units are not verified sources')
+        require({row[0] for row in raw_compact}=={row[0] for row in raw_complete},
+                'compact native source project coverage mismatch')
+        require(len(raw_compact)==len({row[0] for row in raw_complete}),
+                'compact native sources must name one representative per project')
+        require({row[0] for row in raw_compact&raw_units}=={row[0] for row in raw_units},
+                'compact native sources omit a translation-unit representative')
+
+        def canonical(rows):
+            result=set()
+            for project,name,sha in rows:
+                target=NATIVE_SOURCE_ALIASES.get((project,name))
+                if target is not None:
+                    candidate=(target[0],target[1],sha)
+                    require(candidate in raw_complete, 'source alias lacks exact pinned upstream match')
+                    result.add(candidate)
+                else:
+                    result.add((project,name,sha))
+            return result
+
+        complete=canonical(raw_complete)
+        units=canonical(raw_units)
+        compact_candidates=canonical(raw_compact)
+        compact=set()
+        for project in {row[0] for row in compact_candidates}:
+            candidates={row for row in compact_candidates if row[0]==project}
+            compact.add(min(candidates&units or candidates))
+        require(units<=complete and compact<=complete
+                and {row[0] for row in compact&units}=={row[0] for row in units},
+                'canonical compiler inputs omit source coverage')
+        response_files=document.get('compilerResponseFiles',[])
+        require(isinstance(response_files,list), 'invalid compiler response-file evidence')
+        response_sources=set()
+        for response in response_files:
+            require(isinstance(response,dict) and isinstance(response.get('originalPath'),str)
+                    and pathlib.PurePosixPath(response['originalPath']).is_absolute()
+                    and isinstance(response.get('file'),dict)
+                    and {'path','sha256','sizeBytes'}<=response['file'].keys(),
+                    'invalid compiler response-file record')
+            data=bound(response['file'],local)
+            response_paths=response.get('sourcePaths')
+            require(data and isinstance(response.get('sourceFiles'),list) and isinstance(response_paths,list)
+                    and response_paths and all(isinstance(item,str) and pathlib.PurePosixPath(item).is_absolute()
+                                               and pathlib.PurePosixPath(item).suffix=='.swift' for item in response_paths)
+                    and set(response_paths)<=set(shlex.split(data.decode('utf-8'))),
+                    'empty compiler response file or missing sources')
+            response_sources.update(canonical(sources(response['sourceFiles'])))
+        if response_files:
+            require(response_sources==units, 'compiler response-file translation units mismatch')
+        module_files=document.get('compilerModuleFiles',[])
+        require(isinstance(module_files,list), 'invalid compiler module-file evidence')
+        for module in module_files:
+            require(isinstance(module,dict) and isinstance(module.get('originalPath'),str)
+                    and pathlib.PurePosixPath(module['originalPath']).is_absolute()
+                    and pathlib.PurePosixPath(module['originalPath']).suffix=='.pcm'
+                    and isinstance(module.get('file'),dict)
+                    and {'path','sha256','sizeBytes'}<=module['file'].keys(),
+                    'invalid compiler module-file record')
+            require(bool(bound(module['file'],local)), 'empty compiler module file')
+    else:
+        complete=compact
+    headers=document.get('generatedHeaders',[])
+    require(isinstance(headers,list), 'invalid generated-header evidence')
+    validated={}
+    def retained(item):
+        key=(path(item['path']),item['sha256'],item['sizeBytes'])
+        if key not in validated:validated[key]=bound(item,local)
+        return validated[key]
+    for header in headers:
+        require(isinstance(header,dict) and isinstance(header.get('originalPath'),str)
+                and pathlib.PurePosixPath(header['originalPath']).is_absolute()
+                and isinstance(header.get('file'),dict)
+                and {'path','sha256','sizeBytes'}<=header['file'].keys(), 'invalid generated-header file evidence')
+        data=retained(header['file'])
+        require(isinstance(header.get('compilerArguments'),list) and header['compilerArguments']
+                and all(isinstance(argument,str) and argument for argument in header['compilerArguments'])
+                and isinstance(header.get('cwd'),str) and pathlib.PurePosixPath(header['cwd']).is_absolute()
+                and isinstance(header.get('evidence'),dict), 'missing generated-header compiler metadata')
+        evidence=header.get('retainedEvidence')
+        require(isinstance(evidence,list) and evidence and all(isinstance(item,dict)
+                and isinstance(item.get('file'),dict) and {'path','sha256','sizeBytes'}<=item['file'].keys()
+                for item in evidence), 'missing retained generated-header compiler evidence')
+        for item in evidence:require(retained(item['file']).strip(), 'empty retained compiler evidence')
+        if header.get('kind')=='empty-header':
+            require(not data and not header.get('matchingSources'), 'empty native header has content or attribution')
+        if header.get('kind')=='generated-source-input':
+            require(pathlib.PurePosixPath(header['originalPath']).name=='cmake_pch.h.c'
+                    and data==b'/* generated by CMake */\n' and not header.get('matchingSources'),
+                    'unverified generated precompiled-header source')
+        if header.get('kind')=='copied-source-input':
+            require(pathlib.PurePosixPath(header['originalPath']).suffix in
+                    ('.c','.cc','.cpp','.mm','.m','.S','.s','.swift') and data,
+                    'invalid copied compiler source input')
+        if header.get('kind')=='generated-template-source-input':
+            source_paths=header.get('sourcePaths')
+            require(pathlib.PurePosixPath(header['originalPath']).suffix in ('.swift','.mm') and data
+                    and isinstance(source_paths,list) and source_paths
+                    and all(isinstance(item,str) and pathlib.PurePosixPath(item).is_absolute()
+                            and pathlib.PurePosixPath(item).suffix in ('.gyb','.swift') for item in source_paths)
+                    and set(source_paths)==({item.decode('utf-8') for item in
+                        re.findall(rb'// ###sourceLocation\(file: "([^"\n]+\.(?:gyb|swift))"',data)}
+                        | {item.decode('utf-8') for item in
+                           re.findall(rb'// original-source-range: ([^\s:]+\.(?:gyb|swift)):\d+:\d+',data)})
+                    and canonical(sources(header.get('sourceFiles',[])))<=complete,
+                    'invalid generated Swift source location evidence')
+        if header.get('kind')=='sdk-configuration-input':
+            require(pathlib.PurePosixPath(header['originalPath']).name=='SDKSettings.json'
+                    and isinstance(parse(data),dict) and not header.get('matchingSources'),
+                    'unverified SDK configuration input')
+        if 'matchingSources' in header or header.get('kind') in ('copied-header','copied-source-input'):
+            matches=canonical(sources(header.get('matchingSources')))
+            require(matches<=complete and all(row[2]==digest(data) for row in matches), 'copied native header source mismatch')
+    ordered=[]
+    emitted=set()
+    for source in document['sourceFiles']:
+        project,name,sha=path(source['project']),path(source['path']),source['sha256']
+        target=NATIVE_SOURCE_ALIASES.get((project,name))
+        if target is not None:project,name=target
+        row=(project,name,sha)
+        if row in complete and row not in emitted:
+            ordered.append(dict(project=project,path=name,sha256=sha))
+            emitted.add(row)
+    require(len(ordered)==len(complete), 'canonical source list lost compiler inputs')
+    return ordered
+
 def link_closure(link, output, projects, fetch, tools=None):
     elf(output)
     require(link['outputSHA256']==digest(output), 'link output mismatch')
@@ -415,6 +676,8 @@ def link_closure(link, output, projects, fetch, tools=None):
     require(selected==set(section_rows), 'link map section/input coverage mismatch')
     require(link['commands'] and link['responseFiles'], 'missing actual linker commands/response files')
     commands=[argv(record,fetch,tools) for record in link['commands']]
+    if all('originalPath' in record for record in link['responseFiles']):
+        commands=[expand_response_arguments(command,link['responseFiles'],fetch,link.get('workingDirectory')) for command in commands]
     require(any(any('-Map' in arg or '--Map' in arg for arg in command[1:]) for command in commands), 'linker argv lacks actual map capture')
     for record in link['responseFiles']:substantive(record,fetch)
     archive_cache={}; parsed_archives={}; expected={}; covered={}; archive_digests={}; ledger=set()
@@ -447,16 +710,13 @@ def link_closure(link, output, projects, fetch, tools=None):
         ledger.add(identity)
         require(digest(data)==record['objectSHA256'], 'selected object mismatch'); elf(data,True)
         require(record['sourceFiles'], 'selected object has no compiled-source attribution')
-        for source in record['sourceFiles']:
+        for source in native_source_files(record,fetch):
             require(source['project'] in projects and source['path'] in projects[source['project']], 'selected source missing')
             leaf=projects[source['project']][source['path']]
             require(leaf['gitMode']!='120000' and leaf['sha256']==source['sha256'], 'selected source attribution mismatch')
     require(expected==covered, 'selected archive occurrence ledger coverage mismatch')
 
-def go_loader(loader, output, projects, fetch, tools=None):
-    elf(output)
-    require(digest(output)==loader['outputSHA256'] and loader['project'] in projects and
-            loader['goRuntimeProject'] in projects, 'Go loader source/output mismatch')
+def go_build_metadata(output):
     magic=b'\xff Go buildinf:'; offset=output.find(magic)
     require(offset>=0 and offset%16==0 and output.find(magic,offset+1)<0 and offset+32<=len(output), 'missing unique Go build info')
     require(output[offset+14]==8, 'wrong Go build info pointer size')
@@ -472,13 +732,220 @@ def go_loader(loader, output, projects, fetch, tools=None):
             shift+=7
         raise ValueError('invalid Go build info length')
     version,position=string(offset+32); info,_=string(position)
-    require(version.decode()==loader['goVersion'] and len(info)>=32, 'Go compiler version/build info mismatch')
-    info=info[16:-16].decode(); modules=[]
+    require(len(info)>=32, 'Go compiler version/build info mismatch')
+    info=info[16:-16].decode(); modules=[]; settings={}
     for line in info.splitlines():
         fields=line.split('\t')
         if fields[0] in ('mod','dep'):
-            require(len(fields)>=3, 'invalid Go module build info'); modules.append(fields[1:4])
+            require(len(fields) in (3,4) and all(fields[1:3]), 'invalid Go module build info')
+            entry=fields[1:3]
+            if len(fields)==4 and fields[3]:entry.append(fields[3])
+            else:require(fields[0]=='mod' and fields[2]=='(devel)', 'missing Go dependency checksum')
+            modules.append(entry)
+        elif fields[0] == 'build':
+            require(len(fields) == 2 and '=' in fields[1], 'invalid Go build setting')
+            key, value = fields[1].split('=', 1)
+            require(key and key not in settings, 'duplicate or empty Go build setting')
+            settings[key] = value
         require(not line.startswith('=>'), 'unverified Go module replacement')
+    return version.decode(),modules,settings
+
+def go_build_info(output):
+    version, modules, _ = go_build_metadata(output)
+    return version, modules
+
+def go_build_settings(output):
+    return go_build_metadata(output)[2]
+
+GO_DIST_GENERATED_SOURCES = {
+    ("go-runtime", "src/internal/runtime/sys/zversion.go"):
+        ("go1.26.5", "f69c03727973664529c2e6fa2d2c53b2d3440c887938d0d9b22254f7984052f2"),
+}
+
+def generated_go_source(project, source_path, source_sha256, go_version):
+    """Classify the version file generated by the pinned Go distribution build."""
+    expected = GO_DIST_GENERATED_SOURCES.get((project, source_path))
+    require(expected is not None and expected == (go_version, source_sha256),
+            'unsupported generated Go source input')
+    return dict(generator='go tool dist', goVersion=go_version)
+
+def verify_go_source_record(source, projects, go_version):
+    if 'generatedSource' in source:
+        require(source['generatedSource'] == generated_go_source(
+            source['project'], source['path'], source['sha256'], go_version),
+            'invalid generated Go source provenance')
+    else:
+        require(source['project'] in projects and source['path'] in projects[source['project']] and
+                projects[source['project']][source['path']]['sha256']==source['sha256'],
+                'Go compiled source mismatch')
+
+def go_capture(record, output, fetch, tools):
+    capture=parse(substantive(record,fetch))
+    prefix=record['path'].rsplit('/',1)[0]+'/' if '/' in record['path'] else ''
+    def local(name):return fetch(prefix+path(name))
+    require(capture['kind']=='hostwright.go-build-capture.v1', 'wrong Go build capture')
+    require(bound(capture['payload'],local)==output, 'Go captured payload mismatch')
+    command=capture['command']
+    require(command[1]=='build' and '-a' in command and '-gcflags=all=-buildid=' in command and
+            tools.get(command[0])==capture['executable']['sha256'], 'Go driver/tool policy mismatch')
+    substantive(capture['executable'],local);substantive(capture['collector'],local)
+    environment=parse(substantive(capture['environment'],local))
+    fixed_environment={'GOOS':'linux','GOARCH':'arm64','CGO_ENABLED':'0','GOENV':'off','GOFLAGS':'',
+                       'GOWORK':'off','GOTOOLCHAIN':'local','GOEXPERIMENT':'','GOTELEMETRY':'off','LANG':'C','TZ':'UTC'}
+    require(all(environment.get(k)==v for k,v in fixed_environment.items()) and
+            re.fullmatch(r'[1-9][0-9]?',environment['GOMAXPROCS']) and int(environment['GOMAXPROCS'])<=64, 'unsafe Go build environment')
+    observed=parse(substantive(capture['goEnvironment'],local))
+    require(observed['GOVERSION']==go_build_info(output)[0] and
+            all(observed.get(k)==fixed_environment[k] for k in ('GOOS','GOARCH','CGO_ENABLED','GOWORK','GOEXPERIMENT')), 'Go observed environment mismatch')
+    wrapper=capture['toolExec'];substantive(wrapper['interpreter'],local)
+    require(tools.get(wrapper['interpreterPath'])==wrapper['interpreter']['sha256'], 'unauthenticated Go capture interpreter')
+    expected_wrapper=shlex.join([wrapper['interpreterPath'],wrapper['collectorPath'],'tool','--output',wrapper['output'],'--'])
+    require(command==[command[0],'build','-a','-p='+environment['GOMAXPROCS'],'-work','-x','-mod=readonly',
+                      '-trimpath','-buildvcs=false','-gcflags=all=-buildid=','-toolexec='+expected_wrapper,
+                      '-ldflags=-buildid= -s -w','-o',wrapper['output']+'/payload','.'], 'unexpected Go build command or collector')
+    for item in capture['lockedInputs'].values():bound(item,local)
+    commands=[parse(substantive(item,local)) for item in capture['commands']]
+    require(commands, 'missing Go captured commands')
+    tool_environment=dict(fixed_environment,GOENV='')
+    # Go exports the resolved environment-file path and telemetry mode to child tools.
+    tool_environment.pop('GOTELEMETRY')
+    compiled={}; assembled={}; links=[]; input_tables={}
+    def flag(args,key):
+        values=[args[i+1] for i,v in enumerate(args[:-1]) if v==key]
+        require(len(values)==1, 'missing or ambiguous Go '+key+' argument')
+        return values[0]
+    def absolute(item):
+        require(isinstance(item,str) and item.startswith('/') and '\\' not in item and
+                '..' not in item.split('/') and not re.search(r'[\x00-\x1f\x7f]',item), 'unsafe Go build input path')
+        return item
+    def table(items):
+        result={}
+        for item in items:
+            name=absolute(item['originalPath'])
+            require(name not in result, 'duplicate Go build input path')
+            bound(item['file'],local);result[name]=item['file']
+        return result
+    for item in commands:
+        args=item['argv'];name=pathlib.PurePosixPath(args[0]).name
+        require(item['exitCode']==0 and tools.get(args[0])==item['executable']['sha256'], 'failed or unauthenticated Go tool invocation')
+        require(item['collector']['path']==wrapper['collectorPath'] and item['collector']['file']==capture['collector'], 'Go invocation used a different collector')
+        require(all(item['environment'].get(k)==value for k,value in tool_environment.items()) and
+                item['environment'].get('GOTELEMETRY') in ('off','local') and
+                item['environment'].get('GOROOT')==('' if name=='link' and '-o' in args else observed['GOROOT']), 'Go tool environment differs from build policy')
+        substantive(item['executable'],local)
+        require(name in ('compile','asm','link'), 'unsupported captured Go tool')
+        inputs=table(item['inputs']);outputs=table(item.get('outputs',[]))
+        input_tables[id(item)]=inputs
+        if '-o' not in args:
+            require(args[1:]==['-V=full'] and not outputs, 'unrecognized Go tool probe')
+            continue
+        target=flag(args,'-o');require(target in outputs, 'Go command output is not retained')
+        require(item['package'] and item['environment'].get('TOOLEXEC_IMPORTPATH')==item['package'], 'Go command package mismatch')
+        if name=='compile':
+            require('-embedcfg' not in args, 'Go embedded inputs need explicit provenance support')
+            require(item['package'] not in compiled, 'duplicate Go package compiler')
+            ids=[args[i+1] if value=='-buildid' else value[len('-buildid='):] for i,value in enumerate(args)
+                 if value=='-buildid' or value.startswith('-buildid=')]
+            require(ids and ids[-1]=='', 'Go compiler must disable archive build ID rewriting')
+            compiled[item['package']]=item
+        elif name=='asm':assembled.setdefault(item['package'],[]).append(item)
+        else:links.append(item)
+    require(len(links)==1, 'missing unambiguous captured Go linker')
+    link=links[0];link_outputs=table(link['outputs'])
+    require(bound(link_outputs[flag(link['argv'],'-o')],local)==output, 'Go link output differs from payload')
+    linked={row['package']:row for row in link['packageArchives']}
+    require(len(linked)==len(link['packageArchives']) and set(linked)==set(compiled), 'Go compiler/linker package coverage mismatch')
+    require(set(assembled)<=set(compiled), 'unlinked Go assembler output')
+    for item in commands:
+        if '-importcfg' not in item['argv']:
+            require(not item['packageArchives'], 'Go archive trace has no import configuration')
+            continue
+        inputs=input_tables[id(item)];configuration=flag(item['argv'],'-importcfg')
+        require(configuration in inputs, 'missing actual Go import configuration')
+        packages={}
+        for line in bound(inputs[configuration],local).decode().splitlines():
+            if line.startswith('packagefile '):
+                name,filename=line[len('packagefile '):].split('=',1)
+                require(name not in packages, 'duplicate Go import package')
+                packages[name]=absolute(filename)
+        rows=item['packageArchives']
+        require(len(rows)==len(packages) and {row['package']:row['originalPath'] for row in rows}==packages,
+                'Go package trace differs from actual import configuration')
+        for row in rows:
+            require(row['package'] in linked and row['file']==linked[row['package']]['file'] and
+                    row['originalPath']==linked[row['package']]['originalPath'], 'Go compiler consumed a different package archive')
+            bound(row['file'],local)
+    result={}
+    for name,compiler in compiled.items():
+        inputs=input_tables[id(compiler)];outputs=table(compiler['outputs']);args=compiler['argv']
+        archive=bound(outputs[flag(args,'-o')],local)
+        members=archive_members(archive,padding=b'\0')
+        require(set(members)=={'__.PKGDEF','_go_.o'} and members['__.PKGDEF'].startswith(b'go object ') and
+                b'build id "' not in archive, 'unsupported Go compiler archive')
+        require(args.count('-pack')==1, 'Go compiler requires an unambiguous source argument list')
+        operands=args[args.index('-pack')+1:]
+        if operands[:1]==['-asmhdr']:
+            require(len(operands)>2 and operands[1] in outputs, 'Go compiler generated header is not retained')
+            operands=operands[2:]
+        require(operands and len(set(operands))==len(operands) and all(item.endswith('.go') and item.startswith('/') for item in operands) and
+                set(operands)=={filename for filename in inputs if filename.endswith('.go')}, 'Go compiler source arguments differ from retained inputs')
+        sources={(filename,inputs[filename]['sha256']) for filename in operands}
+        additions={}
+        for assembly in assembled.get(name,[]):
+            args=assembly['argv'];asm_inputs=input_tables[id(assembly)]
+            operands=args[args.index('-o')+2:]
+            require(operands and len(set(operands))==len(operands) and all(item.endswith('.s') and item.startswith('/') for item in operands) and
+                    set(operands)=={filename for filename in asm_inputs if filename.endswith('.s')}, 'Go assembler source arguments differ from retained inputs')
+            sources.update((filename,asm_inputs[filename]['sha256']) for filename in operands)
+            headers=table(assembly['openedHeaders']);trace=assembly['headerTrace']
+            trace_args=trace['argv'];trace_path=absolute(trace['originalPath'])
+            require(trace['exitCode']==0 and tools.get(trace_args[0])==trace['executable']['sha256'] and
+                    trace_args==[trace_args[0],'-f','-qq','-yy','-s','65535','-e','trace=open,openat,openat2','-o',trace_path,'--',*args], 'Go header tracer/tool mismatch')
+            substantive(trace['executable'],local);substantive(trace['version'],local)
+            opened=set()
+            for line in bound(trace['file'],local).decode().splitlines():
+                selected=re.search(r'O_RDONLY.*= [0-9]+<([^<>\n]+)>\s*$',line)
+                if not selected:continue
+                filename=selected[1]
+                if filename in operands:continue
+                if is_go_runtime_resource_read(filename, environment['HOME']):continue
+                opened.add(filename)
+            require(opened==set(headers), 'Go selected headers differ from actual file opens')
+            roots={pathlib.PurePosixPath(filename).parent for filename in asm_inputs if filename.endswith('.s')}
+            roots.update(pathlib.PurePosixPath(args[i+1]) for i,value in enumerate(args[:-1]) if value=='-I')
+            for filename,item in headers.items():
+                require(any(pathlib.PurePosixPath(filename).is_relative_to(root) for root in roots), 'Go header escapes source/include roots')
+                if filename in outputs and outputs[filename]['sha256']==item['sha256']:continue
+                if '-gensymabis' in args and pathlib.PurePosixPath(filename).name=='go_asm.h' and bound(item,local)==b'':continue
+                sources.add((filename,item['sha256']))
+            asm_outputs=table(assembly['outputs']);target=flag(args,'-o')
+            if '-gensymabis' in args:
+                require(target in inputs and inputs[target]==asm_outputs[target], 'Go compiler did not consume assembler symbol metadata')
+            else:
+                member=pathlib.PurePosixPath(target).name[:16]
+                require(member not in members, 'duplicate Go assembler archive member')
+                members[member]=bound(asm_outputs[target],local)
+                raw=members[member]
+                header=f'{member:<16}{0:<12}{0:<6}{0:<6}{0o644:<8o}{len(raw):<10}`\n'.encode()
+                additions[member]=header+raw+(b'\0' if len(raw)%2 else b'')
+        actual=bound(linked[name]['file'],local)
+        require(members==archive_members(actual,padding=b'\0'), 'Go linked archive differs from compiler/assembler outputs')
+        require(actual.startswith(archive), 'Go compiler archive bytes changed before link')
+        suffix=actual[len(archive):];observed=[]
+        for member,offset,raw in archive_entries(b'!<arch>\n'+suffix,padding=b'\0'):
+            require(member in additions and suffix[offset-8:offset-8+len(additions[member])]==additions[member], 'Go archive pack bytes differ from assembler output')
+            observed.append(member)
+        require(len(observed)==len(additions) and set(observed)==set(additions) and len(suffix)==sum(map(len,additions.values())), 'Go archive contains untraced packed bytes')
+        require(linked[name]['originalPath']==flag(compiler['argv'],'-o'), 'Go link uses a different compiler output path')
+        result[name]=dict(archive=linked[name]['file'],sources=sources)
+    return result,commands
+
+def go_loader(loader, output, projects, fetch, tools=None):
+    elf(output)
+    require(digest(output)==loader['outputSHA256'] and loader['project'] in projects and
+            loader['goRuntimeProject'] in projects, 'Go loader source/output mismatch')
+    version,modules=go_build_info(output)
+    require(version==loader['goVersion'], 'Go compiler version/build info mismatch')
     expected=loader['modules']
     require(modules and len(expected)==len(modules) and
             {tuple(m) for m in modules}=={tuple(m['buildInfo']) for m in expected}, 'Go linked module coverage mismatch')
@@ -486,22 +953,39 @@ def go_loader(loader, output, projects, fetch, tools=None):
         require(module['project'] in projects and module['revision']==loader['moduleRevisions'][module['project']], 'Go linked module revision/source missing')
     require(loader['sourceFiles'] and loader['commands'] and loader['compiler'], 'missing Go compiled source/tool inputs')
     for source in loader['sourceFiles']:
-        require(source['project'] in projects and source['path'] in projects[source['project']] and
-                projects[source['project']][source['path']]['sha256']==source['sha256'], 'Go compiled source mismatch')
+        verify_go_source_record(source, projects, loader['goVersion'])
     require(tools is not None and loader['compiler']['sha256'] in tools.values(), 'missing authenticated Go compiler toolchain')
     substantive(loader['compiler'],fetch)
     for item in loader['commands']:argv(item,fetch,tools)
+    captured,commands=go_capture(loader['buildCapture'],output,fetch,tools)
+    capture=parse(substantive(loader['buildCapture'],fetch))
+    collector_source=projects[loader['project']].get('scripts/release/capture-go-build.py',{})
+    require(collector_source.get('gitMode') in ('100644','100755') and
+            collector_source.get('sha256')==capture['collector']['sha256'] and
+            collector_source.get('sizeBytes')==capture['collector']['sizeBytes'], 'Go collector does not match the accepted source commit')
+    require(sorted(canonical(parse(bound(item,fetch))) for item in loader['commands'])==
+            sorted(canonical(item['argv']) for item in commands), 'Go command list differs from build capture')
     trace=parse(substantive(loader['packageTrace'],fetch))
-    require(isinstance(trace,list) and trace and {r['project'] for r in trace}==
-            {m['project'] for m in expected}|{loader['goRuntimeProject']}, 'missing actual Go compiled package trace')
+    component_projects={m['project'] for m in expected}|{loader['goRuntimeProject']}
+    require(isinstance(trace,list) and trace and {r['project'] for r in trace}==component_projects,
+            'missing actual Go compiled package trace')
+    require(len(trace)==len(captured) and {item['package'] for item in trace}==set(captured), 'Go package trace/link coverage mismatch')
     for package in trace:
         require(package['sourceFiles'] and package['archive'], 'Go compiled package lacks source/archive trace')
-        package_members=archive_members(substantive(package['archive'],fetch))
+        actual=captured[package['package']]
+        require(package['archive']['sha256']==actual['archive']['sha256'] and
+                {(item['originalPath'],item['sha256']) for item in package['sourceFiles']}==actual['sources'],
+                'Go package source/archive trace differs from actual build')
+        package_members=archive_members(substantive(package['archive'],fetch),padding=b'\0')
         require('__.PKGDEF' in package_members and package_members['__.PKGDEF'].startswith(b'go object '),
                 'Go package trace lacks actual compiler archive metadata')
+        source_projects={source['project'] for source in package['sourceFiles']}
+        require(package['project'] in source_projects and source_projects<=component_projects,
+                'Go package source component coverage mismatch')
         for source in package['sourceFiles']:
-            require(source['project']==package['project'] and source['project'] in projects and
-                    source['path'] in projects[source['project']] and projects[source['project']][source['path']]['sha256']==source['sha256'], 'Go package trace source mismatch')
+            verify_go_source_record(source, projects, loader['goVersion'])
+    require({canonical(item) for item in loader['sourceFiles']}==
+            {canonical(item) for package in trace for item in package['sourceFiles']}, 'Go loader source inventory differs from package trace')
 
 def verify(manifest_data, runtime, payloads, fetch, source_commit, require_authentication=True):
     manifest=parse(manifest_data)
@@ -515,7 +999,8 @@ def verify(manifest_data, runtime, payloads, fetch, source_commit, require_authe
             {'kata-linux-kernel','apple-vminit-oci','hostwright-netfilter-loader'}, 'runtime license asset coverage mismatch')
     require(runtime.get('status')=='qualified' and all(a.get('status')=='qualified' and
             a.get('blockers')==[] and a.get('licenseExpression') and
-            'LicenseRef-' not in a['licenseExpression'] for a in assets), 'unresolved runtime license evidence')
+            set(re.findall(r'LicenseRef-[A-Za-z0-9.-]+',a['licenseExpression']))<=REVIEWED_LICENSE_REFS
+            for a in assets), 'unresolved runtime license evidence')
     require(manifest['runtimeInventorySHA256']==digest(canonical(runtime)), 'runtime license inventory bytes mismatch')
     expected={path(r['path']):r for r in manifest['payloads']}
     require(len(expected)==len(manifest['payloads']) and set(expected)==set(payloads) and 0<len(expected)<=4096, 'runtime subject coverage mismatch')
@@ -534,6 +1019,7 @@ def verify(manifest_data, runtime, payloads, fetch, source_commit, require_authe
     for project in manifest['sourceProjects']:
         require(project['identity'] not in projects, 'duplicate source project')
         projects[project['identity']]=source_project(project,fetch,project_commits)
+    verify_embedded_license_documents(manifest['sourceProjects'],fetch)
     require(projects, 'missing complete corresponding sources')
     tools=toolchain(manifest,fetch)
     oci=manifest['oci']; prefix=path(oci['prefix'])
@@ -598,7 +1084,8 @@ def verify(manifest_data, runtime, payloads, fetch, source_commit, require_authe
         record=files[name];require(record['sha256']==digest(data) and record['sizeBytes']==len(data), 'OCI file attribution bytes mismatch')
         if name in extracted:
             require(record['type']=='elf', 'wrong OCI file classification')
-            components={s['project'] for item in links[name]['selectedInputs'] for s in item['sourceFiles']}
+            components={s['project'] for item in links[name]['selectedInputs']
+                        for s in native_source_files(item, fetch)}
         else:
             require(record['type']=='source-copy', 'unsupported generated/unattributed non-ELF OCI file')
             source=record['source'];require(source['project'] in projects and source['path'] in projects[source['project']] and

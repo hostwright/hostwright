@@ -7,6 +7,7 @@ from pathlib import Path
 import tarfile
 import tempfile
 import unittest
+from unittest import mock
 
 
 HERE = Path(__file__).resolve().parent
@@ -31,7 +32,7 @@ class RuntimePreparationTests(unittest.TestCase):
         self.native = self.root / "native-input"
         self.loader = self.root / "loader-input"
         self.output = self.root / "output"
-        self.manifest, _, self.payloads, evidence = F.fixture()
+        self.manifest, self.runtime, self.payloads, evidence = F.fixture()
         self.commit = self.manifest["sourceCommit"]
         self.native_fragment = dict(status="prepared-not-release-qualified", sourceCommit=self.commit,
             **{key: copy.deepcopy(self.manifest[key]) for key in ("sourceProjects", "toolchain", "kernel", "oci")},
@@ -82,6 +83,52 @@ class RuntimePreparationTests(unittest.TestCase):
         self.assertEqual(first.read_bytes(), second.read_bytes())
         with tarfile.open(first) as archive:
             self.assertIn("runtime-provenance/manifest.json", archive.getnames())
+
+    def test_source_root_handoff_embeds_only_freshly_qualified_inventory(self):
+        source = self.root / "source"
+        source.mkdir()
+        outputs = {
+            "runtime-license-inventory.json": P.V.canonical(dict(
+                self.runtime,
+                retainedLoaderSourceRevision="1" * 40)),
+            "THIRD_PARTY_NOTICES": b"qualified notices\n",
+            "third-party-license-inventory.json": b"qualified dependency inventory\n",
+            "ThirdPartyLicenses/runtime-build-recipes/source-documents.json": b"qualified source docs\n",
+            "ThirdPartyLicenses/runtime-build-recipes/kernel-actual-config-6.18.15-186": b"CONFIG_ARM64=y\n",
+        }
+
+        def regenerate(_prepared, source_root):
+            self.assertEqual(source_root.resolve(), source.resolve())
+            for name, data in outputs.items():
+                relative = "runtime-license-inventory.json" if name == "runtime-license-inventory.json" else name
+                path = source_root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(data)
+            return outputs, {}
+
+        with mock.patch.object(P.Q, "regenerate", side_effect=regenerate):
+            manifest = P.prepare(self.native, self.loader, self.commit, 123, 2,
+                                 self.output, source_root=source)
+        inventory_data = (self.output / "licenses/runtime-license-inventory.json").read_bytes()
+        self.assertEqual(inventory_data, outputs["runtime-license-inventory.json"])
+        self.assertEqual(manifest["runtimeInventorySHA256"], P.V.digest(inventory_data))
+
+        changed = self.root / "mismatched-output"
+        original_verify = P.Q.verify_committed_outputs
+
+        def mismatch(source_root, generated):
+            path = source_root / "runtime-license-inventory.json"
+            committed = P.V.parse(path.read_bytes())
+            committed["assets"][0]["sha256"] = "f" * 64
+            path.write_bytes(P.V.canonical(committed))
+            return original_verify(source_root, generated)
+
+        with mock.patch.object(P.Q, "regenerate", side_effect=regenerate), \
+             mock.patch.object(P.Q, "verify_committed_outputs", side_effect=mismatch):
+            with self.assertRaisesRegex(ValueError, "differs from freshly verified"):
+                P.prepare(self.native, self.loader, self.commit, 123, 2,
+                          changed, source_root=source)
+        self.assertFalse(changed.exists())
 
     def test_record_rebasing_preserves_source_and_installed_paths(self):
         source = dict(project="project", path="src/main.c", sha256="a" * 64)

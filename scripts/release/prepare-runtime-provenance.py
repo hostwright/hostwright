@@ -23,6 +23,7 @@ def load(name, filename):
 
 V = load("runtime_verifier", "verify-runtime-provenance.py")
 A = load("runtime_assembler", "assemble-runtime-provenance.py")
+Q = load("runtime_inventory_qualifier", "qualify-runtime-inventory.py")
 ASSETS = ("kata-linux-kernel", "apple-vminit-oci", "hostwright-netfilter-loader")
 
 
@@ -120,7 +121,7 @@ def rebase_loader(value, fetch, generated):
     return result
 
 
-def prepare(native_root, loader_root, source_commit, run_id, attempt, output):
+def prepare(native_root, loader_root, source_commit, run_id, attempt, output, source_root=None):
     V.require(re.fullmatch("[a-f0-9]{40}", source_commit) is not None, "invalid source commit")
     producer = dict(commit=source_commit, runID=run_id, attempt=attempt)
     V.producer_binding(producer, source_commit)
@@ -128,6 +129,9 @@ def prepare(native_root, loader_root, source_commit, run_id, attempt, output):
     for name, root in (("native", native_root), ("loader", loader_root)):
         V.require(not root.is_symlink() and root.is_dir(), "unsafe runtime input root")
         roots[name] = root.resolve(strict=True)
+    if source_root is not None:
+        V.require(not source_root.is_symlink() and source_root.is_dir(), "unsafe runtime source root")
+        source_root = source_root.resolve(strict=True)
     V.require(not output.exists() and not output.is_symlink(), "runtime output already exists")
     output = output.absolute()
     V.require(all(not output.resolve().is_relative_to(root) for root in roots.values()),
@@ -222,6 +226,14 @@ def prepare(native_root, loader_root, source_commit, run_id, attempt, output):
         write("runtime-provenance/manifest.json", manifest_data)
         write("licenses/runtime-license-inventory.json", V.canonical(inventory))
         write("upstream/kernel-source-signature.json", receipt_data)
+        if source_root is not None:
+            generated_outputs, _ = Q.regenerate(staging, source_root)
+            committed_inventory = Q.verify_committed_outputs(source_root, generated_outputs)
+            inventory = V.parse(committed_inventory)
+            manifest["runtimeInventorySHA256"] = V.digest(committed_inventory)
+            manifest_data = V.canonical(manifest)
+            (staging / "runtime-provenance/manifest.json").write_bytes(manifest_data)
+            (staging / "licenses/runtime-license-inventory.json").write_bytes(committed_inventory)
         V.verify(manifest_data, inventory, payloads, lambda name: regular(staging, name).read_bytes(),
                  source_commit, require_authentication=False)
         V.require(not output.exists() and not output.is_symlink(), "runtime output already exists")
@@ -236,6 +248,8 @@ if __name__ == "__main__":
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--run-id", type=int, required=True)
     parser.add_argument("--attempt", type=int, required=True)
+    parser.add_argument("--source-root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    prepare(args.native_root, args.loader_root, args.source_commit, args.run_id, args.attempt, args.output)
+    prepare(args.native_root, args.loader_root, args.source_commit, args.run_id, args.attempt,
+            args.output, source_root=args.source_root)

@@ -455,6 +455,7 @@ jobs:
           python3 scripts/release/prepare-runtime-provenance.py \
             --native-root "$native" --loader-root "$RUNNER_TEMP/runtime-loader-authenticated" \
             --source-commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
+            --source-root "$GITHUB_WORKSPACE" \
             --output "$RUNNER_TEMP/runtime-prepared"
           mkdir -m 700 "$RUNNER_TEMP/runtime-final"
           python3 scripts/release/assemble-runtime-provenance.py \

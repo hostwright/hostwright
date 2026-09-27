@@ -92,6 +92,15 @@ def source_project_data(project, fetch):
         return result
 
 
+def loader_source_closure_digest(files):
+    V.require(len(files) == 21 and "LICENSE" in files and
+              all(name.startswith("Guest/HostwrightNetfilter/") for name in files if name != "LICENSE"),
+              "Hostwright source closure must contain the retained 20 files and LICENSE")
+    records = [dict(path=name, sha256=sha(data), sizeBytes=len(data))
+               for name, data in sorted(files.items())]
+    return sha(V.canonical(dict(kind="hostwright.runtime-loader-source-closure.v1", files=records)))
+
+
 def verify_root_guest_bindings(source_root, third_party, runtime, manifest, fetch):
     """Require current host locks and loader sources to agree with retained records."""
     NOTICES.verify(source_root, require_qualified=False)
@@ -101,6 +110,9 @@ def verify_root_guest_bindings(source_root, third_party, runtime, manifest, fetc
     head = subprocess.check_output(
         ["git", "-C", str(Path(source_root).resolve()), "rev-parse", "HEAD"], text=True).strip()
     V.require(head == manifest["sourceCommit"], "source root HEAD differs from the prepared runtime source commit")
+    status = subprocess.check_output(
+        ["git", "-C", str(Path(source_root).resolve()), "status", "--porcelain=v1", "--untracked-files=all"])
+    V.require(not status, "source root must be clean before qualifying runtime inventory")
     hostwright = next((project for project in manifest["sourceProjects"]
                        if project["identity"] == manifest["loader"]["project"]), None)
     V.require(hostwright is not None and hostwright["commit"] == manifest["sourceCommit"],
@@ -108,16 +120,95 @@ def verify_root_guest_bindings(source_root, third_party, runtime, manifest, fetc
     retained = runtime["retainedLoaderSourceFiles"]
     V.require(len(retained) == 20, "retained loader source inventory is incomplete")
     source_leaves = source_project_data(hostwright, fetch)
+    loader_source_bytes = {}
     for name, digest in retained.items():
         data = regular(source_root, name).read_bytes()
         V.require(sha(data) == digest and name in source_leaves and sha(source_leaves[name]) == digest,
                   "root loader source differs from the prepared exact source tree: " + name)
+        loader_source_bytes[name] = data
+    license_name = "LICENSE"
+    license_data = regular(source_root, license_name).read_bytes()
+    license_records = [record for record in hostwright["licenses"] + hostwright["notices"]
+                       if record["sourcePath"] == license_name]
+    V.require(license_name in source_leaves and source_leaves[license_name] == license_data and
+              license_records and all(record["sha256"] == sha(license_data) and
+                                      record["sizeBytes"] == len(license_data)
+                                      for record in license_records),
+              "root Hostwright license differs from the exact captured source license")
+    loader_source_bytes[license_name] = license_data
     for name, field in (("Guest/HostwrightNetfilter/go.mod", "goModuleSHA256"),
                         ("Guest/HostwrightNetfilter/go.sum", "goSumSHA256")):
         data = regular(source_root, name).read_bytes()
         V.require(sha(data) == runtime[field] and name in source_leaves and sha(source_leaves[name]) == sha(data),
                   "root Go dependency lock differs from the prepared exact source tree: " + name)
-    return result
+    loader_digest = loader_source_closure_digest(loader_source_bytes)
+    return dict(loaderSourceSHA256=loader_digest, loaderSourceFiles=loader_source_bytes)
+
+
+def stable_source_reference(project, hostwright_source_sha256):
+    """Return a content-addressed source reference without inventory/manifest cycles."""
+    if project["identity"] == "hostwright":
+        return "prepared-local-source-coverage:hostwright-loader-source+LICENSE#sha256=" + hostwright_source_sha256
+    archive = project["archive"]
+    return ("prepared-local-source-coverage:runtime-provenance/" + archive["path"] +
+            "#sha256=" + archive["sha256"] + "&sizeBytes=" + str(archive["sizeBytes"]))
+
+
+def remove_generated_runtime_documents(notices, records):
+    """Remove prior generated runtime-source sections before rebuilding them."""
+    generated = [record for record in records if record["sourcePath"].startswith("runtime-source/")]
+    ranges = []
+    for record in generated:
+        heading = ("\n\n--- " + record["sourcePath"] + " ---\n").encode()
+        start = record["offsetBytes"] - len(heading)
+        end = record["offsetBytes"] + record["sizeBytes"]
+        V.require(start >= 0 and end <= len(notices) and notices[start:record["offsetBytes"]] == heading and
+                  sha(notices[record["offsetBytes"]:end]) == record["sha256"],
+                  "generated runtime notice differs from its indexed bytes")
+        ranges.append((start, end))
+    ranges.sort()
+    for previous, current in zip(ranges, ranges[1:]):
+        V.require(previous[1] <= current[0], "overlapping generated runtime notice sections")
+    output = bytearray()
+    cursor = 0
+    for start, end in ranges:
+        output.extend(notices[cursor:start])
+        cursor = end
+    output.extend(notices[cursor:])
+    preserved = []
+    for record in records:
+        if record["sourcePath"].startswith("runtime-source/"):
+            continue
+        updated = dict(record)
+        removed = sum(end - start for start, end in ranges if end <= record["offsetBytes"])
+        updated["offsetBytes"] = record["offsetBytes"] - removed
+        preserved.append(updated)
+    return output, preserved
+
+
+def verify_committed_outputs(source_root, generated):
+    """Require committed qualified inventory and public docs to match fresh proof."""
+    committed_data = regular(source_root, RUNTIME_INVENTORY).read_bytes()
+    committed = V.parse(committed_data)
+    V.require(committed_data == V.canonical(committed) and committed.get("status") == "qualified" and
+              V.re.fullmatch("[a-f0-9]{40}", committed.get("retainedLoaderSourceRevision", "")) is not None,
+              "committed runtime inventory is not a canonical qualified inventory")
+    expected = V.parse(generated[RUNTIME_INVENTORY])
+    # This records the historical loader qualification revision; current source bytes
+    # are independently checked above.
+    expected["retainedLoaderSourceRevision"] = committed["retainedLoaderSourceRevision"]
+    V.require(V.canonical(expected) == committed_data,
+              "committed runtime inventory differs from freshly verified runtime evidence")
+    for generated_path, root_path in (
+        (NOTICES_FILE, NOTICES_FILE),
+        (THIRD_PARTY_INVENTORY, THIRD_PARTY_INVENTORY),
+        (SOURCE_DOCUMENTS, SOURCE_DOCUMENTS),
+        (CONFIG_PATH, CONFIG_PATH),
+    ):
+        V.require(generated_path in generated and
+                  regular(source_root, root_path).read_bytes() == generated[generated_path],
+                  "committed runtime notices/source documents differ from verified runtime evidence: " + root_path)
+    return committed_data
 
 
 def add_document(notices, records, category, source_path, data, source_paths):
@@ -166,8 +257,10 @@ def regenerate(prepared_root, source_root):
     third_party = read_json(source_root, THIRD_PARTY_INVENTORY)
     runtime = read_json(source_root, RUNTIME_INVENTORY)
     notices = bytearray(regular(source_root, NOTICES_FILE).read_bytes())
-    verify_root_guest_bindings(source_root, third_party, runtime, manifest, fetch)
-    manifest_hash = sha(manifest_data)
+    guest_bindings = verify_root_guest_bindings(source_root, third_party, runtime, manifest, fetch)
+    notices, preserved_runtime_documents = remove_generated_runtime_documents(
+        notices, third_party["runtimeDocuments"])
+    third_party["runtimeDocuments"] = preserved_runtime_documents
 
     # Replace only the stale embedded kernel configuration document; retain all
     # host and pre-existing runtime notice bytes and their source attribution.
@@ -182,8 +275,7 @@ def regenerate(prepared_root, source_root):
     notices = notices[:start] + bytearray(config) + notices[end:]
     delta = len(config) - config_record["sizeBytes"]
     config_record.update(sha256=sha(config), sizeBytes=len(config),
-                         sourcePaths=["embedded-IKCFG_ST:sha256:" + manifest["kernel"]["outputSHA256"],
-                                      "runtime-provenance/manifest.json#sha256=" + manifest_hash])
+                         sourcePaths=["embedded-IKCFG_ST:sha256:" + manifest["kernel"]["outputSHA256"]])
     for record in third_party["runtimeDocuments"]:
         if record is not config_record and record["offsetBytes"] >= end:
             record["offsetBytes"] += delta
@@ -195,7 +287,6 @@ def regenerate(prepared_root, source_root):
         for mapping in manifest["licensing"][identity]:
             project = projects[mapping["project"]]
             V.require(mapping["spdx"] == project["spdx"], "runtime project SPDX mapping changed")
-            archive = project["archive"]
             for field in ("licenses", "notices"):
                 expected_paths = set(mapping[field])
                 actual_records = {record["path"]: record for record in project[field]}
@@ -218,13 +309,14 @@ def regenerate(prepared_root, source_root):
                   "captured runtime license bytes mismatch")
         kind = "kernel" if "kata-linux-kernel" in entry["assets"] else (
             "loader" if "hostwright-netfilter-loader" in entry["assets"] else "native")
-        output_path = "runtime-source/" + project_identity + "@" + project["commit"] + "/" + source_name
-        source_paths = [
-            "git-object:" + project_identity + "@" + project["commit"] + ":" + source_name,
-            "prepared-local-source-coverage:runtime-provenance/manifest.json#sha256=" + manifest_hash,
-            "prepared-local-source-coverage:runtime-provenance/" + project["archive"]["path"] +
-            "#sha256=" + project["archive"]["sha256"] + "&sizeBytes=" + str(project["archive"]["sizeBytes"]),
-        ]
+        if project_identity == "hostwright":
+            hostwright_source = guest_bindings["loaderSourceSHA256"]
+            output_path = "runtime-source/hostwright-loader-source+LICENSE/" + source_name
+            source_paths = ["git-object:hostwright-loader-source+LICENSE#sha256=" + hostwright_source]
+        else:
+            output_path = "runtime-source/" + project_identity + "@" + project["commit"] + "/" + source_name
+            source_paths = ["git-object:" + project_identity + "@" + project["commit"] + ":" + source_name,
+                            stable_source_reference(project, guest_bindings["loaderSourceSHA256"])]
         add_document(notices, records, "runtime-" + kind + "-license", output_path, data, source_paths)
 
     third_party["runtimeDocuments"] = records
@@ -260,17 +352,19 @@ def regenerate(prepared_root, source_root):
     signature_data = regular(prepared_root, signature_path).read_bytes()
     signature = V.parse(signature_data)
     V.require(signature.get("signatureVerified") is True and signature.get("exitStatus") == 0 and
-              signature.get("archiveSHA256") == runtime["kernelSourceEvidence"]["sourceArchiveSHA256"],
+              signature.get("archiveSHA256") == runtime["kernelSourceEvidence"]["sourceArchiveSHA256"] and
+              signature.get("archiveSHA256") == "7c716216c3c4134ed0de69195701e677577bbcdd3979f331c182acd06bf2f170" and
+              signature.get("fingerprint") == "647F28654894E3BD457199BE38DBBDC86092693E",
               "retained kernel source signature does not bind the recorded upstream archive")
     for identity in ASSETS:
-        refs = ["prepared-local-source-coverage:runtime-provenance/manifest.json#sha256=" + manifest_hash]
+        refs = []
         if identity == "kata-linux-kernel":
-            refs.append("prepared-local-source-coverage:" + signature_path + "#sha256=" + sha(signature_data))
+            refs.append("prepared-local-source-coverage:" + signature_path +
+                        "#archiveSHA256=" + signature["archiveSHA256"] +
+                        "&fingerprint=" + signature["fingerprint"])
         for mapping in manifest["licensing"][identity]:
             project = projects[mapping["project"]]
-            archive = project["archive"]
-            refs.append("prepared-local-source-coverage:runtime-provenance/" + archive["path"] +
-                        "#sha256=" + archive["sha256"] + "&sizeBytes=" + str(archive["sizeBytes"]))
+            refs.append(stable_source_reference(project, guest_bindings["loaderSourceSHA256"]))
         source_evidence[identity] = sorted(set(refs))
 
     asset_values = {

@@ -63,15 +63,32 @@ final class DistributionThirdPartyNoticesTests: XCTestCase {
         XCTAssertNoThrow(try DistributionThirdPartyNotices.requireQualifiedRuntimeSource(root: repository))
 
         let data = try DistributionThirdPartyNotices.read(repository.appendingPathComponent("runtime-license-inventory.json"))
-        var inventory = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        var assets = try XCTUnwrap(inventory["assets"] as? [[String: Any]])
-        assets[0]["blockers"] = ["test-only missing source coverage"]
-        inventory["assets"] = assets
+        var inventory = try DistributionThirdPartyNotices.decode(RuntimeLicenseInventory.self, data: data)
+        let qualified = inventory.assets[0]
+        inventory.assets[0] = RuntimeLicenseAsset(
+            identity: qualified.identity,
+            payloadPaths: qualified.payloadPaths,
+            sha256: qualified.sha256,
+            sizeBytes: qualified.sizeBytes,
+            licenseExpression: qualified.licenseExpression,
+            status: qualified.status,
+            sourceReferences: qualified.sourceReferences,
+            blockers: ["test-only missing source coverage"],
+            sourceDistributionEvidence: qualified.sourceDistributionEvidence
+        )
 
         try withTemporaryRoot { temporary in
-            try JSONSerialization.data(withJSONObject: inventory, options: [.sortedKeys])
+            try DistributionThirdPartyNotices.encode(inventory)
                 .write(to: temporary.appendingPathComponent("runtime-license-inventory.json"))
-            XCTAssertThrowsError(try DistributionThirdPartyNotices.requireQualifiedRuntimeSource(root: temporary))
+            XCTAssertThrowsError(try DistributionThirdPartyNotices.requireQualifiedRuntimeSource(root: temporary)) { error in
+                guard case let DistributionError.invalidArtifact(message) = error else {
+                    return XCTFail("Expected incomplete source evidence to be refused, received \(error)")
+                }
+                XCTAssertEqual(
+                    message,
+                    "Trusted release blocked: runtime corresponding-source, build provenance, or component-license evidence remains incomplete. See runtime-license-inventory.json."
+                )
+            }
         }
     }
 

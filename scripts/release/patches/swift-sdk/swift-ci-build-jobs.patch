@@ -2,8 +2,7 @@ diff --git a/swift-ci/sdks/static-linux/scripts/build.sh b/swift-ci/sdks/static-
 index 1ce2f3d..b35b2c0 100755
 --- a/swift-ci/sdks/static-linux/scripts/build.sh
 +++ b/swift-ci/sdks/static-linux/scripts/build.sh
-@@ -177,34 +177,7 @@ resource_dir="${script_dir}/../resources"
- 
+@@ -178,33 +178,6 @@ resource_dir="${script_dir}/../resources"
  # Find the version numbers of the various dependencies
  function describe {
 -    pushd $1 >/dev/null 2>&1
@@ -60,8 +59,7 @@ index 1ce2f3d..b35b2c0 100755
      mkdir -p $llvm_bin $swift_bin
      cat >> $llvm_bin/${arch}-swift-linux-musl-clang.cfg <<EOF
  --sysroot ${sdk_root}
-@@ -855,7 +828,12 @@ EOF
- 
+@@ -856,6 +829,11 @@ EOF
      SWIFT_SOURCE_ROOT="${source_dir}/swift-project" \
      SWIFT_BUILD_ROOT="${build_dir}/swift" \
 -    run ${source_dir}/swift-project/swift/utils/build-script -r \
@@ -74,12 +72,10 @@ index 1ce2f3d..b35b2c0 100755
          --reconfigure \
          --compiler-vendor=apple \
          --bootstrapping hosttools \
-@@ -867,7 +845,7 @@ EOF
+@@ -867,5 +845,5 @@ EOF
          --install-destdir=$sdk_root \
          --install-prefix=/usr \
          --swift-install-components="libexec;stdlib;sdk-overlay" \
 -        --extra-cmake-options="-DSWIFT_SHOULD_BUILD_EMBEDDED_STDLIB=NO -DLLVM_USE_LINKER=lld -DLLVM_NO_DEAD_STRIP=On" \
 +        --extra-cmake-options="-DSWIFT_SHOULD_BUILD_EMBEDDED_STDLIB=NO -DLLVM_USE_LINKER=lld -DLLVM_NO_DEAD_STRIP=On -DCMAKE_C_FLAGS_RELEASE='-O2 -DNDEBUG' -DCMAKE_CXX_FLAGS_RELEASE='-O2 -DNDEBUG'" \
          $build_script_lto
- 
-     # Find some tools

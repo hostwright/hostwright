@@ -167,14 +167,15 @@ def tool(root, arguments):
                 if filename in sources:
                     continue
                 if re.fullmatch(r"/proc/[0-9]+/(cgroup|mountinfo)", filename) or filename in {
-                    "/sys/fs/cgroup/cpu.max", str(Path.home() / ".config/go/telemetry/local/weekends")
+                    "/sys/fs/cgroup/cpu.max", str(Path.home() / ".config/go/telemetry/local/weekends"),
+                    str(Path.home() / ".config/go/telemetry/mode")
                 }:
                     continue
                 headers.add(filename)
             for name in sorted(headers):
                 header = Path(name)
                 if not header.is_absolute() or header.is_symlink() or not any(header.resolve().is_relative_to(base) for base in roots):
-                    raise ValueError("assembler header escaped its source/include roots")
+                    raise ValueError("assembler header escaped its source/include roots: " + str(header))
                 invocation["openedHeaders"].append(dict(originalPath=name, file=retain(root, header)))
             invocation["headerTrace"] = dict(file=retain(root, trace), originalPath=str(trace), exitCode=result.returncode,
                                              executable=retain(root, tracer), argv=command,
@@ -236,7 +237,11 @@ def build(go, source, output, jobs):
             failure = output.with_name(output.name + ".failure.log")
             with failure.open("xb") as destination, (root / "build.log").open("rb") as log:
                 shutil.copyfileobj(log, destination)
-            raise RuntimeError("Go build failed; retained log: " + str(failure))
+            with failure.open("rb") as log:
+                log.seek(max(0, failure.stat().st_size - 16384))
+                diagnostic = log.read().decode(errors="replace").strip()
+            raise RuntimeError("Go build failed (exit " + str(result.returncode) + "); retained log: "
+                               + str(failure) + "\n" + diagnostic)
         after = {name: retain(root, source / name) for name in before}
         if before != after:
             raise ValueError("locked module inputs changed during the build")

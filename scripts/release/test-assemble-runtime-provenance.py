@@ -75,6 +75,33 @@ class RuntimeProvenanceAssemblerTests(unittest.TestCase):
         receipt = (source / "upstream/kernel-source-signature.json").read_bytes()
         return ASSEMBLER.assemble(source, output, "0.0.2", state, receipt)
 
+    def test_compiler_input_sidecars_and_nested_records_survive_archive(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            source = root / "input"
+            source.mkdir()
+            manifest, _, payloads, files = self.fixture(source)
+            record, _ = VERIFIER_TEST.compiler_inputs_fixture(manifest, files)
+            files["runtime-provenance/manifest.json"] = VERIFIER_TEST.v.canonical(manifest)
+            for name, data in files.items():
+                destination = source / name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(data)
+            closure = ASSEMBLER.evidence_records(manifest, lambda name: (source / name).read_bytes())
+            self.assertIn("proof/headers/copied.h", closure)
+            self.assertIn("proof/headers/empty.h", closure)
+            self.assertIn("proof/headers/main.d", closure)
+            output = root / "source.tar.gz"
+            self.assemble(source, output, manifest)
+            with tarfile.open(output) as archive:
+                for name in (record["compilerInputs"]["path"], "proof/headers/copied.h", "proof/headers/main.d"):
+                    self.assertEqual(archive.extractfile(name).read(), files[name])
+                with mock.patch.object(VERIFIER_TEST.v, "authenticate"):
+                    VERIFIER_TEST.v.verify_source_bundle(archive, manifest["sourceCommit"], payloads)
+            (source / "proof/headers/main.d").write_bytes(b"changed")
+            with self.assertRaisesRegex(ValueError, "evidence bytes mismatch"):
+                self.assemble(source, root / "tampered.tar.gz", manifest)
+
     def test_assembly_is_deterministic_and_verifier_consumable(self):
         with tempfile.TemporaryDirectory() as temporary:
             temporary = pathlib.Path(temporary)

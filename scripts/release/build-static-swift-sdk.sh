@@ -49,6 +49,8 @@ git -C "$root/builder" apply --check "$repo_root/scripts/release/patches/swift-s
 git -C "$root/builder" apply "$repo_root/scripts/release/patches/swift-sdk/swift-ci-build-jobs.patch"
 git -C "$root/swift-project/swift-driver" apply --check "$repo_root/scripts/release/patches/swift-sdk/swift-driver-ninja-jobs.patch"
 git -C "$root/swift-project/swift-driver" apply "$repo_root/scripts/release/patches/swift-sdk/swift-driver-ninja-jobs.patch"
+git -C "$root/swift-project/swift-foundation-icu" apply --check "$repo_root/scripts/release/patches/swift-sdk/foundation-icu-upstream-license.patch"
+git -C "$root/swift-project/swift-foundation-icu" apply "$repo_root/scripts/release/patches/swift-sdk/foundation-icu-upstream-license.patch"
 
 {
   printf 'Swift: '; "$swift_path" --version | head -1
@@ -60,6 +62,7 @@ git -C "$root/swift-project/swift-driver" apply "$repo_root/scripts/release/patc
   done
   printf 'builder patch: '; sha256sum "$repo_root/scripts/release/patches/swift-sdk/swift-ci-build-jobs.patch"
   printf 'driver patch: '; sha256sum "$repo_root/scripts/release/patches/swift-sdk/swift-driver-ninja-jobs.patch"
+  printf 'ICU license patch: '; sha256sum "$repo_root/scripts/release/patches/swift-sdk/foundation-icu-upstream-license.patch"
 } > "$records/toolchain-and-patches.txt"
 python3 - "$records/build-environment.json" <<'PY'
 import json, os, platform, sys
@@ -72,9 +75,11 @@ with open(sys.argv[1], 'x', encoding='utf-8') as stream:
     stream.write('\n')
 PY
 date -u +%FT%TZ > "$records/build-started"
+build_working_directory=$(pwd -P)
+printf '%s\n' "$build_working_directory" > "$records/build-working-directory"
 
 set +e
-strace -f -qq -ttt -T -v -s 65535 -yy -e trace=process,file -o "$records/build.trace" \
+strace -f -qq -ttt -T -s 65535 -yy -e trace=process,file -o "$records/build.trace" \
   bash -x "$root/builder/swift-ci/sdks/static-linux/scripts/build.sh" \
     --source-dir "$root" --build-dir "$build_dir" --products-dir "$products_dir" \
     --archs aarch64 --jobs 3 --version 0.1.0-hostwright.1 2>&1 | tee "$records/build.log"
@@ -89,4 +94,12 @@ mapfile -t archives < "$records/product-archives.txt"
 (( ${#archives[@]} == 1 )) || { echo "expected one static Swift SDK archive" >&2; exit 65; }
 cp "${archives[0]}" "$records/swift-static-sdk.tar.gz"
 sha256sum "$records/swift-static-sdk.tar.gz" > "$records/swift-static-sdk.sha256"
+python3 "$repo_root/scripts/release/capture-swift-sdk-build-inputs.py" \
+  --sources "$root" --build "$build_dir" --sdk-archive "$records/swift-static-sdk.tar.gz" \
+  --output "$records/build-inputs"
+python3 "$repo_root/scripts/release/capture-sdk-object-sources.py" \
+  --sources "$root" --build "$build_dir" --sdk-root "$build_dir/sdk_root/aarch64" \
+  --trace "$records/build.trace" --trace-cwd "$build_working_directory" \
+  --generated-output "$records/build-inputs/generated-headers" \
+  --output "$records/build-inputs/sdk-object-sources.json"
 (cd "$records" && find . -type f ! -name checksums.sha256 -print0 | sort -z | xargs -0 sha256sum) > "$records/checksums.sha256"

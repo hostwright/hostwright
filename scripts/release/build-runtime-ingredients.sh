@@ -3,10 +3,14 @@ set -euo pipefail
 umask 077
 readonly source_capture="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/capture-runtime-source.py"
 readonly package_capture="$(dirname -- "$source_capture")/capture-package-sources.py"
+readonly native_capture="$(dirname -- "$source_capture")/capture-native-runtime-build.py"
+readonly linux_capture="$(dirname -- "$source_capture")/capture-linux-runtime-source.py"
+readonly patch_capture="$(dirname -- "$source_capture")/capture-native-patches.py"
 
 readonly containerization_commit=44bec8b9933bc491d0cbf44abac90a1f6aaebf6b
 readonly kata_commit=660e3bb6535b141c84430acb25b159857278d596
 readonly kernel_version=6.18.15
+readonly kernel_commit=df0dc1b06fb6b6461f9838694bf84079eca7562a
 readonly kernel_config_version=186
 readonly kernel_source_sha=7c716216c3c4134ed0de69195701e677577bbcdd3979f331c182acd06bf2f170
 readonly build_time=2026-01-01T00:00:00Z
@@ -29,7 +33,7 @@ done
 [[ -f "$swift_sdk" && ! -L "$swift_sdk" ]] || die "missing regular source-built Swift SDK archive"
 [[ "$(sha256sum "$swift_sdk" | awk '{print $1}')" == "$swift_sdk_sha" ]] || die "Swift SDK archive digest mismatch"
 [[ "$(uname -s)" == Linux && "$(uname -m)" == aarch64 ]] || die "runtime ingredients require Linux arm64" 69
-for tool in aarch64-linux-gnu-gcc bison clang flex gcc git jq ld.lld make python3 sha256sum swift swiftly yq; do command -v "$tool" >/dev/null || die "missing producer tool: $tool" 69; done
+for tool in aarch64-linux-gnu-gcc bison clang flex gcc git jq ld.lld make python3 sha256sum strace swift swiftly yq; do command -v "$tool" >/dev/null || die "missing producer tool: $tool" 69; done
 [[ "$(swift --version | head -1)" == *"Swift version 6.3"* ]] || die "runtime ingredients require Swift 6.3" 69
 
 # Swiftly stores toolchains separately from its configuration directory.
@@ -40,6 +44,9 @@ swift_bin="$swift_toolchain/usr/bin/swift"
 swiftc_bin="$swift_toolchain/usr/bin/swiftc"
 swift_real=$(readlink -f "$swift_bin")
 swiftc_real=$(readlink -f "$swiftc_bin")
+native_linker="$swift_toolchain/usr/bin/ld.lld"
+[[ -x "$native_linker" && "$(readlink -f "$native_linker")" == "$swift_toolchain/"* ]] \
+  || die "LLD resolves outside the verified Swift toolchain"
 for real in "$swift_real" "$swiftc_real"; do
   [[ "$real" == "$swift_toolchain/"* && -f "$real" && -x "$real" ]] \
     || die "Swift entrypoint resolves outside the verified toolchain"
@@ -74,6 +81,12 @@ mkdir -m 700 "$work/evidence/source-trees"
 
 python3 scripts/release/verify-kernel-source-signature.py \
   --inputs "$kernel_inputs" --output "$work/evidence/kernel-source-signature.json"
+git clone --depth 1 --single-branch --branch "v$kernel_version" \
+  https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git "$work/sources/linux"
+test "$(git -C "$work/sources/linux" rev-parse HEAD)" = "$kernel_commit"
+python3 "$linux_capture" --repository "$work/sources/linux" \
+  --source-archive "$kernel_inputs/linux-$kernel_version.tar.xz" \
+  --output "$work/evidence/source-trees/linux"
 
 git clone --filter=blob:none https://github.com/kata-containers/kata-containers.git "$work/sources/kata"
 git -C "$work/sources/kata" checkout --detach "$kata_commit"
@@ -96,14 +109,25 @@ for pass in first second; do
   cp -a "$work/sources/kata" "$root/kata"
   (
     cd "$root/kata/tools/packaging/kernel"
-    bash -x ./build-kernel.sh -a aarch64 -v "$kernel_version" -u "file://$kernel_inputs/" -f setup
+    bash -x ./build-kernel.sh -a aarch64 -v "$kernel_version" -u "file://$kernel_inputs/" -f setup \
+      >"$work/evidence/kernel-$pass.setup.log" 2>&1
     test -d "kata-linux-$kernel_version-$kernel_config_version"
+    python3 "$patch_capture" --repository "$work/sources/linux" \
+      --source-capture "$work/evidence/source-trees/linux" \
+      --tree "$PWD/kata-linux-$kernel_version-$kernel_config_version" --root "$work/evidence" --project linux \
+      --kernel-setup-log "$work/evidence/kernel-$pass.setup.log" --kernel-patches-dir "$PWD/patches/6.18.x" \
+      --output "$work/evidence/native-patches-linux-$pass.json"
     cp "kata-linux-$kernel_version-$kernel_config_version/.config" "$work/evidence/kernel-$pass.config"
     bash -x ./build-kernel.sh -a aarch64 -v "$kernel_version" build
     cp "kata-linux-$kernel_version-$kernel_config_version/arch/arm64/boot/Image" "$work/kernel-$pass.Image"
+    python3 "$native_capture" retain-build --kind kernel --root "$work/evidence" \
+      --tree "$PWD/kata-linux-$kernel_version-$kernel_config_version" \
+      --metadata "$work/evidence/native-kernel-$pass.json"
   ) >"$work/evidence/kernel-$pass.log" 2>&1
 done
 cmp "$work/kernel-first.Image" "$work/kernel-second.Image"
+mkdir -m 700 "$work/evidence/rebuilds"
+cp "$work/kernel-first.Image" "$work/kernel-second.Image" "$work/evidence/rebuilds/"
 install -m 0644 "$work/kernel-first.Image" "$work/payloads/vmlinux-$kernel_version-$kernel_config_version"
 
 git clone --filter=blob:none https://github.com/apple/containerization.git "$work/sources/containerization"
@@ -132,21 +156,40 @@ for pass in first second; do
   git -C "$tree" checkout --detach "$containerization_commit"
   git -C "$tree" apply --check "$work/evidence/containerization-guest-security.patch"
   git -C "$tree" apply "$work/evidence/containerization-guest-security.patch"
+  python3 "$patch_capture" --repository "$work/sources/containerization" \
+    --source-capture "$work/evidence/source-trees/containerization" --tree "$tree" \
+    --root "$work/evidence" --project containerization --patch "$work/evidence/containerization-guest-security.patch" \
+    --output "$work/evidence/native-patches-containerization-$pass.json"
+  mkdir -m 700 "$work/evidence/linker-invocations-$pass"
+  native_linker_wrapper="$work/native-linker"
+  printf '#!/usr/bin/env bash\nexec python3 %q linker --root %q --executable %q --metadata-dir %q -- "$@"\n' \
+    "$native_capture" "$work/evidence" "$native_linker" "$work/evidence/linker-invocations-$pass" > "$native_linker_wrapper"
+  chmod 0755 "$native_linker_wrapper"
   (
     cd "$tree/vminitd"
     # Header timestamps otherwise change Clang module signatures and Swift object hashes.
-    swift build -v -c release --swift-sdk aarch64-swift-linux-musl --disable-automatic-resolution \
+    strace -f -qq -yy -s 65535 -e trace=execve,mmap -o "$work/evidence/vminitd-$pass.exec.trace" -- \
+      "$swift_bin" build -v -c release --swift-sdk aarch64-swift-linux-musl --disable-automatic-resolution \
+      -Xswiftc "-use-ld=$native_linker_wrapper" \
       -Xcc -Xclang -Xcc -fno-pch-timestamp \
       --product vminitd -Xlinker -s -Xlinker -Map="$work/evidence/vminitd-$pass.map"
-    swift build -v -c release --swift-sdk aarch64-swift-linux-musl --disable-automatic-resolution \
+    strace -f -qq -yy -s 65535 -e trace=execve,mmap -o "$work/evidence/vmexec-$pass.exec.trace" -- \
+      "$swift_bin" build -v -c release --swift-sdk aarch64-swift-linux-musl --disable-automatic-resolution \
+      -Xswiftc "-use-ld=$native_linker_wrapper" \
       -Xcc -Xclang -Xcc -fno-pch-timestamp \
       --product vmexec -Xlinker -s -Xlinker -Map="$work/evidence/vmexec-$pass.map"
     bin=$(swift build -c release --swift-sdk aarch64-swift-linux-musl --disable-automatic-resolution --show-bin-path)
     cp "$bin/vminitd" "$work/vminitd-$pass"
     cp "$bin/vmexec" "$work/vmexec-$pass"
+    python3 "$native_capture" retain-build --kind swift --root "$work/evidence" --tree "$PWD" \
+      --trace "$work/evidence/vminitd-$pass.exec.trace" --trace "$work/evidence/vmexec-$pass.exec.trace" \
+      --map "$work/evidence/vminitd-$pass.map" --map "$work/evidence/vmexec-$pass.map" \
+      --link-invocations "$work/evidence/linker-invocations-$pass" \
+      --metadata "$work/evidence/native-swift-$pass.json"
     find .build -type f \( -name '*.a' -o -name '*.o' -o -name '*.resp' -o -name '*.rsp' \
       -o -name '*.LinkFileList' -o -name '*.autolink' -o -name sources \
-      -o -name output-file-map.json -o -name description.json -o -name release.yaml \) -print0 \
+      -o -name '*.d' -o -name compile_commands.json -o -name output-file-map.json \
+      -o -name description.json -o -name release.yaml \) -print0 \
       | sort -z | tar --null -T - --sort=name --mtime=@1767225600 --owner=0 --group=0 --numeric-owner -cf - \
       | gzip -n > "$work/evidence/vminit-link-inputs-$pass.tar.gz"
     if [[ "$pass" == first ]]; then
@@ -158,6 +201,20 @@ for pass in first second; do
 done
 cmp "$work/vminitd-first" "$work/vminitd-second"
 cmp "$work/vmexec-first" "$work/vmexec-second"
+python3 - "$work/evidence" <<'PY'
+import json, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+ledger = {}
+for project in ('linux', 'containerization'):
+    first = json.loads((root / ('native-patches-' + project + '-first.json')).read_bytes())
+    second = json.loads((root / ('native-patches-' + project + '-second.json')).read_bytes())
+    if first != second or set(first) != {project}:
+        raise SystemExit('native applied patches differ between builds: ' + project)
+    ledger.update(first)
+with (root / 'native-patches.json').open('x') as stream:
+    json.dump(ledger, stream, sort_keys=True, separators=(',', ':')); stream.write('\n')
+PY
+cp "$work/vminitd-first" "$work/vminitd-second" "$work/vmexec-first" "$work/vmexec-second" "$work/evidence/rebuilds/"
 install -m 0755 "$work/vminitd-first" "$work/payloads/vminitd"
 install -m 0755 "$work/vmexec-first" "$work/payloads/vmexec"
 

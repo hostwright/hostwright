@@ -1,0 +1,51 @@
+{
+  "kind": "hostwright.source-license-patch.v1",
+  "licenseMatches": [
+    {
+      "comparison": "Exact license text after removing upstream comment prefixes and normalizing whitespace.",
+      "normalizedTextSHA256": "97531e7b4c7581a8608f9796c2717f9801cabe34e0e9c03a12df2206287a7235",
+      "reference": "https://spdx.org/licenses/NAIST-2003.html",
+      "spdx": "NAIST-2003",
+      "upstreamSection": "COPYING.ipadic"
+    }
+  ],
+  "patch": {
+    "afterSHA256": "30129dc7da79d0ea4ec583873c895b3826ec7d410acdfd49cb3228cce609b43d",
+    "beforeSHA256": "2245a990b635558be210fb3eb4f8a6f7a49aebc0fefbf5859146a65ddc7ddcf3",
+    "path": "scripts/release/patches/swift-sdk/foundation-icu-upstream-license.patch",
+    "sha256": "04e42724a2ca2e93aa20f40cad56813c824c9e253fcb40ea10b4b03683bd85f7",
+    "sizeBytes": 27510,
+    "target": "LICENSE.md"
+  },
+  "schemaVersion": 1,
+  "scope": "Prepend-only license document change; original LICENSE.md bytes remain its unmodified suffix. The upstream version header is byte-identical; this does not assert equality of all transformed Swift ICU sources or establish which packed data or native objects are linked. The existing verifier replays the actual patch against captured source bytes.",
+  "sourceProject": {
+    "commit": "2e2854eee567589ed44c5f3c85c7343e6d91978d",
+    "identity": "swift-sdk/swift-project/swift-foundation-icu",
+    "repository": "https://github.com/swiftlang/swift-foundation-icu.git"
+  },
+  "status": "prepared-not-applied",
+  "unresolved": [
+    "The retained Costello punycode permission has no verified supported SPDX identifier; exclude its source scope unless actual source participation and terms are qualified.",
+    "The source-document patch has not been applied to or captured from the SDK sources; it is not release evidence."
+  ],
+  "upstream": {
+    "commit": "8eca245c7484ac6cc179e3e5f7c1ea7680810f39",
+    "path": "LICENSE",
+    "release": "76.1",
+    "repository": "https://github.com/unicode-org/icu.git",
+    "sha256": "01edac20612b1e590c1c1cfb02b7218c6adc7b0a944eda7a1e03aeee10725aed",
+    "sizeBytes": 26487,
+    "url": "https://raw.githubusercontent.com/unicode-org/icu/8eca245c7484ac6cc179e3e5f7c1ea7680810f39/LICENSE"
+  },
+  "versionEvidence": {
+    "comparison": "byte-identical",
+    "major": 76,
+    "minor": 1,
+    "sha256": "dd8038453c55bcc1b7a2a7825dd995447363e962abc81171f1f10a142ca9161a",
+    "sizeBytes": 6480,
+    "sourcePath": "icuSources/include/_foundation_unicode/uvernum.h",
+    "upstreamPath": "icu4c/source/common/unicode/uvernum.h",
+    "url": "https://raw.githubusercontent.com/unicode-org/icu/8eca245c7484ac6cc179e3e5f7c1ea7680810f39/icu4c/source/common/unicode/uvernum.h"
+  }
+}

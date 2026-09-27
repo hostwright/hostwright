@@ -128,10 +128,20 @@ jobs:
       - name: Verify source and build evidence capture
         run: |
           sudo apt-get update
-          sudo apt-get install --yes strace
+          sudo apt-get install --yes clang lld llvm ninja-build strace
           python3 scripts/release/test-capture-runtime-source.py
+          python3 scripts/release/test-capture-linux-runtime-source.py
           python3 scripts/release/test-capture-package-sources.py
           python3 scripts/release/test-capture-go-runtime-sources.py
           python3 scripts/release/test-capture-go-build.py
+          python3 scripts/release/test-prepare-go-runtime-provenance.py
+          python3 scripts/release/test-capture-native-runtime-build.py
+          python3 scripts/release/test-capture-native-patches.py
+          python3 scripts/release/test-capture-swift-sdk-build-inputs.py
+          python3 scripts/release/test-capture-sdk-object-sources.py
+          python3 scripts/release/test-prepare-native-source-projects.py
+          python3 scripts/release/test-prepare-reviewed-native-sources.py
+          python3 scripts/release/test-prepare-native-runtime-provenance.py
+          python3 scripts/release/test-prepare-runtime-provenance.py
           python3 scripts/release/test-runtime-provenance.py
           python3 scripts/release/test-assemble-runtime-provenance.py

@@ -98,11 +98,14 @@ def toolchain(manifest, fetch):
     require({'compiler','linker'}<=identities, 'missing authenticated compiler/linker toolchain')
     return tools
 
+REVIEWED_LICENSE_REFS={'LicenseRef-Adam-Costello-Punycode'}
+
+
 def spdx(expression):
-    supported={'0BSD','Apache-2.0','BSD-2-Clause','BSD-3-Clause','MIT','ISC','bzip2-1.0.6','GPL-2.0-only','GPL-2.0-or-later',
+    supported={'0BSD','Apache-2.0','BSD-2-Clause','BSD-3-Clause','MIT','ISC','bzip2-1.0.6','curl','GPL-2.0-only','GPL-2.0-or-later',
                'GPL-3.0-only','GPL-3.0-or-later','LGPL-2.1-only','LGPL-2.1-or-later','LGPL-3.0-only',
-               'Zlib','OpenSSL','Unicode-3.0','Unicode-DFS-2016','ICU','MPL-2.0','CC0-1.0','PSF-2.0',
-               'LLVM-exception','Swift-exception'}
+               'Zlib','OpenSSL','Unicode-3.0','Unicode-DFS-2016','ICU','MPL-2.0','CC0-1.0','PSF-2.0','SunPro',
+               'bcrypt-Solar-Designer','NAIST-2003','LLVM-exception','Swift-exception'} | REVIEWED_LICENSE_REFS
     tokens=re.findall(r'[A-Za-z0-9.-]+|[()]',expression)
     require(''.join(tokens)==re.sub(r'\s','',expression) and tokens, 'malformed SPDX expression')
     cursor=0
@@ -264,6 +267,12 @@ def source_project(project, fetch, project_commits=None):
         require(source_name in leaves and leaves[source_name]['gitMode']!='120000' and
                 leaves[source_name]['sha256']==digest(data) and item['component']==project['identity'] and
                 item['spdx']==project['spdx'], 'license/notice is not bound to exact source leaf/component/SPDX')
+    if 'LicenseRef-Adam-Costello-Punycode' in project['spdx']:
+        data=contents.get('icuSources/common/punycode.cpp',b'')
+        retained=any(item['sourcePath']=='icuSources/common/punycode.cpp'
+                     for item in project['licenses']+project['notices'])
+        require(b'Adam M. Costello' in data and b'irrevocable permission' in data and retained,
+                'Punycode LicenseRef lacks its exact source grant evidence')
     return leaves
 
 def elf(data, relocatable=False):
@@ -403,6 +412,196 @@ def lld_map_inputs(data):
     require(selected, 'empty actual LLD selected input set')
     return selected
 
+def expand_response_arguments(arguments, records, fetch, cwd=None):
+    responses={}
+    for record in records:
+        name=record.get('originalPath')
+        require(isinstance(name,str) and name and '\0' not in name, 'response file lacks original invocation path')
+        require(name not in responses, 'duplicate response file invocation path')
+        responses[name]=substantive(record,fetch).decode()
+    def expand(values, active):
+        result=[]
+        for value in values:
+            if not value.startswith('@'):
+                result.append(value);continue
+            name=value[1:]
+            if name not in responses and cwd is not None:name=os.path.normpath(os.path.join(cwd,name))
+            require(name in responses, 'linker response file was not retained')
+            require(name not in active, 'recursive linker response file')
+            result.extend(expand(shlex.split(responses[name]),active|{name}))
+        return result
+    return expand(arguments,set())
+
+def compiler_input_document(record, fetch):
+    metadata=record['compilerInputs']
+    name=path(metadata['path'])
+    document=parse(substantive(metadata,fetch))
+    require(isinstance(document,dict) and document.get('objectSHA256')==record['objectSHA256'],
+            'compiler input object mismatch')
+    require({'objectSHA256','sourceFiles','translationUnits'}<=document.keys()
+            and document.keys()<={'objectSHA256','sourceFiles','translationUnits','generatedHeaders','compilerResponseFiles','compilerModuleFiles'},
+            'invalid compiler input metadata')
+    return document,name.rsplit('/',1)[0]+'/' if '/' in name else ''
+
+NATIVE_SOURCE_ALIASES = {
+    ("swift-sdk/swift-project/cmake", "Utilities/cmbzip2/blocksort.c"): ("swift-sdk/bzip2", "blocksort.c"),
+    ("swift-sdk/swift-project/cmake", "Utilities/cmbzip2/bzlib.h"): ("swift-sdk/bzip2", "bzlib.h"),
+    ("swift-sdk/swift-project/cmake", "Utilities/cmbzip2/crctable.c"): ("swift-sdk/bzip2", "crctable.c"),
+    ("swift-sdk/swift-project/cmake", "Utilities/cmbzip2/decompress.c"): ("swift-sdk/bzip2", "decompress.c"),
+    ("swift-sdk/swift-project/cmake", "Utilities/cmbzip2/huffman.c"): ("swift-sdk/bzip2", "huffman.c"),
+    ("swift-sdk/swift-project/cmake", "Utilities/cmbzip2/randtable.c"): ("swift-sdk/bzip2", "randtable.c"),
+    ("swift-sdk/swift-project/cmake", "Utilities/cmcurl/include/curl/header.h"):
+        ("swift-sdk/curl", "include/curl/header.h"),
+    ("swift-sdk/swift-project/cmake", "Utilities/cmcurl/include/curl/options.h"):
+        ("swift-sdk/curl", "include/curl/options.h"),
+}
+
+
+def native_source_files(record, fetch):
+    def sources(values):
+        require(isinstance(values,list) and 0<len(values)<=MAX_FILES, 'missing native compiler sources')
+        result=set()
+        for source in values:
+            require(isinstance(source,dict) and {'project','path','sha256'}<=source.keys(), 'invalid native compiler source')
+            identity=(path(source['project']),path(source['path']),source['sha256'])
+            require(re.fullmatch('[a-f0-9]{64}',identity[2]) is not None, 'invalid native compiler source digest')
+            require(identity not in result, 'duplicate native compiler source')
+            result.add(identity)
+        return result
+    compact=sources(record['sourceFiles'])
+    document=record
+    local=fetch
+    if 'compilerInputs' in record:
+        require('generatedHeaders' not in record, 'compiler input metadata is duplicated inline')
+        document,prefix=compiler_input_document(record,fetch)
+        local=lambda name:fetch(prefix+path(name))
+        raw_compact=compact
+        raw_complete=sources(document['sourceFiles'])
+        raw_units=sources(document['translationUnits'])
+        require(raw_units<=raw_complete and raw_compact<=raw_complete,
+                'compact native sources or translation units are not verified sources')
+        require({row[0] for row in raw_compact}=={row[0] for row in raw_complete},
+                'compact native source project coverage mismatch')
+        require(len(raw_compact)==len({row[0] for row in raw_complete}),
+                'compact native sources must name one representative per project')
+        require({row[0] for row in raw_compact&raw_units}=={row[0] for row in raw_units},
+                'compact native sources omit a translation-unit representative')
+
+        def canonical(rows):
+            result=set()
+            for project,name,sha in rows:
+                target=NATIVE_SOURCE_ALIASES.get((project,name))
+                if target is not None:
+                    candidate=(target[0],target[1],sha)
+                    require(candidate in raw_complete, 'source alias lacks exact pinned upstream match')
+                    result.add(candidate)
+                else:
+                    result.add((project,name,sha))
+            return result
+
+        complete=canonical(raw_complete)
+        units=canonical(raw_units)
+        compact_candidates=canonical(raw_compact)
+        compact=set()
+        for project in {row[0] for row in compact_candidates}:
+            candidates={row for row in compact_candidates if row[0]==project}
+            compact.add(min(candidates&units or candidates))
+        require(units<=complete and compact<=complete
+                and {row[0] for row in compact&units}=={row[0] for row in units},
+                'canonical compiler inputs omit source coverage')
+        response_files=document.get('compilerResponseFiles',[])
+        require(isinstance(response_files,list), 'invalid compiler response-file evidence')
+        response_sources=set()
+        for response in response_files:
+            require(isinstance(response,dict) and isinstance(response.get('originalPath'),str)
+                    and pathlib.PurePosixPath(response['originalPath']).is_absolute()
+                    and isinstance(response.get('file'),dict)
+                    and {'path','sha256','sizeBytes'}<=response['file'].keys(),
+                    'invalid compiler response-file record')
+            data=bound(response['file'],local)
+            response_paths=response.get('sourcePaths')
+            require(data and isinstance(response.get('sourceFiles'),list) and isinstance(response_paths,list)
+                    and response_paths and all(isinstance(item,str) and pathlib.PurePosixPath(item).is_absolute()
+                                               and pathlib.PurePosixPath(item).suffix=='.swift' for item in response_paths)
+                    and set(response_paths)<=set(shlex.split(data.decode('utf-8'))),
+                    'empty compiler response file or missing sources')
+            response_sources.update(canonical(sources(response['sourceFiles'])))
+        if response_files:
+            require(response_sources==units, 'compiler response-file translation units mismatch')
+        module_files=document.get('compilerModuleFiles',[])
+        require(isinstance(module_files,list), 'invalid compiler module-file evidence')
+        for module in module_files:
+            require(isinstance(module,dict) and isinstance(module.get('originalPath'),str)
+                    and pathlib.PurePosixPath(module['originalPath']).is_absolute()
+                    and pathlib.PurePosixPath(module['originalPath']).suffix=='.pcm'
+                    and isinstance(module.get('file'),dict)
+                    and {'path','sha256','sizeBytes'}<=module['file'].keys(),
+                    'invalid compiler module-file record')
+            require(bool(bound(module['file'],local)), 'empty compiler module file')
+    else:
+        complete=compact
+    headers=document.get('generatedHeaders',[])
+    require(isinstance(headers,list), 'invalid generated-header evidence')
+    validated={}
+    def retained(item):
+        key=(path(item['path']),item['sha256'],item['sizeBytes'])
+        if key not in validated:validated[key]=bound(item,local)
+        return validated[key]
+    for header in headers:
+        require(isinstance(header,dict) and isinstance(header.get('originalPath'),str)
+                and pathlib.PurePosixPath(header['originalPath']).is_absolute()
+                and isinstance(header.get('file'),dict)
+                and {'path','sha256','sizeBytes'}<=header['file'].keys(), 'invalid generated-header file evidence')
+        data=retained(header['file'])
+        require(isinstance(header.get('compilerArguments'),list) and header['compilerArguments']
+                and all(isinstance(argument,str) and argument for argument in header['compilerArguments'])
+                and isinstance(header.get('cwd'),str) and pathlib.PurePosixPath(header['cwd']).is_absolute()
+                and isinstance(header.get('evidence'),dict), 'missing generated-header compiler metadata')
+        evidence=header.get('retainedEvidence')
+        require(isinstance(evidence,list) and evidence and all(isinstance(item,dict)
+                and isinstance(item.get('file'),dict) and {'path','sha256','sizeBytes'}<=item['file'].keys()
+                for item in evidence), 'missing retained generated-header compiler evidence')
+        for item in evidence:require(retained(item['file']).strip(), 'empty retained compiler evidence')
+        if header.get('kind')=='empty-header':
+            require(not data and not header.get('matchingSources'), 'empty native header has content or attribution')
+        if header.get('kind')=='generated-source-input':
+            require(pathlib.PurePosixPath(header['originalPath']).name=='cmake_pch.h.c'
+                    and data==b'/* generated by CMake */\n' and not header.get('matchingSources'),
+                    'unverified generated precompiled-header source')
+        if header.get('kind')=='copied-source-input':
+            require(pathlib.PurePosixPath(header['originalPath']).suffix in
+                    ('.c','.cc','.cpp','.mm','.m','.S','.s','.swift') and data,
+                    'invalid copied compiler source input')
+        if header.get('kind')=='generated-template-source-input':
+            source_paths=header.get('sourcePaths')
+            require(pathlib.PurePosixPath(header['originalPath']).suffix in ('.swift','.mm') and data
+                    and isinstance(source_paths,list) and source_paths
+                    and all(isinstance(item,str) and pathlib.PurePosixPath(item).is_absolute()
+                            and pathlib.PurePosixPath(item).suffix in ('.gyb','.swift') for item in source_paths)
+                    and set(source_paths)==({item.decode('utf-8') for item in
+                        re.findall(rb'// ###sourceLocation\(file: "([^"\n]+\.(?:gyb|swift))"',data)}
+                        | {item.decode('utf-8') for item in
+                           re.findall(rb'// original-source-range: ([^\s:]+\.(?:gyb|swift)):\d+:\d+',data)})
+                    and canonical(sources(header.get('sourceFiles',[])))<=complete,
+                    'invalid generated Swift source location evidence')
+        if header.get('kind')=='sdk-configuration-input':
+            require(pathlib.PurePosixPath(header['originalPath']).name=='SDKSettings.json'
+                    and isinstance(parse(data),dict) and not header.get('matchingSources'),
+                    'unverified SDK configuration input')
+        if 'matchingSources' in header or header.get('kind') in ('copied-header','copied-source-input'):
+            matches=canonical(sources(header.get('matchingSources')))
+            require(matches<=complete and all(row[2]==digest(data) for row in matches), 'copied native header source mismatch')
+    ordered=[]
+    for source in document['sourceFiles']:
+        project,name,sha=path(source['project']),path(source['path']),source['sha256']
+        target=NATIVE_SOURCE_ALIASES.get((project,name))
+        if target is not None:project,name=target
+        row=(project,name,sha)
+        if row in complete and row not in {(item['project'],item['path'],item['sha256']) for item in ordered}:
+            ordered.append(dict(project=project,path=name,sha256=sha))
+    require(len(ordered)==len(complete), 'canonical source list lost compiler inputs')
+    return ordered
+
 def link_closure(link, output, projects, fetch, tools=None):
     elf(output)
     require(link['outputSHA256']==digest(output), 'link output mismatch')
@@ -415,6 +614,8 @@ def link_closure(link, output, projects, fetch, tools=None):
     require(selected==set(section_rows), 'link map section/input coverage mismatch')
     require(link['commands'] and link['responseFiles'], 'missing actual linker commands/response files')
     commands=[argv(record,fetch,tools) for record in link['commands']]
+    if all('originalPath' in record for record in link['responseFiles']):
+        commands=[expand_response_arguments(command,link['responseFiles'],fetch,link.get('workingDirectory')) for command in commands]
     require(any(any('-Map' in arg or '--Map' in arg for arg in command[1:]) for command in commands), 'linker argv lacks actual map capture')
     for record in link['responseFiles']:substantive(record,fetch)
     archive_cache={}; parsed_archives={}; expected={}; covered={}; archive_digests={}; ledger=set()
@@ -447,7 +648,7 @@ def link_closure(link, output, projects, fetch, tools=None):
         ledger.add(identity)
         require(digest(data)==record['objectSHA256'], 'selected object mismatch'); elf(data,True)
         require(record['sourceFiles'], 'selected object has no compiled-source attribution')
-        for source in record['sourceFiles']:
+        for source in native_source_files(record,fetch):
             require(source['project'] in projects and source['path'] in projects[source['project']], 'selected source missing')
             leaf=projects[source['project']][source['path']]
             require(leaf['gitMode']!='120000' and leaf['sha256']==source['sha256'], 'selected source attribution mismatch')
@@ -612,7 +813,8 @@ def go_capture(record, output, fetch, tools):
                 filename=selected[1]
                 if filename in operands:continue
                 if re.fullmatch(r'/proc/[0-9]+/(cgroup|mountinfo)',filename) or filename in {
-                    '/sys/fs/cgroup/cpu.max',environment['HOME']+'/.config/go/telemetry/local/weekends'}:continue
+                    '/sys/fs/cgroup/cpu.max',environment['HOME']+'/.config/go/telemetry/local/weekends',
+                    environment['HOME']+'/.config/go/telemetry/mode'}:continue
                 opened.add(filename)
             require(opened==set(headers), 'Go selected headers differ from actual file opens')
             roots={pathlib.PurePosixPath(filename).parent for filename in asm_inputs if filename.endswith('.s')}
@@ -705,7 +907,8 @@ def verify(manifest_data, runtime, payloads, fetch, source_commit, require_authe
             {'kata-linux-kernel','apple-vminit-oci','hostwright-netfilter-loader'}, 'runtime license asset coverage mismatch')
     require(runtime.get('status')=='qualified' and all(a.get('status')=='qualified' and
             a.get('blockers')==[] and a.get('licenseExpression') and
-            'LicenseRef-' not in a['licenseExpression'] for a in assets), 'unresolved runtime license evidence')
+            set(re.findall(r'LicenseRef-[A-Za-z0-9.-]+',a['licenseExpression']))<=REVIEWED_LICENSE_REFS
+            for a in assets), 'unresolved runtime license evidence')
     require(manifest['runtimeInventorySHA256']==digest(canonical(runtime)), 'runtime license inventory bytes mismatch')
     expected={path(r['path']):r for r in manifest['payloads']}
     require(len(expected)==len(manifest['payloads']) and set(expected)==set(payloads) and 0<len(expected)<=4096, 'runtime subject coverage mismatch')

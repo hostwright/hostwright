@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 SPEC = importlib.util.spec_from_file_location("capture_go_build", Path(__file__).with_name("capture-go-build.py"))
@@ -43,7 +44,13 @@ class GoBuildCaptureTests(unittest.TestCase):
     @unittest.skipUnless(sys.platform == "linux" and shutil.which("strace"), "actual header capture requires Linux strace")
     def test_actual_build_retains_linked_archives_and_preserves_payload(self):
         output = self.root / "capture"
-        metadata = CAPTURE.build(self.go, self.source, output, 1)
+        home = self.root / "home"
+        mode = home / ".config/go/telemetry/mode"
+        mode.parent.mkdir(parents=True)
+        mode.write_text("off\n")
+        with patch.dict(os.environ, HOME=str(home)):
+            metadata = CAPTURE.build(self.go, self.source, output, 1)
+        self.assertEqual(mode.read_text(), "off\n")
         commands = [json.loads(self.read_record(output, item)) for item in metadata["commands"]]
         self.assertEqual(len(commands), len(list((output / "commands").glob("*.json"))))
         for command in commands:
@@ -83,6 +90,8 @@ class GoBuildCaptureTests(unittest.TestCase):
         tools[metadata["toolExec"]["interpreterPath"]] = metadata["toolExec"]["interpreter"]["sha256"]
         tools.update({item["headerTrace"]["argv"][0]: item["headerTrace"]["executable"]["sha256"]
                       for item in commands if "headerTrace" in item})
+        self.assertTrue(any(str(mode).encode() in self.read_record(output, item["headerTrace"]["file"])
+                            for item in commands if "headerTrace" in item))
 
         def verify(changed=None):
             retained = {}
@@ -176,9 +185,37 @@ class GoBuildCaptureTests(unittest.TestCase):
             command["headerTrace"]["originalPath"] += ".stale"
         def change_experiment(rows):
             tool_command(rows, "compile")["environment"]["GOEXPERIMENT"] = "loopvar"
-        for change in (omit_source, invent_source, substitute_archive, omit_header, omit_assembler, change_link_output, change_trace_path, change_experiment):
+        def open_untracked_header(rows):
+            command = next(item for item in rows if item["openedHeaders"])
+            trace = self.read_record(output, command["headerTrace"]["file"])
+            trace += b'1 openat(AT_FDCWD, "/outside/header.h", O_RDONLY) = 4</outside/header.h>\n'
+            command["headerTrace"]["file"] = CAPTURE.retain_bytes(output, trace)
+        for change in (omit_source, invent_source, substitute_archive, omit_header, omit_assembler, change_link_output, change_trace_path, change_experiment, open_untracked_header):
             with self.subTest(change=change.__name__), self.assertRaises(ValueError):
                 verify(change)
+
+    @unittest.skipUnless(sys.platform == "linux" and shutil.which("strace"), "actual header capture requires Linux strace")
+    def test_assembler_refuses_an_actual_header_outside_source_roots(self):
+        output = self.root / "capture"
+        (output / "files").mkdir(parents=True)
+        (output / "commands").mkdir()
+        (self.root / "outside.h").write_text("#define OUTSIDE 1\n")
+        source = self.source / "escaped.s"
+        source.write_text('#include "../outside.h"\nTEXT ·test(SB),0,$0-0\nRET\n')
+        tool_directory = subprocess.check_output([str(self.go), "env", "GOTOOLDIR"], text=True).strip()
+        with patch.dict(os.environ, GOTOOLCHAIN="local", GOOS="linux", GOARCH="arm64", GOMAXPROCS="1"):
+            with self.assertRaisesRegex(ValueError, "assembler header escaped.*outside.h"):
+                CAPTURE.tool(output, [tool_directory + "/asm", "-p", "example.test/capture",
+                                     "-o", str(self.root / "escaped.o"), str(source)])
+
+    def test_build_failure_exposes_compiler_diagnostic_and_retains_log(self):
+        (self.source / "main.go").write_text('package main\nimport _ "missing-capture-package"\nfunc main() {}\n')
+        output = self.root / "failed"
+        with self.assertRaisesRegex(RuntimeError, "Go build failed") as failure:
+            CAPTURE.build(self.go, self.source, output, 1)
+        self.assertIn("missing-capture-package", str(failure.exception))
+        self.assertIn("missing-capture-package", (self.root / "failed.failure.log").read_text())
+        self.assertFalse(output.exists())
 
     def test_refuses_existing_or_linked_output_without_modification(self):
         existing = self.root / "existing"

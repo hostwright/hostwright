@@ -58,6 +58,20 @@ def records(value):
 
 def evidence_records(manifest, fetch):
     found = records(manifest)
+
+    def include(document, prefix):
+        for name, record in records(document).items():
+            qualified = dict(record, path=prefix + name)
+            if qualified["path"] in found and found[qualified["path"]] != qualified:
+                fail("conflicting nested provenance record")
+            found[qualified["path"]] = qualified
+
+    for link in [manifest.get("loader", {}), *manifest.get("oci", {}).get("links", [])]:
+        for selected in link.get("selectedInputs", []):
+            if "compilerInputs" in selected:
+                document, prefix = VERIFIER.compiler_input_document(selected, fetch)
+                VERIFIER.native_source_files(selected, fetch)
+                include(document, prefix)
     capture_record = manifest.get("loader", {}).get("buildCapture")
     if capture_record is None:
         return found
@@ -73,11 +87,7 @@ def evidence_records(manifest, fetch):
     for record in capture["commands"] + [capture["packages"]]:
         documents.append(VERIFIER.parse(VERIFIER.substantive(record, local)))
     for document in documents:
-        for name, record in records(document).items():
-            qualified = dict(record, path=prefix + name)
-            if qualified["path"] in found and found[qualified["path"]] != qualified:
-                fail("conflicting nested Go provenance record")
-            found[qualified["path"]] = qualified
+        include(document, prefix)
     return found
 
 

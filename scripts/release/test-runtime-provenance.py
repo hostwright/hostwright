@@ -80,7 +80,89 @@ def fixture(rootfs_layer=None):
   kernel=dict(project='compiled-project',payloadPath=kernel,outputSHA256=v.digest(arm64_image()),config=add('proof/kernel.config',b'CONFIG_ARM64=y\n'),compiler=tools[0]['executable'],commands=add('proof/kernel.argv',v.canonical(['/toolchains/clang','-o','vmlinux','main.c'])),patches=[]))
  return manifest,runtime,payloads,files
 
+def compiler_inputs_fixture(manifest,files):
+ record=manifest['oci']['links'][0]['selectedInputs'][0]
+ unit=record['sourceFiles'][0]
+ header_source=dict(project=unit['project'],path='NOTICE',sha256=v.digest(b'Fixture notice text\n'))
+ def add(name,data):
+  files['proof/'+name]=data
+  return dict(path=name,sha256=v.digest(data),sizeBytes=len(data))
+ evidence=add('headers/main.d',b'main.o: /source/main.c /build/copied.h /build/empty.h\n')
+ headers=[]
+ for name,data,extra in [('copied.h',b'Fixture notice text\n',dict(kind='copied-header',matchingSources=[header_source])),
+                         ('empty.h',b'',dict(kind='empty-header'))]:
+  headers.append(dict(originalPath='/build/'+name,file=add('headers/'+name,data),
+   compilerArguments=['clang','-c','/source/main.c','-o','main.o'],cwd='/build',evidence=dict(path='/build/main.d'),
+   retainedEvidence=[dict(originalPath='/build/main.d',file=evidence)],**extra))
+ document=dict(objectSHA256=record['objectSHA256'],sourceFiles=[unit,header_source],translationUnits=[unit],generatedHeaders=headers)
+ raw=v.canonical(document);files['proof/compiler-inputs.json']=raw
+ record['compilerInputs']=dict(path='proof/compiler-inputs.json',sha256=v.digest(raw),sizeBytes=len(raw))
+ return record,document
+
 class RuntimeProvenanceTests(unittest.TestCase):
+ def test_vendored_sdk_source_alias_requires_exact_upstream_candidate(self):
+  cases=(('swift-sdk/bzip2','blocksort.c','Utilities/cmbzip2/blocksort.c'),
+         ('swift-sdk/curl','include/curl/header.h','Utilities/cmcurl/include/curl/header.h'),
+         ('swift-sdk/curl','include/curl/options.h','Utilities/cmcurl/include/curl/options.h'))
+  for project,path,vendored_path in cases:
+   with self.subTest(path=path):
+    digest=v.digest(b'vendored '+path.encode())
+    upstream=dict(project=project,path=path,sha256=digest)
+    vendored=dict(project='swift-sdk/swift-project/cmake',path=vendored_path,sha256=digest)
+    document=dict(objectSHA256='a'*64,sourceFiles=[upstream,vendored],translationUnits=[vendored])
+    raw=v.canonical(document);files={'proof/inputs.json':raw}
+    record=dict(objectSHA256='a'*64,sourceFiles=[upstream,vendored],
+                compilerInputs=dict(path='proof/inputs.json',sha256=v.digest(raw),sizeBytes=len(raw)))
+    self.assertEqual(v.native_source_files(record,files.__getitem__),[upstream])
+    document['sourceFiles']=[vendored];record['sourceFiles']=[vendored]
+    raw=v.canonical(document);files['proof/inputs.json']=raw
+    record['compilerInputs'].update(sha256=v.digest(raw),sizeBytes=len(raw))
+    with self.assertRaisesRegex(ValueError,'source alias lacks exact pinned upstream match'):
+     v.native_source_files(record,files.__getitem__)
+
+ def test_compact_compiler_inputs_preserve_full_source_and_header_checks(self):
+  manifest,runtime,payloads,files=fixture();record,document=compiler_inputs_fixture(manifest,files)
+  self.assertEqual(v.native_source_files(record,files.__getitem__),document['sourceFiles'])
+  v.verify(v.canonical(manifest),runtime,payloads,files.__getitem__,manifest['sourceCommit'],require_authentication=False)
+  document['translationUnits']=list(document['sourceFiles'])
+  data=v.canonical(document);files[record['compilerInputs']['path']]=data
+  record['compilerInputs'].update(sha256=v.digest(data),sizeBytes=len(data))
+  self.assertEqual(len(record['sourceFiles']),1)
+  v.verify(v.canonical(manifest),runtime,payloads,files.__getitem__,manifest['sourceCommit'],require_authentication=False)
+ def test_compact_compiler_inputs_reject_incomplete_or_false_source_coverage(self):
+  for change,message in [('object','compiler input object mismatch'),('unit','not verified sources'),
+                          ('project','project coverage mismatch'),('representative','translation-unit representative'),
+                          ('multiple','one representative'),('leaf','selected source attribution mismatch')]:
+   with self.subTest(change=change):
+    manifest,runtime,payloads,files=fixture();record,document=compiler_inputs_fixture(manifest,files)
+    if change=='object':document['objectSHA256']='f'*64
+    elif change=='unit':document['translationUnits'][0]=dict(document['translationUnits'][0],path='missing.c')
+    elif change=='project':document['sourceFiles'].append(dict(document['sourceFiles'][0],project='missing-project'))
+    elif change=='representative':record['sourceFiles']=[document['sourceFiles'][1]]
+    elif change=='multiple':record['sourceFiles']=list(document['sourceFiles'])
+    elif change=='leaf':
+     document['sourceFiles'][1]=dict(document['sourceFiles'][1],sha256='f'*64)
+     document['generatedHeaders']=[]
+    raw=v.canonical(document);files[record['compilerInputs']['path']]=raw
+    record['compilerInputs'].update(sha256=v.digest(raw),sizeBytes=len(raw))
+    with self.assertRaisesRegex(ValueError,message):
+     v.verify(v.canonical(manifest),runtime,payloads,files.__getitem__,manifest['sourceCommit'],require_authentication=False)
+ def test_compiler_input_sidecars_reject_tampering_escape_and_oversize(self):
+  for change,message in [('sidecar','evidence bytes mismatch'),('header','evidence bytes mismatch'),
+                          ('evidence','evidence bytes mismatch'),('escape','unsafe provenance path'),
+                          ('oversize','oversized provenance metadata')]:
+   with self.subTest(change=change):
+    manifest,runtime,payloads,files=fixture();record,document=compiler_inputs_fixture(manifest,files)
+    if change in ('sidecar','header','evidence'):
+     name={'sidecar':'proof/compiler-inputs.json','header':'proof/headers/copied.h','evidence':'proof/headers/main.d'}[change]
+     files[name]+=b'changed'
+    else:
+     if change=='escape':document['generatedHeaders'][0]['file']['path']='../outside.h'
+     raw=v.canonical(document) if change=='escape' else b'{}'+b' '*v.MAX_METADATA
+     files[record['compilerInputs']['path']]=raw
+     record['compilerInputs'].update(sha256=v.digest(raw),sizeBytes=len(raw))
+    with self.assertRaisesRegex(ValueError,message):
+     v.verify(v.canonical(manifest),runtime,payloads,files.__getitem__,manifest['sourceCommit'],require_authentication=False)
  def test_submodule_projects_are_independently_verified_by_full_validator(self):
   manifest,runtime,payloads,files=fixture()
   parent=manifest['sourceProjects'][0];child=copy.deepcopy(parent);child['identity']='child-project'
@@ -236,7 +318,13 @@ class RuntimeProvenanceTests(unittest.TestCase):
    with self.subTest(offset=offset),self.assertRaises(ValueError):v.arm64_image(payload)
  def test_static_sdk_spdx_identifiers_require_exact_known_values(self):
   self.assertEqual(v.spdx('0BSD AND bzip2-1.0.6'),'0BSD AND bzip2-1.0.6')
-  for expression in ('0bsd','bzip2-1.0.5','LicenseRef-bzip2'):
+  self.assertEqual(v.spdx('curl AND MIT'),'curl AND MIT')
+  self.assertEqual(v.spdx('MIT AND SunPro'),'MIT AND SunPro')
+  self.assertEqual(v.spdx('MIT AND bcrypt-Solar-Designer'),'MIT AND bcrypt-Solar-Designer')
+  self.assertEqual(v.spdx('Unicode-3.0 AND NAIST-2003'),'Unicode-3.0 AND NAIST-2003')
+  self.assertEqual(v.spdx('Unicode-3.0 AND LicenseRef-Adam-Costello-Punycode'),
+                   'Unicode-3.0 AND LicenseRef-Adam-Costello-Punycode')
+  for expression in ('0bsd','bzip2-1.0.5','LicenseRef-bzip2','LicenseRef-Unknown'):
    with self.subTest(expression=expression),self.assertRaisesRegex(ValueError,'unsupported SPDX identifier'):
     v.spdx(expression)
  def test_authenticated_seam_accepts_actual_byte_bindings_without_receipt_verification_flags(self):

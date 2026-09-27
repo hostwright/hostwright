@@ -9,6 +9,37 @@ from pathlib import Path
 SPEC = importlib.util.spec_from_file_location("verifier", Path(__file__).with_name("verify-runtime-provenance.py"))
 V = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(V)
+NATIVE_SPEC = importlib.util.spec_from_file_location("native_capture", Path(__file__).with_name("capture-native-runtime-build.py"))
+NATIVE = importlib.util.module_from_spec(NATIVE_SPEC)
+NATIVE_SPEC.loader.exec_module(NATIVE)
+
+
+def capture_toolchain(root, capture, commands, fetch):
+    environment = V.parse(V.bound(capture["environment"], fetch))
+    specifications = {}
+
+    def add(identity, executable, digest, arguments):
+        previous = specifications.get(executable)
+        current = (identity, digest, arguments)
+        V.require(previous is None or previous == current, "Go build used conflicting executable bytes")
+        specifications[executable] = current
+
+    add("go-driver", capture["command"][0], capture["executable"]["sha256"], [capture["command"][0], "version"])
+    interpreter = capture["toolExec"]["interpreterPath"]
+    add("go-collector-python", interpreter, capture["toolExec"]["interpreter"]["sha256"], [interpreter, "--version"])
+    for command in commands:
+        executable = command["argv"][0]
+        add("go-" + Path(executable).name, executable, command["executable"]["sha256"], [executable, "-V=full"])
+        if "headerTrace" in command:
+            trace = command["headerTrace"]
+            executable = trace["argv"][0]
+            add("go-header-tracer", executable, trace["executable"]["sha256"], [executable, "--version"])
+    result = []
+    for executable, (identity, expected, arguments) in sorted(specifications.items()):
+        tool = NATIVE.record_tool(root, identity, executable, arguments, environment)
+        V.require(tool["executable"]["sha256"] == expected, "Go tool changed after the captured build")
+        result.append(tool)
+    return result
 
 
 def prepare(root, source_commit, pins):
@@ -47,6 +78,8 @@ def prepare(root, source_commit, pins):
     first_payload = fetch("capture-first/payload")
     V.require(first_payload==fetch("capture-second/payload"), "Go loader rebuilds differ")
     fragments = []
+    captured_tools = None
+    first_capture = first_commands = None
     for pass_name in ("first", "second"):
         prefix = "capture-" + pass_name + "/"
         capture_record = record(prefix + "build.json")
@@ -57,6 +90,10 @@ def prepare(root, source_commit, pins):
         tools[capture["toolExec"]["interpreterPath"]] = capture["toolExec"]["interpreter"]["sha256"]
         tools.update({item["headerTrace"]["argv"][0]: item["headerTrace"]["executable"]["sha256"]
                       for item in commands if "headerTrace" in item})
+        V.require(captured_tools is None or tools == captured_tools, "Go rebuild toolchains differ")
+        if captured_tools is None:
+            captured_tools = tools
+            first_capture, first_commands = capture, commands
         packages, _ = V.go_capture(capture_record, first_payload, fetch, tools)
         package_metadata = {item["ImportPath"]: item for item in V.parse(V.bound(capture["packages"], lambda name: fetch(prefix + name)))}
         goroot = V.parse(V.bound(capture["goEnvironment"], lambda name: fetch(prefix + name)))["GOROOT"]
@@ -104,6 +141,7 @@ def prepare(root, source_commit, pins):
                       packageTrace=metadata_record("package-trace.json", trace), buildCapture=capture_record)
         V.go_loader(loader, first_payload, projects, lambda name: generated[name] if name in generated else fetch(name), tools)
         fragments.append((loader, generated))
+    toolchain = capture_toolchain(root, first_capture, first_commands, lambda name: fetch("capture-first/" + name))
     for _, generated in fragments:
         for name, data in generated.items():
             filename = root / name
@@ -111,7 +149,8 @@ def prepare(root, source_commit, pins):
             with filename.open("xb") as stream:
                 stream.write(data)
     fragment = dict(status="prepared-not-release-qualified", sourceCommit=source_commit,
-                    sourceProjects=source_projects, loader=fragments[0][0], reproducibleBuild=fragments[1][0])
+                    sourceProjects=source_projects, loader=fragments[0][0], reproducibleBuild=fragments[1][0],
+                    toolchain=toolchain)
     with output.open("xb") as stream:
         stream.write(V.canonical(fragment))
     return fragment

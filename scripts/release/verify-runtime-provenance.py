@@ -696,7 +696,7 @@ def link_closure(link, output, projects, fetch, tools=None):
             require(leaf['gitMode']!='120000' and leaf['sha256']==source['sha256'], 'selected source attribution mismatch')
     require(expected==covered, 'selected archive occurrence ledger coverage mismatch')
 
-def go_build_info(output):
+def go_build_metadata(output):
     magic=b'\xff Go buildinf:'; offset=output.find(magic)
     require(offset>=0 and offset%16==0 and output.find(magic,offset+1)<0 and offset+32<=len(output), 'missing unique Go build info')
     require(output[offset+14]==8, 'wrong Go build info pointer size')
@@ -713,7 +713,7 @@ def go_build_info(output):
         raise ValueError('invalid Go build info length')
     version,position=string(offset+32); info,_=string(position)
     require(len(info)>=32, 'Go compiler version/build info mismatch')
-    info=info[16:-16].decode(); modules=[]
+    info=info[16:-16].decode(); modules=[]; settings={}
     for line in info.splitlines():
         fields=line.split('\t')
         if fields[0] in ('mod','dep'):
@@ -722,8 +722,20 @@ def go_build_info(output):
             if len(fields)==4 and fields[3]:entry.append(fields[3])
             else:require(fields[0]=='mod' and fields[2]=='(devel)', 'missing Go dependency checksum')
             modules.append(entry)
+        elif fields[0] == 'build':
+            require(len(fields) == 2 and '=' in fields[1], 'invalid Go build setting')
+            key, value = fields[1].split('=', 1)
+            require(key and key not in settings, 'duplicate or empty Go build setting')
+            settings[key] = value
         require(not line.startswith('=>'), 'unverified Go module replacement')
-    return version.decode(),modules
+    return version.decode(),modules,settings
+
+def go_build_info(output):
+    version, modules, _ = go_build_metadata(output)
+    return version, modules
+
+def go_build_settings(output):
+    return go_build_metadata(output)[2]
 
 GO_DIST_GENERATED_SOURCES = {
     ("go-runtime", "src/internal/runtime/sys/zversion.go"):

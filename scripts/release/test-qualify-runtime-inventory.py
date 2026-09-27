@@ -113,6 +113,26 @@ class RuntimeInventoryQualificationTests(unittest.TestCase):
         self.assertIn("kernel.tar.gz#sha256=" + "b" * 64 + "&sizeBytes=300", pinned_ref)
         self.assertNotIn("manifest.json", host_ref + pinned_ref)
 
+    def test_qualified_loader_build_settings_require_authenticated_target(self):
+        def loader(lines):
+            def string(data):
+                return bytes([len(data)]) + data
+            header = bytearray(32)
+            header[:14] = b"\xff Go buildinf:"
+            header[14] = 8
+            header[15] = 2
+            return b"\0" * 16 + bytes(header) + string(b"go1.26.5") + string(b"\0" * 16 + lines + b"\0" * 16)
+
+        valid = loader(b"build\tGOOS=linux\nbuild\tGOARCH=arm64\nbuild\tCGO_ENABLED=0\n")
+        self.assertEqual(Q.qualified_loader_build_settings(valid),
+                         {"GOOS": "linux", "GOARCH": "arm64", "CGO_ENABLED": "0"})
+        for lines in (
+            b"build\tGOOS=linux\nbuild\tGOARCH=arm64\n",
+            b"build\tGOOS=linux\nbuild\tGOARCH=amd64\nbuild\tCGO_ENABLED=0\n",
+        ):
+            with self.assertRaisesRegex(ValueError, "authenticated target environment"):
+                Q.qualified_loader_build_settings(loader(lines))
+
     def test_regeneration_replaces_prior_runtime_notice_sections_idempotently(self):
         base = bytearray(b"host notices\n")
         records = []

@@ -396,6 +396,17 @@ class RuntimeProvenanceTests(unittest.TestCase):
                    ('go1.26.5',[['example.invalid/main','(devel)']]))
   for line in (b'dep\texample.invalid/module\tv1.0.0\t\n',b'dep\texample.invalid/module\tv1.0.0\n'):
    with self.assertRaisesRegex(ValueError,'missing Go dependency checksum'):v.go_build_info(output(line))
+ def test_go_build_settings_are_extracted_exactly_and_ambiguous_values_rejected(self):
+  def string(data):
+   self.assertLess(len(data),128);return bytes([len(data)])+data
+  header=bytearray(32);header[:14]=b'\xff Go buildinf:';header[14]=8;header[15]=2
+  def output(lines):return elf()+b'0'*8+bytes(header)+string(b'go1.26.5')+string(b'0'*16+lines+b'0'*16)
+  self.assertEqual(v.go_build_settings(output(
+   b'build\t-gcflags=all=-buildid=\nbuild\tGOARCH=arm64\nbuild\tCGO_ENABLED=0\n')),
+   {'-gcflags':'all=-buildid=','GOARCH':'arm64','CGO_ENABLED':'0'})
+  for lines, message in ((b'build\tGOARCH=arm64\nbuild\tGOARCH=arm64\n','duplicate'),
+                         (b'build\tGOARCH\n','invalid')):
+   with self.assertRaisesRegex(ValueError,message):v.go_build_settings(output(lines))
  def test_go_and_native_archive_padding_are_not_interchangeable(self):
   header=b'odd.o/          '+b'0           '+b'0     '+b'0     '+b'644     '+b'1         '+b'`\n'
   for padding in (b'\0',b'\n'):

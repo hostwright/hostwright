@@ -154,6 +154,14 @@ def stable_source_reference(project, hostwright_source_sha256):
             "#sha256=" + archive["sha256"] + "&sizeBytes=" + str(archive["sizeBytes"]))
 
 
+def qualified_loader_build_settings(loader_data):
+    settings = V.go_build_settings(loader_data)
+    V.require(settings.get("GOOS") == "linux" and settings.get("GOARCH") == "arm64" and
+              settings.get("CGO_ENABLED") == "0",
+              "Go binary build settings differ from the authenticated target environment")
+    return settings
+
+
 def remove_generated_runtime_documents(notices, records):
     """Remove prior generated runtime-source sections before rebuilding them."""
     generated = [record for record in records if record["sourcePath"].startswith("runtime-source/")]
@@ -414,7 +422,7 @@ def regenerate(prepared_root, source_root):
         linked.append(copy.deepcopy(go_deps[key]))
     V.require(len(linked) == 6, "Go runtime metadata lacks its exact six linked modules")
     runtime["retainedLoaderLinkedModules"] = sorted(linked, key=lambda item: item["module"])
-    runtime["retainedLoaderBuildSettings"].update({"GOOS": "linux", "GOARCH": "arm64", "CGO_ENABLED": "0"})
+    runtime["retainedLoaderBuildSettings"] = qualified_loader_build_settings(loader_data)
     tool_versions = {tool["identity"]: V.substantive(tool["version"], fetch).decode("utf-8").strip()
                      for tool in manifest["toolchain"] if tool["identity"] in ("compiler", "linker")}
     V.require(set(tool_versions) == {"compiler", "linker"}, "kernel compiler or linker version evidence is missing")

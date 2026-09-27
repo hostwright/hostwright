@@ -33,6 +33,26 @@ def path(name):
 
 def digest(data): return hashlib.sha256(data).hexdigest()
 
+def is_go_cgroup_cpu_max_path(filename):
+    """Recognize only Go's cgroup-v2 CPU quota resource path, not arbitrary /sys reads."""
+    if not isinstance(filename, str) or not filename.startswith('/sys/fs/cgroup/') or '\\' in filename:
+        return False
+    if re.search(r'[\x00-\x1f\x7f]', filename):
+        return False
+    components = filename.split('/')
+    return (len(components) >= 5 and components[:4] == ['', 'sys', 'fs', 'cgroup'] and
+            components[-1] == 'cpu.max' and
+            all(component not in ('', '.', '..') for component in components[1:]))
+
+def is_go_runtime_resource_read(filename, home):
+    """Match Go 1.26 runtime resource probes observed in assembler traces."""
+    return (re.fullmatch(r'/proc/[0-9]+/(cgroup|mountinfo)', filename) is not None or
+            is_go_cgroup_cpu_max_path(filename) or filename in {
+                '/sys/kernel/mm/transparent_hugepage/hpage_pmd_size',
+                str(pathlib.Path(home) / '.config/go/telemetry/local/weekends'),
+                str(pathlib.Path(home) / '.config/go/telemetry/mode')
+            })
+
 def bound(record, fetch):
     name = path(record['path'])
     require(re.fullmatch('[a-f0-9]{64}', record['sha256']) is not None, 'invalid evidence digest')
@@ -888,9 +908,7 @@ def go_capture(record, output, fetch, tools):
                 if not selected:continue
                 filename=selected[1]
                 if filename in operands:continue
-                if re.fullmatch(r'/proc/[0-9]+/(cgroup|mountinfo)',filename) or filename in {
-                    '/sys/fs/cgroup/cpu.max',environment['HOME']+'/.config/go/telemetry/local/weekends',
-                    environment['HOME']+'/.config/go/telemetry/mode'}:continue
+                if is_go_runtime_resource_read(filename, environment['HOME']):continue
                 opened.add(filename)
             require(opened==set(headers), 'Go selected headers differ from actual file opens')
             roots={pathlib.PurePosixPath(filename).parent for filename in asm_inputs if filename.endswith('.s')}

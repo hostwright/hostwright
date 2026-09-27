@@ -41,6 +41,31 @@ class GoBuildCaptureTests(unittest.TestCase):
         self.assertEqual(record["sizeBytes"], len(data))
         return data
 
+    def test_go_cgroup_cpu_resource_path_classifier_is_exact(self):
+        self.assertTrue(VERIFIER.is_go_cgroup_cpu_max_path("/sys/fs/cgroup/cpu.max"))
+        self.assertTrue(VERIFIER.is_go_cgroup_cpu_max_path(
+            "/sys/fs/cgroup/system.slice/hosted-compute-agent.service/cpu.max"))
+        for filename in (
+            "/outside/cpu.max",
+            "/sys/fs/cgroupx/cpu.max",
+            "/sys/fs/cgroup/system.slice/memory.max",
+            "/sys/fs/cgroup/../outside/cpu.max",
+            "/sys/fs/cgroup/./cpu.max",
+            "/sys/fs/cgroup/system.slice/../cpu.max",
+            "/sys/fs/cgroup//cpu.max",
+            "/sys/fs/cgroup/system.slice//cpu.max",
+            "/sys/fs/cgroup/system.slice/cpu.max/",
+            "/sys/fs/cgroup/system.slice/\x00/cpu.max",
+            "/sys/fs/cgroup/system.slice\\hosted-compute-agent.service/cpu.max",
+        ):
+            with self.subTest(filename=filename):
+                self.assertFalse(VERIFIER.is_go_cgroup_cpu_max_path(filename))
+        self.assertFalse(VERIFIER.is_go_runtime_resource_read("/outside/header.h", "/home/runner"))
+        self.assertTrue(VERIFIER.is_go_runtime_resource_read(
+            "/sys/kernel/mm/transparent_hugepage/hpage_pmd_size", "/home/runner"))
+        self.assertFalse(VERIFIER.is_go_runtime_resource_read(
+            "/sys/kernel/mm/transparent_hugepage/other", "/home/runner"))
+
     @unittest.skipUnless(sys.platform == "linux" and shutil.which("strace"), "actual header capture requires Linux strace")
     def test_actual_build_retains_linked_archives_and_preserves_payload(self):
         output = self.root / "capture"
@@ -190,6 +215,13 @@ class GoBuildCaptureTests(unittest.TestCase):
             trace = self.read_record(output, command["headerTrace"]["file"])
             trace += b'1 openat(AT_FDCWD, "/outside/header.h", O_RDONLY) = 4</outside/header.h>\n'
             command["headerTrace"]["file"] = CAPTURE.retain_bytes(output, trace)
+        def open_hosted_cgroup_cpu_resource(rows):
+            command = next(item for item in rows if item["openedHeaders"])
+            trace = self.read_record(output, command["headerTrace"]["file"])
+            path = "/sys/fs/cgroup/system.slice/hosted-compute-agent.service/cpu.max"
+            trace += f'1 openat(AT_FDCWD, "{path}", O_RDONLY|O_CLOEXEC) = 4<{path}>\n'.encode()
+            command["headerTrace"]["file"] = CAPTURE.retain_bytes(output, trace)
+        verify(open_hosted_cgroup_cpu_resource)
         for change in (omit_source, invent_source, substitute_archive, omit_header, omit_assembler, change_link_output, change_trace_path, change_experiment, open_untracked_header):
             with self.subTest(change=change.__name__), self.assertRaises(ValueError):
                 verify(change)

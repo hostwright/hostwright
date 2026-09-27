@@ -17,6 +17,11 @@ import tarfile
 import tempfile
 import uuid
 
+VERIFIER_SPEC = importlib.util.spec_from_file_location(
+    "capture_go_runtime_resource_paths", Path(__file__).with_name("verify-runtime-provenance.py"))
+VERIFIER = importlib.util.module_from_spec(VERIFIER_SPEC)
+VERIFIER_SPEC.loader.exec_module(VERIFIER)
+
 
 def canonical(value):
     return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
@@ -166,10 +171,7 @@ def tool(root, arguments):
                 filename = opened[1]
                 if filename in sources:
                     continue
-                if re.fullmatch(r"/proc/[0-9]+/(cgroup|mountinfo)", filename) or filename in {
-                    "/sys/fs/cgroup/cpu.max", str(Path.home() / ".config/go/telemetry/local/weekends"),
-                    str(Path.home() / ".config/go/telemetry/mode")
-                }:
+                if VERIFIER.is_go_runtime_resource_read(filename, str(Path.home())):
                     continue
                 headers.add(filename)
             for name in sorted(headers):

@@ -445,6 +445,22 @@
     },
     "sourceFile": {
       "properties": {
+        "generatedSource": {
+          "properties": {
+            "generator": {
+              "const": "go tool dist"
+            },
+            "goVersion": {
+              "pattern": "^go[0-9]+\\.[0-9]+\\.[0-9]+$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "generator",
+            "goVersion"
+          ],
+          "type": "object"
+        },
         "path": {
           "minLength": 1,
           "type": "string"
@@ -471,6 +487,14 @@
           "minLength": 1,
           "type": "string"
         },
+        "embeddedPinPath": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "embeddedCommit": {
+          "pattern": "^[a-f0-9]{40}$",
+          "type": "string"
+        },
         "path": {
           "minLength": 1,
           "type": "string"
@@ -485,6 +509,10 @@
           "type": "integer"
         },
         "sourcePath": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "sourceProject": {
           "minLength": 1,
           "type": "string"
         },

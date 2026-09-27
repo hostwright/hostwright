@@ -16,63 +16,23 @@
         "sizeBytes": 3086
       }
     ],
-    "excludedSourcePrefixes": [
-      "Sources/ContainerizationArchive/CArchive/"
-    ],
     "identity": "containerization",
     "licenses": [
-      "LICENSE"
+      "LICENSE",
+      "Sources/ContainerizationArchive/CArchive/COPYING"
     ],
     "notices": [
       "LICENSE",
       "Sources/ContainerizationArchive/CArchive/COPYING"
     ],
-    "scope": "Containerization Apache declaration. The retained CArchive COPYING identifies separate libarchive terms; this prefix must be separately qualified if selected.",
-    "spdx": "Apache-2.0"
+    "scope": "Selected containerization sources include the Apache-2.0 Swift bridge and two libarchive headers under their exact captured BSD-3-Clause COPYING terms. No other CArchive implementation source is selected.",
+    "spdx": "Apache-2.0 AND BSD-3-Clause",
+    "allowedSourcePrefixes": [
+      "Sources/",
+      "vminitd/Sources/"
+    ]
   },
   "excluded": [
-    {
-      "commit": "e8d6eba1fef23ae5b359c46b03f7d94be2f41fed",
-      "destination": "swift-crypto",
-      "group": "guest",
-      "identity": "swift-crypto",
-      "reason": "boringssl-upstream-LICENSE was fetched from another repository and is not a leaf of this captured project; embedded-source attribution remains unresolved.",
-      "reviewedDocuments": [
-        {
-          "gitBlobSHA1": "d645695673349e3947e8e5ae42332d0ac3164cd7",
-          "path": "LICENSE.txt",
-          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
-          "sizeBytes": 11358
-        },
-        {
-          "gitBlobSHA1": "e216797479bc539a0f996226236f39957a0514b2",
-          "path": "NOTICE.txt",
-          "sha256": "dce18a16ad00beb4731f57d225f7d29c9dc96d74ca0eeb36c77ac5bbad123e3d",
-          "sizeBytes": 1565
-        }
-      ]
-    },
-    {
-      "commit": "173cc69a058623525a58ae6710e2f5727c663793",
-      "destination": "swift-nio-ssl",
-      "group": "guest",
-      "identity": "swift-nio-ssl",
-      "reason": "boringssl-upstream-LICENSE is external to this captured project; embedded-source attribution remains unresolved.",
-      "reviewedDocuments": [
-        {
-          "gitBlobSHA1": "d645695673349e3947e8e5ae42332d0ac3164cd7",
-          "path": "LICENSE.txt",
-          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
-          "sizeBytes": 11358
-        },
-        {
-          "gitBlobSHA1": "229577a238e7c3765551e0725adae80bb1d1fad1",
-          "path": "NOTICE.txt",
-          "sha256": "03e8ca5c65a3df21fe1ab48eef91bca7d370db56c290d8ef16eaaa09ba322abe",
-          "sizeBytes": 1984
-        }
-      ]
-    },
     {
       "commit": "924936d0427cb25a61169739a7660230bffa6ea6",
       "destination": "swift-project/cmark",
@@ -416,6 +376,50 @@
       "spdx": "Apache-2.0 WITH Swift-exception"
     },
     {
+      "commit": "da9d28d69ebe3894b18376c8f2395c2f37b8448f",
+      "destination": "swift-crypto",
+      "documents": [
+        {
+          "gitBlobSHA1": "d645695673349e3947e8e5ae42332d0ac3164cd7",
+          "path": "LICENSE.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "sizeBytes": 11358
+        },
+        {
+          "gitBlobSHA1": "a7756f296965da0369ee69f4fef6d5cd1488b3d2",
+          "path": "NOTICE.txt",
+          "sha256": "b3ddc2ae068e76b3beb71be03c0400f90090f9469aa491bf7b1ac42320af37b8",
+          "sizeBytes": 1563
+        },
+        {
+          "gitBlobSHA1": "c660f94076ae9db2adb659de92e5d78b9f00cc6d",
+          "path": "Sources/CXKCP/FIPS202-opt64/KeccakHash.c",
+          "sha256": "0e2b1e9e9e30e0d7a1042f11ac35d7d7ccd8dd86ac2a48718c863f7a45335064",
+          "sizeBytes": 3341
+        },
+        {
+          "gitBlobSHA1": "7c640b90ea64d1437ffdacda51de1725ac956911",
+          "path": "Sources/CXKCP/FIPS202-opt64/brg_endian.h",
+          "sha256": "3f819e75718565e36fbb1f6ed31e800b4bd274c81adc81f6da2a5bf51c29cf66",
+          "sizeBytes": 5638
+        }
+      ],
+      "identity": "swift-crypto",
+      "licenses": [
+        "LICENSE.txt",
+        "Sources/CXKCP/FIPS202-opt64/KeccakHash.c",
+        "Sources/CXKCP/FIPS202-opt64/brg_endian.h"
+      ],
+      "notices": [
+        "NOTICE.txt"
+      ],
+      "scope": "Selected runtime sources are from this exact package commit. BoringSSL hash.txt pins upstream 0226f30467f540a3f62ef48d453f93927da199b6; selected BoringSSL files carry Apache-2.0 headers. The selected XKCP files carry the CC0-1.0 dedication; brg_endian.h carries Brian Gladman three-clause terms. The retained package LICENSE supplies the exact Apache-2.0 terms; BoringSSL\u2019s additional Go support-code terms explicitly exclude libcrypto/libssl.",
+      "spdx": "Apache-2.0 AND CC0-1.0 AND BSD-3-Clause",
+      "allowedSourcePrefixes": [
+        "Sources/"
+      ]
+    },
+    {
       "commit": "dc4030184203ffafbb2ec614352487235d747fe0",
       "destination": "swift-distributed-tracing",
       "documents": [
@@ -606,7 +610,7 @@
         "Sources/NIOHPACK/",
         "Sources/NIOHTTP2/"
       ],
-      "commit": "5e9e99ec96c53bc2c18ddd10c1e25a3cd97c55e5",
+      "commit": "45bdf670248be5f16ec0340e125dca285536f0fb",
       "destination": "swift-nio-http2",
       "documents": [
         {
@@ -616,10 +620,10 @@
           "sizeBytes": 11358
         },
         {
-          "gitBlobSHA1": "9c25a7fd20609be091cb495f89b678a6c8acbdd0",
+          "gitBlobSHA1": "89102cd32e67b5564f87f84f7862ad06506ce24c",
           "path": "NOTICE.txt",
-          "sha256": "014244485fb6701b2208de19de5ced65c2fa1dbc1d63bf4f2aa6666e7b9baa68",
-          "sizeBytes": 2002
+          "sha256": "56b85f4571b653e82649d82a696afe841a417206a21a25afac751bcb11c2ea87",
+          "sizeBytes": 2285
         }
       ],
       "excludedSourcePrefixes": [
@@ -637,6 +641,46 @@
       ],
       "scope": "Library declaration restricted to NIOHPACK and NIOHTTP2 source targets. NOTICE explicitly assigns the MIT hpack-test-case vectors to unit tests; no tests, fuzz harness, examples or performance targets are included in this scope.",
       "spdx": "Apache-2.0"
+    },
+    {
+      "commit": "173cc69a058623525a58ae6710e2f5727c663793",
+      "destination": "swift-nio-ssl",
+      "documents": [
+        {
+          "gitBlobSHA1": "d645695673349e3947e8e5ae42332d0ac3164cd7",
+          "path": "LICENSE.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "sizeBytes": 11358
+        },
+        {
+          "gitBlobSHA1": "229577a238e7c3765551e0725adae80bb1d1fad1",
+          "path": "NOTICE.txt",
+          "sha256": "03e8ca5c65a3df21fe1ab48eef91bca7d370db56c290d8ef16eaaa09ba322abe",
+          "sizeBytes": 1984
+        }
+      ],
+      "identity": "swift-nio-ssl",
+      "licenses": [
+        "LICENSE.txt"
+      ],
+      "notices": [
+        "NOTICE.txt"
+      ],
+      "spdx": "Apache-2.0 AND ISC AND OpenSSL AND MIT",
+      "scope": "Selected SwiftNIO SSL and vendored BoringSSL sources. The exact BoringSSL 817 revision is a separately captured source project pinned by Sources/CNIOBoringSSL/hash.txt; its exact LICENSE and third_party/fiat/LICENSE bytes are retained as embedded license evidence. The package notice attributes the BoringSSL/OpenSSL sources; the aggregate expression also covers SwiftNIO Apache-2.0 and Fiat MIT terms.",
+      "allowedSourcePrefixes": [
+        "Sources/"
+      ],
+      "embeddedLicenseProjects": [
+        {
+          "identity": "swift-sdk/boringssl",
+          "pinPath": "Sources/CNIOBoringSSL/hash.txt",
+          "licensePaths": [
+            "LICENSE",
+            "third_party/fiat/LICENSE"
+          ]
+        }
+      ]
     },
     {
       "commit": "cd1e89816d345d2523b11c55654570acd5cd4c56",
@@ -697,6 +741,54 @@
         "LICENSE.txt"
       ],
       "spdx": "Apache-2.0 WITH Swift-exception"
+    },
+    {
+      "commit": "b6f9284da830b69be787732ffdaa35049d20a088",
+      "destination": "swift-protobuf-submodule-6803b18d73bb362e",
+      "documents": [
+        {
+          "gitBlobSHA1": "19b305b00060a774a9180fb916c14b49edb2008f",
+          "path": "LICENSE",
+          "sha256": "6e5e117324afd944dcf67f36cf329843bc1a92229a8cd9bb573d7a83130fea7d",
+          "sizeBytes": 1732
+        },
+        {
+          "gitBlobSHA1": "e59f14fa55de789cc2aa634e9788e0514be74611",
+          "path": "third_party/utf8_range/LICENSE",
+          "sha256": "02de69b64fc36d9e938f418e52723e42f0b2b226d58a9cb3c8dcbdf7059f5074",
+          "sizeBytes": 1091
+        }
+      ],
+      "identity": "swift-protobuf-submodule-6803b18d73bb362e",
+      "licenses": [
+        "LICENSE",
+        "third_party/utf8_range/LICENSE"
+      ],
+      "notices": [
+        "LICENSE",
+        "third_party/utf8_range/LICENSE"
+      ],
+      "spdx": "BSD-3-Clause AND MIT"
+    },
+    {
+      "commit": "76bb24329e8bf5f39704eb10d21b9a80befa7c81",
+      "destination": "swift-protobuf-submodule-a2d140d6db70f8d6",
+      "documents": [
+        {
+          "gitBlobSHA1": "ccd61dcfe3dbcdf77a72794d7794b1e112a39e0b",
+          "path": "LICENSE",
+          "sha256": "c79a7fea0e3cac04cd43f20e7b648e5a0ff8fa5344e644b0ee09ca1162b62747",
+          "sizeBytes": 11361
+        }
+      ],
+      "identity": "swift-protobuf-submodule-a2d140d6db70f8d6",
+      "licenses": [
+        "LICENSE"
+      ],
+      "notices": [
+        "LICENSE"
+      ],
+      "spdx": "Apache-2.0"
     },
     {
       "commit": "d0997351b0c7779017f88e7a93bc30a1878d7f29",

@@ -298,7 +298,7 @@ def source_map_from_swift_output_map(filename, roots, projects, source_list=None
     for source, output in outputs.items():
         if "object" not in output:
             continue
-        sources = module_sources or ([source] if source else [])
+        sources = module_sources if not source else [source]
         V.require(sources, "module-wide Swift object requires the actual source list")
         obj = (cwd / output["object"]).resolve(strict=True)
         result.append(dict(object=str(obj), objectSHA256=V.digest(obj.read_bytes()),
@@ -341,6 +341,11 @@ def collect_link(root, specification, projects, tools):
             V.require(len(attributions) == 1, "missing or ambiguous compiled-source mapping for " + name + " (" + digest + ")")
             item = dict(mapInput=name, file=file_record, objectSHA256=digest,
                         sourceFiles=V.parse(next(iter(attributions))))
+            compiler_evidence = {V.canonical({field: row[field] for field in ("compilerInputs", "generatedHeaders")
+                                              if field in row}) for row in candidates}
+            V.require(len(compiler_evidence) == 1,
+                      "missing or ambiguous compiler-input evidence for " + name + " (" + digest + ")")
+            item.update(V.parse(next(iter(compiler_evidence))))
             if match:
                 item.update(member=match[2], archiveOffset=offset)
             ledger.append(item)

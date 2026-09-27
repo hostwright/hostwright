@@ -4,6 +4,7 @@ umask 077
 readonly source_capture="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/capture-runtime-source.py"
 readonly package_capture="$(dirname -- "$source_capture")/capture-package-sources.py"
 readonly native_capture="$(dirname -- "$source_capture")/capture-native-runtime-build.py"
+readonly native_source_map="$(dirname -- "$source_capture")/capture-native-source-map.py"
 readonly linux_capture="$(dirname -- "$source_capture")/capture-linux-runtime-source.py"
 readonly patch_capture="$(dirname -- "$source_capture")/capture-native-patches.py"
 
@@ -16,21 +17,32 @@ readonly kernel_source_sha=7c716216c3c4134ed0de69195701e677577bbcdd3979f331c182a
 readonly build_time=2026-01-01T00:00:00Z
 
 die() { printf '%s\n' "$1" >&2; exit "${2:-70}"; }
-usage() { die "usage: build-runtime-ingredients.sh --output ABSOLUTE_DIR --kernel-inputs ABSOLUTE_DIR --swift-sdk ABSOLUTE_FILE --swift-sdk-sha256 SHA256" 64; }
+usage() { die "usage: build-runtime-ingredients.sh --output ABSOLUTE_DIR --work-dir ABSOLUTE_DIR --kernel-inputs ABSOLUTE_DIR --swift-sdk ABSOLUTE_FILE --swift-sdk-sha256 SHA256 --sdk-object-sources ABSOLUTE_FILE --sdk-source-map-root ABSOLUTE_DIR [--sdk-source-captures ABSOLUTE_DIR]" 64; }
 
-output= kernel_inputs= swift_sdk= swift_sdk_sha=
+output= workdir= kernel_inputs= swift_sdk= swift_sdk_sha= sdk_object_sources= sdk_source_map_root= sdk_source_captures=
 while (( $# )); do
   case "$1" in
     --output) (( $# >= 2 )) || usage; output=$2; shift 2 ;;
+    --work-dir) (( $# >= 2 )) || usage; workdir=$2; shift 2 ;;
     --kernel-inputs) (( $# >= 2 )) || usage; kernel_inputs=$2; shift 2 ;;
     --swift-sdk) (( $# >= 2 )) || usage; swift_sdk=$2; shift 2 ;;
     --swift-sdk-sha256) (( $# >= 2 )) || usage; swift_sdk_sha=$2; shift 2 ;;
+    --sdk-object-sources) (( $# >= 2 )) || usage; sdk_object_sources=$2; shift 2 ;;
+    --sdk-source-map-root) (( $# >= 2 )) || usage; sdk_source_map_root=$2; shift 2 ;;
+    --sdk-source-captures) (( $# >= 2 )) || usage; sdk_source_captures=$2; shift 2 ;;
     *) usage ;;
   esac
 done
-[[ "$output" == /* && "$kernel_inputs" == /* && "$swift_sdk" == /* && "$swift_sdk_sha" =~ ^[a-f0-9]{64}$ ]] || usage
-[[ ! -e "$output" && ! -L "$output" ]] || die "runtime ingredient output already exists"
+[[ "$output" == /* && "$workdir" == /* && "$kernel_inputs" == /* && "$swift_sdk" == /* && "$sdk_object_sources" == /* && "$sdk_source_map_root" == /* && "$swift_sdk_sha" =~ ^[a-f0-9]{64}$ ]] || usage
+if [[ -z "$sdk_source_captures" ]]; then
+  sdk_source_captures="$sdk_source_map_root/source-trees"
+fi
+[[ "$sdk_source_captures" == /* ]] || usage
+[[ ! -e "$output" && ! -L "$output" && ! -e "$workdir" && ! -L "$workdir" ]] || die "runtime ingredient output or work directory already exists"
 [[ -f "$swift_sdk" && ! -L "$swift_sdk" ]] || die "missing regular source-built Swift SDK archive"
+[[ -f "$sdk_object_sources" && ! -L "$sdk_object_sources" && -d "$sdk_source_map_root" && ! -L "$sdk_source_map_root" \
+   && -d "$sdk_source_captures" && ! -L "$sdk_source_captures" ]] \
+  || die "missing authenticated Swift SDK object-source mapping"
 [[ "$(sha256sum "$swift_sdk" | awk '{print $1}')" == "$swift_sdk_sha" ]] || die "Swift SDK archive digest mismatch"
 [[ "$(uname -s)" == Linux && "$(uname -m)" == aarch64 ]] || die "runtime ingredients require Linux arm64" 69
 for tool in aarch64-linux-gnu-gcc bison clang flex gcc git jq ld.lld make python3 sha256sum strace swift swiftly yq; do command -v "$tool" >/dev/null || die "missing producer tool: $tool" 69; done
@@ -60,7 +72,12 @@ done
 
 parent=$(dirname "$output")
 [[ -d "$parent" && ! -L "$parent" ]] || die "runtime ingredient output parent is unsafe"
-work=$(mktemp -d "$parent/.runtime-ingredients.XXXXXXXX")
+work_parent=$(dirname "$workdir")
+[[ -d "$work_parent" && ! -L "$work_parent" && "$workdir" != "$output" \
+   && "$output" != "$workdir/"* && "$workdir" != "$output/"* ]] \
+  || die "runtime ingredient work directory is unsafe or overlaps output"
+work=$workdir
+mkdir -m 700 "$work"
 cleanup() {
   status=$?
   trap - EXIT
@@ -181,26 +198,37 @@ for pass in first second; do
     bin=$(swift build -c release --swift-sdk aarch64-swift-linux-musl --disable-automatic-resolution --show-bin-path)
     cp "$bin/vminitd" "$work/vminitd-$pass"
     cp "$bin/vmexec" "$work/vmexec-$pass"
+    if [[ "$pass" == first ]]; then
+      cp Package.resolved "$work/evidence/vminit-Package.resolved"
+      python3 "$package_capture" --lockfile Package.resolved --checkouts .build/checkouts \
+        --output "$work/evidence/source-trees/vminit-packages"
+    fi
     python3 "$native_capture" retain-build --kind swift --root "$work/evidence" --tree "$PWD" \
       --trace "$work/evidence/vminitd-$pass.exec.trace" --trace "$work/evidence/vmexec-$pass.exec.trace" \
       --map "$work/evidence/vminitd-$pass.map" --map "$work/evidence/vmexec-$pass.map" \
       --link-invocations "$work/evidence/linker-invocations-$pass" \
       --metadata "$work/evidence/native-swift-$pass.json"
+    mkdir -m 700 "$work/evidence/native-source-map-$pass"
+    python3 "$native_source_map" \
+      --tree "$PWD" --source-captures "$work/evidence/source-trees" \
+      --sdk-object-sources "$sdk_object_sources" --sdk-source-map-root "$sdk_source_map_root" \
+      --sdk-source-captures "$sdk_source_captures" \
+      --native-capture "$work/evidence/native-swift-$pass.json" \
+      --output "$work/evidence/native-source-map-$pass/source-map.json"
     find .build -type f \( -name '*.a' -o -name '*.o' -o -name '*.resp' -o -name '*.rsp' \
       -o -name '*.LinkFileList' -o -name '*.autolink' -o -name sources \
       -o -name '*.d' -o -name compile_commands.json -o -name output-file-map.json \
       -o -name description.json -o -name release.yaml \) -print0 \
       | sort -z | tar --null -T - --sort=name --mtime=@1767225600 --owner=0 --group=0 --numeric-owner -cf - \
       | gzip -n > "$work/evidence/vminit-link-inputs-$pass.tar.gz"
-    if [[ "$pass" == first ]]; then
-      cp Package.resolved "$work/evidence/vminit-Package.resolved"
-      python3 "$package_capture" --lockfile Package.resolved --checkouts .build/checkouts \
-        --output "$work/evidence/source-trees/vminit-packages"
-    fi
   ) >"$work/evidence/vminit-$pass.log" 2>&1
 done
 cmp "$work/vminitd-first" "$work/vminitd-second"
 cmp "$work/vmexec-first" "$work/vmexec-second"
+diff -r "$work/evidence/native-source-map-first" "$work/evidence/native-source-map-second"
+find "$work/evidence/native-source-map-second" -depth -delete
+mv "$work/evidence/native-source-map-first" "$work/evidence/source-map"
+mv "$work/evidence/source-map/source-map.json" "$work/evidence/source-map.json"
 python3 - "$work/evidence" <<'PY'
 import json, pathlib, sys
 root = pathlib.Path(sys.argv[1])

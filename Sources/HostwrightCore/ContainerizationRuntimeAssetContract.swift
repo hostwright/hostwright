@@ -4,32 +4,33 @@ public enum ContainerizationRuntimeAssetContract {
     public static let frameworkVersion = "0.35.0"
     public static let frameworkRevision = "44bec8b9933bc491d0cbf44abac90a1f6aaebf6b"
 
-    public static let initImageReference = "ghcr.io/apple/containerization/vminit:0.35.0"
-    public static let initImageRegistryRepository = "apple/containerization/vminit"
-    public static let initImageIndexDigest =
-        "5708d65ba1914caa756a2e813831e17d7655042799310bc94efef82210c2dac6"
-    public static let initImageVariantDigest =
-        "04cd14f8e6ec9617611429aaf2a91a841b27ff9eae847acaca48430f58c5e57d"
+    public static let initImageManifestDigest =
+        "9b7d2e0d32dd662d6a40f7b25a35dc28b5267e932465403f31bf47723dafb0cd"
+    public static let initImageManifestSize: Int64 = 406
     public static let initImageConfigurationDigest =
-        "30d24816422f41337fae35f59a3c03ac13559fd42bd0d67321a7db4d57ac4988"
+        "188cfff3bfe0bde342bb3e73ebc0f5d2fafa2f366bd78b68c391ccff4e3c12ae"
+    public static let initImageConfigurationSize: Int64 = 151
     public static let initImageLayerDigest =
-        "e3b2b9d347c2e5834d9fe5b4d615f5c0632c485d785e64f5c6b4c9b179ac168f"
-    public static let initImageIndexSize: Int64 = 306
-    public static let initImageVariantSize: Int64 = 409
-    public static let initImageConfigurationSize: Int64 = 255
-    public static let initImageLayerSize: Int64 = 66_895_112
+        "bd71734611fbccd656736610e8170546bf05d64e62a09895790364ea59818bfc"
+    public static let initImageLayerSize: Int64 = 67_226_282
+    public static let initImageIndexJSONSHA256 =
+        "a5fb5845e3e9d96aba5789f3a65b776f7c007ac4b7d751f17077cf36d3c0e58e"
+    public static let initImageIndexJSONSize: Int64 = 240
+    public static let initImageLayoutSHA256 =
+        "18f0797eab35a4597c1e9624aa4f15fd91f6254e5538c1e0d193b2a95dd4acc6"
+    public static let initImageLayoutSize: Int64 = 30
+    public static var initImageReference: String {
+        "untagged@sha256:\(initImageManifestDigest)"
+    }
 
     public static let kernelFileName = "vmlinux-6.18.15-186"
     public static let kernelSHA256 =
-        "2fe4a58d2885d623bcb4d705900ac8c1d4f02371152da8126b3b00c8c47fc3a1"
-    public static let kernelSize: Int64 = 16_151_040
-    public static let kernelArchiveURL =
-        "https://github.com/kata-containers/kata-containers/releases/download/3.28.0/kata-static-3.28.0-arm64.tar.zst"
-    public static let kernelArchiveSHA256 =
-        "f63d54507d1f18635d94475077e4c2330de4d8e05cedf25f7c38f063b0e66a91"
-    public static let kernelArchiveSize: Int64 = 596_775_193
-    public static let kernelArchiveMember =
-        "opt/kata/share/kata-containers/vmlinux-6.18.15-186"
+        "74b612335db14171de36bcc68fb82bbc19751e07bc440d4c1724ad92a08b4132"
+    public static let kernelSize: Int64 = 16_148_992
+
+    public static let guestNetworkPolicyLoaderSHA256 =
+        "a411dbcf1efaaf0ea0da17d76e3376a92b99037a8cb00af6588e8ecc6f3f7e99"
+    public static let guestNetworkPolicyLoaderSize: Int64 = 2_949_246
 
     public static let installationRelativeRoot = "share/hostwright/containerization"
     public static let kernelInstallationRelativePath =
@@ -42,6 +43,6 @@ public enum ContainerizationRuntimeAssetContract {
         "\(installationRelativeRoot)/guest/\(guestNetworkPolicyLoaderFileName)"
 
     public static var initImageDescriptorDigest: String {
-        "sha256:\(initImageIndexDigest)"
+        "sha256:\(initImageManifestDigest)"
     }
 }

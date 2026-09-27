@@ -136,6 +136,7 @@ jobs:
           python3 scripts/release/test-capture-go-build.py
           python3 scripts/release/test-prepare-go-runtime-provenance.py
           python3 scripts/release/test-capture-native-runtime-build.py
+          python3 scripts/release/test-capture-native-source-map.py
           python3 scripts/release/test-capture-native-patches.py
           python3 scripts/release/test-capture-swift-sdk-build-inputs.py
           python3 scripts/release/test-capture-sdk-object-sources.py
@@ -145,3 +146,9 @@ jobs:
           python3 scripts/release/test-prepare-runtime-provenance.py
           python3 scripts/release/test-runtime-provenance.py
           python3 scripts/release/test-assemble-runtime-provenance.py
+          python3 scripts/release/test-create-runtime-rootfs.py
+          python3 scripts/release/test-create-runtime-oci.py
+          python3 scripts/release/test-prepare-runtime-attestation-subjects.py
+          python3 scripts/release/test-materialize-runtime-assets.py
+          python3 scripts/release/test-qualify-runtime-inventory.py
+          python3 scripts/release/test-corresponding-source.py

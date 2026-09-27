@@ -109,11 +109,13 @@ def prepare(ingredients, source_projects, source_map, source_commit, kernel_proj
         commits = {project["identity"]: project["commit"] for project in projects}
         V.require(len(commits) == len(projects) and kernel_project in commits, "missing or duplicate native source project")
         leaves = {project["identity"]: V.source_project(project, fetch, commits) for project in projects}
+        V.verify_embedded_license_documents(projects, fetch)
         sources = {}
         for row in source_map:
             V.require(re.fullmatch("[a-f0-9]{64}", row["objectSHA256"]) and row["sourceFiles"],
                       "native object mapping lacks source evidence")
-            for source in V.native_source_files(row, mapping_fetch):
+            canonical_sources = V.native_source_files(row, mapping_fetch)
+            for source in canonical_sources:
                 leaf = leaves.get(source["project"], {}).get(source["path"])
                 V.require(leaf is not None and leaf["gitMode"] != "120000" and leaf["sha256"] == source["sha256"],
                           "native object source mapping differs from captured Git source")
@@ -292,7 +294,8 @@ def prepare(ingredients, source_projects, source_map, source_commit, kernel_proj
             V.link_closure(link, data, leaves, fetch, authenticated)
             links.append(link)
             files.append(dict(path=path, sha256=V.digest(data), sizeBytes=len(data), type="elf",
-                components=sorted({source["project"] for selected in link["selectedInputs"] for source in selected["sourceFiles"]})))
+                components=sorted({source["project"] for selected in link["selectedInputs"]
+                                   for source in V.native_source_files(selected, fetch)})))
         write("upstream/kernel-source-signature.json", regular(evidence, "kernel-source-signature.json").read_bytes())
         result = dict(status="prepared-not-release-qualified", sourceCommit=source_commit, sourceProjects=projects,
                       toolchain=toolchain, kernel=kernel, oci=dict(prefix=PREFIX + "vminit", links=links, files=files),

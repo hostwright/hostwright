@@ -114,8 +114,15 @@ def prepare(root, source_commit, pins):
                     relative = Path(filename).relative_to(module["Dir"]).as_posix()
                     if project=="hostwright":
                         relative = "Guest/HostwrightNetfilter/" + relative
-                V.require(projects[project].get(relative, {}).get("sha256")==digest, "Go compiled input differs from complete Git source")
+                leaf = projects[project].get(relative)
+                generated = None
+                if leaf is None:
+                    generated = V.generated_go_source(project, relative, digest, pins["go"]["version"])
+                else:
+                    V.require(leaf.get("sha256")==digest, "Go compiled input differs from complete Git source")
                 source = dict(project=project, path=relative, originalPath=filename, sha256=digest)
+                if generated is not None:
+                    source["generatedSource"] = generated
                 selected.append(source)
                 sources[V.canonical(source)] = source
             trace.append(dict(package=name, project=owner, archive=rebase(package["archive"], prefix), sourceFiles=selected))

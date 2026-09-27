@@ -51,6 +51,8 @@ class NativeCaptureTests(unittest.TestCase):
         self.evidence = self.root / "evidence"
         self.evidence.mkdir()
 
+    @unittest.skipUnless(platform.system() == "Linux" and shutil.which("strace") and shutil.which("gcc"),
+                         "Linux strace and GCC are required")
     def test_kernel_capture_ignores_directory_symlinks_named_like_dependency_files(self):
         tree = self.root / "kernel-tree"
         dependency_directory = tree / "tools/testing/selftests/alsa"
@@ -96,6 +98,16 @@ class NativeCaptureTests(unittest.TestCase):
             C.source_map_from_swift_output_map(mapping, self.roots, self.projects)
         source_list = self.root / "sources"
         source_list.write_text(str(self.source / "helper.c") + "\n")
+        rows = C.source_map_from_swift_output_map(mapping, self.roots, self.projects, source_list)
+        self.assertEqual(rows[0]["sourceFiles"][0]["path"], "helper.c")
+
+    def test_swift_file_object_uses_its_own_source_not_the_module_source_list(self):
+        obj = self.root / "helper.o"
+        obj.write_bytes(b"file output")
+        mapping = self.root / "output-file-map.json"
+        mapping.write_bytes(V.canonical({str(self.source / "helper.c"): {"object": str(obj)}}))
+        source_list = self.root / "sources"
+        source_list.write_text(str(self.source / "start.c") + "\n")
         rows = C.source_map_from_swift_output_map(mapping, self.roots, self.projects, source_list)
         self.assertEqual(rows[0]["sourceFiles"][0]["path"], "helper.c")
 

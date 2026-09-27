@@ -42,7 +42,9 @@ def prepare(input_root, metadata, output):
     declarations, identities = [], set()
     for declaration in metadata:
         V.require(isinstance(declaration, dict) and
-                  set(declaration) == {"identity", "sourceDirectory", "spdx", "licenses", "notices", "patches"},
+                  {"identity", "sourceDirectory", "spdx", "licenses", "notices", "patches"} <= set(declaration) and
+                  set(declaration) <= {"identity", "sourceDirectory", "spdx", "licenses", "notices", "patches",
+                                      "embeddedLicenseDocuments"},
                   "native source declaration requires explicit identity, directory, SPDX, licenses, notices, and patches")
         identity = V.path(declaration["identity"])
         V.require(identity not in identities, "duplicate native source identity")
@@ -75,6 +77,8 @@ def prepare(input_root, metadata, output):
             return dict(path=name, sha256=V.digest(data), sizeBytes=len(data))
 
         projects = []
+        project_contents = {}
+        embedded_specs = {}
         for index, (declaration, source) in enumerate(declarations):
             prefix = "sources/" + str(index).zfill(4) + "/"
             project = dict(identity=declaration["identity"], commit=source["commit"], tree=source["tree"],
@@ -108,6 +112,9 @@ def prepare(input_root, metadata, output):
                                   "duplicate or oversized native source archive entry")
                         contents[name] = archive.extractfile(member).read()
             V.require(contents.keys() == leaves.keys(), "native source archive/inventory coverage mismatch")
+            project_contents[declaration["identity"]] = contents
+            if "embeddedLicenseDocuments" in declaration:
+                embedded_specs[declaration["identity"]] = declaration["embeddedLicenseDocuments"]
             for index, name in enumerate(declaration["patches"]):
                 data = regular(input_root, name).read_bytes()
                 V.require(all(leaves[path]["gitMode"] != "120000" for path in contents if ("a/" + path).encode() in data),
@@ -123,6 +130,33 @@ def prepare(input_root, metadata, output):
                     project[field].append(dict(retain(prefix + "licenses/" + name, contents[name]), sourcePath=name,
                                                component=project["identity"], spdx=project["spdx"]))
             projects.append(project)
+        projects_by_identity = {project["identity"]: project for project in projects}
+        for identity, documents in embedded_specs.items():
+            project = projects_by_identity[identity]
+            V.require(isinstance(documents, list) and documents, "missing embedded license documents")
+            for embedded in documents:
+                V.require(isinstance(embedded, dict) and
+                          set(embedded) == {"sourceProject", "embeddedPinPath", "embeddedCommit", "sourcePath", "data"},
+                          "invalid embedded license document")
+                source_identity = V.path(embedded["sourceProject"])
+                source_path = V.path(embedded["sourcePath"])
+                pin_path = V.path(embedded["embeddedPinPath"])
+                commit = embedded["embeddedCommit"]
+                V.require(source_identity != identity and V.re.fullmatch("[a-f0-9]{40}", commit) is not None,
+                          "invalid embedded source identity or commit")
+                pin = project_contents[identity].get(pin_path, b"")
+                data = embedded["data"]
+                V.require(pin and isinstance(data, bytes) and data.strip(),
+                          "embedded license or captured source pin is missing")
+                V.verify_embedded_source_pin(pin, commit)
+                destination = ("sources/" + str(next(i for i, d in enumerate(declarations)
+                    if d[0]["identity"] == identity)).zfill(4) + "/licenses/embedded/" +
+                    source_identity.replace("/", "_") + "/" + source_path)
+                copied = retain(destination, data)
+                copied.update(sourceProject=source_identity, embeddedPinPath=pin_path, embeddedCommit=commit,
+                              sourcePath=source_path, component=identity, spdx=project["spdx"])
+                project["licenses"].append(copied)
+                project["notices"].append(dict(copied))
         for project in projects:
             V.source_project(project, lambda name: regular(staging, name).read_bytes(), commits)
         (staging / "projects.json").write_bytes(V.canonical(projects))

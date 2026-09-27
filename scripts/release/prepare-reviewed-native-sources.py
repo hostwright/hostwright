@@ -6,6 +6,7 @@ import importlib.util
 import os
 from pathlib import Path
 import re
+import tarfile
 import tempfile
 
 
@@ -116,9 +117,12 @@ def retain_source_map(source_map, source_map_root, staging):
             inputs = compiler_inputs(row, source_map_root)
             record = row["compilerInputs"]
             parent = Path(V.path(record["path"])).parent
+            prefix = "source-map/" + (parent.as_posix() + "/" if parent != Path(".") else "")
             if "generatedHeaders" in inputs:
-                prefix = "source-map/" + (parent.as_posix() + "/" if parent != Path(".") else "")
                 retain_headers(inputs["generatedHeaders"], source_map_root / parent, prefix, False)
+            for field in ("compilerModuleFiles", "compilerResponseFiles"):
+                if field in inputs:
+                    retain_mapping(inputs[field], source_map_root / parent, prefix, False)
             retained_row["compilerInputs"] = retain_mapping(record)
         retained_map.append(retained_row)
     return retained_map
@@ -222,6 +226,23 @@ def prepare(catalog, source_map, output, sdk_inputs=None, ingredients=None, nati
             if child["project"] not in requested:
                 requested.add(child["project"])
                 queue.append(child["project"])
+        reviewed = declarations[identity][1]
+        embedded = reviewed.get("embeddedLicenseProjects", [])
+        V.require(isinstance(embedded, list), "invalid embedded source license projects: " + identity)
+        for dependency in embedded:
+            V.require(isinstance(dependency, dict) and
+                      set(dependency) == {"identity", "pinPath", "licensePaths"} and
+                      isinstance(dependency["licensePaths"], list) and dependency["licensePaths"],
+                      "invalid embedded source license declaration: " + identity)
+            child_identity = V.path(dependency["identity"])
+            V.path(dependency["pinPath"])
+            V.require(child_identity in declarations and child_identity in captures and
+                      child_identity != identity, "embedded license source project is missing: " + child_identity)
+            V.require(len(set(V.path(name) for name in dependency["licensePaths"])) == len(dependency["licensePaths"]),
+                      "duplicate embedded source license path: " + child_identity)
+            if child_identity not in requested:
+                requested.add(child_identity)
+                queue.append(child_identity)
 
     metadata = {name: [] for name in roots}
     for identity in sorted(requested):
@@ -245,8 +266,34 @@ def prepare(catalog, source_map, output, sdk_inputs=None, ingredients=None, nati
                       "source document differs from reviewed bytes: " + identity + "/" + name)
         for name in selected.get(identity, {}):
             in_scope(reviewed, name)
-        metadata[captured["group"]].append(dict(identity=identity, sourceDirectory=directory,
-            spdx=reviewed["spdx"], licenses=reviewed["licenses"], notices=reviewed["notices"], patches=captured["patches"]))
+        declaration = dict(identity=identity, sourceDirectory=directory,
+            spdx=reviewed["spdx"], licenses=reviewed["licenses"], notices=reviewed["notices"], patches=captured["patches"])
+        if "embeddedLicenseProjects" in reviewed:
+            embedded_documents = []
+            for dependency in reviewed["embeddedLicenseProjects"]:
+                child_identity = dependency["identity"]
+                child_group, child_reviewed = declarations[child_identity]
+                child_capture = captures[child_identity]
+                child_root = roots[child_group]
+                child_directory = child_capture["directory"]
+                child_archive_record = child_capture["source"]["archive"]
+                archive_path = P.regular(child_root, child_directory + "/" + V.path(child_archive_record["path"]))
+                with tarfile.open(archive_path, "r:*") as archive:
+                    for source_path in dependency["licensePaths"]:
+                        source_path = V.path(source_path)
+                        document = next((item for item in child_reviewed["documents"]
+                                         if item["path"] == source_path), None)
+                        V.require(document is not None and source_path in child_reviewed["licenses"] + child_reviewed["notices"],
+                                  "embedded document is not a reviewed source license: " + child_identity + "/" + source_path)
+                        member = archive.extractfile(source_path)
+                        V.require(member is not None, "embedded source license leaf is missing")
+                        data = member.read()
+                        V.bound(document, lambda _name, data=data: data)
+                        embedded_documents.append(dict(sourceProject=child_identity,
+                            embeddedPinPath=dependency["pinPath"], embeddedCommit=child_capture["source"]["commit"],
+                            sourcePath=source_path, data=data))
+            declaration["embeddedLicenseDocuments"] = embedded_documents
+        metadata[captured["group"]].append(declaration)
 
     with tempfile.TemporaryDirectory(prefix=".reviewed-native-sources-", dir=output.parent) as temporary:
         staging = Path(temporary) / "projects"
@@ -260,9 +307,11 @@ def prepare(catalog, source_map, output, sdk_inputs=None, ingredients=None, nati
         projects.sort(key=lambda row: row["identity"])
         commits = {row["identity"]: row["commit"] for row in projects}
         fetch = lambda name: P.regular(staging, name).read_bytes()
+        source_leaves = {}
         for project in projects:
             identity = project["identity"]
             leaves = V.source_project(project, fetch, commits)
+            source_leaves[identity] = leaves
             for name, digest in selected.get(identity, {}).items():
                 leaf = leaves.get(name)
                 V.require(leaf is not None and leaf["gitMode"] != "120000" and leaf["sha256"] == digest,
@@ -273,16 +322,19 @@ def prepare(catalog, source_map, output, sdk_inputs=None, ingredients=None, nati
             V.require(len(expected) == len(documents) and set(expected) ==
                       {row["path"] for row in reviewed["documents"]}, "incomplete reviewed patched documents")
             for record in project["licenses"] + project["notices"]:
+                if "sourceProject" in record:
+                    continue
                 document = expected[record["sourcePath"]]
                 data = V.bound(record, fetch)
                 V.require(record["sha256"] == document["sha256"] and record["sizeBytes"] == document["sizeBytes"]
                           and V.git_object("blob", data) == document["gitBlobSHA1"],
                           "applied patch changes reviewed license/notice bytes: " + identity)
+        V.verify_embedded_license_documents(projects, fetch)
         (staging / "projects.json").write_bytes(V.canonical(projects))
         (staging / "source-map.json").write_bytes(V.canonical(retained_map))
         V.require(not output.exists() and not output.is_symlink(), "reviewed source output already exists")
         os.rename(staging, output)
-    return projects
+        return projects
 
 
 if __name__ == "__main__":

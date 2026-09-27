@@ -451,4 +451,16 @@ class RuntimeProvenanceTests(unittest.TestCase):
     record=next(r for r in manifest['payloads'] if r['path']==p);record.update(sha256=v.digest(payloads[p]),sizeBytes=len(payloads[p]))
    with self.subTest(change=change),mock.patch.object(v,'authenticate'):
     with self.assertRaisesRegex(ValueError,'duplicate OCI|schema/media'):v.verify(v.canonical(manifest),runtime,payloads,files.__getitem__,manifest['sourceCommit'])
+class GoGeneratedSourceTests(unittest.TestCase):
+ def test_pinned_go_distribution_generated_version_file_is_explicit(self):
+  source=v.generated_go_source('go-runtime','src/internal/runtime/sys/zversion.go',
+   'f69c03727973664529c2e6fa2d2c53b2d3440c887938d0d9b22254f7984052f2','go1.26.5')
+  self.assertEqual(source,{'generator':'go tool dist','goVersion':'go1.26.5'})
+  for project,path,digest,version in (
+   ('go-runtime','src/internal/runtime/sys/zversion.go','0'*64,'go1.26.5'),
+   ('go-runtime','src/other/generated.go','f69c03727973664529c2e6fa2d2c53b2d3440c887938d0d9b22254f7984052f2','go1.26.5'),
+   ('go-runtime','src/internal/runtime/sys/zversion.go','f69c03727973664529c2e6fa2d2c53b2d3440c887938d0d9b22254f7984052f2','go1.26.6')):
+   with self.subTest(path=path,digest=digest,version=version),self.assertRaisesRegex(ValueError,'unsupported generated Go source'):
+    v.generated_go_source(project,path,digest,version)
+
 if __name__=='__main__':unittest.main()

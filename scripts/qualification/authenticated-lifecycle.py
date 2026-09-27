@@ -414,7 +414,8 @@ def validate_sdk_inputs(args, binding, fresh=False):
     raw, metadata = sdk.secure_read(spec['configInputPath'], limit=65536)
     require(metadata['sha256'] == spec['configSHA256'], 'SDK config input changed')
     config = sdk.decode(raw)
-    require(config.get('schema') == 1 and config.get('framework') == '0.35.0', 'SDK config framework mismatch')
+    require(config.get('schema') == 1 and config.get('framework') == '0.35.0'
+            and config.get('initImageReference') == 'untagged@sha256:9b7d2e0d32dd662d6a40f7b25a35dc28b5267e932465403f31bf47723dafb0cd', 'SDK config framework/image reference mismatch')
     data = Path(config['dataRootPath'])
     state = Path(args.state_root)
     require(data.is_absolute() and data.resolve() == data and data.parent.is_dir() and data != state and state not in data.parents and data not in state.parents, 'unsafe/overlapping SDK data root')
@@ -428,12 +429,20 @@ def validate_sdk_inputs(args, binding, fresh=False):
     if fresh: require(not data.exists() and not data.is_symlink(), 'SDK data root must be fresh before seeding')
     require(spec.get('frameworkRevision') == '44bec8b9933bc491d0cbf44abac90a1f6aaebf6b', 'SDK source revision mismatch')
     for path, digest in spec['assetSHA256'].items(): bound(path, digest)
-    require(config['kernelPath'] in spec['assetSHA256'] and config['kernelSHA256'] == spec['assetSHA256'][config['kernelPath']] == '2fe4a58d2885d623bcb4d705900ac8c1d4f02371152da8126b3b00c8c47fc3a1', 'SDK kernel not pinned byte bound')
+    require(config['kernelPath'] in spec['assetSHA256'] and config['kernelSHA256'] == spec['assetSHA256'][config['kernelPath']] == '74b612335db14171de36bcc68fb82bbc19751e07bc440d4c1724ad92a08b4132'
+            and Path(config['kernelPath']).stat().st_size == 16148992, 'SDK kernel not pinned byte bound')
     require(not config.get('guestNetworkPolicyLoaderPath') and not config.get('guestNetworkPolicyLoaderSHA256'), 'qualification workload does not admit guest policy loader')
-    init_digests = ('5708d65ba1914caa756a2e813831e17d7655042799310bc94efef82210c2dac6','04cd14f8e6ec9617611429aaf2a91a841b27ff9eae847acaca48430f58c5e57d','30d24816422f41337fae35f59a3c03ac13559fd42bd0d67321a7db4d57ac4988','e3b2b9d347c2e5834d9fe5b4d615f5c0632c485d785e64f5c6b4c9b179ac168f')
-    for digest in init_digests:
-        require(spec['assetSHA256'].get(str(Path(config['initImageLayoutPath'])/'blobs/sha256'/digest)) == digest, 'SDK init OCI asset omitted or unpinned')
-    require(config['initImageDescriptorDigest'] == 'sha256:'+init_digests[0] and config['initImageVariantDigest'] == 'sha256:'+init_digests[1], 'SDK init descriptors mismatch')
+    init_digests = ('9b7d2e0d32dd662d6a40f7b25a35dc28b5267e932465403f31bf47723dafb0cd','188cfff3bfe0bde342bb3e73ebc0f5d2fafa2f366bd78b68c391ccff4e3c12ae','bd71734611fbccd656736610e8170546bf05d64e62a09895790364ea59818bfc')
+    init_root = Path(config['initImageLayoutPath'])
+    init_files = {
+        'oci-layout': ('18f0797eab35a4597c1e9624aa4f15fd91f6254e5538c1e0d193b2a95dd4acc6', 30),
+        'index.json': ('a5fb5845e3e9d96aba5789f3a65b776f7c007ac4b7d751f17077cf36d3c0e58e', 240),
+        **{f'blobs/sha256/{digest}': (digest, size) for digest, size in zip(init_digests, (406, 151, 67226282))},
+    }
+    for relative, (digest, size) in init_files.items():
+        path = str(init_root/relative)
+        require(spec['assetSHA256'].get(path) == digest and Path(path).stat().st_size == size, 'SDK init OCI asset omitted, unpinned, or wrong size')
+    require(config['initImageDescriptorDigest'] == 'sha256:'+init_digests[0] and config['initImageVariantDigest'] == 'sha256:'+init_digests[0], 'SDK init descriptors mismatch')
     if fresh: require(sdk.oci_tree_digest(spec['layoutPath']) == spec['layoutSHA256'], 'SDK OCI input tree mismatch')
     require(spec['unmanagedProcessPaths'] and all(Path(x).is_absolute() for x in spec['unmanagedProcessPaths']), 'explicit unmanaged host workload process scope required')
     for path in spec['unmanagedProcessPaths']: bound(path,spec['unmanagedProcessSHA256'][path])

@@ -132,6 +132,15 @@ class ReviewedNativeSourcesTests(unittest.TestCase):
     def test_compact_inputs_preserve_full_sources_and_relative_bound_evidence(self):
         root, inputs, files = self.compiler_input_sidecar()
         inputs["translationUnits"] = copy.deepcopy(inputs["sourceFiles"])
+        files["generated/module.pcm"] = b"compiled module bytes"
+        files["generated/sources.resp"] = b"/source/main.swift\n"
+        for name, data in files.items():
+            (root / "nested" / name).write_bytes(data)
+        inputs["compilerModuleFiles"] = [dict(originalPath="/build/module.pcm",
+            file=self.record("generated/module.pcm", files["generated/module.pcm"]))]
+        inputs["compilerResponseFiles"] = [dict(originalPath="/build/sources.resp",
+            file=self.record("generated/sources.resp", files["generated/sources.resp"]),
+            sourcePaths=["/source/main.swift"], sourceFiles=copy.deepcopy(inputs["translationUnits"]))]
         data = V.canonical(inputs)
         (root / "nested/compiler-inputs.json").write_bytes(data)
         self.source_map[0]["compilerInputs"] = self.record("nested/compiler-inputs.json", data)

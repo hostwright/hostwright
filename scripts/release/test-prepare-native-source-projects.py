@@ -26,13 +26,30 @@ class NativeSourcePreparationTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name).resolve()
+        self.embedded_repository = self.root / "embedded-repository"
+        self.embedded_repository.mkdir()
+        subprocess.run(["git", "init", "-q", str(self.embedded_repository)], check=True)
+        self.embedded_license = b"Exact embedded upstream license fixture\n"
+        (self.embedded_repository / "LICENSE").write_bytes(self.embedded_license)
+        (self.embedded_repository / "NOTICE").write_bytes(b"Embedded source notice\n")
+        subprocess.run(["git", "-C", str(self.embedded_repository), "add", "."], check=True)
+        subprocess.run(["git", "-C", str(self.embedded_repository), "-c", "user.name=Test", "-c",
+                        "user.email=test@example.test", "commit", "-qm", "embedded source"], check=True)
+        self.embedded_commit = subprocess.check_output(
+            ["git", "-C", str(self.embedded_repository), "rev-parse", "HEAD"]).decode().strip()
         self.repository = self.root / "repository"
         self.repository.mkdir()
         subprocess.run(["git", "init", "-q", str(self.repository)], check=True)
         self.original = {"main.c": b"int value = 1;\n", "COPYING": b"Explicit fixture license text\n",
-                         "NOTICE": b"Exact fixture attribution\n"}
+                         "NOTICE": b"Exact fixture attribution\n",
+                         "Sources/embedded.hash": (
+                             "This directory is derived from BoringSSL cloned from "
+                             "https://boringssl.googlesource.com/boringssl at revision " +
+                             self.embedded_commit + "\n").encode()}
         for name, data in self.original.items():
-            (self.repository / name).write_bytes(data)
+            target = self.repository / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
         (self.repository / "license-link").symlink_to("COPYING")
         self.git("add", ".")
         self.git("-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-qm", "source")
@@ -40,6 +57,7 @@ class NativeSourcePreparationTests(unittest.TestCase):
         self.inputs = self.root / "inputs"
         self.inputs.mkdir()
         S.capture(self.repository, self.commit, self.inputs / "capture")
+        S.capture(self.embedded_repository, self.embedded_commit, self.inputs / "embedded")
         self.metadata = [dict(identity="sdk/example", sourceDirectory="capture", spdx="MIT",
                               licenses=["COPYING"], notices=["NOTICE"], patches=[])]
         self.output = self.root / "output"
@@ -78,8 +96,53 @@ class NativeSourcePreparationTests(unittest.TestCase):
         self.assertEqual([p["identity"] for p in projects], ["sdk/example", "swiftpm/example"])
         self.assertEqual({p["commit"] for p in projects}, {self.commit})
         self.assertNotEqual(projects[0]["archive"]["path"], projects[1]["archive"]["path"])
+
+    def test_embedded_license_is_bound_to_pinned_source_project(self):
+        embedded = dict(identity="sdk/embedded", sourceDirectory="embedded", spdx="Apache-2.0",
+                        licenses=["LICENSE"], notices=["NOTICE"], patches=[])
+        self.metadata.append(embedded)
+        self.metadata[0]["embeddedLicenseDocuments"] = [dict(sourceProject="sdk/embedded",
+            embeddedPinPath="Sources/embedded.hash", embeddedCommit=self.embedded_commit,
+            sourcePath="LICENSE", data=self.embedded_license)]
+        projects = self.prepare()
+        fetch = lambda name: (self.output / name).read_bytes()
+        commits = {project["identity"]: project["commit"] for project in projects}
         for project in projects:
-            self.assertEqual(project["licenses"][0]["component"], project["identity"])
+            P.V.source_project(project, fetch, commits)
+        P.V.verify_embedded_license_documents(projects, fetch)
+        parent = next(project for project in projects if project["identity"] == "sdk/example")
+        external = next(item for item in parent["licenses"] if item.get("sourceProject"))
+        self.assertEqual(external["sourceProject"], "sdk/embedded")
+        self.assertEqual(fetch(external["path"]), self.embedded_license)
+        self.assertEqual(projects, P.V.parse((self.output / "projects.json").read_bytes()))
+
+    def test_embedded_license_with_wrong_pin_is_rejected(self):
+        embedded = dict(identity="sdk/embedded", sourceDirectory="embedded", spdx="Apache-2.0",
+                        licenses=["LICENSE"], notices=["NOTICE"], patches=[])
+        metadata = copy.deepcopy(self.metadata + [embedded])
+        metadata[0]["embeddedLicenseDocuments"] = [dict(sourceProject="sdk/embedded",
+            embeddedPinPath="Sources/embedded.hash", embeddedCommit="0" * 40,
+            sourcePath="LICENSE", data=self.embedded_license)]
+        with self.assertRaisesRegex(ValueError, "exactly name the captured source commit"):
+            P.prepare(self.inputs, metadata, self.root / "wrong-pin-output")
+
+    def test_embedded_license_rejects_commit_substring_in_unrelated_pin_text(self):
+        embedded = dict(identity="sdk/embedded", sourceDirectory="embedded", spdx="Apache-2.0",
+                        licenses=["LICENSE"], notices=["NOTICE"], patches=[])
+        self.metadata.append(embedded)
+        self.metadata[0]["embeddedLicenseDocuments"] = [dict(sourceProject="sdk/embedded",
+            embeddedPinPath="Sources/embedded.hash", embeddedCommit=self.embedded_commit,
+            sourcePath="LICENSE", data=self.embedded_license)]
+        (self.repository / "Sources/embedded.hash").write_text(
+            "documentation mentions " + self.embedded_commit + " only\n")
+        self.git("add", "Sources/embedded.hash")
+        self.git("-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-qm",
+                 "replace source pin with unrelated text")
+        capture = self.inputs / "capture-substring-pin"
+        S.capture(self.repository, self.git("rev-parse", "HEAD").decode().strip(), capture)
+        self.metadata[0]["sourceDirectory"] = "capture-substring-pin"
+        with self.assertRaisesRegex(ValueError, "exactly name the captured source commit"):
+            self.prepare(self.root / "substring-pin-output")
 
     def test_license_declarations_are_required_and_never_guessed(self):
         for field, value in (("licenses", []), ("notices", []), ("licenses", ["LICENSE"]),

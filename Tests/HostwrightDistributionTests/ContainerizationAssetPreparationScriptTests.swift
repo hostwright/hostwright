@@ -2,24 +2,24 @@ import Foundation
 import XCTest
 
 final class ContainerizationAssetPreparationScriptTests: XCTestCase {
-    func testDryRunValidatesLockedPlanWithoutDownloadingOrWriting() throws {
+    func testDryRunPrintsDirectManifestContractWithoutMaterializing() throws {
         try withTemporaryDirectory { root in
             let output = root.appendingPathComponent("assets", isDirectory: true)
-            let result = try runScript(["--output", output.path, "--dry-run"])
+            let result = try runScript([
+                "--output", output.path,
+                "--runtime-archive", root.appendingPathComponent("runtime-provenance.tar.gz").path,
+                "--source-commit", String(repeating: "a", count: 40),
+                "--run-id", "1234", "--attempt", "1", "--dry-run"
+            ])
 
             XCTAssertEqual(result.status, 0, result.output)
             XCTAssertTrue(result.output.contains("Containerization framework: 0.35.0"))
-            XCTAssertTrue(
-                result.output.contains(
-                    "f63d54507d1f18635d94475077e4c2330de4d8e05cedf25f7c38f063b0e66a91 (596775193 bytes)"
-                )
-            )
-            XCTAssertTrue(
-                result.output.contains(
-                    "e3b2b9d347c2e5834d9fe5b4d615f5c0632c485d785e64f5c6b4c9b179ac168f (66895112 bytes)"
-                )
-            )
-            XCTAssertTrue(result.output.contains("no files downloaded or written"))
+            XCTAssertTrue(result.output.contains("Rebuilt Linux kernel: 74b612335db14171de36bcc68fb82bbc19751e07bc440d4c1724ad92a08b4132 (16148992 bytes)"))
+            XCTAssertTrue(result.output.contains("Direct OCI image manifest: sha256:9b7d2e0d32dd662d6a40f7b25a35dc28b5267e932465403f31bf47723dafb0cd (406 bytes)"))
+            XCTAssertTrue(result.output.contains("Guest policy loader: a411dbcf1efaaf0ea0da17d76e3376a92b99037a8cb00af6588e8ecc6f3f7e99 (2949246 bytes)"))
+            XCTAssertTrue(result.output.contains("authenticated source \(String(repeating: "a", count: 40)) run 1234 attempt 1"))
+            XCTAssertFalse(result.output.localizedCaseInsensitiveContains("kata archive"))
+            XCTAssertFalse(result.output.localizedCaseInsensitiveContains("ghcr"))
             XCTAssertFalse(FileManager.default.fileExists(atPath: output.path))
             XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.path), [])
         }
@@ -38,6 +38,9 @@ final class ContainerizationAssetPreparationScriptTests: XCTestCase {
 
             let linked = try runScript([
                 "--output", link.appendingPathComponent("assets", isDirectory: true).path,
+                "--runtime-archive", root.appendingPathComponent("runtime-provenance.tar.gz").path,
+                "--source-commit", String(repeating: "a", count: 40),
+                "--run-id", "1234", "--attempt", "1",
                 "--dry-run"
             ])
             XCTAssertEqual(linked.status, 66)

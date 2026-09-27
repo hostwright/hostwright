@@ -197,6 +197,15 @@ def apply_patch_bytes(patch_data, contents):
         contents[name]=b''.join(result+original[cursor:]); changed=True
     require(changed, 'missing actual source patch changes')
 
+BORINGSSL_PIN_PREFIX = (b'This directory is derived from BoringSSL cloned from '
+                        b'https://boringssl.googlesource.com/boringssl at revision ')
+
+def verify_embedded_source_pin(data, commit):
+    """Require the complete, recognized BoringSSL hash.txt record for this revision."""
+    match=re.fullmatch(re.escape(BORINGSSL_PIN_PREFIX)+rb'([a-f0-9]{40})\r?\n?',data)
+    require(match is not None and match.group(1).decode()==commit,
+            'embedded source pin does not exactly name the captured source commit')
+
 def source_project(project, fetch, project_commits=None):
     """Reconstruct the complete Git tree from actual retained source leaves."""
     commit = bound(project['commitObject'], fetch)
@@ -264,6 +273,19 @@ def source_project(project, fetch, project_commits=None):
     for name,data in contents.items():leaves[name]=dict(leaves[name],sha256=digest(data),sizeBytes=len(data))
     for item in project['licenses']+project['notices']:
         data=substantive(item,fetch); source_name=path(item['sourcePath'])
+        if 'sourceProject' in item or 'embeddedPinPath' in item or 'embeddedCommit' in item:
+            require(all(key in item for key in ('sourceProject','embeddedPinPath','embeddedCommit')) and
+                    item['sourceProject']!=project['identity'] and
+                    re.fullmatch('[a-f0-9]{40}',item['embeddedCommit']) is not None and
+                    (project_commits is None or item['sourceProject'] not in project_commits or
+                     project_commits[item['sourceProject']]==item['embeddedCommit']),
+                    'embedded license lacks an exact captured source project')
+            pin_path=path(item['embeddedPinPath'])
+            require(pin_path in contents and leaves[pin_path]['gitMode']!='120000' and
+                    item['component']==project['identity'] and item['spdx']==project['spdx'],
+                    'embedded license source is not bound to the exact source pin')
+            verify_embedded_source_pin(contents[pin_path],item['embeddedCommit'])
+            continue
         require(source_name in leaves and leaves[source_name]['gitMode']!='120000' and
                 leaves[source_name]['sha256']==digest(data) and item['component']==project['identity'] and
                 item['spdx']==project['spdx'], 'license/notice is not bound to exact source leaf/component/SPDX')
@@ -274,6 +296,24 @@ def source_project(project, fetch, project_commits=None):
         require(b'Adam M. Costello' in data and b'irrevocable permission' in data and retained,
                 'Punycode LicenseRef lacks its exact source grant evidence')
     return leaves
+
+def verify_embedded_license_documents(projects, fetch):
+    """Bind copied embedded license bytes to a captured source pin and its exact source leaf."""
+    by_identity={project['identity']:project for project in projects}
+    for project in projects:
+        for item in project['licenses']+project['notices']:
+            if 'sourceProject' not in item:
+                continue
+            source=by_identity.get(item['sourceProject'])
+            require(source is not None and source['commit']==item['embeddedCommit'],
+                    'embedded license source project is absent or has the wrong commit')
+            matches=[record for record in source['licenses']+source['notices']
+                     if record['sourcePath']==item['sourcePath']]
+            require(matches, 'embedded license source leaf is not declared by its source project')
+            data=substantive(item,fetch)
+            require(any(substantive(record,fetch)==data and record['sha256']==item['sha256'] and
+                        record['sizeBytes']==item['sizeBytes'] for record in matches),
+                    'embedded license bytes differ from the exact captured source leaf')
 
 def elf(data, relocatable=False):
     require(len(data)>=64 and data[:7]==b'\x7fELF\x02\x01\x01', 'expected ELF64 little-endian bytes')
@@ -592,13 +632,15 @@ def native_source_files(record, fetch):
             matches=canonical(sources(header.get('matchingSources')))
             require(matches<=complete and all(row[2]==digest(data) for row in matches), 'copied native header source mismatch')
     ordered=[]
+    emitted=set()
     for source in document['sourceFiles']:
         project,name,sha=path(source['project']),path(source['path']),source['sha256']
         target=NATIVE_SOURCE_ALIASES.get((project,name))
         if target is not None:project,name=target
         row=(project,name,sha)
-        if row in complete and row not in {(item['project'],item['path'],item['sha256']) for item in ordered}:
+        if row in complete and row not in emitted:
             ordered.append(dict(project=project,path=name,sha256=sha))
+            emitted.add(row)
     require(len(ordered)==len(complete), 'canonical source list lost compiler inputs')
     return ordered
 
@@ -682,6 +724,28 @@ def go_build_info(output):
             modules.append(entry)
         require(not line.startswith('=>'), 'unverified Go module replacement')
     return version.decode(),modules
+
+GO_DIST_GENERATED_SOURCES = {
+    ("go-runtime", "src/internal/runtime/sys/zversion.go"):
+        ("go1.26.5", "f69c03727973664529c2e6fa2d2c53b2d3440c887938d0d9b22254f7984052f2"),
+}
+
+def generated_go_source(project, source_path, source_sha256, go_version):
+    """Classify the version file generated by the pinned Go distribution build."""
+    expected = GO_DIST_GENERATED_SOURCES.get((project, source_path))
+    require(expected is not None and expected == (go_version, source_sha256),
+            'unsupported generated Go source input')
+    return dict(generator='go tool dist', goVersion=go_version)
+
+def verify_go_source_record(source, projects, go_version):
+    if 'generatedSource' in source:
+        require(source['generatedSource'] == generated_go_source(
+            source['project'], source['path'], source['sha256'], go_version),
+            'invalid generated Go source provenance')
+    else:
+        require(source['project'] in projects and source['path'] in projects[source['project']] and
+                projects[source['project']][source['path']]['sha256']==source['sha256'],
+                'Go compiled source mismatch')
 
 def go_capture(record, output, fetch, tools):
     capture=parse(substantive(record,fetch))
@@ -859,8 +923,7 @@ def go_loader(loader, output, projects, fetch, tools=None):
         require(module['project'] in projects and module['revision']==loader['moduleRevisions'][module['project']], 'Go linked module revision/source missing')
     require(loader['sourceFiles'] and loader['commands'] and loader['compiler'], 'missing Go compiled source/tool inputs')
     for source in loader['sourceFiles']:
-        require(source['project'] in projects and source['path'] in projects[source['project']] and
-                projects[source['project']][source['path']]['sha256']==source['sha256'], 'Go compiled source mismatch')
+        verify_go_source_record(source, projects, loader['goVersion'])
     require(tools is not None and loader['compiler']['sha256'] in tools.values(), 'missing authenticated Go compiler toolchain')
     substantive(loader['compiler'],fetch)
     for item in loader['commands']:argv(item,fetch,tools)
@@ -890,8 +953,7 @@ def go_loader(loader, output, projects, fetch, tools=None):
         require(package['project'] in source_projects and source_projects<=component_projects,
                 'Go package source component coverage mismatch')
         for source in package['sourceFiles']:
-            require(source['project'] in projects and
-                    source['path'] in projects[source['project']] and projects[source['project']][source['path']]['sha256']==source['sha256'], 'Go package trace source mismatch')
+            verify_go_source_record(source, projects, loader['goVersion'])
     require({canonical(item) for item in loader['sourceFiles']}==
             {canonical(item) for package in trace for item in package['sourceFiles']}, 'Go loader source inventory differs from package trace')
 
@@ -927,6 +989,7 @@ def verify(manifest_data, runtime, payloads, fetch, source_commit, require_authe
     for project in manifest['sourceProjects']:
         require(project['identity'] not in projects, 'duplicate source project')
         projects[project['identity']]=source_project(project,fetch,project_commits)
+    verify_embedded_license_documents(manifest['sourceProjects'],fetch)
     require(projects, 'missing complete corresponding sources')
     tools=toolchain(manifest,fetch)
     oci=manifest['oci']; prefix=path(oci['prefix'])
@@ -991,7 +1054,8 @@ def verify(manifest_data, runtime, payloads, fetch, source_commit, require_authe
         record=files[name];require(record['sha256']==digest(data) and record['sizeBytes']==len(data), 'OCI file attribution bytes mismatch')
         if name in extracted:
             require(record['type']=='elf', 'wrong OCI file classification')
-            components={s['project'] for item in links[name]['selectedInputs'] for s in item['sourceFiles']}
+            components={s['project'] for item in links[name]['selectedInputs']
+                        for s in native_source_files(item, fetch)}
         else:
             require(record['type']=='source-copy', 'unsupported generated/unattributed non-ELF OCI file')
             source=record['source'];require(source['project'] in projects and source['path'] in projects[source['project']] and

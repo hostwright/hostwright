@@ -61,17 +61,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 scripts/release/materialize-swift-sdk-sources.py --root "$RUNNER_TEMP/swift-sdk-sources"
+          sudo mkdir -p /workspace
+          sudo chown "$(id -u):$(id -g)" /workspace
+          python3 scripts/release/materialize-swift-sdk-sources.py --root /workspace/sources
       - name: Build the source-pinned static Swift SDK
         shell: bash
         run: |
           set -euo pipefail
           scripts/release/build-static-swift-sdk.sh \
-            --root "$RUNNER_TEMP/swift-sdk-sources" --repo-root "$GITHUB_WORKSPACE" \
-            --build-dir "$RUNNER_TEMP/swift-sdk-build" \
-            --products-dir "$RUNNER_TEMP/swift-sdk-products" \
+            --root /workspace/sources --repo-root "$GITHUB_WORKSPACE" \
+            --build-dir /workspace/build \
+            --products-dir /workspace/products \
             --records "$RUNNER_TEMP/swift-sdk-records"
-          cp "$RUNNER_TEMP/swift-sdk-sources/source-revisions.json" "$RUNNER_TEMP/swift-sdk-records/"
+          cp /workspace/sources/source-revisions.json "$RUNNER_TEMP/swift-sdk-records/"
           cp "$RUNNER_TEMP/swift-bootstrap/swiftly.tar.gz" \
             "$RUNNER_TEMP/swift-bootstrap/swiftly.tar.gz.sig" \
             "$RUNNER_TEMP/swift-bootstrap/swift-signing-keys.asc" \
@@ -148,6 +150,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          sudo mkdir -p /workspace
+          sudo chown "$(id -u):$(id -g)" /workspace
           sudo apt-get update
           sudo apt-get install --yes \
             bc bison clang cpio dwarves flex gcc gcc-aarch64-linux-gnu git gpg jq libcurl4-openssl-dev libelf-dev libssl-dev \
@@ -218,9 +222,12 @@ jobs:
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
           [[ "$(swift --version | head -1)" == "Swift version 6.3"* ]]
           scripts/release/build-runtime-ingredients.sh \
+            --work-dir /workspace/runtime-build \
             --kernel-inputs "$RUNNER_TEMP/kernel-signature-inputs" \
             --swift-sdk "$RUNNER_TEMP/swift-sdk-records/swift-static-sdk.tar.gz" \
             --swift-sdk-sha256 "$(awk '{print $1}' "$RUNNER_TEMP/swift-sdk-records/swift-static-sdk.sha256")" \
+            --sdk-object-sources "$RUNNER_TEMP/swift-sdk-records/build-inputs/sdk-object-sources.json" \
+            --sdk-source-map-root "$RUNNER_TEMP/swift-sdk-records/build-inputs" \
             --output "$RUNNER_TEMP/runtime-build-ingredients"
           mkdir -m 700 "$RUNNER_TEMP/runtime-build-ingredients/evidence/swift-bootstrap"
           cp "$RUNNER_TEMP/swift-bootstrap/swiftly.tar.gz" \
@@ -233,6 +240,38 @@ jobs:
             find payloads evidence -type f -print0 | sort -z | xargs -0 sha256sum) \
             > "$RUNNER_TEMP/runtime-build-ingredients/checksums.sha256"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
+      - name: Prepare reviewed source closure and native producer fragment
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/release/test-capture-native-source-map.py
+          python3 scripts/release/test-prepare-reviewed-native-sources.py
+          python3 scripts/release/test-prepare-native-runtime-provenance.py
+          python3 scripts/release/prepare-reviewed-native-sources.py \
+            --sdk-inputs "$RUNNER_TEMP/swift-sdk-records/build-inputs" \
+            --ingredients "$RUNNER_TEMP/runtime-build-ingredients" \
+            --source-map "$RUNNER_TEMP/runtime-build-ingredients/evidence/source-map.json" \
+            --source-map-root "$RUNNER_TEMP/runtime-build-ingredients/evidence/source-map" \
+            --native-patches "$RUNNER_TEMP/runtime-build-ingredients/evidence/native-patches.json" \
+            --output "$RUNNER_TEMP/runtime-native-source-projects"
+          kernel_project="$(python3 -c 'import json; print(json.load(open("scripts/release/runtime-native-source-licenses.json"))["kernel"]["identity"])')"
+          python3 scripts/release/prepare-native-runtime-provenance.py \
+            --ingredients "$RUNNER_TEMP/runtime-build-ingredients" \
+            --source-projects "$RUNNER_TEMP/runtime-native-source-projects" \
+            --source-map "$RUNNER_TEMP/runtime-build-ingredients/evidence/source-map.json" \
+            --source-map-root "$RUNNER_TEMP/runtime-build-ingredients/evidence/source-map" \
+            --source-commit "$GITHUB_SHA" --kernel-project "$kernel_project" \
+            --output "$RUNNER_TEMP/runtime-native-fragment"
+          mv "$RUNNER_TEMP/runtime-native-fragment" "$RUNNER_TEMP/runtime-build-ingredients/runtime-native-fragment"
+          (cd "$RUNNER_TEMP/runtime-build-ingredients" && \
+            find payloads evidence runtime-native-fragment -type f -print0 | sort -z | xargs -0 sha256sum) \
+            > "$RUNNER_TEMP/runtime-build-ingredients/checksums.sha256"
+      - name: Attest the prepared native producer fragment
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            ${{ runner.temp }}/runtime-build-ingredients/runtime-native-fragment/native-provenance.json
+            ${{ runner.temp }}/runtime-build-ingredients/evidence/source-map.json
       - name: Attest rebuilt ingredients and retained evidence
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
@@ -244,10 +283,7 @@ jobs:
         with:
           name: runtime-build-ingredients-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           include-hidden-files: true
-          path: |
-            ${{ runner.temp }}/runtime-build-ingredients/payloads/
-            ${{ runner.temp }}/runtime-build-ingredients/evidence/
-            ${{ runner.temp }}/runtime-build-ingredients/checksums.sha256
+          path: ${{ runner.temp }}/runtime-build-ingredients/
           retention-days: 30
           if-no-files-found: error
 
@@ -339,11 +375,117 @@ jobs:
       - name: Retain the attested loader and build inputs
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: runtime-guest-loader-${{ github.sha }}
+          name: runtime-guest-loader-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/runtime-ingredients/hostwright-netfilter-*
             ${{ runner.temp }}/runtime-ingredients/hostwright-netfilter.sha256
             ${{ runner.temp }}/runtime-ingredients/go-environment.json
             ${{ runner.temp }}/runtime-ingredients/loader-build-inputs.tar.gz
+          retention-days: 30
+          if-no-files-found: error
+
+  runtime-provenance:
+    name: Assemble and attest the authenticated runtime provenance bundle
+    if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' }}
+    needs: [runtime-build-ingredients, guest-loader]
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - name: Check out the exact main commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Download native producer fragment from this run attempt
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: runtime-build-ingredients-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/runtime-inputs
+      - name: Download the exact loader fragment from this run attempt
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: runtime-guest-loader-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/runtime-loader
+      - name: Verify producer attestations and retained build records
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          native="$RUNNER_TEMP/runtime-inputs"
+          for subject in "$native/checksums.sha256" "$RUNNER_TEMP/runtime-loader/loader-build-inputs.tar.gz"; do
+            gh attestation verify "$subject" \
+              --repo "$GITHUB_REPOSITORY" --hostname github.com \
+              --signer-digest "$GITHUB_SHA" --source-digest "$GITHUB_SHA" \
+              --source-ref refs/heads/main \
+              --cert-identity "https://github.com/$GITHUB_REPOSITORY/.github/workflows/runtime-ingredients.yml@refs/heads/main" \
+              --cert-oidc-issuer https://token.actions.githubusercontent.com --deny-self-hosted-runners
+          done
+          (cd "$native" && sha256sum --check checksums.sha256)
+          test -f "$native/runtime-native-fragment/native-provenance.json"
+          for subject in "$native/runtime-native-fragment/native-provenance.json" "$native/evidence/source-map.json"; do
+            gh attestation verify "$subject" \
+            --repo "$GITHUB_REPOSITORY" --hostname github.com \
+            --signer-digest "$GITHUB_SHA" --source-digest "$GITHUB_SHA" \
+            --source-ref refs/heads/main \
+            --cert-identity "https://github.com/$GITHUB_REPOSITORY/.github/workflows/runtime-ingredients.yml@refs/heads/main" \
+            --cert-oidc-issuer https://token.actions.githubusercontent.com --deny-self-hosted-runners
+          done
+          gh attestation verify "$RUNNER_TEMP/runtime-loader/hostwright-netfilter-first" \
+            --repo "$GITHUB_REPOSITORY" --hostname github.com \
+            --signer-digest "$GITHUB_SHA" --source-digest "$GITHUB_SHA" \
+            --source-ref refs/heads/main \
+            --cert-identity "https://github.com/$GITHUB_REPOSITORY/.github/workflows/runtime-ingredients.yml@refs/heads/main" \
+            --cert-oidc-issuer https://token.actions.githubusercontent.com --deny-self-hosted-runners
+          mkdir -m 700 "$RUNNER_TEMP/runtime-loader-authenticated"
+          tar --no-same-owner -xzf "$RUNNER_TEMP/runtime-loader/loader-build-inputs.tar.gz" \
+            -C "$RUNNER_TEMP/runtime-loader-authenticated"
+      - name: Prepare and verify the combined runtime provenance source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/release/test-prepare-runtime-provenance.py
+          python3 scripts/release/test-assemble-runtime-provenance.py
+          python3 scripts/release/test-prepare-runtime-attestation-subjects.py
+          native="$RUNNER_TEMP/runtime-inputs/runtime-native-fragment"
+          python3 scripts/release/prepare-runtime-provenance.py \
+            --native-root "$native" --loader-root "$RUNNER_TEMP/runtime-loader-authenticated" \
+            --source-commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
+            --output "$RUNNER_TEMP/runtime-prepared"
+          mkdir -m 700 "$RUNNER_TEMP/runtime-final"
+          python3 scripts/release/assemble-runtime-provenance.py \
+            --input-root "$RUNNER_TEMP/runtime-prepared" \
+            --output "$RUNNER_TEMP/runtime-final/runtime-provenance.tar.gz" \
+            --version "$(python3 -c 'import json; print(json.load(open("contracts/v0.0.2/versions.json"))["productVersion"])')" \
+            --source-root "$GITHUB_WORKSPACE" \
+            --kernel-signature-inputs "$RUNNER_TEMP/runtime-inputs/evidence/kernel-inputs"
+          python3 scripts/release/prepare-runtime-attestation-subjects.py \
+            --archive "$RUNNER_TEMP/runtime-final/runtime-provenance.tar.gz" \
+            --output "$RUNNER_TEMP/runtime-attestation-subjects" --source-commit "$GITHUB_SHA"
+      - name: Attest the exact runtime manifest and every payload
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            ${{ runner.temp }}/runtime-attestation-subjects/runtime-provenance.json
+            ${{ runner.temp }}/runtime-attestation-subjects/payloads/*
+      - name: Authenticate the final bundle against this producer run
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 scripts/release/verify-runtime-provenance.py \
+            --source-archive "$RUNNER_TEMP/runtime-final/runtime-provenance.tar.gz" \
+            --source-commit "$GITHUB_SHA" \
+            --expected-archive-sha256 "$(sha256sum "$RUNNER_TEMP/runtime-final/runtime-provenance.tar.gz" | awk '{print $1}')"
+      - name: Retain the authenticated runtime provenance archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: runtime-provenance-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/runtime-final/runtime-provenance.tar.gz
           retention-days: 30
           if-no-files-found: error

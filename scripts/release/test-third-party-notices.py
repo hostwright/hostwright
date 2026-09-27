@@ -12,6 +12,9 @@ class NoticesTests(unittest.TestCase):
   obj=json.loads((self.root/path).read_text());update(obj);(self.root/path).write_text(json.dumps(obj,sort_keys=True,separators=(',',':'))+'\n')
  def test_exact_inventory_and_blocked_release(self):
   self.assertEqual(module.verify(self.root)['dependencies'],31)
+  self.change('runtime-license-inventory.json',lambda x:(x.update(status='blocked'),[
+   asset.update(status='blocked',blockers=['local evidence is not final release qualification'])
+   for asset in x['assets']]))
   with self.assertRaises(ValueError):module.verify(self.root,True)
  def test_altered_text_and_pin(self):
   (self.root/'THIRD_PARTY_NOTICES').write_bytes(b'altered')

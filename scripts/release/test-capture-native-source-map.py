@@ -80,12 +80,12 @@ class NativeSourceMapTests(unittest.TestCase):
     def sha(data):
         return hashlib.sha256(data).hexdigest()
 
-    def add_c_invocation(self, dependency_contents, *, retain_depfile=True):
-        source = self.tree / "Sources" / "native.c"
+    def add_c_invocation(self, dependency_contents, *, retain_depfile=True, stem="native"):
+        source = self.tree / "Sources" / (stem + ".c")
         source.write_text("int runtime(void) { return 1; }\n")
         inventory = self.captures / "containerization" / "source-inventory.json"
         entries = json.loads(inventory.read_text())
-        entries.append(dict(path="vminitd/Sources/native.c", gitMode="100644"))
+        entries.append(dict(path="vminitd/Sources/" + stem + ".c", gitMode="100644"))
         inventory.write_text(json.dumps(entries))
 
         copied_header = self.tree / "include" / "copied.h"
@@ -102,26 +102,27 @@ class NativeSourceMapTests(unittest.TestCase):
         sdk_capture["sourceMap"][0] = self.sdk_object
         self.sdk_map.write_text(json.dumps(sdk_capture))
 
-        object_file = self.tree / ".build" / "native.o"
-        object_file.write_bytes(b"native-c-object")
-        depfile = self.tree / ".build" / "native.d"
+        object_file = self.tree / ".build" / (stem + ".o")
+        object_file.write_bytes((stem + "-c-object").encode())
+        depfile = self.tree / ".build" / (stem + ".d")
         depfile.write_text(dependency_contents)
-        argv = ["clang", "-c", "Sources/native.c", "-MF", ".build/native.d",
-                "-o", ".build/native.o"]
-        argv_file = self.root / "native-argv.json"
+        argv = ["clang", "-c", "Sources/" + stem + ".c", "-MF", ".build/" + stem + ".d",
+                "-o", ".build/" + stem + ".o"]
+        argv_file = self.root / (stem + "-argv.json")
         argv_file.write_bytes(M.V.canonical(argv))
         record = dict(path=argv_file.name, sha256=self.sha(argv_file.read_bytes()),
                       sizeBytes=argv_file.stat().st_size)
         native = json.loads(self.native_capture.read_text())
-        native["invocations"] = [dict(executablePath="/usr/bin/clang", argv=record, responseFiles=[])]
+        native.setdefault("invocations", []).append(
+            dict(executablePath="/usr/bin/clang", argv=record, responseFiles=[]))
         native["links"][0]["selectedInputs"].append(
             dict(mapInput=str(object_file), objectSHA256=self.sha(object_file.read_bytes())))
         if retain_depfile:
-            retained_depfile = self.root / "native-depfile.d"
+            retained_depfile = self.root / (stem + "-depfile.d")
             retained_depfile.write_text(dependency_contents)
-            native["metadata"] = [dict(originalPath=str(depfile.resolve()), file=dict(
+            native.setdefault("metadata", []).append(dict(originalPath=str(depfile.resolve()), file=dict(
                 path=retained_depfile.name, sha256=self.sha(retained_depfile.read_bytes()),
-                sizeBytes=retained_depfile.stat().st_size))]
+                sizeBytes=retained_depfile.stat().st_size)))
         else:
             native["metadata"] = []
         self.native_capture.write_text(json.dumps(native))
@@ -145,6 +146,26 @@ class NativeSourceMapTests(unittest.TestCase):
         self.assertEqual((self.root / "source-map" / "compiler-inputs.json").read_bytes(),
                          (self.sdk_root / "compiler-inputs.json").read_bytes())
         self.assertEqual(json.loads(self.output.read_text()), rows)
+
+    def test_compiler_scheduling_does_not_change_complete_source_map_bytes(self):
+        self.add_c_invocation(".build/native.o: Sources/native.c include/copied.h\n")
+        self.add_c_invocation(".build/other.o: Sources/other.c include/copied.h\n", stem="other")
+        first = self.root / "first" / "source-map.json"
+        second = self.root / "second" / "source-map.json"
+        for output in (first, second):
+            output.parent.mkdir()
+        M.capture(self.tree, self.captures, self.sdk_map, self.sdk_root,
+                  self.native_capture, first)
+        native = json.loads(self.native_capture.read_text())
+        native["invocations"].reverse()
+        self.native_capture.write_text(json.dumps(native))
+        M.capture(self.tree, self.captures, self.sdk_map, self.sdk_root,
+                  self.native_capture, second)
+        self.assertEqual(first.read_bytes(), second.read_bytes())
+        self.assertEqual(len(json.loads(first.read_bytes())), 4)
+        leaves = lambda root: {path.relative_to(root).as_posix(): path.read_bytes()
+                               for path in root.rglob("*") if path.is_file()}
+        self.assertEqual(leaves(first.parent), leaves(second.parent))
 
     def test_selected_c_object_retains_actual_argv_depfile_and_sdk_header_mapping(self):
         dep = ".build/native.o: Sources/native.c include/copied.h\n"

@@ -277,6 +277,7 @@ def capture(tree, source_captures, sdk_map_file, sdk_map_root, native_capture_fi
 
     combined = local_mappings + P.retain_source_map(
         [selected_sdk[key] for key in sorted(selected_sdk)], sdk_map_root, output.parent)
+    combined.sort(key=V.canonical)
     with output.open("xb") as stream:
         stream.write(V.canonical(combined))
     return combined

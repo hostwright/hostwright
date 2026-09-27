@@ -58,8 +58,21 @@ final class DistributionThirdPartyNoticesTests: XCTestCase {
         XCTAssertThrowsError(try DistributionThirdPartyNotices.sourcePayload(root: changed, runtimeAssets: assets))
     }
 
-    func testIncompleteRuntimeCorrespondingSourceCannotBecomeTrustedRelease() throws {
-        XCTAssertThrowsError(try DistributionThirdPartyNotices.requireQualifiedRuntimeSource(root: root()))
+    func testRuntimeCorrespondingSourceQualificationUsesTheCommittedEvidenceState() throws {
+        let repository = root()
+        XCTAssertNoThrow(try DistributionThirdPartyNotices.requireQualifiedRuntimeSource(root: repository))
+
+        let data = try DistributionThirdPartyNotices.read(repository.appendingPathComponent("runtime-license-inventory.json"))
+        var inventory = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var assets = try XCTUnwrap(inventory["assets"] as? [[String: Any]])
+        assets[0]["blockers"] = ["test-only missing source coverage"]
+        inventory["assets"] = assets
+
+        try withTemporaryRoot { temporary in
+            try JSONSerialization.data(withJSONObject: inventory, options: [.sortedKeys])
+                .write(to: temporary.appendingPathComponent("runtime-license-inventory.json"))
+            XCTAssertThrowsError(try DistributionThirdPartyNotices.requireQualifiedRuntimeSource(root: temporary))
+        }
     }
 
     func testSchemaThreeRequiresNoticesAndHistoricalSchemaTwoLayoutRemainsVerifiable() {
@@ -72,5 +85,13 @@ final class DistributionThirdPartyNoticesTests: XCTestCase {
             paths: Set(DistributionLayout.legacyPayloadModesV5.keys)))
         XCTAssertNotNil(DistributionLayout.trustedPayloadModes(schemaVersion: 2,
             paths: Set(DistributionLayout.legacyPayloadModesV4.keys)))
+    }
+
+    private func withTemporaryRoot(_ body: (URL) throws -> Void) throws {
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-runtime-qualification-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        try body(temporary)
     }
 }

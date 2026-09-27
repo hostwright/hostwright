@@ -14,8 +14,10 @@ final class ContainerizationAssetPreparationScriptTests: XCTestCase {
 
             XCTAssertEqual(result.status, 0, result.output)
             XCTAssertTrue(result.output.contains("Containerization framework: 0.35.0"))
-            XCTAssertTrue(result.output.contains("Rebuilt Linux kernel: 74b612335db14171de36bcc68fb82bbc19751e07bc440d4c1724ad92a08b4132 (16148992 bytes)"))
-            XCTAssertTrue(result.output.contains("Direct OCI image manifest: sha256:9b7d2e0d32dd662d6a40f7b25a35dc28b5267e932465403f31bf47723dafb0cd (406 bytes)"))
+            XCTAssertTrue(result.output.contains("Rebuilt Linux kernel: 55f86b8394c1d46551836f5c1d3525cdc8d505aeb9bb630c608edb564674239d (16148992 bytes)"))
+            XCTAssertTrue(result.output.contains("Direct OCI image manifest: sha256:e61c8654a20b4b9ec90ae2673764a96aac9bd3054c9d2c9b5c1393f0adbf67f0 (406 bytes)"))
+            XCTAssertTrue(result.output.contains("OCI image configuration: 76509f206856f255171e27a20feaf5fa314d6b9d8cb6959efd6410948a1c70fb (151 bytes)"))
+            XCTAssertTrue(result.output.contains("OCI image layer: 33370a8dbc5994627e107cbe34cc44761fd97c6d2cce0b0fae465f56eca808e1 (67223030 bytes)"))
             XCTAssertTrue(result.output.contains("Guest policy loader: a411dbcf1efaaf0ea0da17d76e3376a92b99037a8cb00af6588e8ecc6f3f7e99 (2949246 bytes)"))
             XCTAssertTrue(result.output.contains("authenticated source \(String(repeating: "a", count: 40)) run 1234 attempt 1"))
             XCTAssertFalse(result.output.localizedCaseInsensitiveContains("kata archive"))

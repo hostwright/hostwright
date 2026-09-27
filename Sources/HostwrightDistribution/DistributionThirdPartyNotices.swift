@@ -224,6 +224,7 @@ enum DistributionThirdPartyNotices {
               runtime.retainedLoaderLinkedModules.count == 6,
               runtime.retainedLoaderLinkedModules.allSatisfy({ runtime.goDependencies.contains($0) }),
               runtime.retainedLoaderBuildSettings["CGO_ENABLED"] == "0",
+              runtime.retainedLoaderBuildSettings["-gcflags"] == "all=-buildid=",
               runtime.retainedLoaderBuildSettings["GOARCH"] == "arm64",
               runtime.retainedLoaderBuildSettings["GOOS"] == "linux" else {
             throw DistributionError.invalidArtifact("Retained loader binary inventory is incomplete or inconsistent.")

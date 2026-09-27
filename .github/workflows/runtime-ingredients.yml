@@ -23,6 +23,21 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+      - name: Reclaim unused hosted .NET SDK storage
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$RUNNER_OS" = Linux
+          test "$RUNNER_ARCH" = ARM64
+          {
+            df -B1 /
+            if [[ -d /usr/share/dotnet ]]; then
+              sudo du -sk /usr/share/dotnet
+              sudo rm -rf -- /usr/share/dotnet
+            fi
+            df -B1 /
+          } | tee "$RUNNER_TEMP/runtime-disk-preflight.txt"
       - name: Install pinned Swift SDK build prerequisites
         shell: bash
         run: |
@@ -74,6 +89,7 @@ jobs:
             --products-dir /workspace/products \
             --records "$RUNNER_TEMP/swift-sdk-records"
           cp /workspace/sources/source-revisions.json "$RUNNER_TEMP/swift-sdk-records/"
+          cp "$RUNNER_TEMP/runtime-disk-preflight.txt" "$RUNNER_TEMP/swift-sdk-records/"
           cp "$RUNNER_TEMP/swift-bootstrap/swiftly.tar.gz" \
             "$RUNNER_TEMP/swift-bootstrap/swiftly.tar.gz.sig" \
             "$RUNNER_TEMP/swift-bootstrap/swift-signing-keys.asc" \
@@ -146,6 +162,21 @@ jobs:
           python3 scripts/release/test-capture-runtime-source.py
           python3 scripts/release/test-capture-package-sources.py
           python3 scripts/release/test-runtime-provenance.py
+      - name: Reclaim unused hosted .NET SDK storage
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$RUNNER_OS" = Linux
+          test "$RUNNER_ARCH" = ARM64
+          {
+            df -B1 /
+            if [[ -d /usr/share/dotnet ]]; then
+              sudo du -sk /usr/share/dotnet
+              sudo rm -rf -- /usr/share/dotnet
+            fi
+            df -B1 /
+          } | tee "$RUNNER_TEMP/runtime-disk-preflight.txt"
       - name: Install and record build prerequisites
         shell: bash
         run: |
@@ -229,6 +260,7 @@ jobs:
             --sdk-object-sources "$RUNNER_TEMP/swift-sdk-records/build-inputs/sdk-object-sources.json" \
             --sdk-source-map-root "$RUNNER_TEMP/swift-sdk-records/build-inputs" \
             --output "$RUNNER_TEMP/runtime-build-ingredients"
+          cp "$RUNNER_TEMP/runtime-disk-preflight.txt" "$RUNNER_TEMP/runtime-build-ingredients/evidence/"
           mkdir -m 700 "$RUNNER_TEMP/runtime-build-ingredients/evidence/swift-bootstrap"
           cp "$RUNNER_TEMP/swift-bootstrap/swiftly.tar.gz" \
              "$RUNNER_TEMP/swift-bootstrap/swiftly.tar.gz.sig" \

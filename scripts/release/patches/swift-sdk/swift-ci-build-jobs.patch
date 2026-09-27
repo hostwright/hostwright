@@ -1,8 +1,10 @@
 diff --git a/swift-ci/sdks/static-linux/scripts/build.sh b/swift-ci/sdks/static-linux/scripts/build.sh
-index 1ce2f3d..cbb9d68 100755
+index 1ce2f3d..b35b2c0 100755
 --- a/swift-ci/sdks/static-linux/scripts/build.sh
 +++ b/swift-ci/sdks/static-linux/scripts/build.sh
-@@ -179,32 +179,5 @@
+@@ -177,34 +177,7 @@ resource_dir="${script_dir}/../resources"
+ 
+ # Find the version numbers of the various dependencies
  function describe {
 -    pushd $1 >/dev/null 2>&1
 -
@@ -47,11 +49,37 @@ index 1ce2f3d..cbb9d68 100755
  run export PATH="${build_dir}/cmake/install/bin:$PATH"
  quiet_popd
  run cmake --version
-@@ -856,6 +829,6 @@
+@@ -831,8 +804,8 @@ EOF
+     # will build a Clang of its own, but that Clang needs to be set up to build
+     # for the static SDK (which means we need a .cfg file)
+     build_arch=$(uname -m)
+-    llvm_bin=${build_dir}/swift/Ninja-RelWithDebInfoAssert/llvm-linux-${build_arch}/bin
+-    swift_bin=${build_dir}/swift/Ninja-RelWithDebInfoAssert/swift-linux-${build_arch}/bin
++    llvm_bin=${build_dir}/swift/Ninja-ReleaseAssert+stdlib-RelWithDebInfoAssert/llvm-linux-${build_arch}/bin
++    swift_bin=${build_dir}/swift/Ninja-ReleaseAssert+stdlib-RelWithDebInfoAssert/swift-linux-${build_arch}/bin
+     mkdir -p $llvm_bin $swift_bin
+     cat >> $llvm_bin/${arch}-swift-linux-musl-clang.cfg <<EOF
+ --sysroot ${sdk_root}
+@@ -855,7 +828,12 @@ EOF
+ 
      SWIFT_SOURCE_ROOT="${source_dir}/swift-project" \
      SWIFT_BUILD_ROOT="${build_dir}/swift" \
 -    run ${source_dir}/swift-project/swift/utils/build-script -r \
-+    run ${source_dir}/swift-project/swift/utils/build-script -r --jobs=1 \
++    run ${source_dir}/swift-project/swift/utils/build-script -R -a \
++        --jobs="${HOSTWRIGHT_SDK_BUILD_JOBS}" \
++        --llvm-build-type="${HOSTWRIGHT_SDK_HOST_TOOLS_BUILD_TYPE}" \
++        --swift-build-type="${HOSTWRIGHT_SDK_HOST_TOOLS_BUILD_TYPE}" \
++        --swift-stdlib-build-type="${HOSTWRIGHT_SDK_TARGET_STDLIB_BUILD_TYPE}" \
++        --swift-stdlib-enable-assertions=true \
          --reconfigure \
          --compiler-vendor=apple \
          --bootstrapping hosttools \
+@@ -867,7 +845,7 @@ EOF
+         --install-destdir=$sdk_root \
+         --install-prefix=/usr \
+         --swift-install-components="libexec;stdlib;sdk-overlay" \
+-        --extra-cmake-options="-DSWIFT_SHOULD_BUILD_EMBEDDED_STDLIB=NO -DLLVM_USE_LINKER=lld -DLLVM_NO_DEAD_STRIP=On" \
++        --extra-cmake-options="-DSWIFT_SHOULD_BUILD_EMBEDDED_STDLIB=NO -DLLVM_USE_LINKER=lld -DLLVM_NO_DEAD_STRIP=On -DCMAKE_C_FLAGS_RELEASE='-O2 -DNDEBUG' -DCMAKE_CXX_FLAGS_RELEASE='-O2 -DNDEBUG'" \
+         $build_script_lto
+ 
+     # Find some tools

@@ -43,7 +43,12 @@ toolchain_bin=$(dirname "$swift_real")
 export PATH="$toolchain_bin:$PATH"
 export CC="$toolchain_bin/clang" CXX="$toolchain_bin/clang++"
 export SOURCE_DATE_EPOCH=1767225600 TZ=UTC LANG=C.UTF-8 LC_ALL=C.UTF-8 TERM=xterm
-export SWIFTCI_USE_LOCAL_DEPS=1 CMAKE_EXPORT_COMPILE_COMMANDS=ON CMAKE_BUILD_PARALLEL_LEVEL=3 MAKEFLAGS=-j3
+export HOSTWRIGHT_SDK_BUILD_JOBS=3
+export HOSTWRIGHT_SDK_HOST_TOOLS_BUILD_TYPE=Release
+export HOSTWRIGHT_SDK_TARGET_STDLIB_BUILD_TYPE=RelWithDebInfo
+export SWIFTCI_USE_LOCAL_DEPS=1 CMAKE_EXPORT_COMPILE_COMMANDS=ON
+export CMAKE_BUILD_PARALLEL_LEVEL="$HOSTWRIGHT_SDK_BUILD_JOBS"
+export MAKEFLAGS="-j$HOSTWRIGHT_SDK_BUILD_JOBS"
 
 git -C "$root/builder" apply --check "$repo_root/scripts/release/patches/swift-sdk/swift-ci-build-jobs.patch"
 git -C "$root/builder" apply "$repo_root/scripts/release/patches/swift-sdk/swift-ci-build-jobs.patch"
@@ -68,9 +73,16 @@ python3 - "$records/build-environment.json" <<'PY'
 import json, os, platform, sys
 keys = ['PATH', 'CC', 'CXX', 'SOURCE_DATE_EPOCH', 'TZ', 'LANG', 'LC_ALL', 'TERM',
         'SWIFTCI_USE_LOCAL_DEPS', 'CMAKE_EXPORT_COMPILE_COMMANDS',
-        'CMAKE_BUILD_PARALLEL_LEVEL', 'MAKEFLAGS']
+        'CMAKE_BUILD_PARALLEL_LEVEL', 'MAKEFLAGS', 'HOSTWRIGHT_SDK_BUILD_JOBS',
+        'HOSTWRIGHT_SDK_HOST_TOOLS_BUILD_TYPE',
+        'HOSTWRIGHT_SDK_TARGET_STDLIB_BUILD_TYPE']
 with open(sys.argv[1], 'x', encoding='utf-8') as stream:
     json.dump({'environment': {key: os.environ[key] for key in keys},
+               'swiftSDKBuildConfiguration': {
+                   'hostToolsReleaseCFlags': '-O2 -DNDEBUG',
+                   'hostToolsReleaseCXXFlags': '-O2 -DNDEBUG',
+                   'targetStdlibAssertions': True,
+               },
                'platform': platform.uname()._asdict()}, stream, sort_keys=True, separators=(',', ':'))
     stream.write('\n')
 PY
@@ -82,7 +94,7 @@ set +e
 strace -f -qq -ttt -T -s 65535 -yy -e trace=process,file -o "$records/build.trace" \
   bash -x "$root/builder/swift-ci/sdks/static-linux/scripts/build.sh" \
     --source-dir "$root" --build-dir "$build_dir" --products-dir "$products_dir" \
-    --archs aarch64 --jobs 3 --version 0.1.0-hostwright.1 2>&1 | tee "$records/build.log"
+    --archs aarch64 --jobs "$HOSTWRIGHT_SDK_BUILD_JOBS" --version 0.1.0-hostwright.1 2>&1 | tee "$records/build.log"
 result=${PIPESTATUS[0]}
 set -e
 printf '%s\n' "$result" > "$records/build-exit-status"

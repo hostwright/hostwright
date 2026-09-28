@@ -69,9 +69,13 @@ jobs:
           ./swiftly init --assume-yes --no-modify-profile --quiet-shell-followup --skip-install
           . "$SWIFTLY_HOME_DIR/env.sh"
           swiftly install --assume-yes 6.3.0
+          swift_toolchain=$(swiftly use --print-location 2>"$RUNNER_TEMP/swiftly-use.stderr")
+          [[ -x "$swift_toolchain/usr/bin/swiftc" ]]
+          [[ "$("$swift_toolchain/usr/bin/swiftc" --version | head -1)" == "Swift version 6.3"* ]]
           [[ "$(swift --version | head -1)" == "Swift version 6.3"* ]]
-          printf '%s\n' "$SWIFTLY_BIN_DIR" >> "$GITHUB_PATH"
-          printf 'SWIFTLY_HOME_DIR=%s\n' "$SWIFTLY_HOME_DIR" >> "$GITHUB_ENV"
+          printf '%s\n' "$SWIFTLY_BIN_DIR" "$swift_toolchain/usr/bin" >> "$GITHUB_PATH"
+          printf 'SWIFTLY_HOME_DIR=%s\nSWIFTLY_BIN_DIR=%s\n' "$SWIFTLY_HOME_DIR" "$SWIFTLY_BIN_DIR" >> "$GITHUB_ENV"
+          printf '%s\n' "$swift_toolchain" > "$RUNNER_TEMP/swift-toolchain-location"
       - name: Materialize the exact Swift source revisions
         shell: bash
         run: |
@@ -94,6 +98,8 @@ jobs:
             "$RUNNER_TEMP/swift-bootstrap/swiftly.tar.gz.sig" \
             "$RUNNER_TEMP/swift-bootstrap/swift-signing-keys.asc" \
             "$RUNNER_TEMP/swift-sdk-records/"
+          cp "$RUNNER_TEMP/swiftly-use.stderr" "$RUNNER_TEMP/swift-sdk-records/swiftly-use.stderr"
+          cp "$RUNNER_TEMP/swift-toolchain-location" "$RUNNER_TEMP/swift-sdk-records/swift-toolchain-location"
           dpkg-query -W -f='${binary:Package}\t${Version}\n' \
             > "$RUNNER_TEMP/swift-sdk-records/ubuntu-package-versions.tsv"
           (cd "$RUNNER_TEMP/swift-sdk-records" && \
@@ -251,8 +257,11 @@ jobs:
           ./swiftly init --assume-yes --no-modify-profile --quiet-shell-followup --skip-install
           . "$SWIFTLY_HOME_DIR/env.sh"
           swiftly install --assume-yes 6.3.0
+          swift_toolchain=$(swiftly use --print-location)
+          [[ -x "$swift_toolchain/usr/bin/swiftc" ]]
+          [[ "$("$swift_toolchain/usr/bin/swiftc" --version | head -1)" == "Swift version 6.3"* ]]
           [[ "$(swift --version | head -1)" == "Swift version 6.3"* ]]
-          printf '%s\n' "$SWIFTLY_BIN_DIR" >> "$GITHUB_PATH"
+          printf '%s\n' "$SWIFTLY_BIN_DIR" "$swift_toolchain/usr/bin" >> "$GITHUB_PATH"
           printf 'SWIFTLY_HOME_DIR=%s\nSWIFTLY_BIN_DIR=%s\n' "$SWIFTLY_HOME_DIR" "$SWIFTLY_BIN_DIR" >> "$GITHUB_ENV"
       - name: Retain authenticated kernel inputs
         shell: bash

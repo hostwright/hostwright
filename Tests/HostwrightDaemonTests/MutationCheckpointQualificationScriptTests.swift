@@ -1974,7 +1974,7 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
               fi
             }
             container() { printf '[]\n'; }
-            managed_runtime_count() { printf '1\n'; }
+            managed_runtime_count() { cat >/dev/null; printf '1\n'; }
             verify_resume_runtime_inventory() { :; }
             supervisor_validate_sqlite() { :; }
             supervisor_validate_guard() { :; }
@@ -2003,7 +2003,7 @@ final class MutationCheckpointQualificationScriptTests: XCTestCase {
               printf '11\t3300\tbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\trunning\n'
             }
             container() { printf '[]\n'; }
-            managed_runtime_count() { printf '1\n'; }
+            managed_runtime_count() { cat >/dev/null; printf '1\n'; }
             verify_resume_runtime_inventory() { :; }
             supervisor_validate_sqlite() { :; }
             supervisor_validate_guard() { :; }

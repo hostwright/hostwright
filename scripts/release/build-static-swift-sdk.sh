@@ -31,6 +31,20 @@ mkdir -m 700 "$build_dir" "$products_dir" "$records"
 swift_path=$(command -v swift)
 swift_real=$(readlink -f "$swift_path")
 toolchain_bin=$(dirname "$swift_real")
+if [[ "${swift_real##*/}" == swiftly ]]; then
+  swiftly_toolchain=$(swiftly use --print-location 2>"$records/swiftly-use.stderr") || {
+    echo "Swiftly could not resolve its active toolchain" >&2
+    exit 69
+  }
+  [[ "$swiftly_toolchain" == /* ]] || {
+    echo "Swiftly returned an invalid toolchain path: $swiftly_toolchain" >&2
+    exit 69
+  }
+  printf '%s\n' "$swiftly_toolchain" > "$records/swift-toolchain-location"
+  toolchain_bin="$swiftly_toolchain/usr/bin"
+  swift_path="$toolchain_bin/swift"
+  swift_real=$(readlink -f "$swift_path")
+fi
 [[ -x "$toolchain_bin/swiftc" && -x "$toolchain_bin/clang" && -x "$toolchain_bin/clang++" ]] || {
   echo "Swift 6.3 toolchain must include swiftc, clang, and clang++" >&2
   exit 69

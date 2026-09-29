@@ -181,6 +181,7 @@ class Sources:
         self.blobs = {}
         self.cache = {}
         self.resolved = {}
+        self.tracked_paths = {}
         self.patched_sources = {}
         for pin in pins:
             destination = V.path(pin["destination"])
@@ -302,11 +303,13 @@ class Sources:
 
     def is_tracked_path(self, name, cwd=None):
         path = self.relocate(name, cwd)
-        return any(path.is_relative_to(directory) for directory, _, _ in self.repositories)
+        if path not in self.tracked_paths:
+            self.tracked_paths[path] = any(path.is_relative_to(directory) for directory, _, _ in self.repositories)
+        return self.tracked_paths[path]
 
     def generated_swift_sources(self, name, cwd=None):
         path = self.relocate(name, cwd)
-        V.require(not any(path.is_relative_to(directory) for directory, _, _ in self.repositories),
+        V.require(not self.is_tracked_path(name, cwd),
                   "changed pinned Swift source cannot be treated as generated: " + str(path))
         data = path.read_bytes()
         V.require(path.suffix in (".swift", ".mm") and data,
@@ -323,7 +326,7 @@ class Sources:
 
     def build_header(self, name, cwd, build_roots):
         path = self.relocate(name, cwd)
-        V.require(not any(path.is_relative_to(directory) for directory, _, _ in self.repositories),
+        V.require(not self.is_tracked_path(name, cwd),
                   "unverified generated or changed source: " + str(path))
         V.require(any(path.is_relative_to(directory) for directory in build_roots)
                   and (path.suffix in (".h", ".hh", ".hpp", ".inc", ".def")

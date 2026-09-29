@@ -1,5 +1,5 @@
 diff --git a/swift-ci/sdks/static-linux/scripts/build.sh b/swift-ci/sdks/static-linux/scripts/build.sh
-index 1ce2f3d..225fcae 100755
+index 1ce2f3d..34594a4 100755
 --- a/swift-ci/sdks/static-linux/scripts/build.sh
 +++ b/swift-ci/sdks/static-linux/scripts/build.sh
 @@ -177,34 +177,7 @@ resource_dir="${script_dir}/../resources"
@@ -57,23 +57,25 @@ index 1ce2f3d..225fcae 100755
      -DLLVM_PARALLEL_LINK_JOBS=1 \
      -DCMAKE_INSTALL_PREFIX=${build_dir}/clang
 
-@@ -831,8 +805,8 @@ EOF
+@@ -831,8 +805,9 @@ EOF
      # will build a Clang of its own, but that Clang needs to be set up to build
      # for the static SDK (which means we need a .cfg file)
      build_arch=$(uname -m)
 -    llvm_bin=${build_dir}/swift/Ninja-RelWithDebInfoAssert/llvm-linux-${build_arch}/bin
 -    swift_bin=${build_dir}/swift/Ninja-RelWithDebInfoAssert/swift-linux-${build_arch}/bin
-+    llvm_bin=${build_dir}/swift/Ninja-ReleaseAssert+stdlib-RelWithDebInfoAssert/llvm-linux-${build_arch}/bin
-+    swift_bin=${build_dir}/swift/Ninja-ReleaseAssert+stdlib-RelWithDebInfoAssert/swift-linux-${build_arch}/bin
++    swift_build_subdir=Ninja-ReleaseAssert
++    llvm_bin=${build_dir}/swift/${swift_build_subdir}/llvm-linux-${build_arch}/bin
++    swift_bin=${build_dir}/swift/${swift_build_subdir}/swift-linux-${build_arch}/bin
      mkdir -p $llvm_bin $swift_bin
      cat >> $llvm_bin/${arch}-swift-linux-musl-clang.cfg <<EOF
  --sysroot ${sdk_root}
-@@ -855,7 +829,13 @@ EOF
+@@ -855,7 +830,14 @@ EOF
 
      SWIFT_SOURCE_ROOT="${source_dir}/swift-project" \
      SWIFT_BUILD_ROOT="${build_dir}/swift" \
 -    run ${source_dir}/swift-project/swift/utils/build-script -r \
 +    run ${source_dir}/swift-project/swift/utils/build-script -R -a \
++        --build-subdir="${swift_build_subdir}" \
 +        --jobs="${HOSTWRIGHT_SDK_BUILD_JOBS}" \
 +        --llvm-build-type="${HOSTWRIGHT_SDK_HOST_TOOLS_BUILD_TYPE}" \
 +        --llvm-targets-to-build=AArch64 \
@@ -83,7 +85,7 @@ index 1ce2f3d..225fcae 100755
          --reconfigure \
          --compiler-vendor=apple \
          --bootstrapping hosttools \
-@@ -867,7 +847,7 @@ EOF
+@@ -867,7 +849,7 @@ EOF
          --install-destdir=$sdk_root \
          --install-prefix=/usr \
          --swift-install-components="libexec;stdlib;sdk-overlay" \

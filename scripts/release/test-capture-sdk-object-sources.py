@@ -605,6 +605,61 @@ class ObjectSourceTests(unittest.TestCase):
         self.assertEqual(Path(header["originalPath"]).name, "__undef_macros")
         self.assertEqual((self.root / header["file"]["path"]).read_bytes(), (self.build / "__undef_macros").read_bytes())
 
+    def test_copied_extensionless_header_requires_exact_pinned_source_bytes(self):
+        sources = C.Sources(self.sources, self.pins, [])
+        copied = self.sdk / "aarch64/usr/include/c++/v1/__config"
+        copied.parent.mkdir(parents=True)
+        pinned = (self.project / "value.h").read_bytes()
+        copied.write_bytes(pinned)
+
+        path, data, matches = sources.build_header(copied, None, [self.sdk.resolve()])
+        self.assertEqual(path, copied.resolve())
+        self.assertEqual(data, pinned)
+        self.assertEqual([(row["project"], row["path"]) for row in matches],
+                         [("swift-sdk/example", "value.h")])
+
+        copied.write_bytes(pinned + b"/* changed */\n")
+        with self.assertRaisesRegex(ValueError, "extensionless copied header lacks pinned source bytes"):
+            sources.build_header(copied, None, [self.sdk.resolve()])
+
+        copied.write_bytes(b"/* no pinned source proof */\n")
+        with self.assertRaisesRegex(ValueError, "extensionless copied header lacks pinned source bytes"):
+            sources.build_header(copied, None, [self.sdk.resolve()])
+
+    def test_compiler_maps_copied_extensionless_header_to_pinned_source(self):
+        include_root = self.sdk / "aarch64/usr/include/c++/v1"
+        include_root.mkdir(parents=True)
+        copied = include_root / "__config"
+        copied.write_bytes((self.project / "value.h").read_bytes())
+        (self.project / "generated.c").write_text(
+            '#include "__config"\nint generated(void) { return VALUE; }\n')
+        self.pin_current_files()
+        arguments = self.arguments[:]
+        arguments[arguments.index(str(self.project / "value.c"))] = str(self.project / "generated.c")
+        arguments[arguments.index("value.o")] = "generated.o"
+        arguments += ["-I", str(include_root)]
+        subprocess.run(arguments, cwd=self.build, check=True, capture_output=True)
+        self.database(arguments, "generated.c", "generated.o")
+        self.archive([self.build / "generated.o"])
+
+        result = self.capture(generated_output=self.root / "copied-extensionless-retained")
+        self.assertEqual(result["counts"]["mappedMembers"], 1)
+        row = self.full_inputs(result["sourceMap"][0])
+        header = next(item for item in row["generatedHeaders"] if item["originalPath"] == str(copied))
+        self.assertEqual(header["kind"], "copied-header")
+        self.assertEqual([(item["project"], item["path"]) for item in header["matchingSources"]],
+                         [("swift-sdk/example", "value.h")])
+        self.assertIn(("swift-sdk/example", "value.h"),
+                      [(item["project"], item["path"]) for item in row["sourceFiles"]])
+
+    def test_copied_extensionless_header_must_remain_inside_build_roots(self):
+        copied = self.root / "outside" / "__config"
+        copied.parent.mkdir()
+        copied.write_bytes((self.project / "value.h").read_bytes())
+        sources = C.Sources(self.sources, self.pins, [])
+        with self.assertRaisesRegex(ValueError, "unverified external source"):
+            sources.build_header(copied, None, [self.sdk.resolve()])
+
     def test_generated_build_header_retains_actual_bytes_and_compiler_evidence(self):
         arguments = self.compile_generated(self.build)
         result = self.capture(generated_output=self.root / "retained")

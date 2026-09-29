@@ -93,6 +93,7 @@ keys = ['PATH', 'CC', 'CXX', 'SOURCE_DATE_EPOCH', 'TZ', 'LANG', 'LC_ALL', 'TERM'
 with open(sys.argv[1], 'x', encoding='utf-8') as stream:
     json.dump({'environment': {key: os.environ[key] for key in keys},
                'swiftSDKBuildConfiguration': {
+                   'llvmTargetsToBuild': ['AArch64'],
                    'hostToolsReleaseCFlags': '-O2 -DNDEBUG',
                    'hostToolsReleaseCXXFlags': '-O2 -DNDEBUG',
                    'targetStdlibAssertions': True,

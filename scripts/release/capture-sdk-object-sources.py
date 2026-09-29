@@ -327,6 +327,7 @@ class Sources:
                   "unverified generated or changed source: " + str(path))
         V.require(any(path.is_relative_to(directory) for directory in build_roots)
                   and (path.suffix in (".h", ".hh", ".hpp", ".inc", ".def")
+                       or not path.suffix
                        or path.name in ("__config_site", "__undef_macros", "cmake_pch.h.c", "SDKSettings.json")),
                   "unverified external source: " + str(path))
         data = path.read_bytes()
@@ -336,12 +337,14 @@ class Sources:
         if path.name == "SDKSettings.json":
             V.require(isinstance(json.loads(data), dict), "unrecognized SDK configuration input")
             return path, data, []
-        if not data:
-            return path, data, []
         digest = V.digest(data)
         candidates = sorted(set(self.blobs.get(("git", V.git_object("blob", data)), [])
                                 + self.blobs.get(("sha256", digest), [])))
         matches = [dict(project=identity, path=name, sha256=digest) for identity, name in candidates]
+        if not path.suffix and path.name not in ("__config_site", "__undef_macros"):
+            V.require(matches, "extensionless copied header lacks pinned source bytes: " + str(path))
+        if not data:
+            return path, data, []
         return path, data, matches
 
 

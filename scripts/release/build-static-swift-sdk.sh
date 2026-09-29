@@ -128,6 +128,7 @@ python3 "$repo_root/scripts/release/capture-swift-sdk-build-inputs.py" \
 printf '%s Mapping SDK objects to their compiler inputs\n' "$(date -u +%FT%TZ)"
 python3 "$repo_root/scripts/release/capture-sdk-object-sources.py" \
   --sources "$root" --build "$build_dir" --sdk-root "$build_dir/sdk_root/aarch64" \
+  --sdk-build-inputs "$records/build-inputs/build-inputs.json" \
   --trace "$records/build.trace" --trace-cwd "$build_working_directory" \
   --generated-output "$records/build-inputs/generated-headers" \
   --output "$records/build-inputs/sdk-object-sources.json"

@@ -116,8 +116,8 @@ git -C "$work/sources/kata" archive --format=tar "$kata_commit" | gzip -n > "$wo
 python3 "$source_capture" --repository "$work/sources/kata" --commit "$kata_commit" \
   --output "$work/evidence/source-trees/kata"
 
-export RUSTC=/bin/false PAHOLE=/bin/false
-export MAKEFLAGS="${MAKEFLAGS:+$MAKEFLAGS }RUSTC=/bin/false PAHOLE=/bin/false"
+export RUSTC=/bin/false PAHOLE=/dev/null
+export MAKEFLAGS="${MAKEFLAGS:+$MAKEFLAGS }RUSTC=/bin/false PAHOLE=/dev/null"
 export KBUILD_BUILD_TIMESTAMP="$build_time" KBUILD_BUILD_USER=hostwright KBUILD_BUILD_HOST=github-arm64
 export KBUILD_BUILD_VERSION=1 SOURCE_DATE_EPOCH=1767225600
 export KCFLAGS="-fdebug-prefix-map=$work=/hostwright-runtime-build" KAFLAGS="-fdebug-prefix-map=$work=/hostwright-runtime-build"

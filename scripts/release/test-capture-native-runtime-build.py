@@ -53,12 +53,12 @@ class NativeCaptureTests(unittest.TestCase):
 
     def test_native_environment_retains_disabled_kernel_tool_selection(self):
         environment = C.process_environment({"PATH": "/usr/bin", "RUSTC": "/bin/false",
-                                             "PAHOLE": "/bin/false",
-                                             "MAKEFLAGS": "RUSTC=/bin/false PAHOLE=/bin/false",
+                                             "PAHOLE": "/dev/null",
+                                             "MAKEFLAGS": "RUSTC=/bin/false PAHOLE=/dev/null",
                                              "RUSTUP_HOME": "/ambient/rust"})
         self.assertEqual(environment["RUSTC"], "/bin/false")
-        self.assertEqual(environment["PAHOLE"], "/bin/false")
-        self.assertEqual(environment["MAKEFLAGS"], "RUSTC=/bin/false PAHOLE=/bin/false")
+        self.assertEqual(environment["PAHOLE"], "/dev/null")
+        self.assertEqual(environment["MAKEFLAGS"], "RUSTC=/bin/false PAHOLE=/dev/null")
         self.assertNotIn("RUSTUP_HOME", environment)
 
     def test_makefile_tool_assignments_cannot_override_kernel_disable_flags(self):
@@ -70,10 +70,10 @@ class NativeCaptureTests(unittest.TestCase):
         makefile.write_text("RUSTC = rustc\nPAHOLE = pahole\nquery:\n"
                             "\t@printf '%s\\n' '$(origin RUSTC)|$(RUSTC)|$(origin PAHOLE)|$(PAHOLE)'\n")
         environment = {**os.environ, "RUSTC": "ambient-rustc", "PAHOLE": "ambient-pahole",
-                       "MAKEFLAGS": "RUSTC=/bin/false PAHOLE=/bin/false"}
+                       "MAKEFLAGS": "RUSTC=/bin/false PAHOLE=/dev/null"}
         result = subprocess.run([make, "--no-print-directory", "-f", str(makefile), "query"],
                                 cwd=self.root, env=environment, check=True, capture_output=True, text=True)
-        self.assertEqual(result.stdout.strip(), "command line|/bin/false|command line|/bin/false")
+        self.assertEqual(result.stdout.strip(), "command line|/bin/false|command line|/dev/null")
 
     @unittest.skipUnless(platform.system() == "Linux" and shutil.which("strace") and shutil.which("gcc"),
                          "Linux strace and GCC are required")

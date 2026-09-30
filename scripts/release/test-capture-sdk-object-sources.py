@@ -354,6 +354,46 @@ class ObjectSourceTests(unittest.TestCase):
         self.assertEqual([(item["project"], item["path"]) for item in verified],
                          [("swift-sdk/example", "value.swift")])
 
+    def test_relocated_swift_response_file_is_read_from_restored_build_root(self):
+        (self.build / "compile_commands.json").unlink()
+        source = self.project / "value.swift"
+        source.write_text("public func value() -> Int { 7 }\n")
+        self.pin_current_files()
+        copied_source = self.build / "value.swift"
+        copied_source.write_bytes(source.read_bytes())
+        output = self.build / "value.o"
+        output.write_bytes(b"compiled Swift WMO object fixture")
+        self.archive([output])
+        response = self.build / "sources.rsp"
+        response.write_text(shlex.quote(str(copied_source)) + "\n")
+        response_bytes = response.read_bytes()
+        argv = ["swiftc", "-whole-module-optimization", "-o", str(output), "@" + str(response)]
+        trace = self.root / "relocated-swift.trace"
+        trace.write_text("\n".join([
+            f'51 123.456 execve("/toolchain/bin/swiftc", {json.dumps(argv)}, 0xffff /* 20 vars */) = 0 <0.001>',
+            f'51 123.457 openat(AT_FDCWD<{self.build}>, "{copied_source}", O_RDONLY) = 3<{copied_source}> <0.001>',
+            '51 123.458 exit_group(0) = ?',
+        ]) + "\n")
+
+        relocated_build = self.root / "restored-build"
+        self.build.rename(relocated_build)
+        result = C.capture(self.sources, [relocated_build], self.sdk, self.pins,
+            traces=[trace], relocations=[(self.build, relocated_build)], trace_cwd=self.build,
+            generated_output=self.root / "relocated-retained",
+            external_header_roots=[relocated_build])
+        self.assertFalse(response.exists())
+        self.assertEqual(result["counts"]["mappedMembers"], 1)
+        record = result["sourceMap"][0]
+        document = C.V.parse(C.V.bound(record["compilerInputs"],
+            lambda name: (self.root / C.V.path(name)).read_bytes()))
+        response_record = document["compilerResponseFiles"][0]
+        self.assertEqual((self.root / response_record["file"]["path"]).read_bytes(),
+                         response_bytes)
+        verified = C.V.native_source_files(record,
+            lambda name: (self.root / C.V.path(name)).read_bytes())
+        self.assertEqual([(item["project"], item["path"]) for item in verified],
+                         [("swift-sdk/example", "value.swift")])
+
     def test_generated_swift_template_and_pcm_are_retained_and_verified(self):
         (self.build / "compile_commands.json").unlink()
         template = self.project / "Template.swift.gyb"

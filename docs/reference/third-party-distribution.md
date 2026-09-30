@@ -50,12 +50,30 @@ published GHCR image.
 
 Dispatch `runtime-ingredients.yml` on the reviewed `main` commit. A successful
 loader-only push run is insufficient. The manual run must complete the source-built
-Swift SDK, native runtime, loader and final provenance jobs. The final artifact is
+Swift SDK checkpoint, SDK evidence, native runtime, loader and final provenance jobs. The final artifact is
 `runtime-provenance-<source SHA>-<run ID>-<attempt>` and contains exactly
 `runtime-provenance.tar.gz`. The manifest and every runtime payload receive GitHub
-attestations from that workflow. Retry with all jobs: each attempt has distinct
-artifact names, so successful jobs from an earlier attempt cannot supply a later
-attempt's handoff.
+attestations from that workflow. Rerun failed jobs to reuse successful upstream
+artifacts. Consumers use each upstream job's original artifact name and authenticate
+its original run attempt; the final handoff is attested by the assembling attempt.
+
+The SDK compiler job retains an authenticated
+`runtime-swift-sdk-checkpoint-<source SHA>-<run ID>-<attempt>` for seven days before
+source mapping begins. It contains compiled SDK bytes, raw object/archive inputs,
+source checkouts, compiler traces, build metadata and referenced temporary sources.
+Host executables outside the SDK are omitted with recorded hashes. Evidence
+collection restores these inputs in a separate job and never runs the SDK compiler.
+A checkpoint is not qualified runtime evidence until source verification passes.
+
+After merging an evidence-only fix, dispatch the workflow on `main` with both
+`sdk_checkpoint_run` and `sdk_checkpoint_attempt` set to the original checkpoint
+producer. The consumer authenticates that producer's exact source/run/attempt and
+archive hashes, requires its source commit to be an ancestor of the new commit,
+and compares all SDK build scripts, source pins, patches and compiler-job settings.
+Changed build inputs refuse reuse. The retained producer manifest preserves the
+original identity; the native runtime still rebuilds twice from the current source.
+Leave both inputs empty when a new SDK compilation is required. Checkpoints use
+artifact storage, so retain/download them deliberately before their expiry.
 
 The signing consumer verifies the exact source commit, repository, main ref,
 workflow, run, attempt and payload digests. A valid attestation from another run or

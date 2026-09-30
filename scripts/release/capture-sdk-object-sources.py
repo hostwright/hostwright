@@ -461,8 +461,7 @@ def trace_compilers(filename, sources, selected_hashes, initial_cwd=None, select
                     for response_path, filelist in response_paths:
                         if not response_path.is_absolute():
                             response_path = Path(cwd or ".") / response_path
-                        response_path = response_path.resolve(strict=True)
-                        data = response_path.read_bytes()
+                        data = sources.relocate(str(response_path), cwd).read_bytes()
                         response_arguments = data.decode("utf-8").splitlines() if filelist else shlex.split(data.decode("utf-8"))
                         units = [value for value in response_arguments if Path(value).suffix == ".swift"]
                         response_units.extend(units)

@@ -40,8 +40,24 @@ def resolve(environment):
         source = environment["GITHUB_SHA"]
     if not isinstance(source, str) or not re.fullmatch(r"[a-f0-9]{40}", source):
         raise ValueError("checkpoint producer source commit is invalid")
+    artifact_kind = "checkpoint"
+    artifact_name = f"runtime-swift-sdk-checkpoint-{source}-{run_id}-{attempt}"
+    if reuse_run:
+        result = subprocess.run(["gh", "api", "--paginate", "--slurp",
+                                f"repos/{REPO}/actions/runs/{run_id}/artifacts?per_page=100"],
+                                check=True, capture_output=True, text=True, timeout=60)
+        pages = json.loads(result.stdout)
+        artifacts = [item for page in pages for item in page["artifacts"] if not item.get("expired", True)]
+        sdk_name = f"runtime-swift-sdk-{source}-{run_id}-{attempt}"
+        matches = [item for item in artifacts if item.get("name") == sdk_name]
+        if matches:
+            artifact_kind, artifact_name = "sdk", sdk_name
+        else:
+            matches = [item for item in artifacts if item.get("name") == artifact_name]
+        if len(matches) != 1:
+            raise ValueError("exact SDK artifact or checkpoint is missing, expired or ambiguous")
     return {"run-id": str(run_id), "producer-attempt": str(attempt), "source-commit": source,
-            "artifact-name": f"runtime-swift-sdk-checkpoint-{source}-{run_id}-{attempt}"}
+            "artifact-kind": artifact_kind, "artifact-name": artifact_name}
 
 
 if __name__ == "__main__":

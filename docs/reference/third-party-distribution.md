@@ -49,8 +49,9 @@ configuration and layer are locked to rebuilt bytes; it is not the previously
 published GHCR image.
 
 Dispatch `runtime-ingredients.yml` on the reviewed `main` commit. A successful
-loader-only push run is insufficient. The manual run must complete the source-built
-Swift SDK checkpoint, SDK evidence, native runtime, loader and final provenance jobs. The final artifact is
+loader-only push run is insufficient. The manual run must complete SDK evidence
+selection, native runtime, loader and final provenance jobs. The SDK may come from
+a new compilation or an authenticated retained producer. The final artifact is
 `runtime-provenance-<source SHA>-<run ID>-<attempt>` and contains exactly
 `runtime-provenance.tar.gz`. The manifest and every runtime payload receive GitHub
 attestations from that workflow. Rerun failed jobs to reuse successful upstream
@@ -66,12 +67,17 @@ collection restores these inputs in a separate job and never runs the SDK compil
 A checkpoint is not qualified runtime evidence until source verification passes.
 
 After merging an evidence-only fix, dispatch the workflow on `main` with both
-`sdk_checkpoint_run` and `sdk_checkpoint_attempt` set to the original checkpoint
-producer. The consumer authenticates that producer's exact source/run/attempt and
-archive hashes, requires its source commit to be an ancestor of the new commit,
-and compares all SDK build scripts, source pins, patches and compiler-job settings.
-Changed build inputs refuse reuse. The retained producer manifest preserves the
-original identity; the native runtime still rebuilds twice from the current source.
+`sdk_checkpoint_run` and `sdk_checkpoint_attempt` set to the original SDK producer.
+The resolver prefers a complete `runtime-swift-sdk` artifact from that exact
+attempt, falling back to its raw build checkpoint. The consumer authenticates the
+original source SHA, workflow, run, attempt and archive hashes, requires that source
+to be an ancestor of the current commit, and compares source pins, patches,
+materialization, compiler configuration and build steps. Changed compilation inputs
+refuse reuse. Retained inventories must match those source pins; selected runtime
+objects still require complete source evidence. An uploaded SDK alone does not
+establish source qualification. Recovery writes new evidence without replacing the
+original authenticated files. The native runtime still rebuilds twice from the
+current source.
 Leave both inputs empty when a new SDK compilation is required. Checkpoints use
 artifact storage, so retain/download them deliberately before their expiry.
 

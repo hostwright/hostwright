@@ -475,6 +475,51 @@ class ObjectSourceTests(unittest.TestCase):
         self.assertNotIn('"PWD=', trace.read_text())
         self.assertEqual(self.capture(traces=[trace], trace_cwd=self.build)["counts"]["mappedMembers"], 1)
 
+    def test_default_compiler_output_requires_one_final_source_argument(self):
+        self.assertEqual(C.compiler_object_output(["clang", "-target", "aarch64-linux-gnu", "-c", "source.c"]),
+                         "source.o")
+        self.assertIsNone(C.compiler_object_output(["clang", "-c", "first.c", "second.c"]))
+        self.assertIsNone(C.compiler_object_output(["clang", "-include", "source.c", "-c"]))
+        self.assertIsNone(C.compiler_object_output(["clang", "-c", "-include", "source.c"]))
+        self.assertIsNone(C.compiler_object_output(["clang", "-c", "source.c", "-MD"]))
+        self.assertIsNone(C.compiler_object_output(["clang", "-c", "source.c", "-o", "one.o", "-o", "two.o"]))
+
+    def test_implicit_clang_output_maps_successful_trace_and_rejects_failed_invocation(self):
+        (self.build / "compile_commands.json").unlink()
+        arguments = [argument for index, argument in enumerate(self.arguments)
+                     if index not in (self.arguments.index("-o"), self.arguments.index("-o") + 1)]
+        subprocess.run(arguments, cwd=self.build, check=True, capture_output=True)
+        output = self.build / "value.o"
+        self.assertTrue(output.is_file())
+        self.archive([output])
+        trace = self.root / "implicit-output.trace"
+        if shutil.which("strace"):
+            subprocess.run(["strace", "-f", "-qq", "-ttt", "-yy", "-s", "1048576", "-e",
+                            "trace=%process,%file", "-o", str(trace), *arguments],
+                           cwd=self.build, check=True, capture_output=True)
+        else:
+            lines = [f'51 123.456 execve({json.dumps(arguments[0])}, {json.dumps(arguments)}, 0xffff /* 10 vars */) = 0 <0.001>']
+            for name in ("value.c", "value.h"):
+                filename = str(self.project / name)
+                lines.append(f'51 123.457 openat(AT_FDCWD, "{filename}", O_RDONLY) = 3<{filename}> <0.001>')
+            lines.append('51 123.458 exit_group(0) = ?')
+            trace.write_text("\n".join(lines) + "\n")
+        result = self.capture(traces=[trace], trace_cwd=self.build,
+                              generated_output=self.root / "implicit-output-retained")
+        self.assertEqual(result["counts"]["mappedMembers"], 1)
+        record = result["sourceMap"][0]
+        self.assertEqual(record["objectSHA256"], C.digest_file(output))
+        full = self.full_inputs(record)
+        self.assertEqual({row["path"] for row in full["translationUnits"]}, {"value.c"})
+        self.assertEqual({row["path"] for row in full["sourceFiles"]}, {"value.c", "value.h"})
+        self.assertEqual({row["sha256"] for row in full["sourceFiles"]},
+                         {C.V.digest((self.project / name).read_bytes()) for name in ("value.c", "value.h")})
+
+        failed = trace.read_text().replace("exit_group(0)", "exit_group(1)")
+        failed = failed.replace("+++ exited with 0 +++", "+++ exited with 1 +++")
+        trace.write_text(failed)
+        self.assertEqual(self.capture(traces=[trace], trace_cwd=self.build)["sourceMap"], [])
+
     @unittest.skipUnless(shutil.which("strace"), "real Linux strace is required")
     def test_real_strace_child_process_attributes_assembly_translation_unit(self):
         (self.build / "compile_commands.json").unlink()

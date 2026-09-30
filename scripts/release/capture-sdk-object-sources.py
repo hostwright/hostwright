@@ -25,6 +25,30 @@ def digest_file(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
+def compiler_object_output(argv):
+    output_options = [index for index, argument in enumerate(argv) if argument == "-o"]
+    if output_options:
+        if len(output_options) != 1 or output_options[0] + 1 >= len(argv):
+            return None
+        output = argv[output_options[0] + 1]
+    else:
+        if argv.count("-c") != 1:
+            return None
+        value_options = {"-I", "-iquote", "-isystem", "-idirafter", "-include", "-imacros", "-MF", "-MT", "-MQ",
+                         "-target", "--target", "--sysroot", "-isysroot", "-resource-dir", "-x", "-std", "-stdlib",
+                         "-arch", "-D", "-U"}
+        source_suffixes = (".c", ".C", ".cc", ".cpp", ".cxx", ".m", ".mm", ".S", ".s")
+        source_arguments = [(index, argument) for index, argument in enumerate(argv)
+                            if not argument.startswith("-") and Path(argument).suffix in source_suffixes]
+        if (len(source_arguments) != 1 or source_arguments[0][0] != len(argv) - 1
+                or (len(argv) > 1 and argv[-2] in value_options)):
+            return None
+        source = source_arguments[0][1]
+        output = Path(source).name
+        output = str(Path(output).with_suffix(".o"))
+    return output if output.endswith((".o", ".obj", ".lo", ".os")) else None
+
+
 class RetainedInputs:
     def __init__(self, directory, mapping_root):
         directory, mapping_root = Path(directory), Path(mapping_root)
@@ -391,6 +415,7 @@ def trace_compilers(filename, sources, selected_hashes, initial_cwd=None, select
             except (ValueError, OSError):
                 continue
         return False
+
     with Path(filename).open(errors="strict") as stream:
         for line_number, line in enumerate(stream, 1):
             prefix = re.match(r"\s*(\d+)\s+(?:\d+\.\d+\s+)?(.*)", line)
@@ -440,10 +465,10 @@ def trace_compilers(filename, sources, selected_hashes, initial_cwd=None, select
                     rest = body[7 + end:].lstrip(", ")
                     argv, end = decoder.raw_decode(rest)
                     swift_wmo = executable.endswith("swiftc") and "-whole-module-optimization" in argv
-                    if "-o" not in argv or not ("-c" in argv or "-emit-obj" in argv or swift_wmo):
+                    if not ("-c" in argv or "-emit-obj" in argv or swift_wmo):
                         continue
-                    output = argv[argv.index("-o") + 1]
-                    if not output.endswith((".o", ".obj", ".lo", ".os")):
+                    output = compiler_object_output(argv)
+                    if output is None:
                         continue
                     cwd = working_directories.get(pid)
                     rest = rest[end:].lstrip(", ")

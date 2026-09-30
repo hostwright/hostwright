@@ -96,13 +96,25 @@ class ProducerSelectionTests(unittest.TestCase):
         self.assertEqual(result['producer-attempt'], '1')
         self.assertEqual(result['artifact-name'], f'runtime-swift-sdk-checkpoint-{self.source}-123-1')
 
-    def resolve_reuse(self, run=None):
+    def resolve_reuse(self, run=None, artifacts=None):
         env = dict(self.env, REUSE_RUN='100', REUSE_ATTEMPT='1')
-        with mock.patch.object(RESOLVE.subprocess, 'run', return_value=subprocess.CompletedProcess(
-                [], 0, stdout=json.dumps(self.run if run is None else run))) as api:
+        if artifacts is None:
+            artifacts = [{'name': 'runtime-swift-sdk-' + 'b' * 40 + '-100-1', 'expired': False}]
+        responses = [subprocess.CompletedProcess([], 0, stdout=json.dumps(self.run if run is None else run)),
+                     subprocess.CompletedProcess([], 0, stdout=json.dumps([{'artifacts': artifacts}]))]
+        with mock.patch.object(RESOLVE.subprocess, 'run', side_effect=responses) as api:
             result = RESOLVE.resolve(env)
-        self.assertEqual(api.call_args.args[0], ['gh', 'api', 'repos/hostwright/hostwright/actions/runs/100'])
+        self.assertEqual(api.call_args_list[0].args[0], ['gh', 'api', 'repos/hostwright/hostwright/actions/runs/100'])
         return result
+
+    def test_existing_sdk_is_preferred_and_checkpoint_is_the_fallback(self):
+        self.assertEqual(self.resolve_reuse()['artifact-kind'], 'sdk')
+        checkpoint = {'name': 'runtime-swift-sdk-checkpoint-' + 'b' * 40 + '-100-1', 'expired': False}
+        self.assertEqual(self.resolve_reuse(artifacts=[checkpoint])['artifact-kind'], 'checkpoint')
+        for artifacts in [[], [dict(checkpoint, expired=True)], [checkpoint, checkpoint],
+                          [dict(checkpoint, name=checkpoint['name'].replace('-100-1', '-100-2'))]]:
+            with self.subTest(artifacts=artifacts), self.assertRaises(ValueError):
+                self.resolve_reuse(artifacts=artifacts)
 
     def test_explicit_reuse_preserves_old_producer_identity(self):
         result = self.resolve_reuse()

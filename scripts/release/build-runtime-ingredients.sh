@@ -160,7 +160,8 @@ python3 "$source_capture" --repository "$work/sources/containerization" --commit
   --output "$work/evidence/source-trees/containerization"
 cp "$swift_sdk" "$work/swift-static-sdk.tar.gz"
 printf '%s  %s\n' "$swift_sdk_sha" "$work/swift-static-sdk.tar.gz" | sha256sum --check --status
-swift sdk install "$work/swift-static-sdk.tar.gz" --checksum "$swift_sdk_sha"
+swift_sdks="$work/swift-sdks"
+swift sdk install "$work/swift-static-sdk.tar.gz" --checksum "$swift_sdk_sha" --swift-sdks-path "$swift_sdks"
 mv "$work/swift-static-sdk.tar.gz" "$work/evidence/swift-static-sdk.tar.gz"
 mkdir -m 700 "$work/evidence/kernel-inputs"
 cp "$kernel_inputs/linux-6.18.15.tar.xz" "$kernel_inputs/linux-6.18.15.tar.sign" \
@@ -191,18 +192,19 @@ for pass in first second; do
     cd "$tree/vminitd"
     # Header timestamps otherwise change Clang module signatures and Swift object hashes.
     strace -f -qq -yy -s 65535 -e trace=execve,mmap -o "$work/evidence/vminitd-$pass.exec.trace" -- \
-      "$swift_bin" build -v -c release --jobs 4 --swift-sdk aarch64-swift-linux-musl --disable-automatic-resolution \
+      "$swift_bin" build -v -c release --swift-sdk aarch64-swift-linux-musl --disable-automatic-resolution \
+      --swift-sdks-path "$swift_sdks" \
       -Xswiftc "-use-ld=$native_linker_wrapper" \
-      -Xswiftc -num-threads -Xswiftc 4 \
       -Xcc -Xclang -Xcc -fno-pch-timestamp \
       --product vminitd -Xlinker -s -Xlinker -Map="$work/evidence/vminitd-$pass.map"
     strace -f -qq -yy -s 65535 -e trace=execve,mmap -o "$work/evidence/vmexec-$pass.exec.trace" -- \
-      "$swift_bin" build -v -c release --jobs 4 --swift-sdk aarch64-swift-linux-musl --disable-automatic-resolution \
+      "$swift_bin" build -v -c release --swift-sdk aarch64-swift-linux-musl --disable-automatic-resolution \
+      --swift-sdks-path "$swift_sdks" \
       -Xswiftc "-use-ld=$native_linker_wrapper" \
-      -Xswiftc -num-threads -Xswiftc 4 \
       -Xcc -Xclang -Xcc -fno-pch-timestamp \
       --product vmexec -Xlinker -s -Xlinker -Map="$work/evidence/vmexec-$pass.map"
-    bin=$(swift build -c release --swift-sdk aarch64-swift-linux-musl --disable-automatic-resolution --show-bin-path)
+    bin=$(swift build -c release --swift-sdk aarch64-swift-linux-musl --disable-automatic-resolution \
+      --swift-sdks-path "$swift_sdks" --show-bin-path)
     cp "$bin/vminitd" "$work/vminitd-$pass"
     cp "$bin/vmexec" "$work/vmexec-$pass"
     if [[ "$pass" == first ]]; then

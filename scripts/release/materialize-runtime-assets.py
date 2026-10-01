@@ -83,7 +83,7 @@ def materialize(archive_path, output, source_commit, run_id, attempt):
             target = temporary.joinpath(*name.split("/"))
             target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
             target.write_bytes(data)
-            target.chmod(0o755 if name == "guest/hostwright-netfilter" else 0o644)
+            target.chmod(0o644)
         for directory, directories, _ in os.walk(temporary):
             pathlib.Path(directory).chmod(0o700)
             for name in directories:

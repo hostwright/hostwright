@@ -156,3 +156,4 @@ jobs:
           python3 scripts/release/test-materialize-runtime-assets.py
           python3 scripts/release/test-qualify-runtime-inventory.py
           python3 scripts/release/test-corresponding-source.py
+          python3 scripts/release/test-stage-corresponding-source.py

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Verify new source-built runtime ingredients; receipt flags are never authority."""
-import hashlib, io, json, os, pathlib, re, shlex, struct, subprocess, tarfile, tempfile
+import gzip, hashlib, io, json, os, pathlib, re, shlex, struct, subprocess, tarfile, tempfile
+from contextlib import contextmanager
 
 REPO = 'hostwright/hostwright'
 WORKFLOW = '.github/workflows/runtime-ingredients.yml'
@@ -9,6 +10,25 @@ MAX_METADATA = 16 * 1024**2
 MAX_SOURCE_INVENTORY = 64 * 1024**2
 MAX_FILE = 2 * 1024**3
 MAX_FILES = 250000
+MAX_SOURCE_ARCHIVE = 8 * 1024**3
+
+@contextmanager
+def open_source_archive(source):
+    """Inflate one gzip TAR sequentially to a bounded, seekable temporary file."""
+    with tempfile.TemporaryFile(mode='w+b') as spool:
+        with gzip.open(source, 'rb') as decoded:
+            expanded = 0
+            while True:
+                chunk = decoded.read(1024 * 1024)
+                if not chunk:
+                    break
+                expanded += len(chunk)
+                require(expanded <= MAX_SOURCE_ARCHIVE, 'expanded runtime source archive exceeds limit')
+                spool.write(chunk)
+        spool.flush()
+        spool.seek(0)
+        with tarfile.open(fileobj=spool, mode='r:') as archive:
+            yield archive
 
 def require(condition, message):
     if not condition: raise ValueError(message)
@@ -1166,5 +1186,5 @@ if __name__=='__main__':
     require(not args.source_archive.is_symlink() and args.source_archive.is_file(), 'unsafe source archive')
     with args.source_archive.open('rb') as stream:
         require(hashlib.file_digest(stream,'sha256').hexdigest()==args.expected_archive_sha256, 'source archive hash mismatch')
-    with tarfile.open(args.source_archive,'r:gz') as archive:
+    with open_source_archive(args.source_archive) as archive:
         print(json.dumps(verify_source_bundle(archive,args.source_commit),sort_keys=True))

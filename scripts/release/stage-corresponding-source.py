@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Bind source bytes to staged products; qualification requires independent verification."""
-import argparse,hashlib,importlib.util,json,pathlib,re,shutil,stat,subprocess,tarfile,zipfile
+import argparse,hashlib,importlib.util,json,pathlib,re,shutil,stat,subprocess,zipfile
 EMPTY_STATUS_SHA256=hashlib.sha256(b'').hexdigest()
 KIND='hostwright.corresponding-source.v1'
 NEW_RUNTIME_KIND='hostwright.corresponding-source.new-runtime.v1'
@@ -43,12 +43,14 @@ def descriptor(root,commit,version):
              archive=dict(fileName=name,sha256=archive_sha,sizeBytes=(source/name).stat().st_size),
              manifest=dict(fileName='source-manifest.json',sha256=manifest_sha,sizeBytes=len(manifest_data)),
              checksums=dict(fileName='SOURCE_SHA256SUMS',sha256=sha(source/'SOURCE_SHA256SUMS')))
+def runtime_verifier():
+ spec=importlib.util.spec_from_file_location('runtime_provenance',pathlib.Path(__file__).with_name('verify-runtime-provenance.py'))
+ validator=importlib.util.module_from_spec(spec);spec.loader.exec_module(validator)
+ return validator
 def qualified_runtime(archive=None,commit=None,product_payloads=None):
  if archive is None or commit is None or product_payloads is None:
   raise ValueError('runtime provenance validator unavailable without authenticated actual runtime/source inputs')
- spec=importlib.util.spec_from_file_location('runtime_provenance',pathlib.Path(__file__).with_name('verify-runtime-provenance.py'))
- validator=importlib.util.module_from_spec(spec);spec.loader.exec_module(validator)
- return validator.verify_source_bundle(archive,commit,product_payloads)
+ return runtime_verifier().verify_source_bundle(archive,commit,product_payloads)
 def source_evidence_contents(runtime):
  result=parse(canonical(runtime));result.pop('payloadFiles',None)
  for asset in result['assets']:
@@ -65,7 +67,7 @@ def verify_contract(root,commit,version,gpg=None,gpg_sha256=None):
  command=['python3',str(pathlib.Path(__file__).with_name('corresponding-source.py')),'verify','--archive',str(archive),'--expected-archive-sha256',binding['archive']['sha256'],'--expected-manifest-sha256',binding['manifest']['sha256'],'--expected-source',commit,'--expected-version',version]+gpg_arguments(gpg,gpg_sha256)
  result=subprocess.run(command,check=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE);verified=parse(result.stdout)
  if verified.get('archiveSHA256')!=binding['archive']['sha256'] or verified.get('manifestSHA256')!=binding['manifest']['sha256'] or verified.get('releaseSourceRevision')!=commit or verified.get('version')!=version:raise ValueError('independent source verifier returned different bindings')
- with tarfile.open(archive,'r:gz') as bundle:
+ with runtime_verifier().open_source_archive(archive) as bundle:
   manifests=[m for m in bundle.getmembers() if m.name=='source-manifest.json'];runtimes=[m for m in bundle.getmembers() if m.name=='licenses/runtime-license-inventory.json']
   if len(manifests)!=1 or not manifests[0].isfile() or bundle.extractfile(manifests[0]).read()!=read(source/'source-manifest.json'):raise ValueError('external source manifest differs from bundled bytes')
   if len(runtimes)!=1 or not runtimes[0].isfile() or runtimes[0].size>16*1024**2:raise ValueError('source bundle lacks exact runtime license inventory')
@@ -87,7 +89,7 @@ def verify_contract(root,commit,version,gpg=None,gpg_sha256=None):
   entries=[item for item in product_archive.infolist() if item.filename.startswith(prefix+'share/hostwright/containerization/') and not item.is_dir()]
   if len({item.filename for item in entries})!=len(entries) or any(item.file_size>2*1024**3 or stat.S_IFMT(item.external_attr>>16) not in (0,stat.S_IFREG) for item in entries):raise ValueError('unsafe actual product runtime closure')
   product_payloads={item.filename[len(prefix):]:product_archive.read(item) for item in entries}
- with tarfile.open(source/binding['archive']['fileName'],'r:gz') as source_archive:
+ with runtime_verifier().open_source_archive(source/binding['archive']['fileName']) as source_archive:
   qualified_runtime(source_archive,commit,product_payloads)
  return binding
 

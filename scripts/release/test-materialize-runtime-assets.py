@@ -46,11 +46,9 @@ class RuntimeAssetMaterializerTests(unittest.TestCase):
                 {path.relative_to(output).as_posix() for path in output.rglob("*") if path.is_file()},
                 {name.removeprefix(MATERIALIZER.PREFIX) for name in payloads},
             )
-            self.assertEqual((output / "guest/hostwright-netfilter").stat().st_mode & 0o777, 0o755)
+            self.assertEqual((output / "guest/hostwright-netfilter").stat().st_mode & 0o777, 0o644)
             for path in output.rglob("*"):
-                self.assertEqual(path.stat().st_mode & 0o777, 0o700 if path.is_dir() else (
-                    0o755 if path.relative_to(output).as_posix() == "guest/hostwright-netfilter" else 0o644
-                ))
+                self.assertEqual(path.stat().st_mode & 0o777, 0o700 if path.is_dir() else 0o644)
 
     def test_rejects_existing_output_and_authentication_failure(self):
         with tempfile.TemporaryDirectory() as temporary:

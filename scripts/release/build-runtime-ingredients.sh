@@ -191,13 +191,15 @@ for pass in first second; do
     cd "$tree/vminitd"
     # Header timestamps otherwise change Clang module signatures and Swift object hashes.
     strace -f -qq -yy -s 65535 -e trace=execve,mmap -o "$work/evidence/vminitd-$pass.exec.trace" -- \
-      "$swift_bin" build -v -c release --swift-sdk aarch64-swift-linux-musl --disable-automatic-resolution \
+      "$swift_bin" build -v -c release --jobs 4 --swift-sdk aarch64-swift-linux-musl --disable-automatic-resolution \
       -Xswiftc "-use-ld=$native_linker_wrapper" \
+      -Xswiftc -num-threads -Xswiftc 4 \
       -Xcc -Xclang -Xcc -fno-pch-timestamp \
       --product vminitd -Xlinker -s -Xlinker -Map="$work/evidence/vminitd-$pass.map"
     strace -f -qq -yy -s 65535 -e trace=execve,mmap -o "$work/evidence/vmexec-$pass.exec.trace" -- \
-      "$swift_bin" build -v -c release --swift-sdk aarch64-swift-linux-musl --disable-automatic-resolution \
+      "$swift_bin" build -v -c release --jobs 4 --swift-sdk aarch64-swift-linux-musl --disable-automatic-resolution \
       -Xswiftc "-use-ld=$native_linker_wrapper" \
+      -Xswiftc -num-threads -Xswiftc 4 \
       -Xcc -Xclang -Xcc -fno-pch-timestamp \
       --product vmexec -Xlinker -s -Xlinker -Map="$work/evidence/vmexec-$pass.map"
     bin=$(swift build -c release --swift-sdk aarch64-swift-linux-musl --disable-automatic-resolution --show-bin-path)

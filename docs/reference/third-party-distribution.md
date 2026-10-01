@@ -41,7 +41,9 @@ source/license qualification.
 ## Runtime producer and signing handoff
 
 The runtime producer rebuilds the Linux kernel, guest binaries and Go loader twice
-and requires matching payload bytes. The signed Linux source archive, applied
+and requires matching payload bytes. Guest builds pin both SwiftPM jobs and Swift
+frontend threads to four: frontend thread count changes the embedded module hash
+even when executable code is identical. The signed Linux source archive, applied
 patches, actual configuration, compiler/linker inputs, selected source files,
 complete source inventories and license texts form the corresponding-source
 closure. The guest OCI layout contains a direct image manifest. Its descriptor,

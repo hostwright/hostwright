@@ -100,6 +100,53 @@ def compiler_inputs_fixture(manifest,files):
  return record,document
 
 class RuntimeProvenanceTests(unittest.TestCase):
+ def test_outer_source_archive_inflates_once_for_out_of_order_member_reads(self):
+  compressed=tar({'first':b'one','middle':b'two','last':b'three'})
+  with tempfile.TemporaryDirectory() as directory:
+   path=pathlib.Path(directory)/'runtime.tar.gz';path.write_bytes(compressed)
+   real_open=v.gzip.open;reads=[]
+   class SequentialReader:
+    def __init__(self,archive_path,mode):self.reader=real_open(archive_path,mode);self.expanded=0;self.seeks=0
+    def __enter__(self):return self
+    def __exit__(self,*args):return self.reader.__exit__(*args)
+    def read(self,size=-1):
+     data=self.reader.read(size);self.expanded+=len(data);reads.append(len(data));return data
+    def seek(self,*args):self.seeks+=1;raise AssertionError('gzip input must not be rewound')
+   with mock.patch.object(v.gzip,'open',side_effect=SequentialReader) as opened:
+    with v.open_source_archive(path) as archive:
+     members={member.name:member for member in archive.getmembers()}
+     self.assertEqual(archive.extractfile(members['last']).read(),b'three')
+     self.assertEqual(archive.extractfile(members['first']).read(),b'one')
+     self.assertEqual(archive.extractfile(members['middle']).read(),b'two')
+   self.assertEqual(opened.call_count,1)
+   self.assertEqual(sum(reads),len(gzip.decompress(compressed)))
+
+ def test_outer_source_archive_enforces_expanded_cap_and_closes_spool_on_all_paths(self):
+  compressed=tar({'member':b'expanded'})
+  real_temporary_file=v.tempfile.TemporaryFile;opened=[]
+  class TrackedFile:
+   def __init__(self):self.file=real_temporary_file(mode='w+b');self.closed=False
+   def __getattr__(self,name):return getattr(self.file,name)
+   def __enter__(self):return self
+   def __exit__(self,*args):self.close()
+   def close(self):self.closed=True;self.file.close()
+  def tracked_file(*args,**kwargs):
+   value=TrackedFile();opened.append(value);return value
+  with tempfile.TemporaryDirectory() as directory:
+   path=pathlib.Path(directory)/'runtime.tar.gz';path.write_bytes(compressed)
+   with mock.patch.object(v.tempfile,'TemporaryFile',side_effect=tracked_file):
+    with v.open_source_archive(path) as archive:self.assertEqual(archive.getnames(),['member'])
+    with self.assertRaisesRegex(RuntimeError,'consumer failed'):
+     with v.open_source_archive(path):raise RuntimeError('consumer failed')
+    with mock.patch.object(v,'MAX_SOURCE_ARCHIVE',1):
+     with self.assertRaisesRegex(ValueError,'expanded runtime source archive exceeds limit'):
+      with v.open_source_archive(path):pass
+    path.write_bytes(compressed[:-4])
+    with self.assertRaises((EOFError,gzip.BadGzipFile)):
+     with v.open_source_archive(path):pass
+  self.assertEqual(len(opened),4)
+  self.assertTrue(all(value.closed for value in opened))
+
  def test_vendored_sdk_source_alias_requires_exact_upstream_candidate(self):
   cases=(('swift-sdk/bzip2','blocksort.c','Utilities/cmbzip2/blocksort.c'),
          ('swift-sdk/curl','include/curl/header.h','Utilities/cmcurl/include/curl/header.h'),

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Prepare exact manifest and payload subjects from a completed runtime source archive."""
-import argparse, importlib.util, json, os, pathlib, tarfile, tempfile
+import argparse, importlib.util, json, os, pathlib, tempfile
 
 HERE=pathlib.Path(__file__).resolve().parent
 spec=importlib.util.spec_from_file_location('runtime_verifier',HERE/'verify-runtime-provenance.py');v=importlib.util.module_from_spec(spec);spec.loader.exec_module(v)
 
 def prepare(archive_path,output,source_commit):
     if archive_path.is_symlink() or not archive_path.is_file() or output.exists() or output.is_symlink():raise ValueError('unsafe attestation subject input or output')
-    with tarfile.open(archive_path,'r:gz') as archive:
+    with v.open_source_archive(archive_path) as archive:
         members={}
         for member in archive.getmembers():
             name=v.path(member.name.rstrip('/'))

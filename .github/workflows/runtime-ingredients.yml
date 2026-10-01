@@ -703,7 +703,7 @@ jobs:
     if: ${{ always() && needs.runtime-build-ingredients.result == 'success' && needs.guest-loader.result == 'success' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' }}
     needs: [runtime-build-ingredients, guest-loader]
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 60
+    timeout-minutes: 120
     permissions:
       contents: read
       id-token: write

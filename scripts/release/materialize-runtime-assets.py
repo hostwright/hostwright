@@ -5,7 +5,6 @@ import importlib.util
 import os
 import pathlib
 import re
-import tarfile
 import tempfile
 
 
@@ -44,7 +43,7 @@ def materialize(archive_path, output, source_commit, run_id, attempt):
     if not output.parent.is_dir():
         fail("runtime asset output parent must be a non-symlink directory")
 
-    with tarfile.open(archive_path, "r:gz") as archive:
+    with VERIFIER.open_source_archive(archive_path) as archive:
         members = archive.getmembers()
         files = {}
         for member in members:

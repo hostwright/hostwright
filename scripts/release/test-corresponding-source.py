@@ -38,6 +38,17 @@ class SourceBundleTests(unittest.TestCase):
  def test_exact_relative_source_symlink(self):
   target='../common.conf';record=dict(path='kernel/configs/arch/link',sha256=hashlib.sha256(target.encode()).hexdigest(),sizeBytes=len(target),mode=0o777,type='symlink',linkTarget=target)
   with self.archive([(record['path'],b'',0o777,tarfile.SYMTYPE,target)]) as t:bundle.verify_records(t,[record])
+ def test_new_runtime_archive_gets_larger_byte_bound_only(self):
+  member=tarfile.TarInfo('runtime/evidence')
+  member.size=bundle.MAX_BYTES+1
+  self.assertEqual(bundle.max_member_bytes('hostwright.corresponding-source.v1'),bundle.MAX_BYTES)
+  self.assertEqual(bundle.max_member_bytes(bundle.NEW_RUNTIME_KIND),bundle.MAX_NEW_RUNTIME_BYTES)
+  with self.assertRaisesRegex(ValueError,'archive byte limit'):
+   bundle.validate_members([member])
+  bundle.validate_members([member],max_bytes=bundle.max_member_bytes(bundle.NEW_RUNTIME_KIND))
+  member.size=bundle.MAX_NEW_RUNTIME_BYTES+1
+  with self.assertRaisesRegex(ValueError,'archive byte limit'):
+   bundle.validate_members([member],max_bytes=bundle.max_member_bytes(bundle.NEW_RUNTIME_KIND))
  def test_candidate_notice_scope_and_changed_inventory(self):
   metadata=dict(kind='hostwright.sdk-candidate-runtime-source-notices.v1',status='not-actual-oci-link-qualified',sdkArchiveSHA256='d2078b69bdeb5c31202c10e9d8a11d6f66f82938b51a4b75f032ccb35c4c286c',documents=[dict(path='LICENSE',sha256='a'*64,sizeBytes=10)])
   records={'LICENSE':dict(sha256='a'*64,sizeBytes=10)}
@@ -84,9 +95,14 @@ class SourceBundleTests(unittest.TestCase):
    with tarfile.open(incoming,'w:gz') as archive:
     item=tarfile.TarInfo('source-manifest.json');item.size=len(manifest_data);archive.addfile(item,io.BytesIO(manifest_data))
    args=types.SimpleNamespace(root=root,runtime_provenance_archive=incoming,output_parent=out_parent,source='a'*40,version='0.0.2',gpg=None,gpg_sha256=None,kernel_inputs=None,kata_recipes=None,loader_receipt=None)
+   validator=bundle.runtime_verifier()
    with mock.patch.object(bundle,'source_state',return_value=dict(head='a'*40,clean=True,gitStatusSHA256=hashlib.sha256(b'').hexdigest())):
-    with self.assertRaisesRegex(ValueError,'missing regular provenance evidence'):
-     bundle.prepare(args)
+    with mock.patch.object(bundle,'runtime_verifier',return_value=validator):
+     with mock.patch.object(validator,'open_source_archive',wraps=validator.open_source_archive) as open_archive:
+      with self.assertRaisesRegex(ValueError,'missing regular provenance evidence'):
+       bundle.prepare(args)
+   open_archive.assert_called_once()
+   self.assertTrue(str(open_archive.call_args.args[0]).endswith('.tar.gz'))
    self.assertFalse(list(out_parent.glob('hostwright-runtime-source-*')))
    import shutil;shutil.rmtree(out_parent)
  def test_pinned_signature_status(self):

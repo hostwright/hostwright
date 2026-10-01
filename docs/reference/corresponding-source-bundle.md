@@ -28,18 +28,24 @@ provenance and carries the exact archive bytes into staging; the legacy bundle
 path remains available for historical source preparation but is refused by
 release staging.
 
-The runtime ingredient workflow does not yet produce this archive. The pinned
-Apple Containerization 0.35.0 source exists upstream at commit
-`44bec8b9933bc491d0cbf44abac90a1f6aaebf6b`, but the current product consumes
-prebuilt GHCR vminit and Kata kernel bytes whose deterministic source-to-payload
-proof and producer handoff have not been established. Its retained loader and
-kernel ingredients therefore cannot satisfy the rebuilt kernel/vminit
-source/link/toolchain evidence required by `verify-runtime-provenance.py`. A
-release remains blocked until a producer builds the exact shipped inputs, embeds
-the source commit and producer run identity, attests the manifest and every
-runtime payload, and uploads the exact
+The manually dispatched runtime ingredient workflow rebuilds the kernel, guest
+loader and Apple Containerization 0.35.0 vminit from pinned source, including
+Containerization commit `44bec8b9933bc491d0cbf44abac90a1f6aaebf6b`. Both independent
+builds must match before their source, compiler/linker and license evidence can
+qualify the shipped runtime inventory. The workflow assembles the verified
+evidence, embeds the source commit and producer run identity, attests the manifest
+and every runtime payload, then authenticates the archive before uploading
+the exact
 `runtime-provenance-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}` artifact
-containing `runtime-provenance.tar.gz`.
+containing `runtime-provenance.tar.gz`. Signing requires that successful final
+artifact; successful ingredient jobs alone are insufficient.
+
+The complete new-runtime source bundle permits up to 8 GiB of member data. The
+legacy source bundle retains its 4 GiB limit. Both paths verify the complete
+member inventory, types, sizes and hashes before accepting the source bundle.
+Repeated evidence reads use a private temporary TAR, decoded once with an 8 GiB
+expanded-archive limit and removed when verification finishes or fails. The
+original compressed bytes remain the archive hash and authentication subject.
 
 Use `verify-kernel-source-signature.py --inputs <kernel-input-directory> --output
 <new-receipt-path>` to independently verify the source's detached signature against
@@ -47,7 +53,8 @@ the kernel.org stable signing fingerprint. The script disables key retrieval and
 agent autostart and checks cryptographic `VALIDSIG`, not just a `signatureVerified`
 JSON field. The public key's expected fingerprint is pinned in reviewed source.
 
-`inspect-vminit-runtime.py` reads the pinned retained OCI layer and recipe's exact
+For historical prebuilt-runtime investigation, `inspect-vminit-runtime.py` reads
+the pinned retained OCI layer and recipe's exact
 Swift SDK without executing guest binaries or installing SDK components. Its output
 records the two actual static stripped AArch64 ELF hashes, build IDs and compiler
 comments, and the candidate SDK's 52 target runtime archives, metadata and header

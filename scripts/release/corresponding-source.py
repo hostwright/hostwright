@@ -27,6 +27,12 @@ PINS = dict(kernelVersion='6.18.15', kernelConfigurationVersion='186',
             retainedLoaderReceiptSHA256='3c5d53e8857f33d02a2bd58716a5fa05230f8292109aab8b244acd58e3fcd77f')
 MAX_FILES = 200000
 MAX_BYTES = 4 * 1024**3
+MAX_NEW_RUNTIME_BYTES = 8 * 1024**3
+NEW_RUNTIME_KIND = 'hostwright.corresponding-source.new-runtime.v1'
+
+
+def max_member_bytes(source_kind):
+    return MAX_NEW_RUNTIME_BYTES if source_kind == NEW_RUNTIME_KIND else MAX_BYTES
 
 
 def canonical(value):
@@ -52,7 +58,7 @@ def safe_path(name):
     return pathlib.PurePosixPath(name)
 
 
-def validate_members(members, root=None, regular_only=False):
+def validate_members(members, root=None, regular_only=False, max_bytes=MAX_BYTES):
     names, size = set(), 0
     for member in members:
         name = member.name.rstrip('/') if member.isdir() else member.name
@@ -63,7 +69,7 @@ def validate_members(members, root=None, regular_only=False):
         if root and path.parts[0] != root: raise ValueError('source archive has an unexpected root')
         if member.size<0: raise ValueError('negative archive entry size')
         size += member.size
-        if size>MAX_BYTES: raise ValueError('archive byte limit exceeded')
+        if size>max_bytes: raise ValueError('archive byte limit exceeded')
         if member.isfile() or member.isdir(): continue
         if regular_only or not (member.issym() or member.islnk()): raise ValueError('unsupported archive entry type')
         link = member.linkname
@@ -79,9 +85,9 @@ def validate_members(members, root=None, regular_only=False):
     return names
 
 
-def verify_records(archive, records):
+def verify_records(archive, records, max_bytes=MAX_BYTES):
     members = archive.getmembers()
-    validate_members(members)
+    validate_members(members, max_bytes=max_bytes)
     files = {m.name:m for m in members if not m.isdir()}
     expected = {r['path']:r for r in records}
     if len(expected)!=len(records) or set(files)-{'source-manifest.json'}!=set(expected):
@@ -110,27 +116,32 @@ def gpg_arguments(executable=None, executable_sha256=None):
     return ['--gpg',str(path),'--gpg-sha256',executable_sha256]
 
 
+def runtime_verifier():
+    spec=importlib.util.spec_from_file_location('runtime_provenance',pathlib.Path(__file__).with_name('verify-runtime-provenance.py'))
+    validator=importlib.util.module_from_spec(spec);spec.loader.exec_module(validator)
+    return validator
+
+
 def verify(bundle, expected_archive=None, expected_manifest=None, expected_source=None, expected_version=None, gpg=None, gpg_sha256=None):
     verifier_arguments=gpg_arguments(gpg,gpg_sha256)
     bundle=regular(bundle)
     archive_sha=digest_file(bundle)
     if expected_archive and archive_sha!=expected_archive:raise ValueError('staged source archive digest mismatch')
-    with tarfile.open(bundle,'r:gz') as archive:
+    validator=runtime_verifier()
+    with validator.open_source_archive(bundle) as archive:
         manifest_member=archive.getmember('source-manifest.json')
         if not manifest_member.isfile() or manifest_member.size>8*1024**2:raise ValueError('unsafe source manifest')
         data=archive.extractfile(manifest_member).read();manifest=json.loads(data)
         manifest_sha=hashlib.sha256(data).hexdigest()
         if data!=canonical(manifest) or (expected_manifest and manifest_sha!=expected_manifest):raise ValueError('source manifest digest/canonical encoding mismatch')
         source_kind=manifest['kind']
-        if manifest['schemaVersion']!=1 or (source_kind!='hostwright.corresponding-source.new-runtime.v1' and (source_kind!='hostwright.corresponding-source.v1' or manifest.get('pins')!=PINS)):
+        if manifest['schemaVersion']!=1 or (source_kind!=NEW_RUNTIME_KIND and (source_kind!='hostwright.corresponding-source.v1' or manifest.get('pins')!=PINS)):
             raise ValueError('unexpected source bundle schema or pins')
         if not re.fullmatch('[a-f0-9]{40}',manifest['releaseSourceRevision']) or not valid_version(manifest['version']):raise ValueError('invalid source/version binding')
         if manifest['status']!='prepared-not-release-qualified' or manifest['publicationRoute']!='same-github-release-alongside-binaries' or manifest.get('upstreamSignatureVerified') is not True:raise ValueError('source preparation lacks authenticated upstream signature')
         if (expected_source and manifest['releaseSourceRevision']!=expected_source) or (expected_version and manifest['version']!=expected_version):raise ValueError('source bundle differs from accepted source/version')
-        verify_records(archive,manifest['files'])
-        if source_kind=='hostwright.corresponding-source.new-runtime.v1':
-            spec=importlib.util.spec_from_file_location('runtime_provenance',pathlib.Path(__file__).with_name('verify-runtime-provenance.py'))
-            validator=importlib.util.module_from_spec(spec);spec.loader.exec_module(validator)
+        verify_records(archive,manifest['files'],max_bytes=max_member_bytes(source_kind))
+        if source_kind==NEW_RUNTIME_KIND:
             validator.verify_source_bundle(archive,manifest['releaseSourceRevision'])
             return dict(archiveSHA256=archive_sha,manifestSHA256=manifest_sha,sizeBytes=bundle.stat().st_size,
                         version=manifest['version'],releaseSourceRevision=manifest['releaseSourceRevision'],status=manifest['status'])
@@ -221,7 +232,7 @@ def prepare_runtime_archive(args):
             shutil.copyfileobj(source, target)
         verified = verify(snapshot, expected_source=args.source, expected_version=args.version,
                           gpg=args.gpg, gpg_sha256=args.gpg_sha256)
-        with tarfile.open(snapshot, 'r:gz') as archive:
+        with runtime_verifier().open_source_archive(snapshot) as archive:
             member = archive.getmember('source-manifest.json')
             if not member.isfile() or member.size > 16 * 1024**2:
                 raise ValueError('runtime source archive lacks a regular source manifest')

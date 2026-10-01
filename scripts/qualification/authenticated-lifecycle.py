@@ -415,7 +415,7 @@ def validate_sdk_inputs(args, binding, fresh=False):
     require(metadata['sha256'] == spec['configSHA256'], 'SDK config input changed')
     config = sdk.decode(raw)
     require(config.get('schema') == 1 and config.get('framework') == '0.35.0'
-            and config.get('initImageReference') == 'untagged@sha256:b3b054594e1b3bf6a21683f2a26074ceff73409ac538b86b2e9513e849d9b325', 'SDK config framework/image reference mismatch')
+            and config.get('initImageReference') == 'untagged@sha256:15a70c63c9ca254020d8bdbe1b6e48332db0629881f563624bfd319412a37ea3', 'SDK config framework/image reference mismatch')
     data = Path(config['dataRootPath'])
     state = Path(args.state_root)
     require(data.is_absolute() and data.resolve() == data and data.parent.is_dir() and data != state and state not in data.parents and data not in state.parents, 'unsafe/overlapping SDK data root')
@@ -432,12 +432,12 @@ def validate_sdk_inputs(args, binding, fresh=False):
     require(config['kernelPath'] in spec['assetSHA256'] and config['kernelSHA256'] == spec['assetSHA256'][config['kernelPath']] == '55f86b8394c1d46551836f5c1d3525cdc8d505aeb9bb630c608edb564674239d'
             and Path(config['kernelPath']).stat().st_size == 16148992, 'SDK kernel not pinned byte bound')
     require(not config.get('guestNetworkPolicyLoaderPath') and not config.get('guestNetworkPolicyLoaderSHA256'), 'qualification workload does not admit guest policy loader')
-    init_digests = ('b3b054594e1b3bf6a21683f2a26074ceff73409ac538b86b2e9513e849d9b325','d5ed2e2c7255c07724bb8a2eded642eb3a4f7a7d4b83441b7075f6682336738e','ffd2251deae40a37b6ba2728ebd4e47edf3ef90a16c1149da28b1f0411d2980c')
+    init_digests = ('15a70c63c9ca254020d8bdbe1b6e48332db0629881f563624bfd319412a37ea3','7812fb606774f30d8b6d36c2a37a6e12ae719ece3fc34775f9b87ee94639e257','3c6b087fc41b30d44dac2951f0ee798b242fac8e00db9b6375e25ef48765418d')
     init_root = Path(config['initImageLayoutPath'])
     init_files = {
         'oci-layout': ('18f0797eab35a4597c1e9624aa4f15fd91f6254e5538c1e0d193b2a95dd4acc6', 30),
-        'index.json': ('bef61a59416346b17767bd3b1f4dc340a5beb3bcfb3439489b4d8412b2cc3563', 240),
-        **{f'blobs/sha256/{digest}': (digest, size) for digest, size in zip(init_digests, (406, 151, 67223020))},
+        'index.json': ('ca910ca52793fbd5269c98aff0ba03091238558ac087d47967611f9d033076d1', 240),
+        **{f'blobs/sha256/{digest}': (digest, size) for digest, size in zip(init_digests, (406, 151, 67222934))},
     }
     for relative, (digest, size) in init_files.items():
         path = str(init_root/relative)

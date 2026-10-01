@@ -42,7 +42,7 @@ source/license qualification.
 
 The runtime producer rebuilds the Linux kernel, guest binaries and Go loader twice
 and requires matching payload bytes. It installs the authenticated Swift SDK under
-the build directory so user-home paths cannot change guest module hashes. The
+the build directory to keep the SDK path independent of the user's home directory. The
 signed Linux source archive, applied
 patches, actual configuration, compiler/linker inputs, selected source files,
 complete source inventories and license texts form the corresponding-source

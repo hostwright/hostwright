@@ -51,6 +51,30 @@ class NativeCaptureTests(unittest.TestCase):
         self.evidence = self.root / "evidence"
         self.evidence.mkdir()
 
+    def test_native_environment_retains_disabled_kernel_tool_selection(self):
+        environment = C.process_environment({"PATH": "/usr/bin", "RUSTC": "/bin/false",
+                                             "PAHOLE": "/dev/null",
+                                             "MAKEFLAGS": "RUSTC=/bin/false PAHOLE=/dev/null",
+                                             "RUSTUP_HOME": "/ambient/rust"})
+        self.assertEqual(environment["RUSTC"], "/bin/false")
+        self.assertEqual(environment["PAHOLE"], "/dev/null")
+        self.assertEqual(environment["MAKEFLAGS"], "RUSTC=/bin/false PAHOLE=/dev/null")
+        self.assertNotIn("RUSTUP_HOME", environment)
+
+    def test_makefile_tool_assignments_cannot_override_kernel_disable_flags(self):
+        make = shutil.which("make")
+        if make is None or "GNU Make" not in subprocess.run(
+                [make, "--version"], check=True, capture_output=True, text=True).stdout:
+            self.skipTest("GNU Make is required")
+        makefile = self.root / "Makefile"
+        makefile.write_text("RUSTC = rustc\nPAHOLE = pahole\nquery:\n"
+                            "\t@printf '%s\\n' '$(origin RUSTC)|$(RUSTC)|$(origin PAHOLE)|$(PAHOLE)'\n")
+        environment = {**os.environ, "RUSTC": "ambient-rustc", "PAHOLE": "ambient-pahole",
+                       "MAKEFLAGS": "RUSTC=/bin/false PAHOLE=/dev/null"}
+        result = subprocess.run([make, "--no-print-directory", "-f", str(makefile), "query"],
+                                cwd=self.root, env=environment, check=True, capture_output=True, text=True)
+        self.assertEqual(result.stdout.strip(), "command line|/bin/false|command line|/dev/null")
+
     @unittest.skipUnless(platform.system() == "Linux" and shutil.which("strace") and shutil.which("gcc"),
                          "Linux strace and GCC are required")
     def test_kernel_capture_ignores_directory_symlinks_named_like_dependency_files(self):

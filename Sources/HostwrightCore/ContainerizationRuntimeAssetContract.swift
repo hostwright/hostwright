@@ -5,16 +5,16 @@ public enum ContainerizationRuntimeAssetContract {
     public static let frameworkRevision = "44bec8b9933bc491d0cbf44abac90a1f6aaebf6b"
 
     public static let initImageManifestDigest =
-        "e61c8654a20b4b9ec90ae2673764a96aac9bd3054c9d2c9b5c1393f0adbf67f0"
+        "b3b054594e1b3bf6a21683f2a26074ceff73409ac538b86b2e9513e849d9b325"
     public static let initImageManifestSize: Int64 = 406
     public static let initImageConfigurationDigest =
-        "76509f206856f255171e27a20feaf5fa314d6b9d8cb6959efd6410948a1c70fb"
+        "d5ed2e2c7255c07724bb8a2eded642eb3a4f7a7d4b83441b7075f6682336738e"
     public static let initImageConfigurationSize: Int64 = 151
     public static let initImageLayerDigest =
-        "33370a8dbc5994627e107cbe34cc44761fd97c6d2cce0b0fae465f56eca808e1"
-    public static let initImageLayerSize: Int64 = 67_223_030
+        "ffd2251deae40a37b6ba2728ebd4e47edf3ef90a16c1149da28b1f0411d2980c"
+    public static let initImageLayerSize: Int64 = 67_223_020
     public static let initImageIndexJSONSHA256 =
-        "00a14b7036af9ed9f5d29775059870ebaf41fbe5b7953a90441c21cbbbf98285"
+        "bef61a59416346b17767bd3b1f4dc340a5beb3bcfb3439489b4d8412b2cc3563"
     public static let initImageIndexJSONSize: Int64 = 240
     public static let initImageLayoutSHA256 =
         "18f0797eab35a4597c1e9624aa4f15fd91f6254e5538c1e0d193b2a95dd4acc6"

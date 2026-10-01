@@ -354,6 +354,46 @@ class ObjectSourceTests(unittest.TestCase):
         self.assertEqual([(item["project"], item["path"]) for item in verified],
                          [("swift-sdk/example", "value.swift")])
 
+    def test_relocated_swift_response_file_is_read_from_restored_build_root(self):
+        (self.build / "compile_commands.json").unlink()
+        source = self.project / "value.swift"
+        source.write_text("public func value() -> Int { 7 }\n")
+        self.pin_current_files()
+        copied_source = self.build / "value.swift"
+        copied_source.write_bytes(source.read_bytes())
+        output = self.build / "value.o"
+        output.write_bytes(b"compiled Swift WMO object fixture")
+        self.archive([output])
+        response = self.build / "sources.rsp"
+        response.write_text(shlex.quote(str(copied_source)) + "\n")
+        response_bytes = response.read_bytes()
+        argv = ["swiftc", "-whole-module-optimization", "-o", str(output), "@" + str(response)]
+        trace = self.root / "relocated-swift.trace"
+        trace.write_text("\n".join([
+            f'51 123.456 execve("/toolchain/bin/swiftc", {json.dumps(argv)}, 0xffff /* 20 vars */) = 0 <0.001>',
+            f'51 123.457 openat(AT_FDCWD<{self.build}>, "{copied_source}", O_RDONLY) = 3<{copied_source}> <0.001>',
+            '51 123.458 exit_group(0) = ?',
+        ]) + "\n")
+
+        relocated_build = self.root / "restored-build"
+        self.build.rename(relocated_build)
+        result = C.capture(self.sources, [relocated_build], self.sdk, self.pins,
+            traces=[trace], relocations=[(self.build, relocated_build)], trace_cwd=self.build,
+            generated_output=self.root / "relocated-retained",
+            external_header_roots=[relocated_build])
+        self.assertFalse(response.exists())
+        self.assertEqual(result["counts"]["mappedMembers"], 1)
+        record = result["sourceMap"][0]
+        document = C.V.parse(C.V.bound(record["compilerInputs"],
+            lambda name: (self.root / C.V.path(name)).read_bytes()))
+        response_record = document["compilerResponseFiles"][0]
+        self.assertEqual((self.root / response_record["file"]["path"]).read_bytes(),
+                         response_bytes)
+        verified = C.V.native_source_files(record,
+            lambda name: (self.root / C.V.path(name)).read_bytes())
+        self.assertEqual([(item["project"], item["path"]) for item in verified],
+                         [("swift-sdk/example", "value.swift")])
+
     def test_generated_swift_template_and_pcm_are_retained_and_verified(self):
         (self.build / "compile_commands.json").unlink()
         template = self.project / "Template.swift.gyb"
@@ -434,6 +474,51 @@ class ObjectSourceTests(unittest.TestCase):
         self.assertIn("vars */", trace.read_text())
         self.assertNotIn('"PWD=', trace.read_text())
         self.assertEqual(self.capture(traces=[trace], trace_cwd=self.build)["counts"]["mappedMembers"], 1)
+
+    def test_default_compiler_output_requires_one_final_source_argument(self):
+        self.assertEqual(C.compiler_object_output(["clang", "-target", "aarch64-linux-gnu", "-c", "source.c"]),
+                         "source.o")
+        self.assertIsNone(C.compiler_object_output(["clang", "-c", "first.c", "second.c"]))
+        self.assertIsNone(C.compiler_object_output(["clang", "-include", "source.c", "-c"]))
+        self.assertIsNone(C.compiler_object_output(["clang", "-c", "-include", "source.c"]))
+        self.assertIsNone(C.compiler_object_output(["clang", "-c", "source.c", "-MD"]))
+        self.assertIsNone(C.compiler_object_output(["clang", "-c", "source.c", "-o", "one.o", "-o", "two.o"]))
+
+    def test_implicit_clang_output_maps_successful_trace_and_rejects_failed_invocation(self):
+        (self.build / "compile_commands.json").unlink()
+        arguments = [argument for index, argument in enumerate(self.arguments)
+                     if index not in (self.arguments.index("-o"), self.arguments.index("-o") + 1)]
+        subprocess.run(arguments, cwd=self.build, check=True, capture_output=True)
+        output = self.build / "value.o"
+        self.assertTrue(output.is_file())
+        self.archive([output])
+        trace = self.root / "implicit-output.trace"
+        if shutil.which("strace"):
+            subprocess.run(["strace", "-f", "-qq", "-ttt", "-yy", "-s", "1048576", "-e",
+                            "trace=%process,%file", "-o", str(trace), *arguments],
+                           cwd=self.build, check=True, capture_output=True)
+        else:
+            lines = [f'51 123.456 execve({json.dumps(arguments[0])}, {json.dumps(arguments)}, 0xffff /* 10 vars */) = 0 <0.001>']
+            for name in ("value.c", "value.h"):
+                filename = str(self.project / name)
+                lines.append(f'51 123.457 openat(AT_FDCWD, "{filename}", O_RDONLY) = 3<{filename}> <0.001>')
+            lines.append('51 123.458 exit_group(0) = ?')
+            trace.write_text("\n".join(lines) + "\n")
+        result = self.capture(traces=[trace], trace_cwd=self.build,
+                              generated_output=self.root / "implicit-output-retained")
+        self.assertEqual(result["counts"]["mappedMembers"], 1)
+        record = result["sourceMap"][0]
+        self.assertEqual(record["objectSHA256"], C.digest_file(output))
+        full = self.full_inputs(record)
+        self.assertEqual({row["path"] for row in full["translationUnits"]}, {"value.c"})
+        self.assertEqual({row["path"] for row in full["sourceFiles"]}, {"value.c", "value.h"})
+        self.assertEqual({row["sha256"] for row in full["sourceFiles"]},
+                         {C.V.digest((self.project / name).read_bytes()) for name in ("value.c", "value.h")})
+
+        failed = trace.read_text().replace("exit_group(0)", "exit_group(1)")
+        failed = failed.replace("+++ exited with 0 +++", "+++ exited with 1 +++")
+        trace.write_text(failed)
+        self.assertEqual(self.capture(traces=[trace], trace_cwd=self.build)["sourceMap"], [])
 
     @unittest.skipUnless(shutil.which("strace"), "real Linux strace is required")
     def test_real_strace_child_process_attributes_assembly_translation_unit(self):

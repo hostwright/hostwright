@@ -121,17 +121,4 @@ mapfile -t archives < "$records/product-archives.txt"
 (( ${#archives[@]} == 1 )) || { echo "expected one static Swift SDK archive" >&2; exit 65; }
 cp "${archives[0]}" "$records/swift-static-sdk.tar.gz"
 sha256sum "$records/swift-static-sdk.tar.gz" > "$records/swift-static-sdk.sha256"
-printf '%s Capturing SDK source and build inputs\n' "$(date -u +%FT%TZ)"
-python3 "$repo_root/scripts/release/capture-swift-sdk-build-inputs.py" \
-  --sources "$root" --build "$build_dir" --sdk-archive "$records/swift-static-sdk.tar.gz" \
-  --output "$records/build-inputs"
-printf '%s Mapping SDK objects to their compiler inputs\n' "$(date -u +%FT%TZ)"
-python3 "$repo_root/scripts/release/capture-sdk-object-sources.py" \
-  --sources "$root" --build "$build_dir" --sdk-root "$build_dir/sdk_root/aarch64" \
-  --sdk-build-inputs "$records/build-inputs/build-inputs.json" \
-  --trace "$records/build.trace" --trace-cwd "$build_working_directory" \
-  --generated-output "$records/build-inputs/generated-headers" \
-  --output "$records/build-inputs/sdk-object-sources.json"
-printf '%s Hashing complete SDK evidence\n' "$(date -u +%FT%TZ)"
-(cd "$records" && find . -type f ! -name checksums.sha256 -print0 | sort -z | xargs -0 sha256sum) > "$records/checksums.sha256"
-printf '%s SDK evidence complete\n' "$(date -u +%FT%TZ)"
+printf '%s SDK compilation complete; ready for authenticated checkpoint\n' "$(date -u +%FT%TZ)"

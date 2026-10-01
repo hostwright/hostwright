@@ -140,6 +140,10 @@ jobs:
           python3 scripts/release/test-capture-native-patches.py
           python3 scripts/release/test-capture-swift-sdk-build-inputs.py
           python3 scripts/release/test-capture-sdk-object-sources.py
+          python3 scripts/release/test-sdk-build-checkpoint.py
+          python3 scripts/release/test-sdk-checkpoint-workflow.py
+          python3 scripts/release/test-verify-sdk-reuse.py
+          python3 scripts/release/test-recover-sdk-object-sources.py
           python3 scripts/release/test-prepare-native-source-projects.py
           python3 scripts/release/test-prepare-reviewed-native-sources.py
           python3 scripts/release/test-prepare-native-runtime-provenance.py

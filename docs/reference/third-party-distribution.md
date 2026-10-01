@@ -41,7 +41,9 @@ source/license qualification.
 ## Runtime producer and signing handoff
 
 The runtime producer rebuilds the Linux kernel, guest binaries and Go loader twice
-and requires matching payload bytes. The signed Linux source archive, applied
+and requires matching payload bytes. It installs the authenticated Swift SDK under
+the build directory to keep the SDK path independent of the user's home directory. The
+signed Linux source archive, applied
 patches, actual configuration, compiler/linker inputs, selected source files,
 complete source inventories and license texts form the corresponding-source
 closure. The guest OCI layout contains a direct image manifest. Its descriptor,
@@ -49,13 +51,37 @@ configuration and layer are locked to rebuilt bytes; it is not the previously
 published GHCR image.
 
 Dispatch `runtime-ingredients.yml` on the reviewed `main` commit. A successful
-loader-only push run is insufficient. The manual run must complete the source-built
-Swift SDK, native runtime, loader and final provenance jobs. The final artifact is
+loader-only push run is insufficient. The manual run must complete SDK evidence
+selection, native runtime, loader and final provenance jobs. The SDK may come from
+a new compilation or an authenticated retained producer. The final artifact is
 `runtime-provenance-<source SHA>-<run ID>-<attempt>` and contains exactly
 `runtime-provenance.tar.gz`. The manifest and every runtime payload receive GitHub
-attestations from that workflow. Retry with all jobs: each attempt has distinct
-artifact names, so successful jobs from an earlier attempt cannot supply a later
-attempt's handoff.
+attestations from that workflow. Rerun failed jobs to reuse successful upstream
+artifacts. Consumers use each upstream job's original artifact name and authenticate
+its original run attempt; the final handoff is attested by the assembling attempt.
+
+The SDK compiler job retains an authenticated
+`runtime-swift-sdk-checkpoint-<source SHA>-<run ID>-<attempt>` for seven days before
+source mapping begins. It contains compiled SDK bytes, raw object/archive inputs,
+source checkouts, compiler traces, build metadata and referenced temporary sources.
+Host executables outside the SDK are omitted with recorded hashes. Evidence
+collection restores these inputs in a separate job and never runs the SDK compiler.
+A checkpoint is not qualified runtime evidence until source verification passes.
+
+After merging an evidence-only fix, dispatch the workflow on `main` with both
+`sdk_checkpoint_run` and `sdk_checkpoint_attempt` set to the original SDK producer.
+The resolver prefers a complete `runtime-swift-sdk` artifact from that exact
+attempt, falling back to its raw build checkpoint. The consumer authenticates the
+original source SHA, workflow, run, attempt and archive hashes, requires that source
+to be an ancestor of the current commit, and compares source pins, patches,
+materialization, compiler configuration and build steps. Changed compilation inputs
+refuse reuse. Retained inventories must match those source pins; selected runtime
+objects still require complete source evidence. An uploaded SDK alone does not
+establish source qualification. Recovery writes new evidence without replacing the
+original authenticated files. The native runtime still rebuilds twice from the
+current source.
+Leave both inputs empty when a new SDK compilation is required. Checkpoints use
+artifact storage, so retain/download them deliberately before their expiry.
 
 The signing consumer verifies the exact source commit, repository, main ref,
 workflow, run, attempt and payload digests. A valid attestation from another run or

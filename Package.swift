@@ -816,6 +816,9 @@ let package = Package(
                 "HostwrightDistribution",
                 "HostwrightState",
                 "HostwrightStorage"
+            ],
+            resources: [
+                .process("Fixtures")
             ]
         ),
         .testTarget(

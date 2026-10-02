@@ -1,0 +1,58 @@
+{
+  "artifactID" : "hostwright-0.0.2-dev.12-macos-arm64-714140051049",
+  "createdDirectories" : [
+    "bin",
+    "share",
+    "share/doc",
+    "share/doc/hostwright",
+    "share/hostwright",
+    "share/hostwright/examples"
+  ],
+  "files" : [
+    {
+      "mode" : 493,
+      "path" : "bin/hostwright",
+      "sha256" : "6207e04d4630e10d75dd4e740f5a68647a8c848b845b98172bb4bb08cd7d8caf",
+      "sizeBytes" : 4970544
+    },
+    {
+      "mode" : 493,
+      "path" : "bin/hostwright-control",
+      "sha256" : "dbc04f58b19e64c68be85482af167f473028493bd3ec8e71c66c25eac987fb3f",
+      "sizeBytes" : 5094368
+    },
+    {
+      "mode" : 493,
+      "path" : "bin/hostwright-dist",
+      "sha256" : "f99d0dfc4a74e3ae40f5e97c7fb70eafed0749547adb82973348db0083f9182c",
+      "sizeBytes" : 4763776
+    },
+    {
+      "mode" : 493,
+      "path" : "bin/hostwrightd",
+      "sha256" : "5ec0be06a0afc0a10265358d8ecb2af7ab193350715765c4bb9d1a9d659ef82b",
+      "sizeBytes" : 4267408
+    },
+    {
+      "mode" : 420,
+      "path" : "share/doc/hostwright/LICENSE",
+      "sha256" : "01b928a7846acbaad3d17de5ad5c33b463f5133fcfb21ca15ca997c646055f9f",
+      "sizeBytes" : 11356
+    },
+    {
+      "mode" : 420,
+      "path" : "share/doc/hostwright/README.md",
+      "sha256" : "01a6e2c77e99a1fdb5889ddabd5e5649a301c47120214cc63be5680810c0b38b",
+      "sizeBytes" : 7713
+    },
+    {
+      "mode" : 420,
+      "path" : "share/hostwright/examples/hostwright.yaml",
+      "sha256" : "3b8e8cd25121b5646dba2db0a690f23ff708de1709f8e0c444cf172dd4b72a14",
+      "sizeBytes" : 248
+    }
+  ],
+  "packageVersion" : "0.0.2-dev.12",
+  "schemaVersion" : 2,
+  "sourceCommit" : "71414005104933d8ee3591e8c91bc831bce2e2a2"
+}

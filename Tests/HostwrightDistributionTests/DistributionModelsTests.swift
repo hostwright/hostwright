@@ -88,6 +88,76 @@ final class DistributionModelsTests: XCTestCase {
     private let commit = String(repeating: "a", count: 40)
     private let digest = String(repeating: "b", count: 64)
 
+    func testInstallManifestAcceptsActualPublishedDev12SchemaTwo() throws {
+        let fixture = try XCTUnwrap(Bundle.module.url(
+            forResource: "dev12-install-manifest", withExtension: "json"
+        ))
+        XCTAssertEqual(
+            try DistributionHash.sha256(fileURL: fixture),
+            "945ac49fcc5f35433e248de739540e931e79782a505841b1d164901757980f86"
+        )
+        let manifest = try DistributionJSON.decode(DistributionInstallManifest.self, from: fixture)
+        XCTAssertEqual(manifest.schemaVersion, 2)
+        XCTAssertEqual(manifest.sourceCommit, "71414005104933d8ee3591e8c91bc831bce2e2a2")
+        XCTAssertEqual(manifest.packageVersion, "0.0.2-dev.12")
+        XCTAssertEqual(manifest.files.count, 7)
+        XCTAssertNoThrow(try manifest.validate())
+    }
+
+    func testPublishedDev12InstallManifestRejectsModifiedLayoutsAndMetadata() throws {
+        let fixture = try XCTUnwrap(Bundle.module.url(
+            forResource: "dev12-install-manifest", withExtension: "json"
+        ))
+        let manifest = try DistributionJSON.decode(DistributionInstallManifest.self, from: fixture)
+        let first = try XCTUnwrap(manifest.files.first)
+        let changedMode = DistributionFileRecord(
+            path: first.path, sha256: first.sha256, sizeBytes: first.sizeBytes, mode: 0o644
+        )
+        let invalidDigest = DistributionFileRecord(
+            path: first.path, sha256: "invalid", sizeBytes: first.sizeBytes, mode: first.mode
+        )
+        let addedHelper = DistributionFileRecord(
+            path: "bin/hostwright-containerization-helper",
+            sha256: first.sha256, sizeBytes: first.sizeBytes, mode: 0o755
+        )
+        for files in [
+            Array(manifest.files.dropLast()),
+            (manifest.files + [addedHelper]).sorted { $0.path < $1.path },
+            (manifest.files + [first]).sorted { $0.path < $1.path },
+            [changedMode] + manifest.files.dropFirst(),
+            [invalidDigest] + manifest.files.dropFirst(),
+            Array(manifest.files.reversed())
+        ] {
+            let changed = DistributionInstallManifest(
+                schemaVersion: 2, artifactID: manifest.artifactID,
+                sourceCommit: manifest.sourceCommit, packageVersion: manifest.packageVersion,
+                files: files, createdDirectories: manifest.createdDirectories
+            )
+            XCTAssertThrowsError(try changed.validate())
+        }
+        let unknownSchema = DistributionInstallManifest(
+            schemaVersion: 99, artifactID: manifest.artifactID,
+            sourceCommit: manifest.sourceCommit, packageVersion: manifest.packageVersion,
+            files: manifest.files, createdDirectories: manifest.createdDirectories
+        )
+        XCTAssertThrowsError(try unknownSchema.validate())
+    }
+
+    func testInstallationStatusAcceptsPublishedDev12NestedSchemaTwoManifest() throws {
+        let fixture = try XCTUnwrap(Bundle.module.url(
+            forResource: "dev12-installation-status", withExtension: "json"
+        ))
+        let manifestFixture = try XCTUnwrap(Bundle.module.url(
+            forResource: "dev12-install-manifest", withExtension: "json"
+        ))
+        let status = try DistributionJSON.decode(DistributionInstallationStatus.self, from: fixture)
+        let manifest = try DistributionJSON.decode(DistributionInstallManifest.self, from: manifestFixture)
+        XCTAssertEqual(status.installedManifest, manifest)
+        XCTAssertEqual(status.installationSource, .package)
+        XCTAssertEqual(status.packageVersion, "0.0.2.12")
+        XCTAssertNoThrow(try status.validate())
+    }
+
     func testPostCommitCleanupReportsPendingWithoutTurningCommittedMutationIntoFailure() {
         let extraction = URL(fileURLWithPath: "/tmp/hostwright-dist-lifecycle-extract-test")
         let pending = DistributionPostCommitCleanup.removeOwnedTemporaryItem(extraction) { _ in

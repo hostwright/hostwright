@@ -887,10 +887,11 @@ public struct TrustedReleaseBuilder: Sendable {
         cancellation: SecureSubprocessCancellation,
         commands: inout [HostwrightEvidenceCommand]
     ) throws -> DistributionArtifactDescriptor {
+        let subjectKeyIdentifier = try TrustedCMSSigningCertificate.subjectKeyIdentifier(for: identity)
         let sign = try runner.run(
             executablePath: "/usr/bin/security",
             arguments: [
-                "cms", "-S", "-N", identity.commonName,
+                "cms", "-S", "-Z", subjectKeyIdentifier,
                 "-G", "-H", "SHA256", "-T",
                 "-i", input.path, "-o", output.path
             ],
@@ -911,6 +912,11 @@ public struct TrustedReleaseBuilder: Sendable {
             cancellation: cancellation
         )
         commands.append(record("verify detached CMS for \(input.lastPathComponent)", verify))
+        let signer = try TrustedCMSSignerInspector.inspect(signature: output, detachedContent: input)
+        guard signer.sha1Fingerprint == identity.sha1Fingerprint,
+              signer.commonName == identity.commonName else {
+            throw DistributionError.invalidArtifact("detached CMS signer does not match the exact selected Developer ID identity")
+        }
         return try descriptor(output, cancellation: cancellation)
     }
 

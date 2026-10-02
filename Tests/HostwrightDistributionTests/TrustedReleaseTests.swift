@@ -1093,6 +1093,283 @@ final class TrustedReleaseTests: XCTestCase {
         XCTAssertTrue(workflow.contains("resolved_commit\" != \"$RELEASE_COMMIT"))
     }
 
+    func testCMSSigningCertificateRequiresExactFingerprintAndCommonName() throws {
+        let identity = makeManifest().applicationSigner
+        let selected = TrustedCMSSigningCertificate.Record(
+            sha1Fingerprint: identity.sha1Fingerprint,
+            commonName: identity.commonName,
+            subjectKeyIdentifier: Data([0x01, 0xab, 0xff])
+        )
+        let unrelated = TrustedCMSSigningCertificate.Record(
+            sha1Fingerprint: String(repeating: "C", count: 40),
+            commonName: identity.commonName,
+            subjectKeyIdentifier: Data([0x02])
+        )
+        XCTAssertEqual(try TrustedCMSSigningCertificate.selectSubjectKeyIdentifier(
+            for: identity, certificates: [unrelated, selected]
+        ), "01ABFF")
+        XCTAssertThrowsError(try TrustedCMSSigningCertificate.selectSubjectKeyIdentifier(
+            for: identity, certificates: []
+        ))
+        XCTAssertThrowsError(try TrustedCMSSigningCertificate.selectSubjectKeyIdentifier(
+            for: identity, certificates: [unrelated]
+        ))
+        for name in [nil, "Developer ID Application: Wrong Project (A1B2C3D4E5)"] {
+            let wrongName = TrustedCMSSigningCertificate.Record(
+                sha1Fingerprint: identity.sha1Fingerprint,
+                commonName: name,
+                subjectKeyIdentifier: selected.subjectKeyIdentifier
+            )
+            XCTAssertThrowsError(try TrustedCMSSigningCertificate.selectSubjectKeyIdentifier(
+                for: identity, certificates: [wrongName]
+            ))
+        }
+    }
+
+    func testCMSSigningCertificateRejectsMissingAndAmbiguousIdentifiers() throws {
+        let identity = makeManifest().applicationSigner
+        for identifier in [nil, Data()] {
+            let missingIdentifier = TrustedCMSSigningCertificate.Record(
+                sha1Fingerprint: identity.sha1Fingerprint,
+                commonName: identity.commonName,
+                subjectKeyIdentifier: identifier
+            )
+            XCTAssertThrowsError(try TrustedCMSSigningCertificate.selectSubjectKeyIdentifier(
+                for: identity, certificates: [missingIdentifier]
+            ))
+        }
+        let selected = TrustedCMSSigningCertificate.Record(
+            sha1Fingerprint: identity.sha1Fingerprint,
+            commonName: identity.commonName,
+            subjectKeyIdentifier: Data([0x01])
+        )
+        let renewedCertificate = TrustedCMSSigningCertificate.Record(
+            sha1Fingerprint: String(repeating: "C", count: 40),
+            commonName: identity.commonName,
+            subjectKeyIdentifier: selected.subjectKeyIdentifier
+        )
+        for certificates in [[selected, selected], [selected, renewedCertificate]] {
+            XCTAssertThrowsError(try TrustedCMSSigningCertificate.selectSubjectKeyIdentifier(
+                for: identity, certificates: certificates
+            ))
+        }
+    }
+
+    func testCMSDecoderAuthenticatesPublicDetachedFixtureAndReadsActualSubjectKeyIdentifier() throws {
+        let fixture = try detachedCMSFixture()
+        let signer = try TrustedCMSSignerInspector.verifiedSigner(
+            signatureData: fixture.signature, contentData: fixture.content
+        )
+        let record = try TrustedCMSSigningCertificate.record(signer.certificate)
+        XCTAssertEqual(record.sha1Fingerprint, "A6CFABEC0AA50ABE00A745BAFA83BC24783AA5DB")
+        let identity = TrustedReleaseIdentity(
+            kind: .application,
+            sha1Fingerprint: record.sha1Fingerprint,
+            commonName: try XCTUnwrap(record.commonName),
+            teamIdentifier: "993YC3JY4Q"
+        )
+        XCTAssertEqual(try TrustedCMSSigningCertificate.selectSubjectKeyIdentifier(
+            for: identity, certificates: [record]
+        ), "C502C6F9B8148AA6B7D6A2D018787F1DE134569E")
+    }
+
+    func testCMSDecoderRejectsTamperedDetachedContentDespiteUnchangedSignerCertificate() throws {
+        let fixture = try detachedCMSFixture()
+        var tampered = fixture.content
+        tampered[0] ^= 1
+        XCTAssertThrowsError(try TrustedCMSSignerInspector.verifiedSigner(
+            signatureData: fixture.signature, contentData: tampered
+        )) { error in
+            XCTAssertEqual(error as? DistributionError, .invalidArtifact(
+                "detached CMS signature does not authenticate its content"
+            ))
+        }
+    }
+
+    func testCMSDecoderRejectsEmbeddedContentForMatchingAndDifferentDetachedInput() throws {
+        let fixture = try detachedCMSFixture()
+        let signature = """
+        MIAGCSqGSIb3DQEHAqCAMIACAQExDzANBglghkgBZQMEAgEFADCABgkqhkiG9w0BBwGggCSABIH3SG9zdHdyaWdodCBkZXRhY2hl
+        ZCBDTVMgc2VsZWN0aW9uIGRpYWdub3N0aWMgb25seS4gVGhpcyBpcyBub3QgYSByZWxlYXNlIG1hbmlmZXN0LCBjaGVja3N1bSwg
+        cHJvdmVuYW5jZSBzdGF0ZW1lbnQsIG9yIGF1dGhvcml6YXRpb24uClNvdXJjZSA1MWM5NGNjMDgxNjcxY2UyZDNkZTFhYmFhMTI3
+        MDYwNDJhY2MxMDhjOyBmYWlsZWQgcnVuMzY5Njk5NTE3MTkgYXR0ZW1wdDIuCjIwMjYtMTAtMDJUMTA6MzE6MjUuMzQ4NDkyKzAw
+        OjAwCgAAAAAAAKCCCggwggQ+MIIDJqADAgECAhR/tAA/zZdJesuDTZKkinhzwoRdQzANBgkqhkiG9w0BAQsFADBiMQswCQYDVQQG
+        EwJVUzETMBEGA1UEChMKQXBwbGUgSW5jLjEmMCQGA1UECxMdQXBwbGUgQ2VydGlmaWNhdGlvbiBBdXRob3JpdHkxFjAUBgNVBAMT
+        DUFwcGxlIFJvb3QgQ0EwHhcNMjEwOTIyMTg1NTEwWhcNMzEwOTE3MDAwMDAwWjBeMS0wKwYDVQQDDCREZXZlbG9wZXIgSUQgQ2Vy
+        dGlmaWNhdGlvbiBBdXRob3JpdHkxCzAJBgNVBAsMAkcyMRMwEQYDVQQKDApBcHBsZSBJbmMuMQswCQYDVQQGEwJVUzCCASIwDQYJ
+        KoZIhvcNAQEBBQADggEPADCCAQoCggEBANMslWghVJGKv2VxwhhO9s0N4ZEoddcDupUf0xKZUkTegEZn/CmLAIWIijCHTUxuSrTH
+        5QLj12NMqszq7NtCL5F9JelfpEsqVG8XrDCfKSg0pH+P5XjjXSMqIUbQicNf+GqXnXEbGKiyDMkDCjWyAqct9bPcG4PFJyFAcqbn
+        N3Yx57sGv3Sy9nCsTKwtzcleRYvP+wjmYtVAlbU3XMwbDuHv3KXljclQt0CfCiMlRUCPlGd74JTqOdN4pTTRwsvgM38utizD5SbV
+        Jc6qjSp3/J4Ulpfg9V8u8uincac7o5lMeiKjTe9wEdXWhoGC8WczkzNaQLGSxKpzlh3EXP/h6zcCAwEAAaOB7zCB7DASBgNVHRMB
+        Af8ECDAGAQH/AgEAMB8GA1UdIwQYMBaAFCvQaUeUdgn+9GuNLkCm90dNfwheMEQGCCsGAQUFBwEBBDgwNjA0BggrBgEFBQcwAYYo
+        aHR0cDovL29jc3AuYXBwbGUuY29tL29jc3AwMy1hcHBsZXJvb3RjYTAuBgNVHR8EJzAlMCOgIaAfhh1odHRwOi8vY3JsLmFwcGxl
+        LmNvbS9yb290LmNybDAdBgNVHQ4EFgQU+DoMaRF24O2s0eumWfo31cRVsB4wDgYDVR0PAQH/BAQDAgEGMBAGCiqGSIb3Y2QGAgYE
+        AgUAMA0GCSqGSIb3DQEBCwUAA4IBAQDB/UMKWb/xsbdDEFrWGDIwFFYm4RFIYytpcpdIH45byl4mFft0I4AzVDMZoSKGWti4S2mq
+        p86WlsIKxzVq0G/OimmDYm1KOfX+g03XotSIH+2IwA/4+TMetBC3wlwRN0Q3BLCkRJ2MaA17fR1+zLWT8NZvPRV6gKV00+GPfdKI
+        6DGnmMUf3+KCWa6AgWBGFuyeuYpAqhsq4WGGCoxwD9lKLOxMogUR1nmMpWMlISMCb5NbWleh10Vt38z3f59f28ftZKdvRC9vTT14
+        eApWtDvXOsgrZaKT6ttY6o7UucTAMPwyGk26kgwkOZiCOqCZ3ufk5LwOvIWvWqtc0PzbzBDDMIIFwjCCBKqgAwIBAgIQBq1ozfR9
+        MElhwR5DvSs1gTANBgkqhkiG9w0BAQsFADBeMS0wKwYDVQQDDCREZXZlbG9wZXIgSUQgQ2VydGlmaWNhdGlvbiBBdXRob3JpdHkx
+        CzAJBgNVBAsMAkcyMRMwEQYDVQQKDApBcHBsZSBJbmMuMQswCQYDVQQGEwJVUzAeFw0yNjA3MTYxNjQzMzNaFw0zMTA3MTcxNjQz
+        MzJaMIGRMRowGAYKCZImiZPyLGQBAQwKOTkzWUMzSlk0UTE7MDkGA1UEAwwyRGV2ZWxvcGVyIElEIEFwcGxpY2F0aW9uOiBEZXYg
+        VHJpdmVkaSAoOTkzWUMzSlk0USkxEzARBgNVBAsMCjk5M1lDM0pZNFExFDASBgNVBAoMC0RldiBUcml2ZWRpMQswCQYDVQQGEwJV
+        UzCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAK6JaMYMzUffrf4dKaxvnKJ+Wk8i5I1lofjwMY8vo107NROTNZOe7YPo
+        756vEv8vRn/M0U4V+d8Pi21Ws4/6BPy/GLNPYw6bqP3KcIP67yGtqTxOdu5esr2Aly6CNoFStouBmNuEiI8RyTZSHvwhzZSbjtK6
+        KZybTXs3l+KZM82Lh/pl6urPtXeHWP8xlHXiPYSaWQaC+VEkOydzyyk7Km5MGns128ob4VU9dKVsjF/OzoKEaKqYNOWbGDsLZu4v
+        p3Ec14kwVdcWLOf7LNMzDU1qCdjJla9nT0/wQVWO7Kk07fK29z+oxbExlXpCOXkExGrRBaeeN+/gEjwetRlSiVcCAwEAAaOCAkYw
+        ggJCMAwGA1UdEwEB/wQCMAAwHwYDVR0jBBgwFoAU+DoMaRF24O2s0eumWfo31cRVsB4wcgYIKwYBBQUHAQEEZjBkMC4GCCsGAQUF
+        BzAChiJodHRwOi8vY2VydHMuYXBwbGUuY29tL2RldmlkZzIuZGVyMDIGCCsGAQUFBzABhiZodHRwOi8vb2NzcC5hcHBsZS5jb20v
+        b2NzcDAzLWRldmlkZzIwMTCCAR4GA1UdIASCARUwggERMIIBDQYJKoZIhvdjZAUBMIH/MIHDBggrBgEFBQcCAjCBtgyBs1JlbGlh
+        bmNlIG9uIHRoaXMgY2VydGlmaWNhdGUgYnkgYW55IHBhcnR5IGFzc3VtZXMgYWNjZXB0YW5jZSBvZiB0aGUgdGhlbiBhcHBsaWNh
+        YmxlIHN0YW5kYXJkIHRlcm1zIGFuZCBjb25kaXRpb25zIG9mIHVzZSwgY2VydGlmaWNhdGUgcG9saWN5IGFuZCBjZXJ0aWZpY2F0
+        aW9uIHByYWN0aWNlIHN0YXRlbWVudHMuMDcGCCsGAQUFBwIBFitodHRwczovL3d3dy5hcHBsZS5jb20vY2VydGlmaWNhdGVhdXRo
+        b3JpdHkvMBYGA1UdJQEB/wQMMAoGCCsGAQUFBwMDMB0GA1UdDgQWBBTFAsb5uBSKprfWotAYeH8d4TRWnjAOBgNVHQ8BAf8EBAMC
+        B4AwHwYKKoZIhvdjZAYBIQQRDA8yMDI2MDcxNjAwMDAwMFowEwYKKoZIhvdjZAYBDQEB/wQCBQAwDQYJKoZIhvcNAQELBQADggEB
+        AClQISmizPTS22uM+YudGY9qludeDqTBb/rCZU5YRJ3txwANtpJ98OUf3VlyKHSaJb5HA2h9a+GghoEdyK1Iwiaftrvh8kmAyuV9
+        NdvT/c5Ei4enUhR2kYPH3u1a7z+RqVC48k47zcg6gC8XvvV/kOn2jxHHAIcLfT+Ndv5w51x+BIypmuUC5QL63b2T0AqXbtOT0R4o
+        HOcIVwYwJoSGSNWHniTLeEyam8EK4azOh93eyi6q90nskPK/rPZmlNvoLwhvhl5+ZIWj0n1n08bF3xtu/yTRC6oE+2oicUupaD8+
+        1JYrXiOf/58pLnUSsTE3VbWvqGxBK4sSFka+D1dQ7UYxggMUMIIDEAIBATByMF4xLTArBgNVBAMMJERldmVsb3BlciBJRCBDZXJ0
+        aWZpY2F0aW9uIEF1dGhvcml0eTELMAkGA1UECwwCRzIxEzARBgNVBAoMCkFwcGxlIEluYy4xCzAJBgNVBAYTAlVTAhAGrWjN9H0w
+        SWHBHkO9KzWBMA0GCWCGSAFlAwQCAQUAoIIBczAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEw
+        MDIxMTAwMTlaMC8GCSqGSIb3DQEJBDEiBCAxFYImARnzmTw4n6T6WONkW/JTE1AyQNvEMMYFqDtUizCBgQYJKwYBBAGCNxAEMXQw
+        cjBeMS0wKwYDVQQDDCREZXZlbG9wZXIgSUQgQ2VydGlmaWNhdGlvbiBBdXRob3JpdHkxCzAJBgNVBAsMAkcyMRMwEQYDVQQKDApB
+        cHBsZSBJbmMuMQswCQYDVQQGEwJVUwIQBq1ozfR9MElhwR5DvSs1gTCBgwYLKoZIhvcNAQkQAgsxdKByMF4xLTArBgNVBAMMJERl
+        dmVsb3BlciBJRCBDZXJ0aWZpY2F0aW9uIEF1dGhvcml0eTELMAkGA1UECwwCRzIxEzARBgNVBAoMCkFwcGxlIEluYy4xCzAJBgNV
+        BAYTAlVTAhAGrWjN9H0wSWHBHkO9KzWBMA0GCSqGSIb3DQEBCwUABIIBAKlqkdJApGjO8WpJCDlyoFwSfkYX2PL6gvZR+MUyDUpb
+        50MF/1f5zDVzNcB9TVQcjf+nHiFjvLhh/Wb2+4LSOQUFU9nlt8qx6TmWDm6HJnz8F0rgZ0948scqh71B4pWKhIlldiEb2oveWEcB
+        QIdB+xmwZjH94Qa1y5BT2WjkZYQ1fA/ZFB2GSdPKogdTmnshzaG3AiDDW3b7VWyf7leQxJ3TzVEdNMa2+pokq+Cnd2UxU9JsnJIv
+        KPXIy6OqJI40c1L3J1dmyHH8YtzSoOK/rCCL0hepv5DjBviimUqV3kl1s4GaweRh6LKVNzyWQt6qN7cCMtMpnuuaBXsVSf4ClDcA
+        AAAAAAA=
+        """
+        let signatureData = try XCTUnwrap(Data(base64Encoded: signature, options: .ignoreUnknownCharacters))
+        for content in [fixture.content, Data("different supplied content".utf8)] {
+            XCTAssertThrowsError(try TrustedCMSSignerInspector.verifiedSigner(
+                signatureData: signatureData, contentData: content
+            )) { error in
+                XCTAssertEqual(error as? DistributionError, .invalidArtifact(
+                    "CMS signature must use detached content"
+                ))
+            }
+        }
+    }
+
+    func testCMSDecoderRejectsEmptyEmbeddedContentWithNonemptyDetachedInput() throws {
+        let fixture = try detachedCMSFixture()
+        let signature = """
+        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
+        deI9hJpZBoL5USQ7J3PLKTsqbkwaezXbyhvhVT10pWyMX87OgoRoqpg05ZsYOwtm7i+ncRzXiTBV1xYs5/ss0zMNTWoJ2MmVr2dP
+        T/BBVY7sqTTt8rb3P6jFsTGVekI5eQTEatEFp5437+ASPB61GVKJVwIDAQABo4ICRjCCAkIwDAYDVR0TAQH/BAIwADAfBgNVHSME
+        GDAWgBT4OgxpEXbg7azR66ZZ+jfVxFWwHjByBggrBgEFBQcBAQRmMGQwLgYIKwYBBQUHMAKGImh0dHA6Ly9jZXJ0cy5hcHBsZS5j
+        b20vZGV2aWRnMi5kZXIwMgYIKwYBBQUHMAGGJmh0dHA6Ly9vY3NwLmFwcGxlLmNvbS9vY3NwMDMtZGV2aWRnMjAxMIIBHgYDVR0g
+        BIIBFTCCAREwggENBgkqhkiG92NkBQEwgf8wgcMGCCsGAQUFBwICMIG2DIGzUmVsaWFuY2Ugb24gdGhpcyBjZXJ0aWZpY2F0ZSBi
+        eSBhbnkgcGFydHkgYXNzdW1lcyBhY2NlcHRhbmNlIG9mIHRoZSB0aGVuIGFwcGxpY2FibGUgc3RhbmRhcmQgdGVybXMgYW5kIGNv
+        bmRpdGlvbnMgb2YgdXNlLCBjZXJ0aWZpY2F0ZSBwb2xpY3kgYW5kIGNlcnRpZmljYXRpb24gcHJhY3RpY2Ugc3RhdGVtZW50cy4w
+        NwYIKwYBBQUHAgEWK2h0dHBzOi8vd3d3LmFwcGxlLmNvbS9jZXJ0aWZpY2F0ZWF1dGhvcml0eS8wFgYDVR0lAQH/BAwwCgYIKwYB
+        BQUHAwMwHQYDVR0OBBYEFMUCxvm4FIqmt9ai0Bh4fx3hNFaeMA4GA1UdDwEB/wQEAwIHgDAfBgoqhkiG92NkBgEhBBEMDzIwMjYw
+        NzE2MDAwMDAwWjATBgoqhkiG92NkBgENAQH/BAIFADANBgkqhkiG9w0BAQsFAAOCAQEAKVAhKaLM9NLba4z5i50Zj2qW514OpMFv
+        +sJlTlhEne3HAA22kn3w5R/dWXIodJolvkcDaH1r4aCGgR3IrUjCJp+2u+HySYDK5X0129P9zkSLh6dSFHaRg8fe7VrvP5GpULjy
+        TjvNyDqALxe+9X+Q6faPEccAhwt9P412/nDnXH4EjKma5QLlAvrdvZPQCpdu05PRHigc5whXBjAmhIZI1YeeJMt4TJqbwQrhrM6H
+        3d7KLqr3SeyQ8r+s9maU2+gvCG+GXn5khaPSfWfTxsXfG27/JNELqgT7aiJxS6loPz7UliteI5//nykudRKxMTdVta+obEErixIW
+        Rr4PV1DtRjGCAxQwggMQAgEBMHIwXjEtMCsGA1UEAwwkRGV2ZWxvcGVyIElEIENlcnRpZmljYXRpb24gQXV0aG9yaXR5MQswCQYD
+        VQQLDAJHMjETMBEGA1UECgwKQXBwbGUgSW5jLjELMAkGA1UEBhMCVVMCEAataM30fTBJYcEeQ70rNYEwDQYJYIZIAWUDBAIBBQCg
+        ggFzMBgGCSqGSIb3DQEJAzELBgkqhkiG9w0BBwEwHAYJKoZIhvcNAQkFMQ8XDTI2MTAwMjExMDE1NVowLwYJKoZIhvcNAQkEMSIE
+        IOOwxEKY/BwUmvv0yJlvuSQnrkHkZJuTTKSVmRt4UrhVMIGBBgkrBgEEAYI3EAQxdDByMF4xLTArBgNVBAMMJERldmVsb3BlciBJ
+        RCBDZXJ0aWZpY2F0aW9uIEF1dGhvcml0eTELMAkGA1UECwwCRzIxEzARBgNVBAoMCkFwcGxlIEluYy4xCzAJBgNVBAYTAlVTAhAG
+        rWjN9H0wSWHBHkO9KzWBMIGDBgsqhkiG9w0BCRACCzF0oHIwXjEtMCsGA1UEAwwkRGV2ZWxvcGVyIElEIENlcnRpZmljYXRpb24g
+        QXV0aG9yaXR5MQswCQYDVQQLDAJHMjETMBEGA1UECgwKQXBwbGUgSW5jLjELMAkGA1UEBhMCVVMCEAataM30fTBJYcEeQ70rNYEw
+        DQYJKoZIhvcNAQELBQAEggEAfefnxn0gaYv/PtkGsQLLBey67KKdqwzYLOyM5tiOV4DTCs7TC3e5rFeK5243Jii0KsLXgST7GHOR
+        0uR7QfYI2INbF9e2uZMPv0PQa/MD8HsAPoLG7RlOlW8iQoxyoOGuFXQ6eNdtbEQXz8+8iMgGWY3MuvZDgH6zzhl383R4oQeCKK8L
+        ECqnp6AG5uQOG/Rtb9NLQtJh30NTlEThti4ugm4lOSUyZoLPTZMTPY1dQFbz9QKIC/nTJBYvGW9BtzypKa2UGFwu7GvxNjfLdjds
+        HYchqPgLjXxv5BUnWgQoalbxsNnBi1z9SIHd/4Tu8/ysFklKP8rdyCpDklokIfsaigAAAAAAAA==
+        """
+        XCTAssertThrowsError(try TrustedCMSSignerInspector.verifiedSigner(
+            signatureData: XCTUnwrap(Data(base64Encoded: signature, options: .ignoreUnknownCharacters)),
+            contentData: fixture.content
+        )) { error in
+            XCTAssertEqual(error as? DistributionError, .invalidArtifact(
+                "detached CMS signature does not authenticate its content"
+            ))
+        }
+    }
+
+    private func detachedCMSFixture() throws -> (signature: Data, content: Data) {
+        // Public detached signature only; cryptographic checks are independent of certificate expiry and network trust.
+        let content = """
+        Hostwright detached CMS selection diagnostic only. This is not a release manifest, checksum, provenance statement, or authorization.
+        Source 51c94cc081671ce2d3de1abaa12706042acc108c; failed run36969951719 attempt2.
+        2026-10-02T10:31:25.348492+00:00
+        """ + "\n"
+        let signature = """
+        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
+        +VEkOydzyyk7Km5MGns128ob4VU9dKVsjF/OzoKEaKqYNOWbGDsLZu4vp3Ec14kwVdcWLOf7LNMzDU1qCdjJla9nT0/wQVWO7Kk0
+        7fK29z+oxbExlXpCOXkExGrRBaeeN+/gEjwetRlSiVcCAwEAAaOCAkYwggJCMAwGA1UdEwEB/wQCMAAwHwYDVR0jBBgwFoAU+DoM
+        aRF24O2s0eumWfo31cRVsB4wcgYIKwYBBQUHAQEEZjBkMC4GCCsGAQUFBzAChiJodHRwOi8vY2VydHMuYXBwbGUuY29tL2Rldmlk
+        ZzIuZGVyMDIGCCsGAQUFBzABhiZodHRwOi8vb2NzcC5hcHBsZS5jb20vb2NzcDAzLWRldmlkZzIwMTCCAR4GA1UdIASCARUwggER
+        MIIBDQYJKoZIhvdjZAUBMIH/MIHDBggrBgEFBQcCAjCBtgyBs1JlbGlhbmNlIG9uIHRoaXMgY2VydGlmaWNhdGUgYnkgYW55IHBh
+        cnR5IGFzc3VtZXMgYWNjZXB0YW5jZSBvZiB0aGUgdGhlbiBhcHBsaWNhYmxlIHN0YW5kYXJkIHRlcm1zIGFuZCBjb25kaXRpb25z
+        IG9mIHVzZSwgY2VydGlmaWNhdGUgcG9saWN5IGFuZCBjZXJ0aWZpY2F0aW9uIHByYWN0aWNlIHN0YXRlbWVudHMuMDcGCCsGAQUF
+        BwIBFitodHRwczovL3d3dy5hcHBsZS5jb20vY2VydGlmaWNhdGVhdXRob3JpdHkvMBYGA1UdJQEB/wQMMAoGCCsGAQUFBwMDMB0G
+        A1UdDgQWBBTFAsb5uBSKprfWotAYeH8d4TRWnjAOBgNVHQ8BAf8EBAMCB4AwHwYKKoZIhvdjZAYBIQQRDA8yMDI2MDcxNjAwMDAw
+        MFowEwYKKoZIhvdjZAYBDQEB/wQCBQAwDQYJKoZIhvcNAQELBQADggEBAClQISmizPTS22uM+YudGY9qludeDqTBb/rCZU5YRJ3t
+        xwANtpJ98OUf3VlyKHSaJb5HA2h9a+GghoEdyK1Iwiaftrvh8kmAyuV9NdvT/c5Ei4enUhR2kYPH3u1a7z+RqVC48k47zcg6gC8X
+        vvV/kOn2jxHHAIcLfT+Ndv5w51x+BIypmuUC5QL63b2T0AqXbtOT0R4oHOcIVwYwJoSGSNWHniTLeEyam8EK4azOh93eyi6q90ns
+        kPK/rPZmlNvoLwhvhl5+ZIWj0n1n08bF3xtu/yTRC6oE+2oicUupaD8+1JYrXiOf/58pLnUSsTE3VbWvqGxBK4sSFka+D1dQ7UYx
+        ggMUMIIDEAIBATByMF4xLTArBgNVBAMMJERldmVsb3BlciBJRCBDZXJ0aWZpY2F0aW9uIEF1dGhvcml0eTELMAkGA1UECwwCRzIx
+        EzARBgNVBAoMCkFwcGxlIEluYy4xCzAJBgNVBAYTAlVTAhAGrWjN9H0wSWHBHkO9KzWBMA0GCWCGSAFlAwQCAQUAoIIBczAYBgkq
+        hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjEwMDIxMDMxMzVaMC8GCSqGSIb3DQEJBDEiBCAxFYImARnz
+        mTw4n6T6WONkW/JTE1AyQNvEMMYFqDtUizCBgQYJKwYBBAGCNxAEMXQwcjBeMS0wKwYDVQQDDCREZXZlbG9wZXIgSUQgQ2VydGlm
+        aWNhdGlvbiBBdXRob3JpdHkxCzAJBgNVBAsMAkcyMRMwEQYDVQQKDApBcHBsZSBJbmMuMQswCQYDVQQGEwJVUwIQBq1ozfR9MElh
+        wR5DvSs1gTCBgwYLKoZIhvcNAQkQAgsxdKByMF4xLTArBgNVBAMMJERldmVsb3BlciBJRCBDZXJ0aWZpY2F0aW9uIEF1dGhvcml0
+        eTELMAkGA1UECwwCRzIxEzARBgNVBAoMCkFwcGxlIEluYy4xCzAJBgNVBAYTAlVTAhAGrWjN9H0wSWHBHkO9KzWBMA0GCSqGSIb3
+        DQEBCwUABIIBAC81wnnBdvNJKaubZtAfOXyqNQtuEwg80BI+VnLHR8YDiN5YHMxkzY/Sfo+uAf4ot75D0tXpDLZjH0MxCcl58XKH
+        OV4To5gQl0duljCceqMTtfWholVfW9fbyPWyKuXB+uBbW2pJpMf+iBR9tUiNEYMQxUg5cFin+UPEJ5BrjfxdD/KDN/mDx/0yId8/
+        xdQwZjVD0oGQXDA2MgfXLWJnkkAfgA8yrACjvlf3GSKieQkt4gGg0YMFgMXIDuR1RUuhz4DziT1R38q3Aq375A0H8kWpwxKoL1jj
+        yl+bPFOKgcQcG0VK/hlQroGiE/CgdO887PzIfVGaKNTKcZEiD/E9tIQAAAAAAAA=
+        """
+        return (try XCTUnwrap(Data(base64Encoded: signature, options: .ignoreUnknownCharacters)), Data(content.utf8))
+    }
+
     func testCMSSignerInspectorRejectsMalformedAndEmptyInputs() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("hostwright-cms-inspector-\(UUID().uuidString)", isDirectory: true)

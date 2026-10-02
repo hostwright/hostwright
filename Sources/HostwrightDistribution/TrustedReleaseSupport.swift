@@ -80,6 +80,80 @@ public struct DeveloperIDIdentityResolver: Sendable {
     }
 }
 
+enum TrustedCMSSigningCertificate {
+    struct Record {
+        let sha1Fingerprint: String
+        let commonName: String?
+        let subjectKeyIdentifier: Data?
+    }
+
+    static func subjectKeyIdentifier(for identity: TrustedReleaseIdentity) throws -> String {
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassCertificate,
+            kSecMatchLimit: kSecMatchLimitAll,
+            kSecReturnRef: true
+        ]
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let certificates = result as? [SecCertificate] else {
+            throw DistributionError.invalidArtifact("public CMS signing certificates are unavailable")
+        }
+        return try selectSubjectKeyIdentifier(
+            for: identity,
+            certificates: certificates.map(record)
+        )
+    }
+
+    static func record(_ certificate: SecCertificate) throws -> Record {
+        var commonName: CFString?
+        _ = SecCertificateCopyCommonName(certificate, &commonName)
+        let values = SecCertificateCopyValues(certificate, [kSecOIDSubjectKeyIdentifier] as CFArray, nil)
+            as? [String: Any]
+        let property = values?[kSecOIDSubjectKeyIdentifier as String] as? [String: Any]
+        let identifiers = try property.map { try dataValues($0, depth: 0) } ?? []
+        guard identifiers.count <= 1 else {
+            throw DistributionError.invalidArtifact("CMS signing certificate has an ambiguous subject key identifier")
+        }
+        return Record(
+            sha1Fingerprint: Insecure.SHA1.hash(data: SecCertificateCopyData(certificate) as Data)
+                .map { String(format: "%02X", $0) }.joined(),
+            commonName: commonName as String?,
+            subjectKeyIdentifier: identifiers.first
+        )
+    }
+
+    static func selectSubjectKeyIdentifier(
+        for identity: TrustedReleaseIdentity,
+        certificates: [Record]
+    ) throws -> String {
+        try identity.validate()
+        let matches = certificates.filter { $0.sha1Fingerprint == identity.sha1Fingerprint }
+        guard matches.count == 1, let certificate = matches.first,
+              certificate.commonName == identity.commonName,
+              let identifier = certificate.subjectKeyIdentifier, !identifier.isEmpty else {
+            throw DistributionError.invalidArtifact("the exact CMS signing certificate or subject key identifier is unavailable or ambiguous")
+        }
+        guard certificates.filter({ $0.subjectKeyIdentifier == identifier }).count == 1 else {
+            throw DistributionError.invalidArtifact("the CMS subject key identifier identifies multiple certificates")
+        }
+        return identifier.map { String(format: "%02X", $0) }.joined()
+    }
+
+    private static func dataValues(_ property: [String: Any], depth: Int) throws -> [Data] {
+        guard depth < 8 else {
+            throw DistributionError.invalidArtifact("CMS subject key identifier properties are malformed")
+        }
+        if property[kSecPropertyKeyType as String] as? String == kSecPropertyTypeData as String {
+            guard let data = property[kSecPropertyKeyValue as String] as? Data else {
+                throw DistributionError.invalidArtifact("CMS subject key identifier is not data")
+            }
+            return [data]
+        }
+        let children = property[kSecPropertyKeyValue as String] as? [[String: Any]] ?? []
+        return try children.flatMap { try dataValues($0, depth: depth + 1) }
+    }
+}
+
 enum TrustedCMSSignerInspector {
     static func inspect(
         signature: URL,
@@ -93,10 +167,34 @@ enum TrustedCMSSignerInspector {
               try DistributionFileSystem.size(of: detachedContent) <= maximumContentBytes else {
             throw DistributionError.invalidArtifact("detached CMS input is missing, unsafe, or oversized")
         }
-        let signatureData = try Data(contentsOf: signature, options: .mappedIfSafe)
-        let contentData = try Data(contentsOf: detachedContent, options: .mappedIfSafe)
-        guard !signatureData.isEmpty, !contentData.isEmpty else {
-            throw DistributionError.invalidArtifact("detached CMS input cannot be empty")
+        let signer = try verifiedSigner(
+            signatureData: Data(contentsOf: signature, options: .mappedIfSafe),
+            contentData: Data(contentsOf: detachedContent, options: .mappedIfSafe)
+        )
+        var trustError: CFError?
+        guard SecTrustEvaluateWithError(signer.trust, &trustError) else {
+            throw DistributionError.invalidArtifact("detached CMS signer does not satisfy code-signing trust")
+        }
+        var commonName: CFString?
+        guard SecCertificateCopyCommonName(signer.certificate, &commonName) == errSecSuccess,
+              let commonName else {
+            throw DistributionError.invalidArtifact("detached CMS signer common name is unavailable")
+        }
+        let certificateData = SecCertificateCopyData(signer.certificate) as Data
+        let fingerprint = Insecure.SHA1.hash(data: certificateData)
+            .map { String(format: "%02X", $0) }
+            .joined()
+        return (fingerprint, commonName as String)
+    }
+
+    static func verifiedSigner(
+        signatureData: Data,
+        contentData: Data
+    ) throws -> (certificate: SecCertificate, trust: SecTrust) {
+        guard !signatureData.isEmpty, !contentData.isEmpty,
+              signatureData.count <= 4 * 1_024 * 1_024,
+              contentData.count <= 32 * 1_024 * 1_024 else {
+            throw DistributionError.invalidArtifact("detached CMS input is empty or oversized")
         }
 
         var decoder: CMSDecoder?
@@ -109,26 +207,35 @@ enum TrustedCMSSignerInspector {
               CMSDecoderFinalizeMessage(decoder) == errSecSuccess else {
             throw DistributionError.invalidArtifact("detached CMS data is malformed")
         }
+        var embeddedContent: CFData?
+        guard CMSDecoderCopyContent(decoder, &embeddedContent) == errSecSuccess,
+              embeddedContent == nil else {
+            throw DistributionError.invalidArtifact("CMS signature must use detached content")
+        }
         var signerCount = 0
         guard CMSDecoderGetNumSigners(decoder, &signerCount) == errSecSuccess,
               signerCount == 1 else {
             throw DistributionError.invalidArtifact("detached CMS must contain exactly one signer")
+        }
+        guard let policy = SecPolicyCreateWithProperties(kSecPolicyAppleCodeSigning, nil) else {
+            throw DistributionError.invalidArtifact("detached CMS code-signing policy is unavailable")
+        }
+        var signerStatus = CMSSignerStatus.unsigned
+        var trust: SecTrust?
+        var verificationResult = errSecSuccess
+        guard CMSDecoderCopySignerStatus(
+            decoder, 0, policy, false, &signerStatus, &trust, &verificationResult
+        ) == errSecSuccess,
+              signerStatus == .valid,
+              let trust else {
+            throw DistributionError.invalidArtifact("detached CMS signature does not authenticate its content")
         }
         var certificate: SecCertificate?
         guard CMSDecoderCopySignerCert(decoder, 0, &certificate) == errSecSuccess,
               let certificate else {
             throw DistributionError.invalidArtifact("detached CMS signer certificate is unavailable")
         }
-        var commonName: CFString?
-        guard SecCertificateCopyCommonName(certificate, &commonName) == errSecSuccess,
-              let commonName else {
-            throw DistributionError.invalidArtifact("detached CMS signer common name is unavailable")
-        }
-        let certificateData = SecCertificateCopyData(certificate) as Data
-        let fingerprint = Insecure.SHA1.hash(data: certificateData)
-            .map { String(format: "%02X", $0) }
-            .joined()
-        return (fingerprint, commonName as String)
+        return (certificate, trust)
     }
 }
 

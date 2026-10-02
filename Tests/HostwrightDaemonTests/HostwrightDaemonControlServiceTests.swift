@@ -89,6 +89,29 @@ final class HostwrightDaemonControlServiceTests: XCTestCase {
     }
   }
 
+  func testAuthenticatedConnectionStartsWhenRuntimeExecutableIsUnavailable() throws {
+    try withPrivateHome { home in
+      let resolver = RuntimeExecutableResolver(path: home.path)
+      XCTAssertNil(try resolver.resolveExecutable(named: "container"))
+      let fixture = try makeService(
+        home: home,
+        runtimeAdapter: AppleContainerCLIAdapter(executableResolver: resolver)
+      )
+      try fixture.service.start()
+      defer { fixture.service.stop() }
+
+      let identity = try DarwinCurrentControlCodeIdentity.inspect()
+      let client = PersistentControlClient(
+        socketPath: fixture.socketPath,
+        serverTrustPolicy: PersistentControlServerTrustPolicy(
+          pinnedAdHocCodeDirectoryHashes: [identity.codeDirectoryHash]
+        )
+      )
+      let session = try client.connectSession()
+      session.close()
+    }
+  }
+
   func testExplicitStateAuthoritiesUseDistinctPrivateLedgersWithoutDefaultMetadata() throws {
     try withPrivateHome { home in
       let first = try makeService(home: home, explicitStateName: "authority-a.sqlite")
@@ -488,7 +511,11 @@ final class HostwrightDaemonControlServiceTests: XCTestCase {
     }
   }
 
-  private func makeService(home: URL, explicitStateName: String? = nil) throws -> (
+  private func makeService(
+    home: URL,
+    explicitStateName: String? = nil,
+    runtimeAdapter: any RuntimeAdapter = DaemonControlTestRuntimeAdapter()
+  ) throws -> (
     service: any DaemonControlServing,
     socketPath: String,
     statePath: String,
@@ -548,7 +575,6 @@ final class HostwrightDaemonControlServiceTests: XCTestCase {
       lockFilePath: resolution.layout.daemonLock,
       maxIterations: 1
     )
-    let runtimeAdapter = DaemonControlTestRuntimeAdapter()
     var commandEnvironment = CLIEnvironment.live
     commandEnvironment.runtimeAdapter = { runtimeAdapter }
     commandEnvironment.runtimeAdapterForProvider = { _ in runtimeAdapter }

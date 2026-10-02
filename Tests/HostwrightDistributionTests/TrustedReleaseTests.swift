@@ -204,6 +204,106 @@ final class TrustedReleaseTests: XCTestCase {
         ))
     }
 
+    func testArchiveNotaryTicketsAcceptRecordedDesktopBundleAndExecutable() throws {
+        let fixture = try recordedDesktopNotaryFixture()
+        let expected = try TrustedReleaseBuilder.archiveNotaryTicketExpectations(
+            archiveFileName: fixture.archiveName,
+            artifactID: fixture.artifactID,
+            signedBinaryCDHashes: fixture.signedHashes
+        )
+        XCTAssertEqual(expected.count, 10)
+        XCTAssertEqual(Set(expected.map(\.path)).count, 10)
+        XCTAssertNoThrow(try NotarytoolLogParser.requireAcceptedTicketContents(
+            output: String(decoding: JSONSerialization.data(withJSONObject: fixture.object), as: UTF8.self),
+            archiveFileName: fixture.archiveName,
+            expectedTickets: expected
+        ))
+    }
+
+    func testArchiveNotaryTicketsBindBundleToFinalDesktopExecutableHash() throws {
+        let fixture = try recordedDesktopNotaryFixture()
+        var signedHashes = fixture.signedHashes
+        let finalDesktopHash = String(repeating: "f", count: 40)
+        signedHashes[DistributionLayout.desktopExecutablePath] = finalDesktopHash
+        let expected = try TrustedReleaseBuilder.archiveNotaryTicketExpectations(
+            archiveFileName: fixture.archiveName,
+            artifactID: fixture.artifactID,
+            signedBinaryCDHashes: signedHashes
+        )
+        let prefix = "\(fixture.archiveName)/\(fixture.artifactID)/"
+        for path in [DistributionLayout.desktopAppPath, DistributionLayout.desktopExecutablePath] {
+            let ticket = try XCTUnwrap(expected.first { $0.path == prefix + path })
+            XCTAssertEqual(ticket.cdHash, finalDesktopHash)
+            XCTAssertEqual(ticket.architecture, "arm64")
+        }
+        XCTAssertThrowsError(try NotarytoolLogParser.requireAcceptedTicketContents(
+            output: String(decoding: JSONSerialization.data(withJSONObject: fixture.object), as: UTF8.self),
+            archiveFileName: fixture.archiveName,
+            expectedTickets: expected
+        ))
+    }
+
+    func testArchiveNotaryTicketsRequireEverySignedExecutableHash() throws {
+        let fixture = try recordedDesktopNotaryFixture()
+        for path in DistributionLayout.shippedBinaryPaths {
+            var signedHashes = fixture.signedHashes
+            signedHashes.removeValue(forKey: path)
+            XCTAssertThrowsError(try TrustedReleaseBuilder.archiveNotaryTicketExpectations(
+                archiveFileName: fixture.archiveName,
+                artifactID: fixture.artifactID,
+                signedBinaryCDHashes: signedHashes
+            ), path)
+        }
+    }
+
+    func testArchiveNotaryTicketsRejectChangedRecordedDesktopInventory() throws {
+        let fixture = try recordedDesktopNotaryFixture()
+        let expected = try TrustedReleaseBuilder.archiveNotaryTicketExpectations(
+            archiveFileName: fixture.archiveName,
+            artifactID: fixture.artifactID,
+            signedBinaryCDHashes: fixture.signedHashes
+        )
+        let tickets = try XCTUnwrap(fixture.object["ticketContents"] as? [[String: String]])
+        let prefix = "\(fixture.archiveName)/\(fixture.artifactID)/"
+        let bundleIndex = try XCTUnwrap(tickets.firstIndex {
+            $0["path"] == prefix + DistributionLayout.desktopAppPath
+        })
+        let executableIndex = try XCTUnwrap(tickets.firstIndex {
+            $0["path"] == prefix + DistributionLayout.desktopExecutablePath
+        })
+        var variants: [(String, [[String: String]])] = []
+        for (name, index) in [("missing bundle", bundleIndex), ("missing executable", executableIndex)] {
+            var changed = tickets
+            changed.remove(at: index)
+            variants.append((name, changed))
+        }
+        for (key, value) in [
+            ("cdhash", String(repeating: "0", count: 40)),
+            ("arch", "x86_64"),
+            ("path", prefix + "libexec/hostwright/Unexpected.app")
+        ] {
+            var changed = tickets
+            changed[bundleIndex][key] = value
+            variants.append(("wrong bundle \(key)", changed))
+        }
+        var extra = tickets[bundleIndex]
+        extra["path"] = prefix + "libexec/hostwright/Unexpected.app"
+        variants.append(("arbitrary extra ticket", tickets + [extra]))
+        variants.append(("duplicate bundle ticket", tickets + [tickets[bundleIndex]]))
+        var duplicateAtExpectedCount = tickets
+        duplicateAtExpectedCount[executableIndex] = tickets[bundleIndex]
+        variants.append(("duplicate bundle replacing executable", duplicateAtExpectedCount))
+        for (name, changed) in variants {
+            var object = fixture.object
+            object["ticketContents"] = changed
+            XCTAssertThrowsError(try NotarytoolLogParser.requireAcceptedTicketContents(
+                output: String(decoding: JSONSerialization.data(withJSONObject: object), as: UTF8.self),
+                archiveFileName: fixture.archiveName,
+                expectedTickets: expected
+            ), name)
+        }
+    }
+
     func testTrustedManifestAndProvenanceBindEveryPublishedArtifact() throws {
         let manifest = makeManifest()
         XCTAssertNoThrow(try manifest.validate())
@@ -1221,6 +1321,103 @@ final class TrustedReleaseTests: XCTestCase {
                 )
             )
         )
+    }
+
+    private func recordedDesktopNotaryFixture() throws -> (
+        archiveName: String, artifactID: String, object: [String: Any], signedHashes: [String: String]
+    ) {
+        let output = """
+        {
+          "logFormatVersion": 1,
+          "jobId": "90a8e507-358a-47f6-97d9-7b9a31f573b5",
+          "status": "Accepted",
+          "statusSummary": "Ready for distribution",
+          "statusCode": 0,
+          "archiveFilename": "hostwright-0.0.2-rc.1-macos-arm64-f95ee80d66da.zip",
+          "uploadDate": "2026-10-02T01:29:45.611Z",
+          "sha256": "0a9336cfb6455c60a48d478ab6e6003a0d0b54e11ff04f988a24e835669c94a7",
+          "ticketContents": [
+            {
+              "path": "hostwright-0.0.2-rc.1-macos-arm64-f95ee80d66da.zip/hostwright-0.0.2-rc.1-macos-arm64-f95ee80d66da/libexec/hostwright/Hostwright.app",
+              "digestAlgorithm": "SHA-256",
+              "cdhash": "53f90820d4a04d9cec5aedfc84324df4adc39c47",
+              "arch": "arm64"
+            },
+            {
+              "path": "hostwright-0.0.2-rc.1-macos-arm64-f95ee80d66da.zip/hostwright-0.0.2-rc.1-macos-arm64-f95ee80d66da/libexec/hostwright/Hostwright.app/Contents/MacOS/hostwright-desktop",
+              "digestAlgorithm": "SHA-256",
+              "cdhash": "53f90820d4a04d9cec5aedfc84324df4adc39c47",
+              "arch": "arm64"
+            },
+            {
+              "path": "hostwright-0.0.2-rc.1-macos-arm64-f95ee80d66da.zip/hostwright-0.0.2-rc.1-macos-arm64-f95ee80d66da/bin/hostwright-network-helper",
+              "digestAlgorithm": "SHA-256",
+              "cdhash": "d5c859a9ee16aef2330bf61f5261b86abea01853",
+              "arch": "arm64"
+            },
+            {
+              "path": "hostwright-0.0.2-rc.1-macos-arm64-f95ee80d66da.zip/hostwright-0.0.2-rc.1-macos-arm64-f95ee80d66da/bin/hostwright-dist",
+              "digestAlgorithm": "SHA-256",
+              "cdhash": "823c450796d5cd6119a30d0d464aec7c1ee05542",
+              "arch": "arm64"
+            },
+            {
+              "path": "hostwright-0.0.2-rc.1-macos-arm64-f95ee80d66da.zip/hostwright-0.0.2-rc.1-macos-arm64-f95ee80d66da/bin/hostwright-storage-helper",
+              "digestAlgorithm": "SHA-256",
+              "cdhash": "175b08442f6c43bb1ea400ac925bb061361564de",
+              "arch": "arm64"
+            },
+            {
+              "path": "hostwright-0.0.2-rc.1-macos-arm64-f95ee80d66da.zip/hostwright-0.0.2-rc.1-macos-arm64-f95ee80d66da/bin/hostwrightd",
+              "digestAlgorithm": "SHA-256",
+              "cdhash": "2c9c25450e0e8a543d8e7a097e1659ed73708d27",
+              "arch": "arm64"
+            },
+            {
+              "path": "hostwright-0.0.2-rc.1-macos-arm64-f95ee80d66da.zip/hostwright-0.0.2-rc.1-macos-arm64-f95ee80d66da/bin/hostwright-network-provider-worker",
+              "digestAlgorithm": "SHA-256",
+              "cdhash": "ed5cafbddde1c87bf8fec3a7b1c1d90b045c960b",
+              "arch": "arm64"
+            },
+            {
+              "path": "hostwright-0.0.2-rc.1-macos-arm64-f95ee80d66da.zip/hostwright-0.0.2-rc.1-macos-arm64-f95ee80d66da/bin/hostwright",
+              "digestAlgorithm": "SHA-256",
+              "cdhash": "372c3538febcc9afc208a7cd936cfee88e3ea9df",
+              "arch": "arm64"
+            },
+            {
+              "path": "hostwright-0.0.2-rc.1-macos-arm64-f95ee80d66da.zip/hostwright-0.0.2-rc.1-macos-arm64-f95ee80d66da/bin/hostwright-control",
+              "digestAlgorithm": "SHA-256",
+              "cdhash": "f7918175bcbe2b34888c483a07a5628ef32c9dd0",
+              "arch": "arm64"
+            },
+            {
+              "path": "hostwright-0.0.2-rc.1-macos-arm64-f95ee80d66da.zip/hostwright-0.0.2-rc.1-macos-arm64-f95ee80d66da/bin/hostwright-containerization-helper",
+              "digestAlgorithm": "SHA-256",
+              "cdhash": "123e3e5fa98c0995940c3d1bba8ae3dce8c4cc51",
+              "arch": "arm64"
+            }
+          ],
+          "issues": null
+        }
+        """
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(output.utf8)) as? [String: Any]
+        )
+        let archiveName = try XCTUnwrap(object["archiveFilename"] as? String)
+        let artifactID = String(archiveName.dropLast(4))
+        let prefix = "\(archiveName)/\(artifactID)/"
+        let tickets = try XCTUnwrap(object["ticketContents"] as? [[String: String]])
+        var signedHashes: [String: String] = [:]
+        for ticket in tickets {
+            let path = try XCTUnwrap(ticket["path"])
+            XCTAssertTrue(path.hasPrefix(prefix))
+            let relativePath = String(path.dropFirst(prefix.count))
+            if relativePath != "libexec/hostwright/Hostwright.app" {
+                signedHashes[relativePath] = try XCTUnwrap(ticket["cdhash"])
+            }
+        }
+        return (archiveName, artifactID, object, signedHashes)
     }
 
     private func packageRoot() -> URL {

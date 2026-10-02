@@ -810,6 +810,25 @@ public struct TrustedReleaseBuilder: Sendable {
         return result
     }
 
+    static func archiveNotaryTicketExpectations(
+        archiveFileName: String,
+        artifactID: String,
+        signedBinaryCDHashes: [String: String]
+    ) throws -> [TrustedNotaryTicketExpectation] {
+        let ticketPaths = DistributionLayout.shippedBinaryPaths + [DistributionLayout.desktopAppPath]
+        return try ticketPaths.map { ticketPath in
+            let binaryPath = ticketPath == DistributionLayout.desktopAppPath
+                ? DistributionLayout.desktopExecutablePath : ticketPath
+            guard let cdHash = signedBinaryCDHashes[binaryPath] else {
+                throw DistributionError.invalidArtifact("signed executable CDHash is missing for \(binaryPath)")
+            }
+            return TrustedNotaryTicketExpectation(
+                path: "\(archiveFileName)/\(artifactID)/\(ticketPath)",
+                cdHash: cdHash
+            )
+        }
+    }
+
     private func verifyArchiveNotaryTicketContents(
         submissionID: String,
         profile: String,
@@ -819,15 +838,11 @@ public struct TrustedReleaseBuilder: Sendable {
         cancellation: SecureSubprocessCancellation,
         commands: inout [HostwrightEvidenceCommand]
     ) throws -> String {
-        let expectedTickets = try shippedBinaryPaths.map { binaryPath in
-            guard let cdHash = signedBinaryCDHashes[binaryPath] else {
-                throw DistributionError.invalidArtifact("signed executable CDHash is missing for \(binaryPath)")
-            }
-            return TrustedNotaryTicketExpectation(
-                path: "\(archiveFileName)/\(artifactID)/\(binaryPath)",
-                cdHash: cdHash
-            )
-        }
+        let expectedTickets = try Self.archiveNotaryTicketExpectations(
+            archiveFileName: archiveFileName,
+            artifactID: artifactID,
+            signedBinaryCDHashes: signedBinaryCDHashes
+        )
         let result = try runner.run(
             executablePath: "/usr/bin/xcrun",
             arguments: ["notarytool", "log", submissionID, "--keychain-profile", profile],

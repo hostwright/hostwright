@@ -207,6 +207,11 @@ enum TrustedCMSSignerInspector {
               CMSDecoderFinalizeMessage(decoder) == errSecSuccess else {
             throw DistributionError.invalidArtifact("detached CMS data is malformed")
         }
+        var embeddedContent: CFData?
+        guard CMSDecoderCopyContent(decoder, &embeddedContent) == errSecSuccess,
+              embeddedContent == nil else {
+            throw DistributionError.invalidArtifact("CMS signature must use detached content")
+        }
         var signerCount = 0
         guard CMSDecoderGetNumSigners(decoder, &signerCount) == errSecSuccess,
               signerCount == 1 else {

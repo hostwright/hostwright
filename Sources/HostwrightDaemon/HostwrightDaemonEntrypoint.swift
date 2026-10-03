@@ -66,7 +66,6 @@ struct HostwrightDaemonEntrypoint {
 
         let shutdownToken = DaemonShutdownToken()
         let signals = installShutdownSignals(shutdownToken: shutdownToken)
-        _ = signals
 
         let correlationID = UUID().uuidString.lowercased()
         let observabilitySink = HostwrightOSLogSink()
@@ -104,6 +103,7 @@ struct HostwrightDaemonEntrypoint {
             )
             return result
         }
+        withExtendedLifetime(signals) {}
 
         if !result.standardOutput.isEmpty {
             print(result.standardOutput, terminator: "")

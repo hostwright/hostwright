@@ -4007,6 +4007,10 @@ struct LifecycleLiveEffects:
                             $1.resourceIdentifier
                     }
                 )
+            } else if context.plan.providerID == .appleContainerization {
+                desired = try await nativeObservationDesiredState(
+                    desired, node: node, context: context
+                )
             }
             let inventory = try await adapter.inventory()
             let observed = try await adapter.observe(desiredState: desired)
@@ -4097,13 +4101,15 @@ struct LifecycleLiveEffects:
                     )
                     try await releaseResourceFenceIfNeeded(
                         node: node,
-                        context: context
+                        context: context,
+                        observedOwnership: exactContainer?.ownership
                     )
                     return .satisfied(specialVerification)
                 case .noEffect(let summary):
                     try await releaseResourceFenceIfNeeded(
                         node: node,
-                        context: context
+                        context: context,
+                        observedOwnership: exactContainer?.ownership
                     )
                     return .noEffect(
                         LifecycleNodeVerification(
@@ -4167,7 +4173,10 @@ struct LifecycleLiveEffects:
                     observed: observed,
                     observationSHA256: inventory.semanticSHA256
                 )
-                try await releaseResourceFenceIfNeeded(node: node, context: context)
+                try await releaseResourceFenceIfNeeded(
+                    node: node, context: context,
+                    observedOwnership: exactContainer?.ownership
+                )
                 return .satisfied(verification)
             }
             if noEffectObserved(
@@ -4176,7 +4185,10 @@ struct LifecycleLiveEffects:
                 observedService: matches.first,
                 collisionCount: containers.count
             ) {
-                try await releaseResourceFenceIfNeeded(node: node, context: context)
+                try await releaseResourceFenceIfNeeded(
+                    node: node, context: context,
+                    observedOwnership: exactContainer?.ownership
+                )
                 return .noEffect(verification)
             }
             if containers.count > 1 ||
@@ -4193,6 +4205,136 @@ struct LifecycleLiveEffects:
                 )
             )
         }
+    }
+
+    private func nativeObservationDesiredState(
+        _ desired: DesiredRuntimeState,
+        node: LifecyclePlanNode,
+        context: LifecycleSagaContext
+    ) async throws -> DesiredRuntimeState {
+        guard let group = try store.operationGroups.load(id: context.groupID),
+              group.status == .active,
+              group.groupKind == "lifecycle-v1",
+              group.projectID == context.plan.projectID,
+              group.operationID == context.operationID,
+              group.planHash == context.plan.planSHA256,
+              group.plannedActionType == context.plan.command.rawValue,
+              group.fencingToken == context.fencingToken,
+              let owner = context.leaseOwner,
+              group.lockOwner == owner,
+              let expiry = group.lockExpiresAt,
+              let expiryDate = ISO8601DateFormatter().date(from: expiry),
+              expiryDate > Date(timeIntervalSince1970: Double(nowMilliseconds()) / 1_000),
+              try LifecyclePersistedIntentCodec.decode(group.intentJSONRedacted) == context.plan,
+              let planned = context.plan.nodes.first(where: { $0.key == node.key }) else {
+            throw StateStoreError.invalidRecord(
+                "SDK postcondition observation requires the exact confirmed node and active finite operation lease."
+            )
+        }
+        let authorizedNode: LifecyclePlanNode
+        if context.direction == .forward {
+            authorizedNode = planned
+        } else if let compensation = planned.compensation {
+            authorizedNode = try LifecyclePlanNode(
+                key: planned.key, action: compensation.action,
+                serviceName: planned.serviceName,
+                resourceIdentifier: planned.resourceIdentifier,
+                resourceUUID: planned.resourceUUID,
+                resourceGeneration: planned.resourceGeneration,
+                fencingToken: planned.fencingToken,
+                preconditions: compensation.preconditions,
+                postconditions: [], timeoutSeconds: compensation.timeoutSeconds,
+                desiredSpecificationJSONRedacted: planned.desiredSpecificationJSONRedacted
+            )
+        } else {
+            throw StateStoreError.invalidRecord(
+                "SDK compensation observation requires the exact configured inverse action."
+            )
+        }
+        guard node == authorizedNode else {
+            throw StateStoreError.invalidRecord(
+                "SDK postcondition observation cannot change the confirmed resource action or scope."
+            )
+        }
+        guard let binding = await state.binding(
+            resourceUUID: node.resourceUUID,
+            resourceIdentifier: node.resourceIdentifier
+        ) else { return desired }
+        let records = try store.ownership.loadAll().filter {
+            ($0.resourceUUID == node.resourceUUID || $0.resourceIdentifier == node.resourceIdentifier) &&
+                RuntimeProviderBinding.stableID(for: $0.runtimeAdapter) == context.plan.providerID
+        }
+        let hints = desired.ownedResourceHints.filter {
+            $0.ownership?.resourceUUID == node.resourceUUID || $0.resourceIdentifier == node.resourceIdentifier
+        }
+        guard binding.resourceUUID == node.resourceUUID,
+              binding.resourceIdentifier == node.resourceIdentifier,
+              binding.resourceGeneration == node.resourceGeneration,
+              binding.projectResourceUUID == context.plan.projectResourceUUID,
+              binding.projectGeneration == context.plan.projectGeneration,
+              binding.providerID == context.plan.providerID,
+              binding.providerGeneration == context.plan.providerGeneration,
+              binding.identity.projectName == context.plan.projectName,
+              node.serviceName == binding.identity.serviceName || node.serviceName == binding.identity.displayName,
+              records.count == 1, let current = records.first,
+              current.resourceType == "container", current.cleanupEligible,
+              current.projectID == context.plan.projectID,
+              current.serviceName == binding.identity.serviceName,
+              current.identityVersion == binding.identityVersion,
+              current.resourceIdentifier == binding.resourceIdentifier,
+              current.resourceUUID == binding.resourceUUID,
+              current.resourceGeneration == binding.resourceGeneration,
+              current.projectResourceUUID == binding.projectResourceUUID,
+              current.projectGeneration == binding.projectGeneration,
+              current.providerGeneration == binding.providerGeneration,
+              hints.count == 1, let hint = hints.first,
+              hint.identity == binding.identity,
+              hint.identityVersion == binding.identityVersion,
+              hint.resourceIdentifier == binding.resourceIdentifier,
+              hint.ownership == binding.ownershipEvidence,
+              hint.authorizedAlternateOwnership == nil else {
+            throw StateStoreError.invalidRecord(
+                "SDK postcondition observation requires one exact UUID-backed resource binding."
+            )
+        }
+        let authority = try OwnershipAuthorityMetadata.decode(from: current.metadataJSONRedacted)
+        try authority?.validate(for: current)
+        if current.fencingToken == binding.currentFencingToken,
+           current.fencingToken != context.fencingToken {
+            return desired
+        }
+        guard current.fencingToken == context.fencingToken,
+              let authority,
+              authority.controllerID == OwnershipAuthorityRecord.lifecycleController,
+              authority.operationGroupID == group.id,
+              authority.leaseOwner == owner,
+              authority.leaseExpiresAt == expiry,
+              ((node.action == .delete || node.action == .retire) &&
+                  authority.deletionTimestamp != nil && Set(authority.finalizers.map(\.state)) == [.releasing]) ||
+                (node.action != .delete && node.action != .retire &&
+                    authority.deletionTimestamp == nil && Set(authority.finalizers.map(\.state)) == [.active]) else {
+            throw StateStoreError.invalidRecord(
+                "SDK postcondition observation requires the exact bound lifecycle mutation authority."
+            )
+        }
+        guard binding.currentFencingToken != context.fencingToken else { return desired }
+        guard authority.handoffGeneration > 0 else {
+            throw StateStoreError.invalidRecord("SDK observation fence handoff is not authenticated.")
+        }
+        let authorized = RuntimeOwnedResourceHint(
+            resourceIdentifier: hint.resourceIdentifier, identity: hint.identity,
+            identityVersion: hint.identityVersion, ownership: hint.ownership,
+            authorizedAlternateOwnership: RuntimeInventoryOwnershipEvidence(
+                resourceUUID: node.resourceUUID, projectUUID: context.plan.projectResourceUUID,
+                resourceGeneration: node.resourceGeneration, projectGeneration: context.plan.projectGeneration,
+                providerID: context.plan.providerID, providerGeneration: context.plan.providerGeneration,
+                fencingToken: context.fencingToken
+            )
+        )
+        return DesiredRuntimeState(
+            projectName: desired.projectName, networks: desired.networks, services: desired.services,
+            ownedResourceHints: desired.ownedResourceHints.map { $0 == hint ? authorized : $0 }
+        )
     }
 
     private func persistNetworkPortIntent(
@@ -6731,7 +6873,8 @@ struct LifecycleLiveEffects:
 
     private func releaseResourceFenceIfNeeded(
         node: LifecyclePlanNode,
-        context: LifecycleSagaContext
+        context: LifecycleSagaContext,
+        observedOwnership: RuntimeInventoryOwnershipEvidence? = nil
     ) async throws {
         guard node.action != .create,
               node.action != .delete,
@@ -6745,6 +6888,12 @@ struct LifecycleLiveEffects:
               }),
               current.fencingToken == context.fencingToken,
               binding.currentFencingToken != context.fencingToken else {
+            return
+        }
+        if context.plan.providerID == .appleContainerization,
+           let observedOwnership,
+           exactOwnership(observedOwnership, node: node, plan: context.plan, binding: binding),
+           observedOwnership.fencingToken == context.fencingToken {
             return
         }
         guard try store.ownership.advanceFencingToken(

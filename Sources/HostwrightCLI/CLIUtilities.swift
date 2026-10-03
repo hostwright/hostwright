@@ -401,14 +401,22 @@ func hostwrightAuthorizedSDKObservationHint(
         throw StateStoreError.invalidRecord("SDK observation lifecycle authority does not match its exact confirmed resource scope.")
     }
     let nodes = plan.nodes.filter { $0.resourceUUID == expected.resourceUUID && $0.action.mutatesRuntime }
-    guard nodes.count == 1, let node = nodes.first,
-          node.resourceIdentifier == hint.resourceIdentifier,
-          node.resourceGeneration == expected.resourceGeneration,
-          node.serviceName == hint.identity.serviceName || node.serviceName == hint.identity.displayName,
-          (plan.command == .remove && node.action == .delete) ||
-            (plan.command == .restart && node.action == .restart) ||
-            (plan.command == .down && node.action == .stop) else {
-        throw StateStoreError.invalidRecord("SDK observation requires one exact confirmed lifecycle action node.")
+    let restartPair = plan.command == .restart && nodes.count == 2 &&
+        nodes[0].action == .stop && nodes[1].action == .start &&
+        nodes[1].dependencies == [nodes[0].key]
+    guard let node = nodes.first,
+          nodes.allSatisfy({
+              $0.resourceIdentifier == hint.resourceIdentifier &&
+                  $0.resourceGeneration == expected.resourceGeneration &&
+                  ($0.serviceName == hint.identity.serviceName || $0.serviceName == hint.identity.displayName) &&
+                  $0.fencingToken == node.fencingToken
+          }),
+          restartPair || (nodes.count == 1 && (
+              (plan.command == .remove && node.action == .delete) ||
+                  (plan.command == .restart && (node.action == .restart || node.action == .start)) ||
+                  (plan.command == .down && node.action == .stop)
+          )) else {
+        throw StateStoreError.invalidRecord("SDK observation requires its exact confirmed lifecycle action scope.")
     }
     let states = Set(authority.finalizers.map(\.state))
     let alternateFence: String
@@ -428,7 +436,8 @@ func hostwrightAuthorizedSDKObservationHint(
               authority.deletionTimestamp == nil, states == [.active], authority.handoffGeneration > 0,
               group.lockOwner == nil, group.lockExpiresAt == nil,
               authority.leaseOwner == nil, authority.leaseExpiresAt == nil,
-              expected.fencingToken == node.fencingToken else {
+              expected.fencingToken == group.fencingToken ||
+                (!restartPair && expected.fencingToken == node.fencingToken) else {
             throw StateStoreError.invalidRecord("SDK completed lifecycle observation requires its exact released resource projection.")
         }
         alternateFence = group.fencingToken
@@ -438,11 +447,13 @@ func hostwrightAuthorizedSDKObservationHint(
               authority.leaseOwner == owner, authority.leaseExpiresAt == expiry,
               let expiryDate = ISO8601DateFormatter().date(from: expiry),
               let now = ISO8601DateFormatter().date(from: currentTimestamp), expiryDate > now,
-              expected.fencingToken == group.fencingToken || expected.fencingToken == node.fencingToken,
+              expected.fencingToken == group.fencingToken ||
+                (!restartPair && expected.fencingToken == node.fencingToken),
               (plan.command == .remove && authority.deletionTimestamp != nil && states == [.releasing]) ||
                 (plan.command != .remove && authority.deletionTimestamp == nil && states == [.active]) else {
             throw StateStoreError.invalidRecord("SDK active lifecycle observation requires the exact unexpired authority lease.")
         }
+        if restartPair { return hint }
         alternateFence = expected.fencingToken == group.fencingToken ? node.fencingToken : group.fencingToken
     case .interrupted:
         return hint

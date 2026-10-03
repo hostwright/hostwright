@@ -8,6 +8,353 @@ import XCTest
 @testable import HostwrightCLI
 
 final class LifecycleProbeLiveIntegrationTests: XCTestCase {
+    func testNativeStopStartRestartObservesTheCurrentOperationFence() async throws {
+        let fixture = try ProbeLiveFixture(
+            action: .stop,
+            desired: probeLiveDesired(),
+            postcondition: LifecyclePlanCondition(
+                kind: "lifecycle", subject: "phase04/web", expectedValue: "stopped"
+            ),
+            providerID: .appleContainerization,
+            planCommand: .restart,
+            nativeRestartPair: true,
+            interactive: ProbeLiveInteractiveExecutor(outcomes: [])
+        )
+        defer { fixture.cleanup() }
+        let helper = NativeFenceLifecycleHelper(fixture: fixture)
+        let effects = try nativeFenceEffects(fixture: fixture, helper: helper)
+        let start = try XCTUnwrap(fixture.context.plan.nodes.first { $0.action == .start })
+        XCTAssertEqual(fixture.context.plan.nodes.map(\.action), [.stop, .start])
+        XCTAssertEqual(start.dependencies, [fixture.node.key])
+        XCTAssertNotEqual(fixture.binding.currentFencingToken, fixture.node.fencingToken)
+        XCTAssertNotEqual(fixture.node.fencingToken, fixture.context.fencingToken)
+
+        guard case .accepted = await effects.apply(node: fixture.node, context: fixture.context) else {
+            return XCTFail("The exact native Stop must complete before its postcondition is observed.")
+        }
+        let stopped = try await helper.inventory()
+        XCTAssertEqual(stopped.containers.first?.lifecycle, .stopped)
+        XCTAssertEqual(stopped.containers.first?.ownership?.fencingToken, fixture.context.fencingToken)
+        XCTAssertEqual(try fixture.exactOwnership().fencingToken, fixture.context.fencingToken)
+        let stopObservation = await effects.observe(node: fixture.node, context: fixture.context)
+        guard case .satisfied = stopObservation else {
+            return XCTFail("Completed native Stop must observe the authorized operation fence: \(stopObservation)")
+        }
+        XCTAssertEqual(try fixture.exactOwnership().fencingToken, stopped.containers.first?.ownership?.fencingToken)
+        let priorBinding = await effects.state.binding(for: fixture.binding.identity)
+        XCTAssertEqual(priorBinding?.currentFencingToken, fixture.binding.currentFencingToken)
+        guard case .accepted = await effects.apply(node: start, context: fixture.context) else {
+            return XCTFail("Restart's dependent native Start must retain exact operation authority.")
+        }
+        let startObservation = await effects.observe(node: start, context: fixture.context)
+        guard case .satisfied = startObservation else {
+            return XCTFail("Completed native Start must observe the same authorized fence: \(startObservation)")
+        }
+        let mutations = await helper.mutations()
+        XCTAssertEqual(mutations, [.stop, .start])
+        XCTAssertEqual(try fixture.exactOwnership().fencingToken, fixture.context.fencingToken)
+        let running = try await helper.inventory()
+        XCTAssertEqual(running.containers.first?.ownership?.fencingToken, try fixture.exactOwnership().fencingToken)
+        try await LifecycleOwnershipFinalizer(store: fixture.store, adapter: effects.adapter)
+            .finalize(context: fixture.context)
+        try fixture.store.operationGroups.finish(
+            groupID: fixture.context.groupID, status: .succeeded,
+            checkpoint: "complete", manualRecoveryHintRedacted: "",
+            updatedAt: "2026-10-03T10:00:00Z", metadataJSONRedacted: "{}"
+        )
+        let hints = try hostwrightRuntimeOwnershipHints(
+            store: fixture.store, projectID: fixture.context.plan.projectID,
+            projectName: fixture.context.plan.projectName, providerID: .appleContainerization
+        )
+        XCTAssertEqual(hints.first?.ownership?.fencingToken, fixture.context.fencingToken)
+        XCTAssertNil(hints.first?.authorizedAlternateOwnership)
+        let observed = try await effects.adapter.observe(desiredState: DesiredRuntimeState(
+            projectName: fixture.context.plan.projectName,
+            services: [probeLiveDesired()], ownedResourceHints: hints
+        ))
+        let service = try XCTUnwrap(observed.services.first)
+        XCTAssertEqual(service.lifecycleState, .running)
+        let logs = try await effects.adapter.logs(for: service, tail: 10)
+        XCTAssertEqual(logs.text, "native lifecycle output")
+
+        let next = try await nativeFenceNextOperation(fixture: fixture, adapter: effects.adapter, observed: observed)
+        for node in next.context.plan.nodes {
+            guard case .accepted = await next.effects.apply(node: node, context: next.context),
+                  case .satisfied = await next.effects.observe(node: node, context: next.context) else {
+                return XCTFail("A second exact restart must hand off the completed resource projection.")
+            }
+            let native = try await helper.inventory()
+            XCTAssertEqual(try fixture.exactOwnership().fencingToken, next.context.fencingToken)
+            XCTAssertEqual(native.containers.first?.ownership?.fencingToken, next.context.fencingToken)
+        }
+    }
+
+    func testNativeObservationRestoresOnlyTheProvenPriorFenceOnNoEffect() async throws {
+        let fixture = try nativeFenceFixture()
+        defer { fixture.cleanup() }
+        let helper = NativeFenceLifecycleHelper(fixture: fixture)
+        await helper.ignoreNextMutation()
+        let effects = try nativeFenceEffects(fixture: fixture, helper: helper)
+        guard case .accepted = await effects.apply(node: fixture.node, context: fixture.context) else {
+            return XCTFail("The fixture must reach post-effect observation.")
+        }
+        XCTAssertEqual(try fixture.exactOwnership().fencingToken, fixture.context.fencingToken)
+        guard case .noEffect = await effects.observe(node: fixture.node, context: fixture.context) else {
+            return XCTFail("The exact old-fence running resource must prove Stop had no effect.")
+        }
+        let native = try await helper.inventory()
+        XCTAssertEqual(native.containers.first?.lifecycle, .running)
+        XCTAssertEqual(native.containers.first?.ownership?.fencingToken, fixture.binding.currentFencingToken)
+        XCTAssertEqual(try fixture.exactOwnership().fencingToken, fixture.binding.currentFencingToken)
+        let binding = await effects.state.binding(for: fixture.binding.identity)
+        XCTAssertEqual(binding, fixture.binding)
+    }
+
+    func testNativeDownAndRemovalRequireExactPostconditionsAndKeepNativeFences() async throws {
+        for (command, action) in [(LifecycleCommand.down, LifecyclePlanAction.stop), (.remove, .delete)] {
+            let fixture = try nativeFenceFixture(command: command, action: action)
+            defer { fixture.cleanup() }
+            let helper = NativeFenceLifecycleHelper(fixture: fixture)
+            let effects = try nativeFenceEffects(fixture: fixture, helper: helper)
+            guard case .accepted = await effects.apply(node: fixture.node, context: fixture.context),
+                  case .satisfied = await effects.observe(node: fixture.node, context: fixture.context) else {
+                return XCTFail("\(command) must verify its real native lifecycle postcondition.")
+            }
+            let inventory = try await helper.inventory()
+            if command == .down {
+                XCTAssertEqual(inventory.containers.first?.lifecycle, .stopped)
+                XCTAssertEqual(try fixture.exactOwnership().fencingToken, inventory.containers.first?.ownership?.fencingToken)
+            } else {
+                XCTAssertTrue(inventory.containers.isEmpty)
+            }
+            try await LifecycleOwnershipFinalizer(store: fixture.store, adapter: effects.adapter)
+                .finalize(context: fixture.context)
+            if command == .remove {
+                XCTAssertTrue(try fixture.store.ownership.loadAll().filter(\.cleanupEligible).isEmpty)
+            }
+        }
+    }
+
+    func testNativeNoEffectWithAnActualFenceHandoffKeepsTheExistingGroupProjection() async throws {
+        let fixture = try nativeFenceFixture()
+        defer { fixture.cleanup() }
+        let helper = NativeFenceLifecycleHelper(fixture: fixture)
+        await helper.ignoreNextMutation(rotatingFence: true)
+        let effects = try nativeFenceEffects(fixture: fixture, helper: helper)
+        guard case .accepted = await effects.apply(node: fixture.node, context: fixture.context),
+              case .noEffect = await effects.observe(node: fixture.node, context: fixture.context) else {
+            return XCTFail("A fence handoff alone must not claim Stop satisfied its postcondition.")
+        }
+        let native = try await helper.inventory()
+        XCTAssertEqual(native.containers.first?.lifecycle, .running)
+        XCTAssertEqual(native.containers.first?.ownership?.fencingToken, fixture.context.fencingToken)
+        XCTAssertEqual(try fixture.exactOwnership().fencingToken, fixture.context.fencingToken)
+        let binding = await effects.state.binding(for: fixture.binding.identity)
+        XCTAssertEqual(binding, fixture.binding)
+    }
+
+    func testNativeObservationRejectsStaleOperationAndExpiredOrMissingAuthority() async throws {
+        for mismatch in ["operation", "group", "owner", "fence", "expired", "terminal", "missing-authority"] {
+            let fixture = try nativeFenceFixture()
+            defer { fixture.cleanup() }
+            let helper = NativeFenceLifecycleHelper(fixture: fixture)
+            let clock = ProbeLiveClock(milliseconds: Int64(Date().timeIntervalSince1970 * 1_000))
+            let effects = try nativeFenceEffects(
+                fixture: fixture, helper: helper, nowMilliseconds: { clock.now() }
+            )
+            if mismatch == "missing-authority" {
+                let legacy = try fixture.exactOwnership()
+                XCTAssertNil(try OwnershipAuthorityMetadata.decode(from: legacy.metadataJSONRedacted))
+                XCTAssertNotNil(try fixture.store.ownership.advanceFencingToken(
+                    resourceIdentifier: legacy.resourceIdentifier, runtimeAdapter: legacy.runtimeAdapter,
+                    expectedResourceUUID: legacy.resourceUUID, expectedFencingToken: legacy.fencingToken,
+                    newFencingToken: fixture.context.fencingToken, observedAt: "2026-10-03T10:00:00Z"
+                ))
+                let unbound = try LifecycleResourceBinding(
+                    record: fixture.exactOwnership(), identity: fixture.binding.identity, providerID: .appleContainerization
+                )
+                await helper.setOwnership(unbound.ownershipEvidence)
+                await helper.setLifecycle(.stopped)
+            } else {
+                guard case .accepted = await effects.apply(node: fixture.node, context: fixture.context) else {
+                    return XCTFail("The fixture must first complete Stop under the genuine current group.")
+                }
+            }
+            if mismatch == "expired" { clock.set(milliseconds: 4_102_444_800_000) }
+            if mismatch == "terminal" {
+                try fixture.store.operationGroups.finish(
+                    groupID: fixture.context.groupID, status: .failed,
+                    checkpoint: "safe-hold", manualRecoveryHintRedacted: "",
+                    updatedAt: "2026-10-03T10:00:00Z", metadataJSONRedacted: "{}"
+                )
+            }
+            let wrongUUID = "99999999-9999-4999-8999-999999999999"
+            let context = LifecycleSagaContext(
+                plan: fixture.context.plan,
+                operationID: mismatch == "operation" ? wrongUUID : fixture.context.operationID,
+                groupID: mismatch == "group" ? wrongUUID : fixture.context.groupID,
+                fencingToken: mismatch == "fence" ? wrongUUID : fixture.context.fencingToken,
+                leaseOwner: mismatch == "owner" ? "unrelated-owner" : fixture.context.leaseOwner,
+                attempt: 1
+            )
+            guard case .ambiguous = await effects.observe(node: fixture.node, context: context) else {
+                return XCTFail("\(mismatch) must never authorize the new native fence.")
+            }
+            XCTAssertEqual(try fixture.exactOwnership().fencingToken, fixture.context.fencingToken)
+            let binding = await effects.state.binding(for: fixture.binding.identity)
+            XCTAssertEqual(binding, fixture.binding)
+        }
+    }
+
+    func testNativeObservationRejectsUnrelatedOwnershipAndUnplannedNode() async throws {
+        for mismatch in ["uuid", "project", "resource-generation", "project-generation", "provider-generation", "fence", "node"] {
+            let fixture = try nativeFenceFixture()
+            defer { fixture.cleanup() }
+            let helper = NativeFenceLifecycleHelper(fixture: fixture)
+            let effects = try nativeFenceEffects(fixture: fixture, helper: helper)
+            guard case .accepted = await effects.apply(node: fixture.node, context: fixture.context) else {
+                return XCTFail("The genuine fenced Stop must precede tampered observation.")
+            }
+            let inventory = try await helper.inventory()
+            let current = try XCTUnwrap(inventory.containers.first?.ownership)
+            let wrongUUID = "99999999-9999-4999-8999-999999999999"
+            if mismatch != "node" {
+                await helper.setOwnership(RuntimeInventoryOwnershipEvidence(
+                    resourceUUID: mismatch == "uuid" ? wrongUUID : current.resourceUUID,
+                    projectUUID: mismatch == "project" ? wrongUUID : current.projectUUID,
+                    resourceGeneration: mismatch == "resource-generation" ? 2 : current.resourceGeneration,
+                    projectGeneration: mismatch == "project-generation" ? 2 : current.projectGeneration,
+                    providerID: current.providerID,
+                    providerGeneration: mismatch == "provider-generation" ? 2 : current.providerGeneration,
+                    fencingToken: mismatch == "fence" ? wrongUUID : current.fencingToken
+                ))
+            }
+            let node = mismatch == "node" ? try LifecyclePlanNode(
+                key: fixture.node.key, action: .start, serviceName: fixture.node.serviceName,
+                resourceIdentifier: fixture.node.resourceIdentifier, resourceUUID: fixture.node.resourceUUID,
+                resourceGeneration: fixture.node.resourceGeneration, fencingToken: fixture.node.fencingToken
+            ) : fixture.node
+            guard case .ambiguous = await effects.observe(node: node, context: fixture.context) else {
+                return XCTFail("\(mismatch) must not become a successful postcondition proof.")
+            }
+            XCTAssertEqual(try fixture.exactOwnership().fencingToken, fixture.context.fencingToken)
+        }
+    }
+
+    func testNativeCompensationAndRecoveryRetainExactPriorBinding() async throws {
+        let fixture = try nativeFenceFixture()
+        defer { fixture.cleanup() }
+        let helper = NativeFenceLifecycleHelper(fixture: fixture)
+        let effects = try nativeFenceEffects(fixture: fixture, helper: helper)
+        guard case .accepted = await effects.apply(node: fixture.node, context: fixture.context) else {
+            return XCTFail("The exact Stop must execute before recovery observation.")
+        }
+        let recoveredBinding = try LifecycleResourceBinding(
+            record: fixture.exactOwnership(), identity: fixture.binding.identity, providerID: .appleContainerization
+        )
+        let recoveryState = LifecycleRuntimeExecutionState(
+            projectID: fixture.context.plan.projectID, providerID: .appleContainerization,
+            capabilitySHA256: fixture.context.plan.capabilitySHA256,
+            desiredState: await effects.state.desiredStateSnapshot(),
+            observedState: await effects.state.observedState,
+            bindings: [recoveredBinding], desiredByNode: [fixture.node.key: probeLiveDesired()]
+        )
+        let recoveryEffects = LifecycleLiveEffects(
+            adapter: effects.adapter, state: recoveryState, store: fixture.store,
+            probeStore: fixture.probeStore, environment: .live,
+            schedulerActivationValidator: { _ in }
+        )
+        guard case .satisfied = await recoveryEffects.observe(node: fixture.node, context: fixture.context) else {
+            return XCTFail("Recovery must prove the exact stopped resource under its persisted current fence.")
+        }
+        let rollback = LifecycleSagaContext(
+            plan: fixture.context.plan, operationID: fixture.context.operationID,
+            groupID: fixture.context.groupID, fencingToken: fixture.context.fencingToken,
+            leaseOwner: fixture.context.leaseOwner, attempt: 1, direction: .rollback
+        )
+        guard case .compensated = await effects.compensate(
+            compensation: try XCTUnwrap(fixture.node.compensation), node: fixture.node, context: rollback
+        ) else {
+            return XCTFail("Only the configured inverse Start may compensate Stop under the original group.")
+        }
+        let binding = await effects.state.binding(for: fixture.binding.identity)
+        XCTAssertEqual(binding, fixture.binding)
+        let native = try await helper.inventory()
+        XCTAssertEqual(native.containers.first?.lifecycle, .running)
+        XCTAssertEqual(native.containers.first?.ownership?.fencingToken, try fixture.exactOwnership().fencingToken)
+        XCTAssertEqual(try fixture.exactOwnership().fencingToken, fixture.context.fencingToken)
+        let restored = try await effects.reconcileCompensatedOwnershipProjection(
+            context: rollback, allowObservedRuntimeFence: false
+        )
+        XCTAssertEqual(restored, 0, "Restored lifecycle is not proof that the native prior fence was restored.")
+        let unconfigured = try LifecyclePlanNode(
+            key: fixture.node.key, action: .stop, serviceName: fixture.node.serviceName,
+            resourceIdentifier: fixture.node.resourceIdentifier, resourceUUID: fixture.node.resourceUUID,
+            resourceGeneration: fixture.node.resourceGeneration, fencingToken: fixture.node.fencingToken
+        )
+        guard case .ambiguous = await effects.observe(node: unconfigured, context: rollback) else {
+            return XCTFail("An unconfigured inverse must not report compensation proof.")
+        }
+    }
+
+    func testSDKCompletedHintsPreserveHistoricalRestartAndCurrentStartOnlyScopes() throws {
+        for action in [LifecyclePlanAction.restart, .start] {
+            let fixture = try nativeFenceFixture()
+            defer { fixture.cleanup() }
+            let node = try LifecyclePlanNode(
+                key: "web-restart", action: action, serviceName: fixture.node.serviceName,
+                resourceIdentifier: fixture.node.resourceIdentifier, resourceUUID: fixture.node.resourceUUID,
+                resourceGeneration: fixture.node.resourceGeneration, fencingToken: fixture.node.fencingToken
+            )
+            let projectedFence = action == .restart ? node.fencingToken : fixture.context.fencingToken
+            let completed = try nativeFenceCompletedHint(fixture: fixture, nodes: [node], fencingToken: projectedFence)
+            let hint = try hostwrightAuthorizedSDKObservationHint(
+                completed.hint, ownership: completed.ownership,
+                group: completed.group, currentTimestamp: "2026-10-03T10:00:00Z"
+            )
+            XCTAssertEqual(hint.ownership, completed.hint.ownership)
+            if action == .restart {
+                XCTAssertEqual(hint.authorizedAlternateOwnership?.fencingToken, fixture.context.fencingToken)
+                XCTAssertEqual(hint.authorizedAlternateOwnership?.resourceUUID, fixture.binding.resourceUUID)
+            } else {
+                XCTAssertNil(hint.authorizedAlternateOwnership)
+            }
+        }
+    }
+
+    func testSDKCompletedRestartHintsRejectMalformedPairsAndUnprovedProjections() throws {
+        for mismatch in ["dependency", "extra-node", "node-fence", "generation", "service", "unproved-projection"] {
+            let fixture = try nativeFenceFixture()
+            defer { fixture.cleanup() }
+            let originalStart = try XCTUnwrap(fixture.context.plan.nodes.first { $0.action == .start })
+            let start = try LifecyclePlanNode(
+                key: originalStart.key, action: originalStart.action,
+                serviceName: mismatch == "service" ? "unrelated" : originalStart.serviceName,
+                resourceIdentifier: originalStart.resourceIdentifier, resourceUUID: originalStart.resourceUUID,
+                resourceGeneration: mismatch == "generation" ? 2 : originalStart.resourceGeneration,
+                fencingToken: mismatch == "node-fence" ? "99999999-9999-4999-8999-999999999999" : originalStart.fencingToken,
+                dependencies: mismatch == "dependency" ? [] : originalStart.dependencies,
+                postconditions: originalStart.postconditions, timeoutSeconds: originalStart.timeoutSeconds
+            )
+            var nodes = [fixture.node, start]
+            if mismatch == "extra-node" {
+                nodes.append(try LifecyclePlanNode(
+                    key: "web-extra", action: .restart, serviceName: fixture.node.serviceName,
+                    resourceIdentifier: fixture.node.resourceIdentifier, resourceUUID: fixture.node.resourceUUID,
+                    resourceGeneration: fixture.node.resourceGeneration, fencingToken: fixture.node.fencingToken
+                ))
+            }
+            let completed = try nativeFenceCompletedHint(
+                fixture: fixture, nodes: nodes,
+                fencingToken: mismatch == "unproved-projection" ? fixture.node.fencingToken : fixture.context.fencingToken
+            )
+            XCTAssertThrowsError(try hostwrightAuthorizedSDKObservationHint(
+                completed.hint, ownership: completed.ownership,
+                group: completed.group, currentTimestamp: "2026-10-03T10:00:00Z"
+            ), mismatch)
+        }
+    }
+
     func testCompensatingRestartRequiresSchedulerAuthority() async throws {
         let fixture = try ProbeLiveFixture(
             action: .stop,
@@ -965,6 +1312,10 @@ private final class ProbeLiveClock: @unchecked Sendable {
         lock.withLock { milliseconds }
     }
 
+    func set(milliseconds value: Int64) {
+        lock.withLock { milliseconds = value }
+    }
+
     func sleep(_ duration: Int64) async throws {
         if duration <= 250 {
             lock.withLock {
@@ -1186,13 +1537,19 @@ private struct ProbeLiveFixture {
         providerID: RuntimeProviderID = .appleContainerCLI,
         timeoutSeconds: Int = 20,
         planCommand: LifecycleCommand? = nil,
+        nativeRestartPair: Bool = false,
+        nativeFenceObservation: Bool = false,
         interactive: ProbeLiveInteractiveExecutor,
         clock: ProbeLiveClock = ProbeLiveClock()
     ) throws {
-        directory = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "hostwright-probe-live-\(UUID().uuidString)",
-            isDirectory: true
-        )
+        let native = nativeRestartPair || nativeFenceObservation
+        directory = native
+            ? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(
+                ".hwnf-\(UUID().uuidString.lowercased().prefix(8))", isDirectory: true
+            )
+            : FileManager.default.temporaryDirectory.appendingPathComponent(
+                "hostwright-probe-live-\(UUID().uuidString)", isDirectory: true
+            )
         try FileManager.default.createDirectory(
             at: directory,
             withIntermediateDirectories: true,
@@ -1227,7 +1584,9 @@ private struct ProbeLiveFixture {
             .resourceUUID
         let resourceUUID = "11111111-1111-4111-8111-111111111111"
         let resourceFence = "33333333-3333-4333-8333-333333333333"
-        let operationFence = "44444444-4444-4444-8444-444444444444"
+        let nodeFence = "44444444-4444-4444-8444-444444444444"
+        let operationFence = native
+            ? "88888888-8888-4888-8888-888888888888" : nodeFence
         let leaseOwner = "probe-live-test"
         let leaseExpiresAt = "2099-01-01T00:00:00Z"
         binding = try LifecycleResourceBinding(
@@ -1263,7 +1622,8 @@ private struct ProbeLiveFixture {
             )
         )
 
-        let capability = probeLiveCapability(providerID: providerID)
+        let capability = native
+            ? nativeFenceCapability() : probeLiveCapability(providerID: providerID)
         node = try LifecyclePlanNode(
             key: "web-\(action.rawValue.replacingOccurrences(of: "-", with: "_"))",
             action: action,
@@ -1271,11 +1631,32 @@ private struct ProbeLiveFixture {
             resourceIdentifier: binding.resourceIdentifier,
             resourceUUID: binding.resourceUUID,
             resourceGeneration: binding.resourceGeneration,
-            fencingToken: operationFence,
+            fencingToken: nodeFence,
             preconditions: preconditions,
             postconditions: [postcondition],
-            timeoutSeconds: timeoutSeconds
+            timeoutSeconds: timeoutSeconds,
+            compensation: native && action == .stop
+                ? LifecycleCompensation(action: .start, timeoutSeconds: timeoutSeconds) : nil
         )
+        let nodes: [LifecyclePlanNode]
+        if nativeRestartPair {
+            nodes = [node, try LifecyclePlanNode(
+                key: "web-start", action: .start,
+                serviceName: desired.identity.serviceName,
+                resourceIdentifier: binding.resourceIdentifier,
+                resourceUUID: binding.resourceUUID,
+                resourceGeneration: binding.resourceGeneration,
+                fencingToken: nodeFence,
+                dependencies: [node.key],
+                postconditions: [LifecyclePlanCondition(
+                    kind: "lifecycle", subject: desired.identity.displayName, expectedValue: "running"
+                )],
+                timeoutSeconds: timeoutSeconds,
+                compensation: LifecycleCompensation(action: .stop, timeoutSeconds: timeoutSeconds)
+            )]
+        } else {
+            nodes = [node]
+        }
         let plan = try LifecyclePlan(
             command: planCommand ?? (action == .restart ? .restart : .up),
             projectID: "project-phase04",
@@ -1287,7 +1668,7 @@ private struct ProbeLiveFixture {
             manifestSHA256: String(repeating: "a", count: 64),
             observationSHA256: String(repeating: "b", count: 64),
             capabilitySHA256: capability.canonicalSHA256,
-            nodes: [node]
+            nodes: nodes
         )
         let groupID = "55555555-5555-4555-8555-555555555555"
         let operationID = "66666666-6666-4666-8666-666666666666"
@@ -1319,7 +1700,8 @@ private struct ProbeLiveFixture {
                 updatedAt: "2026-07-23T12:00:00Z",
                 metadataJSONRedacted: "{}",
                 fencingToken: operationFence,
-                intentJSONRedacted: try plan.canonicalJSON(),
+                intentJSONRedacted: providerID == .appleContainerization
+                    ? try LifecyclePersistedIntentCodec.encode(plan) : try plan.canonicalJSON(),
                 compensationJSONRedacted: "[]",
                 verificationJSONRedacted: "{}"
             )
@@ -1375,7 +1757,7 @@ private struct ProbeLiveFixture {
             desiredState: desiredState,
             observedState: observed,
             bindings: [binding.identity: binding],
-            desiredByNode: [node.key: desired]
+            desiredByNode: Dictionary(uniqueKeysWithValues: nodes.map { ($0.key, desired) })
         )
         adapter = ProbeLiveRuntimeAdapter(
             capability: capability,
@@ -1490,4 +1872,341 @@ private func probeLiveCapability(
             )
         }
     )
+}
+
+private func nativeFenceFixture(
+    command: LifecycleCommand = .restart,
+    action: LifecyclePlanAction = .stop
+) throws -> ProbeLiveFixture {
+    try ProbeLiveFixture(
+        action: action, desired: probeLiveDesired(),
+        postcondition: LifecyclePlanCondition(
+            kind: "lifecycle", subject: "phase04/web", expectedValue: action == .delete ? "missing" : "stopped"
+        ),
+        providerID: .appleContainerization, planCommand: command,
+        nativeRestartPair: command == .restart,
+        nativeFenceObservation: true,
+        interactive: ProbeLiveInteractiveExecutor(outcomes: [])
+    )
+}
+
+private func nativeFenceCompletedHint(
+    fixture: ProbeLiveFixture,
+    nodes: [LifecyclePlanNode],
+    fencingToken: String
+) throws -> (hint: RuntimeOwnedResourceHint, ownership: OwnershipRecord, group: OperationGroupRecord) {
+    let previous = fixture.context.plan
+    let plan = try LifecyclePlan(
+        command: .restart, projectID: previous.projectID, projectName: previous.projectName,
+        projectResourceUUID: previous.projectResourceUUID, projectGeneration: previous.projectGeneration,
+        providerID: previous.providerID, providerGeneration: previous.providerGeneration,
+        manifestSHA256: previous.manifestSHA256, observationSHA256: previous.observationSHA256,
+        capabilitySHA256: previous.capabilitySHA256, nodes: nodes
+    )
+    let group = OperationGroupRecord(
+        id: fixture.context.groupID, operationID: fixture.context.operationID, groupKind: "lifecycle-v1",
+        projectID: plan.projectID, serviceName: nil, plannedActionType: plan.command.rawValue,
+        status: .succeeded, groupIdempotencyKey: plan.planSHA256, planHash: plan.planSHA256,
+        checkpoint: "complete", lockOwner: nil, lockExpiresAt: nil,
+        rollbackAvailable: true, manualRecoveryHintRedacted: "",
+        createdAt: "2026-10-03T10:00:00Z", updatedAt: "2026-10-03T10:00:00Z",
+        metadataJSONRedacted: "{}", fencingToken: fixture.context.fencingToken,
+        intentJSONRedacted: try LifecyclePersistedIntentCodec.encode(plan),
+        compensationJSONRedacted: "[]", verificationJSONRedacted: "{}"
+    )
+    let record = try fixture.exactOwnership()
+    func projecting(metadata: String) -> OwnershipRecord {
+        OwnershipRecord(
+            id: record.id, resourceIdentifier: record.resourceIdentifier,
+            resourceType: record.resourceType, projectID: record.projectID,
+            serviceName: record.serviceName, runtimeAdapter: record.runtimeAdapter,
+            createdAt: record.createdAt, observedAt: record.observedAt,
+            cleanupEligible: record.cleanupEligible, metadataJSONRedacted: metadata,
+            identityVersion: record.identityVersion, resourceUUID: record.resourceUUID,
+            resourceGeneration: record.resourceGeneration, projectResourceUUID: record.projectResourceUUID,
+            projectGeneration: record.projectGeneration, providerGeneration: record.providerGeneration,
+            fencingToken: fencingToken
+        )
+    }
+    let projected = projecting(metadata: record.metadataJSONRedacted)
+    let authority = try OwnershipAuthorityRecord.lifecycle(
+        ownership: projected, operationGroup: group, finalizerState: .active, handoffGeneration: 1
+    )
+    let ownership = projecting(metadata: try OwnershipAuthorityMetadata.encode(authority, into: record.metadataJSONRedacted))
+    let binding = try LifecycleResourceBinding(
+        record: ownership, identity: fixture.binding.identity, providerID: .appleContainerization
+    )
+    let hint = RuntimeOwnedResourceHint(
+        resourceIdentifier: binding.resourceIdentifier, identity: binding.identity,
+        identityVersion: binding.identityVersion, ownership: binding.ownershipEvidence
+    )
+    return (hint, ownership, group)
+}
+
+private func nativeFenceNextOperation(
+    fixture: ProbeLiveFixture,
+    adapter: any RuntimeAdapter,
+    observed: ObservedRuntimeState
+) async throws -> (effects: LifecycleLiveEffects, context: LifecycleSagaContext) {
+    let previous = fixture.context.plan
+    let inventory = try await adapter.inventory()
+    let plan = try LifecyclePlan(
+        command: .restart, projectID: previous.projectID, projectName: previous.projectName,
+        projectResourceUUID: previous.projectResourceUUID, projectGeneration: previous.projectGeneration,
+        providerID: previous.providerID, providerGeneration: previous.providerGeneration,
+        manifestSHA256: previous.manifestSHA256, observationSHA256: inventory.semanticSHA256,
+        capabilitySHA256: previous.capabilitySHA256, nodes: previous.nodes
+    )
+    let context = LifecycleSagaContext(
+        plan: plan, operationID: HostwrightResourceUUID.generate(),
+        groupID: HostwrightResourceUUID.generate(), fencingToken: HostwrightResourceUUID.generate(),
+        leaseOwner: "native-next-test", attempt: 1
+    )
+    let acquired = try fixture.store.operationGroups.acquire(OperationGroupRecord(
+        id: context.groupID, operationID: context.operationID, groupKind: "lifecycle-v1",
+        projectID: plan.projectID, serviceName: nil, plannedActionType: plan.command.rawValue,
+        status: .active, groupIdempotencyKey: plan.planSHA256, planHash: plan.planSHA256,
+        checkpoint: "intent-persisted", lockOwner: context.leaseOwner, lockExpiresAt: "2099-01-01T00:00:00Z",
+        rollbackAvailable: true, manualRecoveryHintRedacted: "",
+        createdAt: "2026-10-03T10:00:00Z", updatedAt: "2026-10-03T10:00:00Z",
+        metadataJSONRedacted: "{}", fencingToken: context.fencingToken,
+        intentJSONRedacted: LifecyclePersistedIntentCodec.encode(plan), compensationJSONRedacted: "[]", verificationJSONRedacted: "{}"
+    ))
+    guard acquired.acquired != nil else {
+        throw StateStoreError.invalidRecord("The completed native lifecycle must release its operation group.")
+    }
+    let binding = try LifecycleResourceBinding(
+        record: fixture.exactOwnership(), identity: fixture.binding.identity, providerID: plan.providerID
+    )
+    let state = LifecycleRuntimeExecutionState(
+        projectID: plan.projectID, providerID: plan.providerID, capabilitySHA256: plan.capabilitySHA256,
+        desiredState: DesiredRuntimeState(projectName: plan.projectName, services: [probeLiveDesired()]),
+        observedState: observed, bindings: [binding],
+        desiredByNode: Dictionary(uniqueKeysWithValues: plan.nodes.map { ($0.key, probeLiveDesired()) })
+    )
+    return (LifecycleLiveEffects(
+        adapter: adapter, state: state, store: fixture.store, probeStore: fixture.probeStore,
+        environment: .live, schedulerActivationValidator: { _ in }
+    ), context)
+}
+
+private func nativeFenceEffects(
+    fixture: ProbeLiveFixture,
+    helper: NativeFenceLifecycleHelper,
+    nowMilliseconds: @escaping @Sendable () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1_000) }
+) throws -> LifecycleLiveEffects {
+    let executable = fixture.directory.appendingPathComponent("hostwright-containerization-helper")
+    let configuration = fixture.directory.appendingPathComponent("containerization-helper.json")
+    guard FileManager.default.createFile(
+        atPath: executable.path, contents: Data("helper".utf8),
+        attributes: [.posixPermissions: 0o700]
+    ), FileManager.default.createFile(
+        atPath: configuration.path, contents: Data("{}".utf8),
+        attributes: [.posixPermissions: 0o600]
+    ) else {
+        throw CocoaError(.fileWriteUnknown)
+    }
+    let client = ContainerizationHelperClient(
+        configuration: try ContainerizationHelperClientConfiguration(
+            executableURL: executable,
+            configurationURL: configuration,
+            runtimeDirectoryURL: fixture.directory.appendingPathComponent("runtime"),
+            launchTimeoutMilliseconds: 500,
+            requestTimeoutMilliseconds: 2_000
+        ),
+        launcher: ContainerizationHelperProcessLauncher { _ in
+            ContainerizationHelperProcessLease(processID: 7, isRunning: { true }, terminate: {})
+        },
+        transport: ContainerizationHelperClientTransport { frame, _, _, _ in
+            try await helper.exchange(frame)
+        }
+    )
+    return LifecycleLiveEffects(
+        adapter: AppleContainerizationRuntimeAdapter(client: client),
+        state: fixture.effects.state,
+        store: fixture.store,
+        probeStore: fixture.probeStore,
+        environment: .live,
+        schedulerActivationValidator: { _ in },
+        nowMilliseconds: nowMilliseconds
+    )
+}
+
+private func nativeFenceCapability() -> RuntimeCapabilitySnapshot {
+    let implemented: Set<RuntimeProviderFeature> = [
+        .observation, .lifecycle, .processControl, .images, .cancellation,
+        .timeouts, .errors, .cleanup
+    ]
+    return RuntimeCapabilitySnapshot(
+        descriptor: RuntimeProviderDescriptor(
+            providerID: .appleContainerization,
+            components: [
+                RuntimeProviderComponent(
+                    identifier: .appleContainerizationHelper,
+                    version: "0.0.2", build: "test", fingerprint: String(repeating: "a", count: 64)
+                ),
+                RuntimeProviderComponent(
+                    identifier: .containerizationHelperProtocolV1,
+                    version: "1", build: "test", fingerprint: String(repeating: "b", count: 64)
+                ),
+                RuntimeProviderComponent(
+                    identifier: .appleContainerizationFramework,
+                    version: "0.35.0", build: "test", fingerprint: String(repeating: "c", count: 64)
+                )
+            ],
+            minimumMacOSVersion: .init(major: 26), supportedArchitectures: [.arm64]
+        ),
+        host: RuntimeProviderHostPlatform(
+            macOSVersion: .init(major: 26), macOSBuild: "test", architecture: .arm64
+        ),
+        features: RuntimeProviderFeature.knownValues.map { feature in
+            implemented.contains(feature)
+                ? RuntimeProviderFeatureStatus(
+                    feature: feature, state: .experimental, reason: .qualificationIncomplete
+                )
+                : RuntimeProviderFeatureStatus(
+                    feature: feature, state: .unavailable, reason: .notImplemented
+                )
+        }
+    )
+}
+
+private actor NativeFenceLifecycleHelper {
+    private struct RoutingEnvelope: Decodable {
+        let operation: ContainerizationHelperOperation
+    }
+
+    private let binding: LifecycleResourceBinding
+    private var operationID: String
+    private let capability: RuntimeCapabilitySnapshot
+    private var ownership: RuntimeInventoryOwnershipEvidence
+    private var lifecycle: RuntimeInventoryLifecycleState = .running
+    private var recordedMutations: [ContainerizationHelperOperation] = []
+    private var ignoresNextMutation = false
+    private var rotatesFenceOnIgnoredMutation = false
+
+    init(fixture: ProbeLiveFixture) {
+        binding = fixture.binding
+        operationID = fixture.context.operationID
+        capability = nativeFenceCapability()
+        ownership = fixture.binding.ownershipEvidence
+    }
+
+    func mutations() -> [ContainerizationHelperOperation] { recordedMutations }
+    func ignoreNextMutation(rotatingFence: Bool = false) {
+        ignoresNextMutation = true
+        rotatesFenceOnIgnoredMutation = rotatingFence
+    }
+    func setOwnership(_ value: RuntimeInventoryOwnershipEvidence) { ownership = value }
+    func setLifecycle(_ value: RuntimeInventoryLifecycleState) { lifecycle = value }
+
+    func inventory() throws -> RuntimeInventory {
+        let context = RuntimeMutationContext(
+            providerID: ownership.providerID,
+            capabilitySHA256: capability.canonicalSHA256,
+            operationID: operationID,
+            resourceUUID: ownership.resourceUUID,
+            resourceGeneration: ownership.resourceGeneration,
+            projectResourceUUID: ownership.projectUUID,
+            projectGeneration: ownership.projectGeneration,
+            providerGeneration: ownership.providerGeneration,
+            fencingToken: ownership.fencingToken
+        )
+        let labels = try RuntimeManagedResourceIdentity.labels(
+            for: binding.identity, resourceIdentifier: binding.resourceIdentifier, context: context
+        ).map { RuntimeInventoryLabel(key: $0.key, value: $0.value) }
+        return try RuntimeInventoryBuilder.build(
+            machine: RuntimeInventoryMachine(
+                state: .running, operatingSystem: "macOS", architecture: "arm64", runtimeVersion: "0.35.0",
+                services: [RuntimeInventoryService(
+                    identifier: "hostwright-containerization-helper", state: .running, required: true
+                )]
+            ),
+            containers: lifecycle == .missing ? [] : [RuntimeInventoryContainer(
+                runtimeID: binding.resourceIdentifier, name: binding.resourceIdentifier,
+                imageReference: "local/phase04:latest", lifecycle: lifecycle,
+                health: RuntimeInventoryHealth(availability: .unsupported),
+                labels: labels, ownership: ownership,
+                initConfiguration: RuntimeInventoryInitConfiguration(
+                    executable: "/usr/bin/service", arguments: [], environment: []
+                ),
+                ports: [], mounts: [], networks: [], services: []
+            )],
+            images: [], networks: [], volumes: []
+        )
+    }
+
+    func exchange(_ frame: Data) throws -> ContainerizationHelperTransportResponse {
+        let payload = try ContainerizationHelperFraming.decodeSingleFrame(frame)
+        let route = try JSONDecoder().decode(RoutingEnvelope.self, from: payload)
+        switch route.operation {
+        case .negotiate:
+            let request = try ContainerizationHelperCanonicalJSON.decodeRequest(
+                ContainerizationHelperEmptyPayload.self, from: payload
+            )
+            return try response(request, result: capability)
+        case .observe:
+            let request = try ContainerizationHelperCanonicalJSON.decodeRequest(
+                ContainerizationHelperObservePayload.self, from: payload
+            )
+            return try response(request, result: ContainerizationHelperObservation(inventory: inventory()))
+        case .logs:
+            let request = try ContainerizationHelperCanonicalJSON.decodeRequest(
+                ContainerizationHelperLogsRequest.self, from: payload
+            )
+            return try response(request, result: ContainerizationHelperLogs(
+                resourceIdentifier: request.payload.resourceIdentifier,
+                text: "native lifecycle output", lineLimit: request.payload.lineLimit
+            ))
+        case .stop, .start, .delete:
+            let request = try ContainerizationHelperCanonicalJSON.decodeRequest(
+                ContainerizationHelperMutationPayload.self, from: payload
+            )
+            guard let context = request.mutationContext,
+                  request.payload.resourceIdentifier == binding.resourceIdentifier,
+                  request.payload.resourceUUID == ownership.resourceUUID,
+                  request.payload.expectedOwnership == ownership else {
+                throw RuntimeAdapterError.outputParseFailed("Native test mutation lost exact prior ownership.")
+            }
+            recordedMutations.append(route.operation)
+            if ignoresNextMutation {
+                ignoresNextMutation = false
+                if rotatesFenceOnIgnoredMutation {
+                    adoptOwnership(context)
+                    rotatesFenceOnIgnoredMutation = false
+                }
+                return try response(request, result: ContainerizationHelperMutationResult(
+                    resourceIdentifier: binding.resourceIdentifier, lifecycle: lifecycle, verified: true
+                ))
+            }
+            adoptOwnership(context)
+            lifecycle = route.operation == .delete ? .missing : (route.operation == .stop ? .stopped : .running)
+            return try response(request, result: ContainerizationHelperMutationResult(
+                resourceIdentifier: binding.resourceIdentifier, lifecycle: lifecycle, verified: true
+            ))
+        default:
+            throw RuntimeAdapterError.outputParseFailed("Unexpected native lifecycle test operation.")
+        }
+    }
+
+    private func adoptOwnership(_ context: RuntimeMutationContext) {
+        operationID = context.operationID
+        ownership = RuntimeInventoryOwnershipEvidence(
+            resourceUUID: context.resourceUUID, projectUUID: context.projectResourceUUID,
+            resourceGeneration: context.resourceGeneration, projectGeneration: context.projectGeneration,
+            providerID: context.providerID, providerGeneration: context.providerGeneration,
+            fencingToken: context.fencingToken
+        )
+    }
+
+    private func response<Payload: Codable & Sendable, Result: Codable & Sendable>(
+        _ request: ContainerizationHelperRequest<Payload>, result: Result
+    ) throws -> ContainerizationHelperTransportResponse {
+        let payload = try ContainerizationHelperCanonicalJSON.encode(ContainerizationHelperResultEnvelope(
+            requestID: request.requestID, operation: request.operation, result: result
+        ))
+        return ContainerizationHelperTransportResponse(
+            frame: try ContainerizationHelperFraming.frame(payload), peerProcessID: 7
+        )
+    }
 }

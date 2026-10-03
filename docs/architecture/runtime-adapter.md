@@ -31,6 +31,8 @@ Implemented:
 
 The helper uses a private mode-`0700` runtime directory and mode-`0600` socket, authenticates same-UID peers plus the signed Hostwright code requirement, limits frames to 8 MiB, and rejects replay, duplicate IDs, truncation, overflow, protocol mismatch, unsafe paths, and replaced binaries. It implements only negotiate, observe, local-image evidence, resource usage, bounded logs, create, start, managed restart, delete, cancellation, and idle shutdown. Images must already exist locally.
 
+Containerization 0.35.0 imports the shipped init image manifest into an indirect OCI index. Bootstrap pins that imported root separately from the Linux ARM64 manifest variant; helper startup verifies both. The packaged layout retains its original index and manifest hashes.
+
 Not implemented:
 
 - image pull, build, load, push, tag, image delete, or prune;

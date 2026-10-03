@@ -45,7 +45,7 @@ enum RuntimeQualificationSDKSeeder {
                   config["schema"] as? Int == 1, config["framework"] as? String == ContainerizationRuntimeAssetContract.frameworkVersion,
                   config["initImageReference"] as? String == ContainerizationRuntimeAssetContract.initImageReference,
                   config["initImageDescriptorDigest"] as? String == ContainerizationRuntimeAssetContract.initImageDescriptorDigest,
-                  config["initImageVariantDigest"] as? String == ContainerizationRuntimeAssetContract.initImageDescriptorDigest,
+                  config["initImageVariantDigest"] as? String == ContainerizationRuntimeAssetContract.initImageVariantDigest,
                   let rootPath = config["dataRootPath"] as? String,
                   let runtimePath = config["runtimeDirectoryPath"] as? String,
                   let kernelPath = config["kernelPath"] as? String,

@@ -33,6 +33,12 @@ Requirements:
 - network access only to clone dependencies/source;
 - Apple `container` installed only for live runtime commands.
 
+An idle local daemon can open its authenticated Control API socket without an available
+runtime, allowing the desktop to connect and display runtime availability. Runtime
+version checks run when a scheduler operation needs runtime authority; a missing
+runtime still refuses that operation before scheduler pressure persistence,
+reservation changes, or runtime mutations.
+
 ```bash
 git clone https://github.com/hostwright/hostwright.git
 cd hostwright

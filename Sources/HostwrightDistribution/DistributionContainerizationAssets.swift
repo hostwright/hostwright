@@ -19,7 +19,7 @@ public enum DistributionContainerizationAssets {
     public static let initImageDescriptorDigest =
         ContainerizationRuntimeAssetContract.initImageDescriptorDigest
     public static let initImageVariantDigest =
-        "sha256:\(ContainerizationRuntimeAssetContract.initImageManifestDigest)"
+        ContainerizationRuntimeAssetContract.initImageVariantDigest
     public static let kernelFileName = ContainerizationRuntimeAssetContract.kernelFileName
     public static let kernelSHA256 = ContainerizationRuntimeAssetContract.kernelSHA256
     static let initManifestDigest = ContainerizationRuntimeAssetContract.initImageManifestDigest
@@ -256,7 +256,7 @@ public enum DistributionContainerizationAssets {
               manifests.count == 1,
               let descriptor = manifests.first,
               descriptor["mediaType"] as? String == "application/vnd.oci.image.manifest.v1+json",
-              descriptor["digest"] as? String == initImageDescriptorDigest,
+              descriptor["digest"] as? String == initImageVariantDigest,
               descriptor["size"] as? Int == Int(ContainerizationRuntimeAssetContract.initImageManifestSize),
               descriptor["annotations"] == nil else {
             throw DistributionError.invalidArtifact("Containerization OCI image descriptor is invalid.")

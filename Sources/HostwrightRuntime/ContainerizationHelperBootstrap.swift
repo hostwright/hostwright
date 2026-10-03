@@ -14,13 +14,13 @@ struct ContainerizationHelperBootstrapAssetLock: Equatable, Sendable {
     let kernel: File
     let guestNetworkPolicyLoader: File
     let initImageReference: String
+    let initImageDescriptorDigest: String
     let initImageLayout: File
     let initImageIndexJSON: File
     let initImageManifest: File
     let initImageConfiguration: File
     let initImageLayer: File
 
-    var initImageDescriptorDigest: String { "sha256:\(initImageManifest.sha256)" }
     var initImageVariantDigest: String { "sha256:\(initImageManifest.sha256)" }
 
     static let pinned = ContainerizationHelperBootstrapAssetLock(
@@ -36,6 +36,7 @@ struct ContainerizationHelperBootstrapAssetLock: Equatable, Sendable {
             size: ContainerizationRuntimeAssetContract.guestNetworkPolicyLoaderSize
         ),
         initImageReference: ContainerizationRuntimeAssetContract.initImageReference,
+        initImageDescriptorDigest: ContainerizationRuntimeAssetContract.initImageDescriptorDigest,
         initImageLayout: File(
             name: "oci-layout",
             sha256: ContainerizationRuntimeAssetContract.initImageLayoutSHA256,
@@ -288,7 +289,7 @@ enum ContainerizationHelperBootstrap {
               manifests.count == 1,
               let descriptor = manifests.first,
               descriptor["mediaType"] as? String == "application/vnd.oci.image.manifest.v1+json",
-              descriptor["digest"] as? String == assetLock.initImageDescriptorDigest,
+              descriptor["digest"] as? String == assetLock.initImageVariantDigest,
               descriptor["size"] as? Int == Int(assetLock.initImageManifest.size),
               descriptor["annotations"] == nil else {
             throw ContainerizationHelperClientError.helperLaunchFailed

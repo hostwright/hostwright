@@ -961,7 +961,16 @@ public struct DistributionInstallManifest: Codable, Equatable, Sendable {
         case 1:
             expectedModes = DistributionLayout.legacyPayloadModesV1
         case 2:
-            expectedModes = DistributionLayout.legacyPayloadModesV2
+            let paths = Set(files.map(\.path))
+            guard let legacyModes = [
+                DistributionLayout.legacyTrustedPayloadModesV1,
+                DistributionLayout.legacyPayloadModesV2
+            ].first(where: { Set($0.keys) == paths }) else {
+                throw DistributionError.invalidManifest(
+                    "install ownership manifest schema is unsupported"
+                )
+            }
+            expectedModes = legacyModes
         case 3:
             let paths = Set(files.map(\.path))
             guard let legacyModes = [

@@ -856,7 +856,8 @@ let package = Package(
                 "HostwrightContainerizationHelper",
                 "HostwrightCore",
                 "HostwrightRuntime",
-                .product(name: "Containerization", package: "containerization")
+                .product(name: "Containerization", package: "containerization"),
+                .product(name: "ContainerizationOCI", package: "containerization")
             ]
         ),
         .testTarget(

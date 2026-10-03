@@ -41,6 +41,7 @@ final class ContainerizationHelperBootstrapTests: XCTestCase {
             document.initImageVariantDigest,
             fixture.assetLock.initImageVariantDigest
         )
+        XCTAssertNotEqual(document.initImageDescriptorDigest, document.initImageVariantDigest)
         XCTAssertEqual(document.rootfsSizeBytes, 4 * 1_024 * 1_024 * 1_024)
         XCTAssertEqual(
             document.guestNetworkPolicyLoaderPath,
@@ -67,6 +68,35 @@ final class ContainerizationHelperBootstrapTests: XCTestCase {
 
         XCTAssertEqual(try Data(contentsOf: fixture.configurationURL), mismatched)
         XCTAssertEqual(try fixture.temporaryConfigurationFiles(), [])
+    }
+
+    func testPrepareRejectsImportedRootAsPackagedManifestBeforePersistence() throws {
+        let fixture = try ContainerizationHelperBootstrapFixture()
+        let indexURL = fixture.initImageLayoutURL.appendingPathComponent("index.json")
+        var index = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: indexURL)) as? [String: Any])
+        var manifests = try XCTUnwrap(index["manifests"] as? [[String: Any]])
+        manifests[0]["digest"] = fixture.assetLock.initImageDescriptorDigest
+        index["manifests"] = manifests
+        let bytes = try JSONSerialization.data(withJSONObject: index, options: [.sortedKeys])
+        try bytes.write(to: indexURL)
+        let original = fixture.assetLock
+        let lock = ContainerizationHelperBootstrapAssetLock(
+            frameworkVersion: original.frameworkVersion,
+            kernel: original.kernel,
+            guestNetworkPolicyLoader: original.guestNetworkPolicyLoader,
+            initImageReference: original.initImageReference,
+            initImageDescriptorDigest: original.initImageDescriptorDigest,
+            initImageLayout: original.initImageLayout,
+            initImageIndexJSON: .init(name: "index.json", sha256: SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined(), size: Int64(bytes.count)),
+            initImageManifest: original.initImageManifest,
+            initImageConfiguration: original.initImageConfiguration,
+            initImageLayer: original.initImageLayer
+        )
+
+        XCTAssertThrowsError(try fixture.prepare(assetLock: lock)) { error in
+            XCTAssertEqual(error as? ContainerizationHelperClientError, .helperLaunchFailed)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.supportURL.path))
     }
 
     func testPrepareRefusesSymlinkTraversalAndUnsafePrivateDirectory() throws {
@@ -439,6 +469,7 @@ private final class ContainerizationHelperBootstrapFixture: @unchecked Sendable 
                 size: Int64(guestLoader.count)
             ),
             initImageReference: "untagged@sha256:\(manifestLock.sha256)",
+            initImageDescriptorDigest: "sha256:\(Self.sha256(Data("fixture-imported-index".utf8)))",
             initImageLayout: layoutLock,
             initImageIndexJSON: indexLock,
             initImageManifest: manifestLock,
@@ -483,12 +514,12 @@ private final class ContainerizationHelperBootstrapFixture: @unchecked Sendable 
         try? FileManager.default.removeItem(at: rootURL)
     }
 
-    func prepare() throws {
+    func prepare(assetLock override: ContainerizationHelperBootstrapAssetLock? = nil) throws {
         try ContainerizationHelperBootstrap.prepare(
             configuration: clientConfiguration,
             homeDirectoryURL: homeURL,
             environment: environment,
-            assetLock: assetLock
+            assetLock: override ?? assetLock
         )
     }
 

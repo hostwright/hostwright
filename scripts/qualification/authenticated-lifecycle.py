@@ -48,6 +48,9 @@ LANES = {'apple-cli-1.0.0': ('apple-container-cli', '1.0.0'),
          'apple-cli-1.1.0': ('apple-container-cli', '1.1.0'),
          'containerization-0.35.0': ('apple-containerization', '0.35.0')}
 HEX = re.compile(r'^[0-9a-f]{64}$')
+SDK_INIT_DESCRIPTOR_DIGEST = 'sha256:c58d7f9497e8c519869cfedfa5d0be02a63d665fb66127c0a4c8e209c7cfe396'
+SDK_INIT_VARIANT_DIGEST = 'sha256:15a70c63c9ca254020d8bdbe1b6e48332db0629881f563624bfd319412a37ea3'
+SDK_INIT_IMPORTED_INDEX_SIZE = 358
 
 class Rejected(RuntimeError):
     pass
@@ -405,6 +408,10 @@ def guard_input_files(args, binding, binding_digest):
     validate_runtime_root(binding)
     if LANES[args.lane][0] == 'apple-containerization': validate_sdk_inputs(args, binding)
 
+def validate_sdk_init_descriptors(config):
+    require(config.get('initImageDescriptorDigest') == SDK_INIT_DESCRIPTOR_DIGEST
+            and config.get('initImageVariantDigest') == SDK_INIT_VARIANT_DIGEST, 'SDK init descriptors mismatch')
+
 def validate_sdk_inputs(args, binding, fresh=False):
     require(isinstance(binding.get('sdk'),dict), 'SDK blocked: concrete SDK bindings required')
     spec = binding['sdk']
@@ -442,7 +449,7 @@ def validate_sdk_inputs(args, binding, fresh=False):
     for relative, (digest, size) in init_files.items():
         path = str(init_root/relative)
         require(spec['assetSHA256'].get(path) == digest and Path(path).stat().st_size == size, 'SDK init OCI asset omitted, unpinned, or wrong size')
-    require(config['initImageDescriptorDigest'] == 'sha256:'+init_digests[0] and config['initImageVariantDigest'] == 'sha256:'+init_digests[0], 'SDK init descriptors mismatch')
+    validate_sdk_init_descriptors(config)
     if fresh: require(sdk.oci_tree_digest(spec['layoutPath']) == spec['layoutSHA256'], 'SDK OCI input tree mismatch')
     require(spec['unmanagedProcessPaths'] and all(Path(x).is_absolute() for x in spec['unmanagedProcessPaths']), 'explicit unmanaged host workload process scope required')
     for path in spec['unmanagedProcessPaths']: bound(path,spec['unmanagedProcessSHA256'][path])
@@ -570,6 +577,7 @@ class Harness:
         atomic(self.evidence/'sdk-after-seed.json', {'receipt':receipt,'nativeFilesystem':self.sdk_fs_baseline})
 
     def sdk_ready_baseline(self):
+        validate_sdk_init_descriptors(self.sdk_config)
         spec = self.binding['sdk']; root = Path(self.sdk_config['dataRootPath'])
         current = sdk.filesystem_inventory(root)
         refs_path = root/'images/state.json'
@@ -580,6 +588,12 @@ class Harness:
         new = {x['path']:x for x in current['entries']}
         init_digests = [Path(path).name for path in spec['assetSHA256'] if '/blobs/sha256/' in path]
         allowed_files = {'images/content/blobs/sha256/'+x:x for x in init_digests}
+        imported_digest = SDK_INIT_DESCRIPTOR_DIGEST[7:]
+        imported_path = 'images/content/blobs/sha256/'+imported_digest
+        allowed_files[imported_path] = imported_digest
+        require(new.get(imported_path, {}).get('type') == 'file'
+                and new[imported_path].get('sha256') == imported_digest
+                and new[imported_path].get('size') == SDK_INIT_IMPORTED_INDEX_SIZE, 'SDK imported init index mismatch')
         bootstrap = 'bootstrap/initfs-0.35.0-'+self.sdk_config['initImageVariantDigest'][7:]+'.ext4'
         allowed_dirs = {'state','state/records','state/logs','bootstrap','images/containers'}
         require(all(new.get(path) == entry for path,entry in old.items() if path != 'images/state.json'), 'seeded SDK native input changed during helper initialization')

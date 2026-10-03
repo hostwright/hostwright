@@ -1733,7 +1733,7 @@ private actor AppleContainerizationRuntimeDriver: ContainerizationHelperRuntimeD
             guestPolicyStore = nil
         }
 
-        let initImage = try await Self.requireInitImage(
+        let initImage = try await ContainerizationHelperInitImage.require(
             configuration: configuration,
             imageStore: imageStore
         )
@@ -2562,23 +2562,6 @@ private actor AppleContainerizationRuntimeDriver: ContainerizationHelperRuntimeD
         if let gateway = interfaces.first?.ipv4Gateway {
             configuration.dns = DNS(nameservers: [gateway.description])
         }
-    }
-
-    private static func requireInitImage(
-        configuration: ContainerizationHelperConfiguration,
-        imageStore: ImageStore
-    ) async throws -> Containerization.Image {
-        var images = try await imageStore.list()
-        if !images.contains(where: { $0.reference == configuration.initImageReference }) {
-            _ = try await imageStore.load(from: configuration.initImageLayoutURL)
-            images = try await imageStore.list()
-        }
-        guard let image = images.first(where: { $0.reference == configuration.initImageReference }),
-              image.descriptor.digest == configuration.initImageDescriptorDigest,
-              try await image.descriptor(for: .current).digest == configuration.initImageVariantDigest else {
-            throw ContainerizationHelperConfigurationError.assetDigestMismatch
-        }
-        return image
     }
 
     private static func mergedEnvironment(

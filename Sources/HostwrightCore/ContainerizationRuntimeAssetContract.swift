@@ -7,6 +7,9 @@ public enum ContainerizationRuntimeAssetContract {
     public static let initImageManifestDigest =
         "15a70c63c9ca254020d8bdbe1b6e48332db0629881f563624bfd319412a37ea3"
     public static let initImageManifestSize: Int64 = 406
+    public static let initImageImportedIndexSHA256 =
+        "c58d7f9497e8c519869cfedfa5d0be02a63d665fb66127c0a4c8e209c7cfe396"
+    public static let initImageImportedIndexSize: Int64 = 358
     public static let initImageConfigurationDigest =
         "7812fb606774f30d8b6d36c2a37a6e12ae719ece3fc34775f9b87ee94639e257"
     public static let initImageConfigurationSize: Int64 = 151
@@ -43,6 +46,10 @@ public enum ContainerizationRuntimeAssetContract {
         "\(installationRelativeRoot)/guest/\(guestNetworkPolicyLoaderFileName)"
 
     public static var initImageDescriptorDigest: String {
+        "sha256:\(initImageImportedIndexSHA256)"
+    }
+
+    public static var initImageVariantDigest: String {
         "sha256:\(initImageManifestDigest)"
     }
 }

@@ -8,6 +8,7 @@ from unittest import mock
 import tarfile
 import zipfile
 import hashlib
+import os
 
 spec = importlib.util.spec_from_file_location('qualification', Path(__file__).with_name('authenticated-lifecycle.py'))
 q = importlib.util.module_from_spec(spec)
@@ -305,5 +306,73 @@ class BoundaryTests(unittest.TestCase):
         obj = q.load(inventory); del obj['files']['release/release-manifest.json.cms']
         inventory.write_text(json.dumps(obj)); self.receipt['release']['inventorySHA256'] = q.sha(inventory); self.write_receipt()
         self.reject('omits release/CMS')
+
+class SDKInitReadinessTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix='hostwright-init-readiness-')
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name).resolve()
+        self.native = self.root/'native'; self.native.mkdir(mode=0o700)
+        for relative in ('images/content/blobs/sha256', 'images/containers', 'state/records', 'state/logs'):
+            (self.native/relative).mkdir(parents=True, mode=0o700)
+        for directory, _, _ in os.walk(self.native): os.chmod(directory, 0o700)
+        self.references = {'fixture-workload': {'digest': 'sha256:'+'a'*64}}
+        self.write('images/state.json', json.dumps(self.references).encode())
+        self.harness = q.Harness.__new__(q.Harness)
+        self.harness.evidence = self.root/'evidence'; self.harness.evidence.mkdir(mode=0o700)
+        self.harness.sdk_config = {
+            'dataRootPath': str(self.native), 'initImageReference': 'untagged@'+q.SDK_INIT_VARIANT_DIGEST,
+            'initImageDescriptorDigest': q.SDK_INIT_DESCRIPTOR_DIGEST, 'initImageVariantDigest': q.SDK_INIT_VARIANT_DIGEST,
+        }
+        self.harness.binding = {'sdk': {
+            'reference': 'fixture-workload', 'descriptor': 'sha256:'+'a'*64,
+            'assetSHA256': {str(self.root/'layout/blobs/sha256'/digest): digest for digest in (
+                q.SDK_INIT_VARIANT_DIGEST[7:], '7812fb606774f30d8b6d36c2a37a6e12ae719ece3fc34775f9b87ee94639e257',
+                '3c6b087fc41b30d44dac2951f0ee798b242fac8e00db9b6375e25ef48765418d')},
+        }}
+        self.harness.sdk_fs_baseline = q.sdk.filesystem_inventory(self.native)
+        index = {
+            'schemaVersion': 2, 'mediaType': 'application/vnd.oci.image.index.v1+json',
+            'annotations': {'com.apple.containerization.index.indirect': 'true'},
+            'manifests': [{'mediaType': 'application/vnd.oci.image.manifest.v1+json',
+                          'digest': q.SDK_INIT_VARIANT_DIGEST, 'size': 406,
+                          'platform': {'architecture': 'arm64', 'os': 'linux'}}],
+        }
+        self.index_bytes = json.dumps(index, sort_keys=True, separators=(',', ':')).replace('/', '\\/').encode()
+        self.assertEqual(len(self.index_bytes), q.SDK_INIT_IMPORTED_INDEX_SIZE)
+        self.assertEqual('sha256:'+hashlib.sha256(self.index_bytes).hexdigest(), q.SDK_INIT_DESCRIPTOR_DIGEST)
+        self.imported_path = 'images/content/blobs/sha256/'+q.SDK_INIT_DESCRIPTOR_DIGEST[7:]
+        self.write(self.imported_path, self.index_bytes)
+        self.references[self.harness.sdk_config['initImageReference']] = {'digest': q.SDK_INIT_DESCRIPTOR_DIGEST}
+        self.write('images/state.json', json.dumps(self.references).encode())
+        (self.native/'bootstrap').mkdir(mode=0o700)
+        self.write('bootstrap/initfs-0.35.0-'+q.SDK_INIT_VARIANT_DIGEST[7:]+'.ext4', b'initfs-unit-fixture')
+
+    def write(self, relative, raw):
+        path = self.native/relative
+        path.write_bytes(raw); path.chmod(0o600)
+
+    def test_readiness_accepts_exact_imported_index(self):
+        self.harness.sdk_ready_baseline()
+        receipt = q.load(self.harness.evidence/'sdk-before-lifecycle.json')
+        self.assertEqual(receipt['imageReferences'][self.harness.sdk_config['initImageReference']]['digest'], q.SDK_INIT_DESCRIPTOR_DIGEST)
+
+    def test_readiness_rejects_tampered_or_missing_imported_index(self):
+        self.write(self.imported_path, b'x'*len(self.index_bytes))
+        with self.assertRaisesRegex(q.Rejected, 'imported init index mismatch'): self.harness.sdk_ready_baseline()
+        (self.native/self.imported_path).unlink()
+        with self.assertRaisesRegex(q.Rejected, 'imported init index mismatch'): self.harness.sdk_ready_baseline()
+
+    def test_readiness_rejects_unexpected_extra_blob(self):
+        self.write('images/content/blobs/sha256/'+'f'*64, b'unexpected')
+        with self.assertRaisesRegex(q.Rejected, 'unexpected SDK initialization artifact'): self.harness.sdk_ready_baseline()
+
+    def test_readiness_rejects_wrong_root_or_variant(self):
+        for key, wrong in [('initImageDescriptorDigest', q.SDK_INIT_VARIANT_DIGEST),
+                           ('initImageVariantDigest', q.SDK_INIT_DESCRIPTOR_DIGEST)]:
+            before = self.harness.sdk_config[key]
+            self.harness.sdk_config[key] = wrong
+            with self.assertRaisesRegex(q.Rejected, 'SDK init descriptors mismatch'): self.harness.sdk_ready_baseline()
+            self.harness.sdk_config[key] = before
 
 if __name__ == '__main__': unittest.main()

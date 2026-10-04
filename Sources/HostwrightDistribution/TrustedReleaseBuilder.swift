@@ -1,6 +1,95 @@
 import Foundation
 import HostwrightCore
 
+enum TrustedReleasePackageComponentPolicy {
+    static let bundleIdentifier = "dev.hostwright.desktop"
+    static let rootRelativeBundlePath = String(DistributionLayout.packageStagingPath.dropFirst())
+        + "/" + DistributionLayout.desktopAppPath
+
+    static func propertyListData() throws -> Data {
+        try PropertyListSerialization.data(
+            fromPropertyList: [[
+                "RootRelativeBundlePath": rootRelativeBundlePath,
+                "BundleIsRelocatable": false,
+                "BundleIsVersionChecked": false,
+                "BundleHasStrictIdentifier": true,
+                "BundleOverwriteAction": "upgrade"
+            ]],
+            format: .xml,
+            options: 0
+        )
+    }
+
+    static func buildArguments(
+        root: URL,
+        scripts: URL,
+        componentPropertyList: URL,
+        packageVersion: String,
+        installerIdentity: String,
+        output: URL
+    ) -> [String] {
+        [
+            "--root", root.path,
+            "--component-plist", componentPropertyList.path,
+            "--identifier", DistributionLayout.packageIdentifier,
+            "--version", packageVersion,
+            "--install-location", "/",
+            "--scripts", scripts.path,
+            "--ownership", "recommended",
+            "--sign", installerIdentity,
+            output.path
+        ]
+    }
+
+    static func validatePackageInfo(
+        _ data: Data,
+        manifest: TrustedReleaseManifest
+    ) throws {
+        guard manifest.schemaVersion >= 3 else { return }
+        try validatePackageInfo(
+            data,
+            packageVersion: DistributionPackageVersion.make(from: manifest.packageVersion),
+            desktopBundleVersion: DistributionDesktopBundleVersion.make(from: manifest.packageVersion)
+        )
+    }
+
+    static func validatePackageInfo(
+        _ data: Data,
+        packageVersion: String,
+        desktopBundleVersion: String
+    ) throws {
+        guard !data.isEmpty, data.count <= 1_024 * 1_024,
+              let document = try? XMLDocument(data: data, options: .nodeLoadExternalEntitiesNever),
+              document.dtd == nil,
+              let root = document.rootElement(), root.name == "pkg-info",
+              root.attribute(forName: "identifier")?.stringValue == DistributionLayout.packageIdentifier,
+              root.attribute(forName: "version")?.stringValue == packageVersion,
+              root.attribute(forName: "install-location")?.stringValue == "/",
+              root.attribute(forName: "relocatable")?.stringValue == "false" else {
+            throw DistributionError.invalidArtifact("trusted package component metadata is invalid")
+        }
+        let bundles = root.elements(forName: "bundle")
+        func bundleIDs(_ section: String) -> [String?] {
+            root.elements(forName: section).flatMap { $0.elements(forName: "bundle") }
+                .map { $0.attribute(forName: "id")?.stringValue }
+        }
+        guard bundles.count == 1,
+              bundles[0].attribute(forName: "id")?.stringValue == bundleIdentifier,
+              bundles[0].attribute(forName: "path")?.stringValue == "./" + rootRelativeBundlePath,
+              bundles[0].attribute(forName: "CFBundleVersion")?.stringValue == desktopBundleVersion,
+              bundleIDs("relocate").isEmpty,
+              bundleIDs("bundle-version").isEmpty,
+              bundleIDs("upgrade-bundle") == [bundleIdentifier],
+              bundleIDs("strict-identifier") == [bundleIdentifier],
+              bundleIDs("update-bundle").isEmpty,
+              bundleIDs("atomic-update-bundle").isEmpty else {
+            throw DistributionError.invalidArtifact(
+                "trusted package desktop component must use exact nonrelocating staging without version skipping"
+            )
+        }
+    }
+}
+
 public struct TrustedReleaseBuildRequest: Sendable {
     public let sourceRoot: URL
     public let outputDirectory: URL
@@ -500,18 +589,22 @@ public struct TrustedReleaseBuilder: Sendable {
         let packageURL = stagedOutput.appendingPathComponent(
             TrustedReleaseLayout.packageFileName(artifactID: artifactID)
         )
+        let packageComponents = scratch.appendingPathComponent("hostwright-dist-release-package-components.plist")
+        try DistributionFileSystem.writeNewFile(
+            try TrustedReleasePackageComponentPolicy.propertyListData(),
+            to: packageComponents,
+            mode: 0o600
+        )
         let packageResult = try runner.run(
             executablePath: "/usr/bin/pkgbuild",
-            arguments: [
-                "--root", packageRoot.path,
-                "--identifier", "dev.hostwright.cli",
-                "--version", installerPackageVersion,
-                "--install-location", "/",
-                "--scripts", packageScripts.path,
-                "--ownership", "recommended",
-                "--sign", installerResolution.identity.sha1Fingerprint,
-                packageURL.path
-            ],
+            arguments: TrustedReleasePackageComponentPolicy.buildArguments(
+                root: packageRoot,
+                scripts: packageScripts,
+                componentPropertyList: packageComponents,
+                packageVersion: installerPackageVersion,
+                installerIdentity: installerResolution.identity.sha1Fingerprint,
+                output: packageURL
+            ),
             label: "build signed flat installer package",
             timeoutSeconds: 300,
             cancellation: cancellation

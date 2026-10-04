@@ -496,6 +496,126 @@ final class TrustedReleaseTests: XCTestCase {
         )
     }
 
+    func testPackageComponentPolicyProducesExactNonrelocatingPkgbuildMetadata() throws {
+        let root = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".hostwright-package-policy-\(UUID().uuidString)")
+        try DistributionFileSystem.createExclusiveDirectory(root)
+        defer { try? DistributionFileSystem.removeOwnedTemporaryItem(root) }
+        let payload = root.appendingPathComponent("payload", isDirectory: true)
+        let scripts = root.appendingPathComponent("scripts", isDirectory: true)
+        let app = payload.appendingPathComponent(TrustedReleasePackageComponentPolicy.rootRelativeBundlePath)
+        let contents = app.appendingPathComponent("Contents", isDirectory: true)
+        let executable = contents.appendingPathComponent("MacOS/hostwright-desktop")
+        try FileManager.default.createDirectory(at: executable.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try DistributionFileSystem.createExclusiveDirectory(scripts)
+        try FileManager.default.copyItem(at: URL(fileURLWithPath: "/usr/bin/true"), to: executable)
+        let info: [String: Any] = [
+            "CFBundleIdentifier": "dev.hostwright.desktop",
+            "CFBundleName": "Hostwright",
+            "CFBundlePackageType": "APPL",
+            "CFBundleExecutable": "hostwright-desktop",
+            "CFBundleShortVersionString": "0.0.2",
+            "CFBundleVersion": "2.1.1"
+        ]
+        try DistributionFileSystem.writeNewFile(
+            PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0),
+            to: contents.appendingPathComponent("Info.plist"), mode: 0o644
+        )
+        let components = root.appendingPathComponent("components.plist")
+        let componentData = try TrustedReleasePackageComponentPolicy.propertyListData()
+        let values = try XCTUnwrap(
+            PropertyListSerialization.propertyList(from: componentData, format: nil) as? [[String: Any]]
+        )
+        XCTAssertEqual(values.count, 1)
+        XCTAssertEqual(values[0]["RootRelativeBundlePath"] as? String,
+                       "Library/Application Support/Hostwright/InstallerPayload/libexec/hostwright/Hostwright.app")
+        XCTAssertEqual(values[0]["BundleIsRelocatable"] as? Bool, false)
+        XCTAssertEqual(values[0]["BundleIsVersionChecked"] as? Bool, false)
+        XCTAssertEqual(values[0]["BundleHasStrictIdentifier"] as? Bool, true)
+        XCTAssertEqual(values[0]["BundleOverwriteAction"] as? String, "upgrade")
+        try DistributionFileSystem.writeNewFile(componentData, to: components, mode: 0o600)
+        let package = root.appendingPathComponent("candidate.pkg")
+        var arguments = TrustedReleasePackageComponentPolicy.buildArguments(
+            root: payload, scripts: scripts, componentPropertyList: components,
+            packageVersion: "0.0.2.1001", installerIdentity: String(repeating: "A", count: 40), output: package
+        )
+        let signingIndex = try XCTUnwrap(arguments.firstIndex(of: "--sign"))
+        XCTAssertEqual(arguments[signingIndex + 1], String(repeating: "A", count: 40))
+        arguments.removeSubrange(signingIndex...(signingIndex + 1))
+        let built = try run(URL(fileURLWithPath: "/usr/bin/pkgbuild"), arguments: arguments)
+        XCTAssertEqual(built.status, 0, built.output)
+        let expanded = root.appendingPathComponent("expanded", isDirectory: true)
+        let expansion = try run(URL(fileURLWithPath: "/usr/sbin/pkgutil"), arguments: ["--expand", package.path, expanded.path])
+        XCTAssertEqual(expansion.status, 0, expansion.output)
+        let packageInfo = try Data(contentsOf: expanded.appendingPathComponent("PackageInfo"))
+        XCTAssertNoThrow(try TrustedReleasePackageComponentPolicy.validatePackageInfo(
+            packageInfo, packageVersion: "0.0.2.1001", desktopBundleVersion: "2.1.1"
+        ))
+        let document = try XMLDocument(data: packageInfo, options: .nodeLoadExternalEntitiesNever)
+        let metadata = try XCTUnwrap(document.rootElement())
+        let relocate = XMLElement(name: "relocate")
+        let bundle = XMLElement(name: "bundle")
+        bundle.addAttribute(XMLNode.attribute(withName: "id", stringValue: "dev.hostwright.desktop") as! XMLNode)
+        relocate.addChild(bundle)
+        metadata.addChild(relocate)
+        XCTAssertEqual(metadata.attribute(forName: "relocatable")?.stringValue, "false")
+        XCTAssertThrowsError(try TrustedReleasePackageComponentPolicy.validatePackageInfo(
+            document.xmlData, packageVersion: "0.0.2.1001", desktopBundleVersion: "2.1.1"
+        ))
+    }
+
+    func testPackageComponentPolicyRejectsSkippedOrInexactBundleMetadata() throws {
+        let metadata = """
+        <pkg-info identifier="dev.hostwright.cli" version="0.0.2.1001" install-location="/" relocatable="false">
+          <bundle path="./Library/Application Support/Hostwright/InstallerPayload/libexec/hostwright/Hostwright.app"
+            id="dev.hostwright.desktop" CFBundleVersion="2.1.1"/>
+          <bundle-version/>
+          <upgrade-bundle><bundle id="dev.hostwright.desktop"/></upgrade-bundle>
+          <strict-identifier><bundle id="dev.hostwright.desktop"/></strict-identifier>
+          <relocate/><update-bundle/><atomic-update-bundle/>
+        </pkg-info>
+        """
+        func validate(_ value: String) throws {
+            try TrustedReleasePackageComponentPolicy.validatePackageInfo(
+                Data(value.utf8), packageVersion: "0.0.2.1001", desktopBundleVersion: "2.1.1"
+            )
+        }
+        XCTAssertNoThrow(try validate(metadata))
+        let mutations = [
+            metadata.replacingOccurrences(of: "<bundle-version/>", with: "<bundle-version><bundle id=\"dev.hostwright.desktop\"/></bundle-version>"),
+            metadata.replacingOccurrences(of: "InstallerPayload/libexec", with: "Other/libexec"),
+            metadata.replacingOccurrences(of: "dev.hostwright.desktop", with: "other.desktop"),
+            metadata.replacingOccurrences(of: "CFBundleVersion=\"2.1.1\"", with: "CFBundleVersion=\"2.1.2\""),
+            metadata.replacingOccurrences(of: "version=\"0.0.2.1001\"", with: "version=\"0.0.2.12\""),
+            metadata.replacingOccurrences(of: "<strict-identifier><bundle id=\"dev.hostwright.desktop\"/></strict-identifier>", with: "<strict-identifier/>"),
+            metadata.replacingOccurrences(of: "<update-bundle/>", with: "<update-bundle><bundle id=\"dev.hostwright.desktop\"/></update-bundle>"),
+            metadata.replacingOccurrences(of: "<relocate/>", with: "<relocate><bundle id=\"dev.hostwright.desktop\"/></relocate>"),
+            metadata.replacingOccurrences(of: "</pkg-info>", with: "<bundle path=\"./other.app\" id=\"other.desktop\"/></pkg-info>"),
+            "<!DOCTYPE pkg-info [<!ENTITY app 'dev.hostwright.desktop'>]>" + metadata,
+            "<pkg-info>",
+            ""
+        ]
+        for value in mutations {
+            XCTAssertThrowsError(try validate(value))
+        }
+    }
+
+    func testPackageComponentPolicyPreservesPublishedSchemaTwoDesktopCompatibility() throws {
+        let manifest = makeManifest(schemaVersion: 2, payloadModes: DistributionLayout.legacyPayloadModesV5)
+        XCTAssertNoThrow(try manifest.validate())
+        XCTAssertTrue(manifest.payloadFiles.contains { $0.path == DistributionLayout.desktopInfoPlistPath })
+        let legacyMetadata = Data("""
+        <pkg-info identifier="dev.hostwright.cli" version="0.0.2.1001" install-location="/" relocatable="false">
+          <bundle path="./Library/Application Support/Hostwright/InstallerPayload/libexec/hostwright/Hostwright.app"
+            id="dev.hostwright.desktop" CFBundleVersion="2.1.1"/>
+          <bundle-version><bundle id="dev.hostwright.desktop"/></bundle-version>
+          <relocate><bundle id="dev.hostwright.desktop"/></relocate>
+        </pkg-info>
+        """.utf8)
+        XCTAssertNoThrow(try TrustedReleasePackageComponentPolicy.validatePackageInfo(legacyMetadata, manifest: manifest))
+        XCTAssertThrowsError(try TrustedReleasePackageComponentPolicy.validatePackageInfo(legacyMetadata, manifest: makeManifest()))
+    }
+
     func testCleanBuildCommandEvidenceRecordsExactDeterministicInvocation() {
         let arguments = DistributionCleanBuilder.deterministicReleaseBuildArguments(
             sourceRoot: URL(fileURLWithPath: "/private/tmp/source with space", isDirectory: true),

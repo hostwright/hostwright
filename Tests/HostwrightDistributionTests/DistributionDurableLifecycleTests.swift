@@ -146,6 +146,27 @@ final class DistributionDurableLifecycleTests: XCTestCase {
         XCTAssertThrowsError(try DistributionOwnerStateSessionService.runRootChild())
     }
 
+    func testOwnerSessionReadRemainsBoundedAndCancellableDuringKeychainApproval() throws {
+        struct Frame: Decodable { let value: String }
+        let input = Pipe()
+        defer {
+            try? input.fileHandleForReading.close()
+            try? input.fileHandleForWriting.close()
+        }
+        let descriptor = input.fileHandleForReading.fileDescriptor
+        XCTAssertEqual(fcntl(descriptor, F_SETFL, O_NONBLOCK), 0)
+        var buffered = Data()
+        XCTAssertThrowsError(try DistributionOwnerStateSessionClient.readFrame(Frame.self,
+            descriptor: descriptor, buffered: &buffered,
+            cancellation: SecureSubprocessCancellation(), timeoutMilliseconds: 1))
+        let cancellation = SecureSubprocessCancellation()
+        cancellation.cancel()
+        let started = Date()
+        XCTAssertThrowsError(try DistributionOwnerStateSessionClient.readFrame(Frame.self,
+            descriptor: descriptor, buffered: &buffered, cancellation: cancellation))
+        XCTAssertLessThan(Date().timeIntervalSince(started), 1)
+    }
+
     func testOwnerPreparationChallengeBindsActualConfigurationWithoutPrivateJournalAccess() throws {
         try withTemporaryRoot { root in
             let artifact = try makeVerifiedArtifact(root: root, name: "owner-preparation", version: "0.0.1", commit: baselineCommit)

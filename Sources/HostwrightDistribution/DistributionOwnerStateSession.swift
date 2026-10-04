@@ -190,7 +190,7 @@ final class DistributionOwnerStateSessionClient: @unchecked Sendable {
     }
 
     static func readFrame<T: Decodable>(_ type: T.Type, descriptor: Int32, buffered: inout Data,
-                                        cancellation: SecureSubprocessCancellation, timeoutMilliseconds: UInt64 = 30_000) throws -> T {
+                                        cancellation: SecureSubprocessCancellation, timeoutMilliseconds: UInt64 = 300_000) throws -> T {
         let deadline = DispatchTime.now().uptimeNanoseconds + timeoutMilliseconds * 1_000_000
         while true {
             if let newline = buffered.firstIndex(of: 10) {

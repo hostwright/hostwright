@@ -655,7 +655,7 @@ public struct DistributionInstalledLifecycle: Sendable {
         let result = try SecureSubprocessRunner().run(SecureSubprocessRequest(executablePath: "/bin/launchctl",
             arguments: ["asuser", String(receipt.binding.ownerUID), executable.path, "owner-state-probe-child"],
             environment: SecureSubprocessEnvironment.minimal, workingDirectory: "/",
-            standardInput: try DistributionJSON.encode(request), timeoutMilliseconds: 30_000,
+            standardInput: try DistributionJSON.encode(request), timeoutMilliseconds: 300_000,
             maximumStandardOutputBytes: 1_048_576, maximumStandardErrorBytes: 65_536), cancellation: cancellation)
         guard result.exitStatus == 0, result.terminationSignal == nil,
               !result.standardOutputTruncated, !result.standardErrorTruncated,

@@ -1,0 +1,102 @@
+{
+  "kind": "hostwright.phase14.build-reproducibility-diagnostic.v1",
+  "sourceCommit": "cd3325a8b0ccb27c095d621bf4a3eb10ca1835da",
+  "sourceTree": "fea43a6d18d3a3d51356b512ec2aa96e3ab5b47c",
+  "run": 37138219739,
+  "attempt": 1,
+  "comparedAt": "2026-10-03T19:14:37.321077+00:00",
+  "comparisonReceiptSHA256": "3ae74e525735d72a9e77336246b61123698c408cde297e68db707008e28c8356",
+  "allNineBinaryHashesEqual": true,
+  "binaryHashScope": "Original two unsigned clean-build generations before Developer ID signing; these are not signed payload archive hashes.",
+  "binaryComparisons": [
+    {
+      "product": "hostwright",
+      "generation1SHA256": "5eb667475615e2b743c10d75f8448459aaa79ecae488762b6f9bbc20eb96fa09",
+      "generation2SHA256": "5eb667475615e2b743c10d75f8448459aaa79ecae488762b6f9bbc20eb96fa09",
+      "equal": true,
+      "generation1Bytes": 57876008,
+      "generation2Bytes": 57876008
+    },
+    {
+      "product": "hostwright-containerization-helper",
+      "generation1SHA256": "c1a754b4170eb745f176562451d273998df3c39f904e83346ab80c0235c97ac9",
+      "generation2SHA256": "c1a754b4170eb745f176562451d273998df3c39f904e83346ab80c0235c97ac9",
+      "equal": true,
+      "generation1Bytes": 50030368,
+      "generation2Bytes": 50030368
+    },
+    {
+      "product": "hostwright-control",
+      "generation1SHA256": "8948c8065d1b033ab7b4ff537e3d596fef2b305af756a3522198760ef3ef11ab",
+      "generation2SHA256": "8948c8065d1b033ab7b4ff537e3d596fef2b305af756a3522198760ef3ef11ab",
+      "equal": true,
+      "generation1Bytes": 58206464,
+      "generation2Bytes": 58206464
+    },
+    {
+      "product": "hostwright-desktop",
+      "generation1SHA256": "0f322c31ff4750f6535b880a0ed7871605ffd4348cdf021d33a2752b7fd2383b",
+      "generation2SHA256": "0f322c31ff4750f6535b880a0ed7871605ffd4348cdf021d33a2752b7fd2383b",
+      "equal": true,
+      "generation1Bytes": 59463040,
+      "generation2Bytes": 59463040
+    },
+    {
+      "product": "hostwright-dist",
+      "generation1SHA256": "636a7e4e8e690982452d290eb1151add93094f6f06b8cc5f88b7f06b2207863f",
+      "generation2SHA256": "636a7e4e8e690982452d290eb1151add93094f6f06b8cc5f88b7f06b2207863f",
+      "equal": true,
+      "generation1Bytes": 33681856,
+      "generation2Bytes": 33681856
+    },
+    {
+      "product": "hostwright-network-helper",
+      "generation1SHA256": "cbd6dfdecea03537b036a830671cc76c3afce6cf91c452d8829c19db7149bc08",
+      "generation2SHA256": "cbd6dfdecea03537b036a830671cc76c3afce6cf91c452d8829c19db7149bc08",
+      "equal": true,
+      "generation1Bytes": 40361320,
+      "generation2Bytes": 40361320
+    },
+    {
+      "product": "hostwright-network-provider-worker",
+      "generation1SHA256": "73a1fe4b3d7d0347cde70a79444e758dc24d42762b3e70b4a124ecc0ebcd765b",
+      "generation2SHA256": "73a1fe4b3d7d0347cde70a79444e758dc24d42762b3e70b4a124ecc0ebcd765b",
+      "equal": true,
+      "generation1Bytes": 3259600,
+      "generation2Bytes": 3259600
+    },
+    {
+      "product": "hostwright-storage-helper",
+      "generation1SHA256": "0698c486534677fdbc6af54012ed3b6fe31bfed975d839b9a8fe6f764724a740",
+      "generation2SHA256": "0698c486534677fdbc6af54012ed3b6fe31bfed975d839b9a8fe6f764724a740",
+      "equal": true,
+      "generation1Bytes": 13068088,
+      "generation2Bytes": 13068088
+    },
+    {
+      "product": "hostwrightd",
+      "generation1SHA256": "e641a8410bc2cc57e524dd8854c6422f5bf45923d3cea6382e57cfe81c6167e7",
+      "generation2SHA256": "e641a8410bc2cc57e524dd8854c6422f5bf45923d3cea6382e57cfe81c6167e7",
+      "equal": true,
+      "generation1Bytes": 59058376,
+      "generation2Bytes": 59058376
+    }
+  ],
+  "workerObjectCountPerGeneration": 131,
+  "workerObjectsEqual": false,
+  "workerObjectDifferences": [
+    {
+      "object": "SystemPackage.build/SystemString.swift.o",
+      "generation1": {
+        "sha256": "8dc09ef571a3454f4b44acf4a7c8efeb429b9399450a21db8c06b40026ab0dd7",
+        "sizeBytes": 105064
+      },
+      "generation2": {
+        "sha256": "20706b9bf15671ef6bfba1469f3c3d1a5dbef106842bc618cf4e88a46f18e361",
+        "sizeBytes": 105064
+      }
+    }
+  ],
+  "rawObjectDifferenceCause": "unresolved",
+  "scope": "Nine executable comparisons match. Raw worker-object comparison is supplemental: one SystemString.swift.o differs among131 retained objects per generation. No all-object reproducibility, native/GUI/VM, or issue closure pass is claimed."
+}

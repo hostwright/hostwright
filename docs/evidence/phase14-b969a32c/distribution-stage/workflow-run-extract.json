@@ -1,0 +1,289 @@
+{
+  "id": 37170124704,
+  "run_attempt": 1,
+  "head_sha": "b969a32caaa250f81b75fd6ced34d42e34d7b855",
+  "head_branch": "main",
+  "event": "workflow_dispatch",
+  "path": ".github/workflows/trusted-release.yml",
+  "status": "completed",
+  "conclusion": "success",
+  "created_at": "2026-10-04T02:08:13Z",
+  "updated_at": "2026-10-04T04:29:11Z",
+  "html_url": "https://github.com/hostwright/hostwright/actions/runs/37170124704",
+  "jobs": [
+    {
+      "id": 111341214276,
+      "name": "Validate reviewed release inputs",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-04T02:08:16Z",
+      "completed_at": "2026-10-04T02:08:21Z",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1,
+          "started_at": "2026-10-04T02:08:17Z",
+          "completed_at": "2026-10-04T02:08:17Z"
+        },
+        {
+          "name": "Validate immutable dispatch contract",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2,
+          "started_at": "2026-10-04T02:08:17Z",
+          "completed_at": "2026-10-04T02:08:18Z"
+        },
+        {
+          "name": "Check out the exact reviewed commit",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3,
+          "started_at": "2026-10-04T02:08:18Z",
+          "completed_at": "2026-10-04T02:08:19Z"
+        },
+        {
+          "name": "Require a preserved main ancestor and unused immutable tag",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 4,
+          "started_at": "2026-10-04T02:08:19Z",
+          "completed_at": "2026-10-04T02:08:20Z"
+        },
+        {
+          "name": "Post Check out the exact reviewed commit",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 8,
+          "started_at": "2026-10-04T02:08:20Z",
+          "completed_at": "2026-10-04T02:08:20Z"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 9,
+          "started_at": "2026-10-04T02:08:20Z",
+          "completed_at": "2026-10-04T02:08:20Z"
+        }
+      ]
+    },
+    {
+      "id": 111341232018,
+      "name": "Build, sign, notarize, and verify",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-04T02:18:46Z",
+      "completed_at": "2026-10-04T04:28:26Z",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1,
+          "started_at": "2026-10-04T02:18:46Z",
+          "completed_at": "2026-10-04T02:18:47Z"
+        },
+        {
+          "name": "Check out the exact commit",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2,
+          "started_at": "2026-10-04T02:18:47Z",
+          "completed_at": "2026-10-04T02:18:51Z"
+        },
+        {
+          "name": "Validate immutable release inputs and host trust",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3,
+          "started_at": "2026-10-04T02:18:51Z",
+          "completed_at": "2026-10-04T02:18:52Z"
+        },
+        {
+          "name": "Run repository regression gate",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 4,
+          "started_at": "2026-10-04T02:18:52Z",
+          "completed_at": "2026-10-04T03:27:07Z"
+        },
+        {
+          "name": "Download runtime provenance from the exact authenticated producer run",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 5,
+          "started_at": "2026-10-04T03:27:07Z",
+          "completed_at": "2026-10-04T03:33:06Z"
+        },
+        {
+          "name": "Prepare pinned corresponding-source bytes from the clean reviewed checkout",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 6,
+          "started_at": "2026-10-04T03:33:06Z",
+          "completed_at": "2026-10-04T03:36:50Z"
+        },
+        {
+          "name": "Build the trusted release twice and verify every trust stage",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 7,
+          "started_at": "2026-10-04T03:36:50Z",
+          "completed_at": "2026-10-04T04:19:37Z"
+        },
+        {
+          "name": "Stage independently verified source bytes and bind product source evidence",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 8,
+          "started_at": "2026-10-04T04:19:37Z",
+          "completed_at": "2026-10-04T04:26:51Z"
+        },
+        {
+          "name": "Bind staged inventory to the immutable build run",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 9,
+          "started_at": "2026-10-04T04:26:51Z",
+          "completed_at": "2026-10-04T04:26:53Z"
+        },
+        {
+          "name": "Retain the exact verified output",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 10,
+          "started_at": "2026-10-04T04:26:53Z",
+          "completed_at": "2026-10-04T04:28:23Z"
+        },
+        {
+          "name": "Post Check out the exact commit",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 20,
+          "started_at": "2026-10-04T04:28:23Z",
+          "completed_at": "2026-10-04T04:28:23Z"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 21,
+          "started_at": "2026-10-04T04:28:23Z",
+          "completed_at": "2026-10-04T04:28:25Z"
+        }
+      ]
+    },
+    {
+      "id": 111361880447,
+      "name": "Attest the retained signed artifacts",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-04T04:28:28Z",
+      "completed_at": "2026-10-04T04:29:10Z",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1,
+          "started_at": "2026-10-04T04:28:29Z",
+          "completed_at": "2026-10-04T04:28:31Z"
+        },
+        {
+          "name": "Download the verified release bundle",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2,
+          "started_at": "2026-10-04T04:28:31Z",
+          "completed_at": "2026-10-04T04:28:57Z"
+        },
+        {
+          "name": "Locate the exact retained artifacts",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3,
+          "started_at": "2026-10-04T04:28:57Z",
+          "completed_at": "2026-10-04T04:28:58Z"
+        },
+        {
+          "name": "Attest immutable stage inventory",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 4,
+          "started_at": "2026-10-04T04:28:58Z",
+          "completed_at": "2026-10-04T04:28:59Z"
+        },
+        {
+          "name": "Attest exact corresponding-source archive, manifest and checksums",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 5,
+          "started_at": "2026-10-04T04:28:59Z",
+          "completed_at": "2026-10-04T04:29:03Z"
+        },
+        {
+          "name": "Attest archive provenance",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 6,
+          "started_at": "2026-10-04T04:29:03Z",
+          "completed_at": "2026-10-04T04:29:04Z"
+        },
+        {
+          "name": "Attest package provenance",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 7,
+          "started_at": "2026-10-04T04:29:04Z",
+          "completed_at": "2026-10-04T04:29:05Z"
+        },
+        {
+          "name": "Attest Homebrew formula provenance",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 8,
+          "started_at": "2026-10-04T04:29:05Z",
+          "completed_at": "2026-10-04T04:29:07Z"
+        },
+        {
+          "name": "Attest archive SBOM",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 9,
+          "started_at": "2026-10-04T04:29:07Z",
+          "completed_at": "2026-10-04T04:29:08Z"
+        },
+        {
+          "name": "Attest package SBOM",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 10,
+          "started_at": "2026-10-04T04:29:08Z",
+          "completed_at": "2026-10-04T04:29:09Z"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 11,
+          "started_at": "2026-10-04T04:29:09Z",
+          "completed_at": "2026-10-04T04:29:09Z"
+        }
+      ]
+    }
+  ],
+  "artifacts": [
+    {
+      "id": 11293568472,
+      "name": "hostwright-0.0.2-rc.1-trusted-release",
+      "size_in_bytes": 2037689460,
+      "digest": "sha256:4897d3bfd7f10dd9941d630ee49dedc083915edd84b59a29de6f6317906d4c69",
+      "created_at": "2026-10-04T04:28:23Z",
+      "expires_at": "2027-01-02T02:08:14Z",
+      "expired": false
+    }
+  ],
+  "artifactDigestScope": "GitHub artifact-container digest, distinct from signed product and corresponding-source archive hashes."
+}

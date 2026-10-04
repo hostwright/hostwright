@@ -1,0 +1,55 @@
+{
+  "sourceCommit": "cd3325a8b0ccb27c095d621bf4a3eb10ca1835da",
+  "run": "37138219739",
+  "attempt": "1",
+  "version": "0.0.2-rc.1",
+  "inventorySHA256": "f676a3545d416f4c6ac16f5eb6aba47f7771ccdc5b0d68e9c040230faece36ac",
+  "authenticatedSubjects": 7,
+  "correspondingSource": {
+    "archive": {
+      "fileName": "hostwright-0.0.2-rc.1-cd3325a8b0cc-corresponding-source.tar.gz",
+      "sha256": "624345e49c11724ff46bdd609bb6ff84d9183f79b00e6ad26ee5d126c2731ed2",
+      "sizeBytes": 1672971478
+    },
+    "checksums": {
+      "fileName": "SOURCE_SHA256SUMS",
+      "sha256": "ef978178397ec96b3ca6ff05e4c490ec0bd9d788ac24ce70e48d5c863028772e"
+    },
+    "kind": "hostwright.corresponding-source-stage.v1",
+    "manifest": {
+      "fileName": "source-manifest.json",
+      "sha256": "97b36fddae944bc9e5beac4107a55afed3d0854e15b22955389678105bf3c67b",
+      "sizeBytes": 2866390
+    },
+    "sourceCommit": "cd3325a8b0ccb27c095d621bf4a3eb10ca1835da",
+    "sourceManifestKind": "hostwright.corresponding-source.new-runtime.v1",
+    "sourceManifestSchemaVersion": 1,
+    "version": "0.0.2-rc.1"
+  },
+  "teamID": "993YC3JY4Q",
+  "archive": {
+    "fileName": "hostwright-0.0.2-rc.1-macos-arm64-cd3325a8b0cc.zip",
+    "sha256": "218f44424d00769ded5af5c5e77ed9922ad972a533b80ace7c499da8e7378c20",
+    "sizeBytes": 186656120
+  },
+  "package": {
+    "fileName": "hostwright-0.0.2-rc.1-macos-arm64-cd3325a8b0cc.pkg",
+    "sha256": "fc2000721cca6edb166b4a7a9a3760be030ec0155fc50c3bb2a2b9d2d2c0022f",
+    "sizeBytes": 196034429
+  },
+  "initialVerifier": {
+    "sha256": "67e51af74b802a45955762cd51268601b55e72400c386a37d9eb25b5b690ebce",
+    "sourceTree": "fea43a6d18d3a3d51356b512ec2aa96e3ab5b47c",
+    "comparedTestedCommit": "33256770d09a3dc18e70974d576f5e465af74ebc",
+    "treesIdentical": true,
+    "pathRole": "Reviewed verifier with exact tested-commit/source-tree comparison."
+  },
+  "signedVerifier": {
+    "mode": 493,
+    "sha256": "a5ad77d588e655c270dfb081efe51bd4a6ab441e26f2c649d0793fd2f8edb1da",
+    "sizeBytes": 33504288,
+    "pathRole": "Inventory-bound signed verifier extracted from the authenticated product ZIP."
+  },
+  "localVerificationReceipt": "local-trusted-verification.json",
+  "scope": "Retained authenticated stage only; no device/VM qualification or publication."
+}

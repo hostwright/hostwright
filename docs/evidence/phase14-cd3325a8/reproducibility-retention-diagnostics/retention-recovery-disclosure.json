@@ -1,0 +1,53 @@
+{
+  "kind": "hostwright.phase14.local-retention-recovery-disclosure.v1",
+  "sourceCommit": "cd3325a8b0ccb27c095d621bf4a3eb10ca1835da",
+  "sourceTree": "fea43a6d18d3a3d51356b512ec2aa96e3ab5b47c",
+  "run": 37138219739,
+  "attempt": 1,
+  "producerStatus": "completed/success",
+  "originalRetainerExitCode": 1,
+  "originalVerificationError": {
+    "code": "HW-DIST-001",
+    "exitCode": 65,
+    "kind": "distributionToolError",
+    "message": "SHA-256 verification failed for bin/hostwright.",
+    "schemaVersion": 1
+  },
+  "cause": "Private retention child inherited umask077; ordinary tar extraction masked authentic payload0755 to0700. SHA and size were unchanged.",
+  "modeDiagnosisReceiptSHA256": "c64032a7b70a662718b949e551e37907694272325be41a6f2525f46f2e5fb9c4",
+  "proof": {
+    "ordinaryTarUmask077Mode": "0700",
+    "ordinaryTarUmask022Mode": "0755",
+    "tarPreservePermissionsUmask077Mode": "0755"
+  },
+  "rootReviewSHA256": "3491b597e3966f0e1b2615d1adc77b843c1920835f606646794bee352bd45186",
+  "recoveryExecutorSHA256": "195c4dbf55c26b2dea46891a6d733f9485769a8beb881ca15ad84d82052e8584",
+  "recoveryCompletedAt": "2026-10-03T19:40:27.524817+00:00",
+  "actualContinuationWaitExitCode": 0,
+  "correctedVerificationChildUmask": "022",
+  "signedVerifierExtraction": "tar -xpf exact authenticated manifest member inside private0700 directory; remaining children retain077",
+  "actualCorrectedVerificationExitCode": 0,
+  "actualSignedVerifierExtractionExitCode": 0,
+  "actualSignedVerifierCodesignExitCode": 0,
+  "actualTrustedVerificationCommandCount": 33,
+  "authenticationSHA256": "6ca22d4fa2e090aeaf8a12115c0a98b1b098887a7492d30cc6f6bdd7a3a0d553",
+  "trustedVerificationSHA256": "215ba7190788462b9af57422734d587595719594ffce5b709ac67b96f4e5a42a",
+  "authenticatedProductArchive": {
+    "fileName": "hostwright-0.0.2-rc.1-macos-arm64-cd3325a8b0cc.zip",
+    "sha256": "218f44424d00769ded5af5c5e77ed9922ad972a533b80ace7c499da8e7378c20",
+    "sizeBytes": 186656120
+  },
+  "authenticatedProductPackage": {
+    "fileName": "hostwright-0.0.2-rc.1-macos-arm64-cd3325a8b0cc.pkg",
+    "sha256": "fc2000721cca6edb166b4a7a9a3760be030ec0155fc50c3bb2a2b9d2d2c0022f",
+    "sizeBytes": 196034429
+  },
+  "failedStdoutSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "failedStderrSHA256": "f5853b13e425a2fb0dde7f802505d5a0a7f4d2998e507e5f1dc36af33ec782ba",
+  "originalFailurePreserved": true,
+  "attestationVerifierReruns": 0,
+  "runtimeOrSigningProducerRestarts": 0,
+  "testsOrBuildsRepeated": 0,
+  "artifactBytesChanged": false,
+  "scope": "Bounded local retention recovery on the already retained actual successful artifact. Original65 failure is retained; no source/runtime/signing/regression repeat or publication."
+}

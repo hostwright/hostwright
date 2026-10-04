@@ -1,0 +1,80 @@
+{
+  "freshBuilds": [
+    {
+      "aliasUsed": false,
+      "build": {
+        "binaryMode": "0700",
+        "binarySHA256": "28ddf72d2c473732dde9d60ac8fbac101641a9566a228ffe1924298d840a5f43",
+        "binarySizeBytes": 52120752,
+        "durationMilliseconds": 66547,
+        "exitCode": 0,
+        "finishedAt": "2026-10-03T22:49:45.441287+00:00",
+        "result": "passed",
+        "startedAt": "2026-10-03T22:48:38.894619+00:00",
+        "swiftVersion": "swift-driver version: 1.148.6 Apple Swift version 6.3.3 (swiftlang-6.3.3.1.3 clang-2100.1.1.101)\nTarget: arm64-apple-macosx26.0"
+      },
+      "log": {
+        "inputID": "fresh-hostwright-dist-log",
+        "sha256": "a237e66fe731d2ee1dedeb16828f4637714428c69a82e0c9574ae64a9764f919",
+        "sizeBytes": 21281
+      },
+      "newBuildByPreparation": false,
+      "originalReceipt": {
+        "inputID": "fresh-hostwright-dist-build",
+        "sha256": "77e92cac574b9a4c6ce74969fe4fe72c7a5f04c2cd042b4fb8557a1dec240580",
+        "sizeBytes": 2447
+      },
+      "privatePathRole": "<fresh-source-bound-hostwright-dist>",
+      "product": "hostwright-dist",
+      "sourceCommit": "b969a32caaa250f81b75fd6ced34d42e34d7b855",
+      "sourceInputs": {
+        "filesCount": 1535,
+        "inputID": "fresh-source-inputs",
+        "sha256": "5b6bd3966860ed2b501cfa404417088559958ba7df851d15d9d0a973fdb1dada",
+        "sizeBytes": 168824
+      },
+      "sourceTree": "408f1a5e96d75e7e64da6358c71b770bb3f29b25"
+    },
+    {
+      "aliasUsed": false,
+      "build": {
+        "binaryMode": "0700",
+        "binarySHA256": "7b3a08b8a173530d50b537fc27e79e338c06c9752f9e3c10eddc85c603de6fbe",
+        "binarySizeBytes": 161653872,
+        "durationMilliseconds": 154622,
+        "exitCode": 0,
+        "finishedAt": "2026-10-03T22:52:20.387877+00:00",
+        "result": "passed",
+        "startedAt": "2026-10-03T22:49:45.767211+00:00",
+        "swiftVersion": "swift-driver version: 1.148.6 Apple Swift version 6.3.3 (swiftlang-6.3.3.1.3 clang-2100.1.1.101)\nTarget: arm64-apple-macosx26.0"
+      },
+      "log": {
+        "inputID": "fresh-hostwright-runtime-conformance-log",
+        "sha256": "40d5d69f73f5ae80f7c88b4ba1bd128264eee5f1d4c495789ea04892304a4605",
+        "sizeBytes": 156662
+      },
+      "newBuildByPreparation": false,
+      "originalReceipt": {
+        "inputID": "fresh-hostwright-runtime-conformance-build",
+        "sha256": "03f4feb20365d3bfa3ed34be9b0d9518ebd6e43e4accee10f820c7d9c0a31ff9",
+        "sizeBytes": 2509
+      },
+      "privatePathRole": "<fresh-source-bound-hostwright-runtime-conformance>",
+      "product": "hostwright-runtime-conformance",
+      "sourceCommit": "b969a32caaa250f81b75fd6ced34d42e34d7b855",
+      "sourceInputs": {
+        "filesCount": 1535,
+        "inputID": "fresh-source-inputs",
+        "sha256": "5b6bd3966860ed2b501cfa404417088559958ba7df851d15d9d0a973fdb1dada",
+        "sizeBytes": 168824
+      },
+      "sourceTree": "408f1a5e96d75e7e64da6358c71b770bb3f29b25"
+    }
+  ],
+  "kind": "hostwright.phase14.private-fresh-build-support-draft.v1",
+  "newBuildsExecutedByPreparation": false,
+  "original591ToNAliasesRelabeledOrUsed": false,
+  "signedProductQualified": false,
+  "sourceCommit": "b969a32caaa250f81b75fd6ced34d42e34d7b855",
+  "sourceTree": "408f1a5e96d75e7e64da6358c71b770bb3f29b25"
+}

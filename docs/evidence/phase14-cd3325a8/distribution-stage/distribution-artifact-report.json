@@ -1,0 +1,906 @@
+{
+  "blockers": [],
+  "cleanup": {
+    "exactResourceIdentifiers": [
+      "<trusted-release-work-root>"
+    ],
+    "message": "Both isolated build trees, verification extractions, and package staging were removed exactly.",
+    "status": "succeeded"
+  },
+  "commands": [
+    {
+      "command": "resolve exact Developer ID Application identity",
+      "durationMilliseconds": 81,
+      "exitCode": 0
+    },
+    {
+      "command": "resolve exact Developer ID Installer identity",
+      "durationMilliseconds": 68,
+      "exitCode": 0
+    },
+    {
+      "command": "git rev-parse HEAD",
+      "durationMilliseconds": 20,
+      "exitCode": 0
+    },
+    {
+      "command": "git status --porcelain=v1 --untracked-files=all",
+      "durationMilliseconds": 22,
+      "exitCode": 0
+    },
+    {
+      "command": "git status --porcelain=v1 --ignored --untracked-files=normal",
+      "durationMilliseconds": 655,
+      "exitCode": 0
+    },
+    {
+      "command": "swift package show-dependencies --format json",
+      "durationMilliseconds": 12067,
+      "exitCode": 0
+    },
+    {
+      "command": "SWIFT_DETERMINISTIC_HASHING=1 /usr/bin/swift build --package-path <release-source-root> --scratch-path <trusted-clean-build-root> -c release --jobs 1 -debug-info-format none -Xlinker -reproducible -Xswiftc -num-threads -Xswiftc 1 -Xswiftc -no-whole-module-optimization -Xswiftc -disable-cmo -Xswiftc -file-prefix-map -Xswiftc <trusted-clean-build-root>=/hostwright-build -Xcc -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcc -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build --product hostwright",
+      "durationMilliseconds": 812541,
+      "exitCode": 0
+    },
+    {
+      "command": "SWIFT_DETERMINISTIC_HASHING=1 /usr/bin/swift build --package-path <release-source-root> --scratch-path <trusted-clean-build-root> -c release --jobs 1 -debug-info-format none -Xlinker -reproducible -Xswiftc -num-threads -Xswiftc 1 -Xswiftc -no-whole-module-optimization -Xswiftc -disable-cmo -Xswiftc -file-prefix-map -Xswiftc <trusted-clean-build-root>=/hostwright-build -Xcc -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcc -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build --product hostwright-control",
+      "durationMilliseconds": 13406,
+      "exitCode": 0
+    },
+    {
+      "command": "SWIFT_DETERMINISTIC_HASHING=1 /usr/bin/swift build --package-path <release-source-root> --scratch-path <trusted-clean-build-root> -c release --jobs 1 -debug-info-format none -Xlinker -reproducible -Xswiftc -num-threads -Xswiftc 1 -Xswiftc -no-whole-module-optimization -Xswiftc -disable-cmo -Xswiftc -file-prefix-map -Xswiftc <trusted-clean-build-root>=/hostwright-build -Xcc -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcc -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build --product hostwright-containerization-helper",
+      "durationMilliseconds": 469310,
+      "exitCode": 0
+    },
+    {
+      "command": "SWIFT_DETERMINISTIC_HASHING=1 /usr/bin/swift build --package-path <release-source-root> --scratch-path <trusted-clean-build-root> -c release --jobs 1 -debug-info-format none -Xlinker -reproducible -Xswiftc -num-threads -Xswiftc 1 -Xswiftc -no-whole-module-optimization -Xswiftc -disable-cmo -Xswiftc -file-prefix-map -Xswiftc <trusted-clean-build-root>=/hostwright-build -Xcc -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcc -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build --product hostwright-network-helper",
+      "durationMilliseconds": 2012,
+      "exitCode": 0
+    },
+    {
+      "command": "SWIFT_DETERMINISTIC_HASHING=1 /usr/bin/swift build --package-path <release-source-root> --scratch-path <trusted-clean-build-root> -c release --jobs 1 -debug-info-format none -Xlinker -reproducible -Xswiftc -num-threads -Xswiftc 1 -Xswiftc -no-whole-module-optimization -Xswiftc -disable-cmo -Xswiftc -file-prefix-map -Xswiftc <trusted-clean-build-root>=/hostwright-build -Xcc -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcc -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build --product hostwright-network-provider-worker",
+      "durationMilliseconds": 1449,
+      "exitCode": 0
+    },
+    {
+      "command": "SWIFT_DETERMINISTIC_HASHING=1 /usr/bin/swift build --package-path <release-source-root> --scratch-path <trusted-clean-build-root> -c release --jobs 1 -debug-info-format none -Xlinker -reproducible -Xswiftc -num-threads -Xswiftc 1 -Xswiftc -no-whole-module-optimization -Xswiftc -disable-cmo -Xswiftc -file-prefix-map -Xswiftc <trusted-clean-build-root>=/hostwright-build -Xcc -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcc -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build --product hostwright-storage-helper",
+      "durationMilliseconds": 2029,
+      "exitCode": 0
+    },
+    {
+      "command": "SWIFT_DETERMINISTIC_HASHING=1 /usr/bin/swift build --package-path <release-source-root> --scratch-path <trusted-clean-build-root> -c release --jobs 1 -debug-info-format none -Xlinker -reproducible -Xswiftc -num-threads -Xswiftc 1 -Xswiftc -no-whole-module-optimization -Xswiftc -disable-cmo -Xswiftc -file-prefix-map -Xswiftc <trusted-clean-build-root>=/hostwright-build -Xcc -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcc -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build --product hostwright-dist",
+      "durationMilliseconds": 2745,
+      "exitCode": 0
+    },
+    {
+      "command": "SWIFT_DETERMINISTIC_HASHING=1 /usr/bin/swift build --package-path <release-source-root> --scratch-path <trusted-clean-build-root> -c release --jobs 1 -debug-info-format none -Xlinker -reproducible -Xswiftc -num-threads -Xswiftc 1 -Xswiftc -no-whole-module-optimization -Xswiftc -disable-cmo -Xswiftc -file-prefix-map -Xswiftc <trusted-clean-build-root>=/hostwright-build -Xcc -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcc -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build --product hostwrightd",
+      "durationMilliseconds": 16640,
+      "exitCode": 0
+    },
+    {
+      "command": "SWIFT_DETERMINISTIC_HASHING=1 /usr/bin/swift build --package-path <release-source-root> --scratch-path <trusted-clean-build-root> -c release --jobs 1 -debug-info-format none -Xlinker -reproducible -Xswiftc -num-threads -Xswiftc 1 -Xswiftc -no-whole-module-optimization -Xswiftc -disable-cmo -Xswiftc -file-prefix-map -Xswiftc <trusted-clean-build-root>=/hostwright-build -Xcc -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcc -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build --product hostwright-desktop",
+      "durationMilliseconds": 12163,
+      "exitCode": 0
+    },
+    {
+      "command": "SWIFT_DETERMINISTIC_HASHING=1 /usr/bin/swift build --package-path <release-source-root> --scratch-path <trusted-clean-build-root> -c release --jobs 1 -debug-info-format none -Xlinker -reproducible -Xswiftc -num-threads -Xswiftc 1 -Xswiftc -no-whole-module-optimization -Xswiftc -disable-cmo -Xswiftc -file-prefix-map -Xswiftc <trusted-clean-build-root>=/hostwright-build -Xcc -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcc -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build --show-bin-path",
+      "durationMilliseconds": 242,
+      "exitCode": 0
+    },
+    {
+      "command": "release hostwright --version",
+      "durationMilliseconds": 916,
+      "exitCode": 0
+    },
+    {
+      "command": "post-build git rev-parse HEAD",
+      "durationMilliseconds": 27,
+      "exitCode": 0
+    },
+    {
+      "command": "post-build git status --porcelain=v1 --untracked-files=all",
+      "durationMilliseconds": 31,
+      "exitCode": 0
+    },
+    {
+      "command": "post-build git status --porcelain=v1 --ignored --untracked-files=normal",
+      "durationMilliseconds": 691,
+      "exitCode": 0
+    },
+    {
+      "command": "validate hostwright version",
+      "durationMilliseconds": 12,
+      "exitCode": 0
+    },
+    {
+      "command": "validate hostwrightd version",
+      "durationMilliseconds": 531,
+      "exitCode": 0
+    },
+    {
+      "command": "validate hostwright-control version",
+      "durationMilliseconds": 853,
+      "exitCode": 0
+    },
+    {
+      "command": "validate hostwright-containerization-helper version",
+      "durationMilliseconds": 750,
+      "exitCode": 0
+    },
+    {
+      "command": "validate hostwright-network-helper version",
+      "durationMilliseconds": 620,
+      "exitCode": 0
+    },
+    {
+      "command": "validate hostwright-network-provider-worker version",
+      "durationMilliseconds": 184,
+      "exitCode": 0
+    },
+    {
+      "command": "validate hostwright-storage-helper version",
+      "durationMilliseconds": 289,
+      "exitCode": 0
+    },
+    {
+      "command": "validate hostwright-dist version",
+      "durationMilliseconds": 541,
+      "exitCode": 0
+    },
+    {
+      "command": "validate hostwright architecture",
+      "durationMilliseconds": 17,
+      "exitCode": 0
+    },
+    {
+      "command": "validate hostwright-control architecture",
+      "durationMilliseconds": 17,
+      "exitCode": 0
+    },
+    {
+      "command": "validate hostwright-containerization-helper architecture",
+      "durationMilliseconds": 11,
+      "exitCode": 0
+    },
+    {
+      "command": "validate hostwright-network-helper architecture",
+      "durationMilliseconds": 12,
+      "exitCode": 0
+    },
+    {
+      "command": "validate hostwright-network-provider-worker architecture",
+      "durationMilliseconds": 12,
+      "exitCode": 0
+    },
+    {
+      "command": "validate hostwright-storage-helper architecture",
+      "durationMilliseconds": 12,
+      "exitCode": 0
+    },
+    {
+      "command": "validate hostwright-dist architecture",
+      "durationMilliseconds": 11,
+      "exitCode": 0
+    },
+    {
+      "command": "validate hostwrightd architecture",
+      "durationMilliseconds": 12,
+      "exitCode": 0
+    },
+    {
+      "command": "validate Hostwright desktop architecture",
+      "durationMilliseconds": 12,
+      "exitCode": 0
+    },
+    {
+      "command": "seal deterministic ad-hoc desktop bundle",
+      "durationMilliseconds": 71,
+      "exitCode": 0
+    },
+    {
+      "command": "remove exact release-build scratch directory",
+      "durationMilliseconds": 3270,
+      "exitCode": 0
+    },
+    {
+      "command": "tar create exact artifact root",
+      "durationMilliseconds": 8783,
+      "exitCode": 0
+    },
+    {
+      "command": "generate SPDX 2.3 artifact-content SBOM",
+      "durationMilliseconds": 0,
+      "exitCode": 0
+    },
+    {
+      "command": "generate unsigned in-toto provenance statement",
+      "durationMilliseconds": 0,
+      "exitCode": 0
+    },
+    {
+      "command": "generate SHA-256 sidecar checksums",
+      "durationMilliseconds": 0,
+      "exitCode": 0
+    },
+    {
+      "command": "inspect Developer ID Application identity availability",
+      "durationMilliseconds": 37,
+      "exitCode": 0
+    },
+    {
+      "command": "read swift version",
+      "durationMilliseconds": 87,
+      "exitCode": 0
+    },
+    {
+      "command": "read git version",
+      "durationMilliseconds": 12,
+      "exitCode": 0
+    },
+    {
+      "command": "read tar version",
+      "durationMilliseconds": 6,
+      "exitCode": 0
+    },
+    {
+      "command": "read notarytool version",
+      "durationMilliseconds": 29,
+      "exitCode": 0
+    },
+    {
+      "command": "git rev-parse HEAD",
+      "durationMilliseconds": 12,
+      "exitCode": 0
+    },
+    {
+      "command": "git status --porcelain=v1 --untracked-files=all",
+      "durationMilliseconds": 24,
+      "exitCode": 0
+    },
+    {
+      "command": "git status --porcelain=v1 --ignored --untracked-files=normal",
+      "durationMilliseconds": 239,
+      "exitCode": 0
+    },
+    {
+      "command": "swift package show-dependencies --format json",
+      "durationMilliseconds": 12190,
+      "exitCode": 0
+    },
+    {
+      "command": "SWIFT_DETERMINISTIC_HASHING=1 /usr/bin/swift build --package-path <release-source-root> --scratch-path <trusted-clean-build-root> -c release --jobs 1 -debug-info-format none -Xlinker -reproducible -Xswiftc -num-threads -Xswiftc 1 -Xswiftc -no-whole-module-optimization -Xswiftc -disable-cmo -Xswiftc -file-prefix-map -Xswiftc <trusted-clean-build-root>=/hostwright-build -Xcc -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcc -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build --product hostwright",
+      "durationMilliseconds": 817957,
+      "exitCode": 0
+    },
+    {
+      "command": "SWIFT_DETERMINISTIC_HASHING=1 /usr/bin/swift build --package-path <release-source-root> --scratch-path <trusted-clean-build-root> -c release --jobs 1 -debug-info-format none -Xlinker -reproducible -Xswiftc -num-threads -Xswiftc 1 -Xswiftc -no-whole-module-optimization -Xswiftc -disable-cmo -Xswiftc -file-prefix-map -Xswiftc <trusted-clean-build-root>=/hostwright-build -Xcc -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcc -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build --product hostwright-control",
+      "durationMilliseconds": 13633,
+      "exitCode": 0
+    },
+    {
+      "command": "SWIFT_DETERMINISTIC_HASHING=1 /usr/bin/swift build --package-path <release-source-root> --scratch-path <trusted-clean-build-root> -c release --jobs 1 -debug-info-format none -Xlinker -reproducible -Xswiftc -num-threads -Xswiftc 1 -Xswiftc -no-whole-module-optimization -Xswiftc -disable-cmo -Xswiftc -file-prefix-map -Xswiftc <trusted-clean-build-root>=/hostwright-build -Xcc -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcc -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build --product hostwright-containerization-helper",
+      "durationMilliseconds": 476733,
+      "exitCode": 0
+    },
+    {
+      "command": "SWIFT_DETERMINISTIC_HASHING=1 /usr/bin/swift build --package-path <release-source-root> --scratch-path <trusted-clean-build-root> -c release --jobs 1 -debug-info-format none -Xlinker -reproducible -Xswiftc -num-threads -Xswiftc 1 -Xswiftc -no-whole-module-optimization -Xswiftc -disable-cmo -Xswiftc -file-prefix-map -Xswiftc <trusted-clean-build-root>=/hostwright-build -Xcc -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcc -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build --product hostwright-network-helper",
+      "durationMilliseconds": 2089,
+      "exitCode": 0
+    },
+    {
+      "command": "SWIFT_DETERMINISTIC_HASHING=1 /usr/bin/swift build --package-path <release-source-root> --scratch-path <trusted-clean-build-root> -c release --jobs 1 -debug-info-format none -Xlinker -reproducible -Xswiftc -num-threads -Xswiftc 1 -Xswiftc -no-whole-module-optimization -Xswiftc -disable-cmo -Xswiftc -file-prefix-map -Xswiftc <trusted-clean-build-root>=/hostwright-build -Xcc -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcc -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build --product hostwright-network-provider-worker",
+      "durationMilliseconds": 1484,
+      "exitCode": 0
+    },
+    {
+      "command": "SWIFT_DETERMINISTIC_HASHING=1 /usr/bin/swift build --package-path <release-source-root> --scratch-path <trusted-clean-build-root> -c release --jobs 1 -debug-info-format none -Xlinker -reproducible -Xswiftc -num-threads -Xswiftc 1 -Xswiftc -no-whole-module-optimization -Xswiftc -disable-cmo -Xswiftc -file-prefix-map -Xswiftc <trusted-clean-build-root>=/hostwright-build -Xcc -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcc -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build --product hostwright-storage-helper",
+      "durationMilliseconds": 2114,
+      "exitCode": 0
+    },
+    {
+      "command": "SWIFT_DETERMINISTIC_HASHING=1 /usr/bin/swift build --package-path <release-source-root> --scratch-path <trusted-clean-build-root> -c release --jobs 1 -debug-info-format none -Xlinker -reproducible -Xswiftc -num-threads -Xswiftc 1 -Xswiftc -no-whole-module-optimization -Xswiftc -disable-cmo -Xswiftc -file-prefix-map -Xswiftc <trusted-clean-build-root>=/hostwright-build -Xcc -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcc -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build --product hostwright-dist",
+      "durationMilliseconds": 2787,
+      "exitCode": 0
+    },
+    {
+      "command": "SWIFT_DETERMINISTIC_HASHING=1 /usr/bin/swift build --package-path <release-source-root> --scratch-path <trusted-clean-build-root> -c release --jobs 1 -debug-info-format none -Xlinker -reproducible -Xswiftc -num-threads -Xswiftc 1 -Xswiftc -no-whole-module-optimization -Xswiftc -disable-cmo -Xswiftc -file-prefix-map -Xswiftc <trusted-clean-build-root>=/hostwright-build -Xcc -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcc -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build --product hostwrightd",
+      "durationMilliseconds": 17068,
+      "exitCode": 0
+    },
+    {
+      "command": "SWIFT_DETERMINISTIC_HASHING=1 /usr/bin/swift build --package-path <release-source-root> --scratch-path <trusted-clean-build-root> -c release --jobs 1 -debug-info-format none -Xlinker -reproducible -Xswiftc -num-threads -Xswiftc 1 -Xswiftc -no-whole-module-optimization -Xswiftc -disable-cmo -Xswiftc -file-prefix-map -Xswiftc <trusted-clean-build-root>=/hostwright-build -Xcc -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcc -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build --product hostwright-desktop",
+      "durationMilliseconds": 12355,
+      "exitCode": 0
+    },
+    {
+      "command": "SWIFT_DETERMINISTIC_HASHING=1 /usr/bin/swift build --package-path <release-source-root> --scratch-path <trusted-clean-build-root> -c release --jobs 1 -debug-info-format none -Xlinker -reproducible -Xswiftc -num-threads -Xswiftc 1 -Xswiftc -no-whole-module-optimization -Xswiftc -disable-cmo -Xswiftc -file-prefix-map -Xswiftc <trusted-clean-build-root>=/hostwright-build -Xcc -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcc -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -ffile-prefix-map=<trusted-clean-build-root>=/hostwright-build -Xcxx -fmacro-prefix-map=<trusted-clean-build-root>=/hostwright-build --show-bin-path",
+      "durationMilliseconds": 251,
+      "exitCode": 0
+    },
+    {
+      "command": "release hostwright --version",
+      "durationMilliseconds": 959,
+      "exitCode": 0
+    },
+    {
+      "command": "post-build git rev-parse HEAD",
+      "durationMilliseconds": 20,
+      "exitCode": 0
+    },
+    {
+      "command": "post-build git status --porcelain=v1 --untracked-files=all",
+      "durationMilliseconds": 37,
+      "exitCode": 0
+    },
+    {
+      "command": "post-build git status --porcelain=v1 --ignored --untracked-files=normal",
+      "durationMilliseconds": 720,
+      "exitCode": 0
+    },
+    {
+      "command": "validate hostwright version",
+      "durationMilliseconds": 15,
+      "exitCode": 0
+    },
+    {
+      "command": "validate hostwrightd version",
+      "durationMilliseconds": 880,
+      "exitCode": 0
+    },
+    {
+      "command": "validate hostwright-control version",
+      "durationMilliseconds": 828,
+      "exitCode": 0
+    },
+    {
+      "command": "validate hostwright-containerization-helper version",
+      "durationMilliseconds": 740,
+      "exitCode": 0
+    },
+    {
+      "command": "validate hostwright-network-helper version",
+      "durationMilliseconds": 629,
+      "exitCode": 0
+    },
+    {
+      "command": "validate hostwright-network-provider-worker version",
+      "durationMilliseconds": 176,
+      "exitCode": 0
+    },
+    {
+      "command": "validate hostwright-storage-helper version",
+      "durationMilliseconds": 311,
+      "exitCode": 0
+    },
+    {
+      "command": "validate hostwright-dist version",
+      "durationMilliseconds": 550,
+      "exitCode": 0
+    },
+    {
+      "command": "validate hostwright architecture",
+      "durationMilliseconds": 15,
+      "exitCode": 0
+    },
+    {
+      "command": "validate hostwright-control architecture",
+      "durationMilliseconds": 14,
+      "exitCode": 0
+    },
+    {
+      "command": "validate hostwright-containerization-helper architecture",
+      "durationMilliseconds": 15,
+      "exitCode": 0
+    },
+    {
+      "command": "validate hostwright-network-helper architecture",
+      "durationMilliseconds": 13,
+      "exitCode": 0
+    },
+    {
+      "command": "validate hostwright-network-provider-worker architecture",
+      "durationMilliseconds": 14,
+      "exitCode": 0
+    },
+    {
+      "command": "validate hostwright-storage-helper architecture",
+      "durationMilliseconds": 13,
+      "exitCode": 0
+    },
+    {
+      "command": "validate hostwright-dist architecture",
+      "durationMilliseconds": 12,
+      "exitCode": 0
+    },
+    {
+      "command": "validate hostwrightd architecture",
+      "durationMilliseconds": 15,
+      "exitCode": 0
+    },
+    {
+      "command": "validate Hostwright desktop architecture",
+      "durationMilliseconds": 15,
+      "exitCode": 0
+    },
+    {
+      "command": "seal deterministic ad-hoc desktop bundle",
+      "durationMilliseconds": 77,
+      "exitCode": 0
+    },
+    {
+      "command": "remove exact release-build scratch directory",
+      "durationMilliseconds": 3269,
+      "exitCode": 0
+    },
+    {
+      "command": "tar create exact artifact root",
+      "durationMilliseconds": 8824,
+      "exitCode": 0
+    },
+    {
+      "command": "generate SPDX 2.3 artifact-content SBOM",
+      "durationMilliseconds": 0,
+      "exitCode": 0
+    },
+    {
+      "command": "generate unsigned in-toto provenance statement",
+      "durationMilliseconds": 0,
+      "exitCode": 0
+    },
+    {
+      "command": "generate SHA-256 sidecar checksums",
+      "durationMilliseconds": 0,
+      "exitCode": 0
+    },
+    {
+      "command": "inspect Developer ID Application identity availability",
+      "durationMilliseconds": 34,
+      "exitCode": 0
+    },
+    {
+      "command": "read swift version",
+      "durationMilliseconds": 95,
+      "exitCode": 0
+    },
+    {
+      "command": "read git version",
+      "durationMilliseconds": 15,
+      "exitCode": 0
+    },
+    {
+      "command": "read tar version",
+      "durationMilliseconds": 7,
+      "exitCode": 0
+    },
+    {
+      "command": "read notarytool version",
+      "durationMilliseconds": 28,
+      "exitCode": 0
+    },
+    {
+      "command": "compare two isolated verified release payloads",
+      "durationMilliseconds": 0,
+      "exitCode": 0
+    },
+    {
+      "command": "Developer ID sign hostwright",
+      "durationMilliseconds": 290,
+      "exitCode": 0
+    },
+    {
+      "command": "verify Developer ID signature for hostwright",
+      "durationMilliseconds": 38,
+      "exitCode": 0
+    },
+    {
+      "command": "inspect Developer ID signature for hostwright",
+      "durationMilliseconds": 12,
+      "exitCode": 0
+    },
+    {
+      "command": "Developer ID sign hostwright-control",
+      "durationMilliseconds": 216,
+      "exitCode": 0
+    },
+    {
+      "command": "verify Developer ID signature for hostwright-control",
+      "durationMilliseconds": 44,
+      "exitCode": 0
+    },
+    {
+      "command": "inspect Developer ID signature for hostwright-control",
+      "durationMilliseconds": 15,
+      "exitCode": 0
+    },
+    {
+      "command": "Developer ID sign hostwright-containerization-helper",
+      "durationMilliseconds": 201,
+      "exitCode": 0
+    },
+    {
+      "command": "verify Developer ID signature for hostwright-containerization-helper",
+      "durationMilliseconds": 40,
+      "exitCode": 0
+    },
+    {
+      "command": "inspect Developer ID signature for hostwright-containerization-helper",
+      "durationMilliseconds": 13,
+      "exitCode": 0
+    },
+    {
+      "command": "inspect containerization helper entitlements",
+      "durationMilliseconds": 13,
+      "exitCode": 0
+    },
+    {
+      "command": "Developer ID sign hostwright-network-helper",
+      "durationMilliseconds": 182,
+      "exitCode": 0
+    },
+    {
+      "command": "verify Developer ID signature for hostwright-network-helper",
+      "durationMilliseconds": 37,
+      "exitCode": 0
+    },
+    {
+      "command": "inspect Developer ID signature for hostwright-network-helper",
+      "durationMilliseconds": 18,
+      "exitCode": 0
+    },
+    {
+      "command": "Developer ID sign hostwright-network-provider-worker",
+      "durationMilliseconds": 101,
+      "exitCode": 0
+    },
+    {
+      "command": "verify Developer ID signature for hostwright-network-provider-worker",
+      "durationMilliseconds": 18,
+      "exitCode": 0
+    },
+    {
+      "command": "inspect Developer ID signature for hostwright-network-provider-worker",
+      "durationMilliseconds": 14,
+      "exitCode": 0
+    },
+    {
+      "command": "Developer ID sign hostwright-storage-helper",
+      "durationMilliseconds": 105,
+      "exitCode": 0
+    },
+    {
+      "command": "verify Developer ID signature for hostwright-storage-helper",
+      "durationMilliseconds": 24,
+      "exitCode": 0
+    },
+    {
+      "command": "inspect Developer ID signature for hostwright-storage-helper",
+      "durationMilliseconds": 19,
+      "exitCode": 0
+    },
+    {
+      "command": "Developer ID sign hostwright-dist",
+      "durationMilliseconds": 166,
+      "exitCode": 0
+    },
+    {
+      "command": "verify Developer ID signature for hostwright-dist",
+      "durationMilliseconds": 34,
+      "exitCode": 0
+    },
+    {
+      "command": "inspect Developer ID signature for hostwright-dist",
+      "durationMilliseconds": 15,
+      "exitCode": 0
+    },
+    {
+      "command": "Developer ID sign hostwrightd",
+      "durationMilliseconds": 165,
+      "exitCode": 0
+    },
+    {
+      "command": "verify Developer ID signature for hostwrightd",
+      "durationMilliseconds": 42,
+      "exitCode": 0
+    },
+    {
+      "command": "inspect Developer ID signature for hostwrightd",
+      "durationMilliseconds": 13,
+      "exitCode": 0
+    },
+    {
+      "command": "Developer ID sign hostwright-desktop",
+      "durationMilliseconds": 148,
+      "exitCode": 0
+    },
+    {
+      "command": "verify Developer ID signature for hostwright-desktop",
+      "durationMilliseconds": 45,
+      "exitCode": 0
+    },
+    {
+      "command": "inspect Developer ID signature for hostwright-desktop",
+      "durationMilliseconds": 20,
+      "exitCode": 0
+    },
+    {
+      "command": "Developer ID sign Hostwright.app",
+      "durationMilliseconds": 150,
+      "exitCode": 0
+    },
+    {
+      "command": "verify Developer ID signature for Hostwright.app",
+      "durationMilliseconds": 41,
+      "exitCode": 0
+    },
+    {
+      "command": "inspect Developer ID signature for Hostwright.app",
+      "durationMilliseconds": 14,
+      "exitCode": 0
+    },
+    {
+      "command": "create exact signed ZIP archive",
+      "durationMilliseconds": 9329,
+      "exitCode": 0
+    },
+    {
+      "command": "notarize signed archive",
+      "durationMilliseconds": 62974,
+      "exitCode": 0
+    },
+    {
+      "command": "verify archive notary ticket contents",
+      "durationMilliseconds": 911,
+      "exitCode": 0
+    },
+    {
+      "command": "build signed flat installer package",
+      "durationMilliseconds": 10067,
+      "exitCode": 0
+    },
+    {
+      "command": "verify Developer ID Installer signature",
+      "durationMilliseconds": 178,
+      "exitCode": 0
+    },
+    {
+      "command": "notarize signed package",
+      "durationMilliseconds": 80155,
+      "exitCode": 0
+    },
+    {
+      "command": "staple package notarization ticket",
+      "durationMilliseconds": 221,
+      "exitCode": 0
+    },
+    {
+      "command": "validate stapled package ticket",
+      "durationMilliseconds": 98,
+      "exitCode": 0
+    },
+    {
+      "command": "assess package with Gatekeeper",
+      "durationMilliseconds": 106,
+      "exitCode": 0
+    },
+    {
+      "command": "sign release-manifest.json with detached CMS",
+      "durationMilliseconds": 40,
+      "exitCode": 0
+    },
+    {
+      "command": "verify detached CMS for release-manifest.json",
+      "durationMilliseconds": 21,
+      "exitCode": 0
+    },
+    {
+      "command": "sign SHA256SUMS with detached CMS",
+      "durationMilliseconds": 34,
+      "exitCode": 0
+    },
+    {
+      "command": "verify detached CMS for SHA256SUMS",
+      "durationMilliseconds": 22,
+      "exitCode": 0
+    },
+    {
+      "command": "sign provenance.intoto.json with detached CMS",
+      "durationMilliseconds": 37,
+      "exitCode": 0
+    },
+    {
+      "command": "verify detached CMS for provenance.intoto.json",
+      "durationMilliseconds": 21,
+      "exitCode": 0
+    },
+    {
+      "command": "verify detached CMS signature for release-manifest.json",
+      "durationMilliseconds": 22,
+      "exitCode": 0
+    },
+    {
+      "command": "verify detached CMS signature for SHA256SUMS",
+      "durationMilliseconds": 22,
+      "exitCode": 0
+    },
+    {
+      "command": "verify detached CMS signature for provenance.intoto.json",
+      "durationMilliseconds": 22,
+      "exitCode": 0
+    },
+    {
+      "command": "inspect trusted ZIP paths",
+      "durationMilliseconds": 13,
+      "exitCode": 0
+    },
+    {
+      "command": "inspect trusted ZIP entry types",
+      "durationMilliseconds": 7,
+      "exitCode": 0
+    },
+    {
+      "command": "extract trusted ZIP into a new private directory",
+      "durationMilliseconds": 758,
+      "exitCode": 0
+    },
+    {
+      "command": "verify extracted Developer ID signature for hostwright",
+      "durationMilliseconds": 48,
+      "exitCode": 0
+    },
+    {
+      "command": "inspect extracted Developer ID signature for hostwright",
+      "durationMilliseconds": 15,
+      "exitCode": 0
+    },
+    {
+      "command": "verify extracted Developer ID signature for hostwright-control",
+      "durationMilliseconds": 41,
+      "exitCode": 0
+    },
+    {
+      "command": "inspect extracted Developer ID signature for hostwright-control",
+      "durationMilliseconds": 14,
+      "exitCode": 0
+    },
+    {
+      "command": "verify extracted Developer ID signature for hostwright-containerization-helper",
+      "durationMilliseconds": 39,
+      "exitCode": 0
+    },
+    {
+      "command": "inspect extracted Developer ID signature for hostwright-containerization-helper",
+      "durationMilliseconds": 14,
+      "exitCode": 0
+    },
+    {
+      "command": "verify extracted Developer ID signature for hostwright-network-helper",
+      "durationMilliseconds": 34,
+      "exitCode": 0
+    },
+    {
+      "command": "inspect extracted Developer ID signature for hostwright-network-helper",
+      "durationMilliseconds": 15,
+      "exitCode": 0
+    },
+    {
+      "command": "verify extracted Developer ID signature for hostwright-network-provider-worker",
+      "durationMilliseconds": 15,
+      "exitCode": 0
+    },
+    {
+      "command": "inspect extracted Developer ID signature for hostwright-network-provider-worker",
+      "durationMilliseconds": 14,
+      "exitCode": 0
+    },
+    {
+      "command": "verify extracted Developer ID signature for hostwright-storage-helper",
+      "durationMilliseconds": 21,
+      "exitCode": 0
+    },
+    {
+      "command": "inspect extracted Developer ID signature for hostwright-storage-helper",
+      "durationMilliseconds": 15,
+      "exitCode": 0
+    },
+    {
+      "command": "verify extracted Developer ID signature for hostwright-dist",
+      "durationMilliseconds": 29,
+      "exitCode": 0
+    },
+    {
+      "command": "inspect extracted Developer ID signature for hostwright-dist",
+      "durationMilliseconds": 13,
+      "exitCode": 0
+    },
+    {
+      "command": "verify extracted Developer ID signature for hostwrightd",
+      "durationMilliseconds": 41,
+      "exitCode": 0
+    },
+    {
+      "command": "inspect extracted Developer ID signature for hostwrightd",
+      "durationMilliseconds": 15,
+      "exitCode": 0
+    },
+    {
+      "command": "verify extracted Developer ID signature for hostwright-desktop",
+      "durationMilliseconds": 40,
+      "exitCode": 0
+    },
+    {
+      "command": "inspect extracted Developer ID signature for hostwright-desktop",
+      "durationMilliseconds": 13,
+      "exitCode": 0
+    },
+    {
+      "command": "verify extracted Hostwright.app signature",
+      "durationMilliseconds": 42,
+      "exitCode": 0
+    },
+    {
+      "command": "verify trusted package signature",
+      "durationMilliseconds": 101,
+      "exitCode": 0
+    },
+    {
+      "command": "validate trusted package staple",
+      "durationMilliseconds": 102,
+      "exitCode": 0
+    },
+    {
+      "command": "assess trusted package with Gatekeeper",
+      "durationMilliseconds": 28,
+      "exitCode": 0
+    },
+    {
+      "command": "expand trusted package into a new private directory",
+      "durationMilliseconds": 1078,
+      "exitCode": 0
+    },
+    {
+      "command": "verify extracted Developer ID signature for hostwright-dist",
+      "durationMilliseconds": 30,
+      "exitCode": 0
+    },
+    {
+      "command": "inspect extracted Developer ID signature for hostwright-dist",
+      "durationMilliseconds": 15,
+      "exitCode": 0
+    },
+    {
+      "command": "remove exact trusted release verification root",
+      "durationMilliseconds": 0,
+      "exitCode": 0
+    }
+  ],
+  "environment": {
+    "architecture": "arm64",
+    "build": "25G83",
+    "hardwareModel": "Mac16,8",
+    "memoryBytes": 25769803776,
+    "operatingSystem": "Version 26.6.2 (Build 25G83)",
+    "toolVersions": {
+      "git": "git version 2.50.1 (Apple Git-155)",
+      "hostwright-dist": "2",
+      "notarytool": "1.1.2 (41)",
+      "swift": "Apple Swift version 6.3.3 (swiftlang-6.3.3.1.3 clang-2100.1.1.101)",
+      "tar": "bsdtar 3.5.3 - libarchive 3.7.4 zlib/1.2.12 liblzma/5.4.3 bz2lib/1.0.8"
+    }
+  },
+  "evidenceClass": "distribution-artifact",
+  "failures": [],
+  "rawResults": {
+    "blocked": 0,
+    "executed": 13,
+    "failed": 0,
+    "passed": 13
+  },
+  "recordedAt": "2026-10-03T19:14:27Z",
+  "schemaVersion": 1,
+  "source": {
+    "commit": "cd3325a8b0ccb27c095d621bf4a3eb10ca1835da",
+    "dirty": false
+  },
+  "status": "passed"
+}

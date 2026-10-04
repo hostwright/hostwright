@@ -1,0 +1,147 @@
+{
+  "actualReadbackRuns": [
+    {
+      "conclusion": "success",
+      "created_at": "2026-10-03T22:13:09Z",
+      "event": "pull_request",
+      "headTree": "408f1a5e96d75e7e64da6358c71b770bb3f29b25",
+      "head_sha": "92fd0b0b4ad29527934369fe0c1cc04c80c2b662",
+      "html_url": "https://github.com/hostwright/hostwright/actions/runs/37157672266",
+      "id": 37157672266,
+      "name": "CI",
+      "originalReceipt": {
+        "inputID": "ci-run-37157672266",
+        "sha256": "9ca1cc113a25e97ef85b1909d23958280d2f8c2e44fa6df1e65322e615894924",
+        "sizeBytes": 12877
+      },
+      "path": ".github/workflows/ci.yml",
+      "run_attempt": 1,
+      "status": "completed",
+      "updated_at": "2026-10-03T22:45:51Z"
+    },
+    {
+      "conclusion": "success",
+      "created_at": "2026-10-03T22:13:09Z",
+      "event": "pull_request",
+      "headTree": "408f1a5e96d75e7e64da6358c71b770bb3f29b25",
+      "head_sha": "92fd0b0b4ad29527934369fe0c1cc04c80c2b662",
+      "html_url": "https://github.com/hostwright/hostwright/actions/runs/37157672270",
+      "id": 37157672270,
+      "name": "Roadmap governance",
+      "originalReceipt": {
+        "inputID": "ci-run-37157672270",
+        "sha256": "f76aff4e82e124599a1dad7b88a4d8ee6bb01d6c31a8ced5abe7e235d00aa113",
+        "sizeBytes": 12909
+      },
+      "path": ".github/workflows/roadmap-governance.yml",
+      "run_attempt": 1,
+      "status": "completed",
+      "updated_at": "2026-10-03T22:13:28Z"
+    },
+    {
+      "conclusion": "success",
+      "created_at": "2026-10-03T22:18:00Z",
+      "event": "pull_request",
+      "headTree": "408f1a5e96d75e7e64da6358c71b770bb3f29b25",
+      "head_sha": "92fd0b0b4ad29527934369fe0c1cc04c80c2b662",
+      "html_url": "https://github.com/hostwright/hostwright/actions/runs/37157960293",
+      "id": 37157960293,
+      "name": "Roadmap governance",
+      "originalReceipt": {
+        "inputID": "ci-run-37157960293",
+        "sha256": "4853a4dd0a6d66de5d804a45ca99ddfb47a960257ed5b990f89998f221da84e5",
+        "sizeBytes": 12909
+      },
+      "path": ".github/workflows/roadmap-governance.yml",
+      "run_attempt": 1,
+      "status": "completed",
+      "updated_at": "2026-10-03T22:18:15Z"
+    }
+  ],
+  "actualSkippedChecks": 2,
+  "actualSuccessfulChecks": 4,
+  "checks": [
+    {
+      "completedAt": "2026-10-03T22:45:50Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/hostwright/hostwright/actions/runs/37157672266/job/111304377738",
+      "name": "test",
+      "startedAt": "2026-10-03T22:13:17Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "completedAt": "2026-10-03T22:13:28Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/hostwright/hostwright/actions/runs/37157672270/job/111304377567",
+      "name": "pull-request-closure-gate",
+      "startedAt": "2026-10-03T22:13:19Z",
+      "status": "COMPLETED",
+      "workflowName": "Roadmap governance"
+    },
+    {
+      "completedAt": "2026-10-03T22:18:15Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/hostwright/hostwright/actions/runs/37157960293/job/111305228001",
+      "name": "pull-request-closure-gate",
+      "startedAt": "2026-10-03T22:18:07Z",
+      "status": "COMPLETED",
+      "workflowName": "Roadmap governance"
+    },
+    {
+      "completedAt": "2026-10-03T22:13:09Z",
+      "conclusion": "SKIPPED",
+      "detailsUrl": "https://github.com/hostwright/hostwright/actions/runs/37157672270/job/111304378236",
+      "name": "issue-closure-gate",
+      "startedAt": "2026-10-03T22:13:10Z",
+      "status": "COMPLETED",
+      "workflowName": "Roadmap governance"
+    },
+    {
+      "completedAt": "2026-10-03T22:18:01Z",
+      "conclusion": "SKIPPED",
+      "detailsUrl": "https://github.com/hostwright/hostwright/actions/runs/37157960293/job/111305228835",
+      "name": "issue-closure-gate",
+      "startedAt": "2026-10-03T22:18:01Z",
+      "status": "COMPLETED",
+      "workflowName": "Roadmap governance"
+    },
+    {
+      "completedAt": "2026-10-03T22:15:15Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/hostwright/hostwright/actions/runs/37157672266/job/111304377601",
+      "name": "runtime-provenance",
+      "startedAt": "2026-10-03T22:13:13Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    }
+  ],
+  "deviceOrClosurePass": false,
+  "fullSigningRegression": {
+    "Python": null,
+    "SwiftTesting": null,
+    "XCTest": null,
+    "attempt": 1,
+    "measuredSkipsWarnings": null,
+    "rawLogSHA256": null,
+    "run": 37170124704,
+    "status": "pending-genuine-final-raw-results"
+  },
+  "kind": "hostwright.phase14.private-ci-support-draft.v1",
+  "oldNWholeGateCountsIncludedInCurrentTotals": false,
+  "originalReadback": {
+    "inputID": "ci-check-readback",
+    "sha256": "f18b47eb5167f4b04a43f390257f5a257b03a476982d762d7e2999fbd0f63aa9",
+    "sizeBytes": 2006
+  },
+  "originalSummary": {
+    "inputID": "ci-summary",
+    "sha256": "cc70e9ef5fe09e3253308e4a5207c820ea0474af385682e6b9f3f29ba0753e7d",
+    "sizeBytes": 383
+  },
+  "rawCheckCount": 6,
+  "reviewedHead": "92fd0b0b4ad29527934369fe0c1cc04c80c2b662",
+  "sourceCommit": "b969a32caaa250f81b75fd6ced34d42e34d7b855",
+  "sourceTree": "408f1a5e96d75e7e64da6358c71b770bb3f29b25",
+  "summaryLabelDisclosure": "Original ci summary reportedPassingCheckCount=6 includes the two SKIPPED issue-closure jobs. Raw terminal outcomes retained here are four SUCCESS and two SKIPPED; no six-executed-pass claim."
+}

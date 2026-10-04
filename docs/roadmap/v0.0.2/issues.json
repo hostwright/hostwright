@@ -5097,7 +5097,7 @@
       "child": 2,
       "parent": 270,
       "title": "P14-C02: Add reviewed desktop up, down and restart",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/259",
       "labels": [
         "area:ci",
@@ -5131,7 +5131,7 @@
         "security-assessment",
         "ux-accessibility"
       ],
-      "stateReason": null
+      "stateReason": "completed"
     },
     {
       "marker": "P14-C03",
@@ -5141,7 +5141,7 @@
       "child": 3,
       "parent": 270,
       "title": "P14-C03: Show local services, health, logs and events",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/260",
       "labels": [
         "area:ci",
@@ -5174,7 +5174,7 @@
         "live-runtime",
         "ux-accessibility"
       ],
-      "stateReason": null
+      "stateReason": "completed"
     },
     {
       "marker": "P14-C04",
@@ -5184,7 +5184,7 @@
       "child": 4,
       "parent": 270,
       "title": "P14-C04: Verify accessibility of the local desktop workflows",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/261",
       "labels": [
         "area:ci",
@@ -5215,7 +5215,7 @@
         "local-integration",
         "ux-accessibility"
       ],
-      "stateReason": null
+      "stateReason": "completed"
     },
     {
       "marker": "P14-C05",

@@ -1,0 +1,297 @@
+{
+  "sourceCommit": "b969a32caaa250f81b75fd6ced34d42e34d7b855",
+  "runID": 37170124704,
+  "attempt": 1,
+  "subjectCount": 7,
+  "receipts": [
+    {
+      "retainedReceiptSHA256": "fca9b25306eefada9f8f0bdbfa28f6c6ed07818daa84c8b256a02a5beb76e4e9",
+      "verificationResults": [
+        {
+          "certificate": {
+            "certificateIssuer": "CN=sigstore-intermediate,O=sigstore.dev",
+            "subjectAlternativeName": "https://github.com/hostwright/hostwright/.github/workflows/trusted-release.yml@refs/heads/main",
+            "issuer": "https://token.actions.githubusercontent.com",
+            "buildSignerURI": "https://github.com/hostwright/hostwright/.github/workflows/trusted-release.yml@refs/heads/main",
+            "buildSignerDigest": "b969a32caaa250f81b75fd6ced34d42e34d7b855",
+            "runnerEnvironment": "github-hosted",
+            "sourceRepositoryURI": "https://github.com/hostwright/hostwright",
+            "sourceRepositoryDigest": "b969a32caaa250f81b75fd6ced34d42e34d7b855",
+            "sourceRepositoryRef": "refs/heads/main",
+            "runInvocationURI": "https://github.com/hostwright/hostwright/actions/runs/37170124704/attempts/1"
+          },
+          "verifiedTimestamps": [
+            {
+              "type": "Tlog",
+              "uri": "https://rekor.sigstore.dev",
+              "timestamp": "2026-10-04T00:28:58-04:00"
+            }
+          ],
+          "statementType": "https://in-toto.io/Statement/v1",
+          "predicateType": "https://slsa.dev/provenance/v1",
+          "subjects": [
+            {
+              "name": "stage-inventory.json",
+              "digest": {
+                "sha256": "340e924ec13944ea87a8760bb0050bb7d7b72549004138d777d3b598a12f09e0"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "retainedReceiptSHA256": "0132f159714170a8a9628feb4c5f84263dcbe12fd2ee353490175d30a2bc1bde",
+      "verificationResults": [
+        {
+          "certificate": {
+            "certificateIssuer": "CN=sigstore-intermediate,O=sigstore.dev",
+            "subjectAlternativeName": "https://github.com/hostwright/hostwright/.github/workflows/trusted-release.yml@refs/heads/main",
+            "issuer": "https://token.actions.githubusercontent.com",
+            "buildSignerURI": "https://github.com/hostwright/hostwright/.github/workflows/trusted-release.yml@refs/heads/main",
+            "buildSignerDigest": "b969a32caaa250f81b75fd6ced34d42e34d7b855",
+            "runnerEnvironment": "github-hosted",
+            "sourceRepositoryURI": "https://github.com/hostwright/hostwright",
+            "sourceRepositoryDigest": "b969a32caaa250f81b75fd6ced34d42e34d7b855",
+            "sourceRepositoryRef": "refs/heads/main",
+            "runInvocationURI": "https://github.com/hostwright/hostwright/actions/runs/37170124704/attempts/1"
+          },
+          "verifiedTimestamps": [
+            {
+              "type": "Tlog",
+              "uri": "https://rekor.sigstore.dev",
+              "timestamp": "2026-10-04T00:29:06-04:00"
+            }
+          ],
+          "statementType": "https://in-toto.io/Statement/v1",
+          "predicateType": "https://slsa.dev/provenance/v1",
+          "subjects": [
+            {
+              "name": "hostwright.rb",
+              "digest": {
+                "sha256": "02b5402d27cf53b3b5d347852f68386ee929cb9ab2618c137d27b60e4075ccac"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "retainedReceiptSHA256": "a926c48ffb82a281e5a74267be693f29b6ffb7e0257dbbef20aac564cd2314d9",
+      "verificationResults": [
+        {
+          "certificate": {
+            "certificateIssuer": "CN=sigstore-intermediate,O=sigstore.dev",
+            "subjectAlternativeName": "https://github.com/hostwright/hostwright/.github/workflows/trusted-release.yml@refs/heads/main",
+            "issuer": "https://token.actions.githubusercontent.com",
+            "buildSignerURI": "https://github.com/hostwright/hostwright/.github/workflows/trusted-release.yml@refs/heads/main",
+            "buildSignerDigest": "b969a32caaa250f81b75fd6ced34d42e34d7b855",
+            "runnerEnvironment": "github-hosted",
+            "sourceRepositoryURI": "https://github.com/hostwright/hostwright",
+            "sourceRepositoryDigest": "b969a32caaa250f81b75fd6ced34d42e34d7b855",
+            "sourceRepositoryRef": "refs/heads/main",
+            "runInvocationURI": "https://github.com/hostwright/hostwright/actions/runs/37170124704/attempts/1"
+          },
+          "verifiedTimestamps": [
+            {
+              "type": "Tlog",
+              "uri": "https://rekor.sigstore.dev",
+              "timestamp": "2026-10-04T00:29:04-04:00"
+            }
+          ],
+          "statementType": "https://in-toto.io/Statement/v1",
+          "predicateType": "https://slsa.dev/provenance/v1",
+          "subjects": [
+            {
+              "name": "hostwright-0.0.2-rc.1-macos-arm64-b969a32caaa2.zip",
+              "digest": {
+                "sha256": "5b82867fce546defa2097c8b1b4f7fc05b0e2039941705cbf52960437f897a37"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "retainedReceiptSHA256": "03440ccb48195dc7f3d4527b6c5f97b5c40ef2bae664859b76f5f85a06f5d550",
+      "verificationResults": [
+        {
+          "certificate": {
+            "certificateIssuer": "CN=sigstore-intermediate,O=sigstore.dev",
+            "subjectAlternativeName": "https://github.com/hostwright/hostwright/.github/workflows/trusted-release.yml@refs/heads/main",
+            "issuer": "https://token.actions.githubusercontent.com",
+            "buildSignerURI": "https://github.com/hostwright/hostwright/.github/workflows/trusted-release.yml@refs/heads/main",
+            "buildSignerDigest": "b969a32caaa250f81b75fd6ced34d42e34d7b855",
+            "runnerEnvironment": "github-hosted",
+            "sourceRepositoryURI": "https://github.com/hostwright/hostwright",
+            "sourceRepositoryDigest": "b969a32caaa250f81b75fd6ced34d42e34d7b855",
+            "sourceRepositoryRef": "refs/heads/main",
+            "runInvocationURI": "https://github.com/hostwright/hostwright/actions/runs/37170124704/attempts/1"
+          },
+          "verifiedTimestamps": [
+            {
+              "type": "Tlog",
+              "uri": "https://rekor.sigstore.dev",
+              "timestamp": "2026-10-04T00:29:05-04:00"
+            }
+          ],
+          "statementType": "https://in-toto.io/Statement/v1",
+          "predicateType": "https://slsa.dev/provenance/v1",
+          "subjects": [
+            {
+              "name": "hostwright-0.0.2-rc.1-macos-arm64-b969a32caaa2.pkg",
+              "digest": {
+                "sha256": "7aebf9ea9d1188ffa801b2580e0b12ffb16a2fd9d955121b61be246e96fb55df"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "retainedReceiptSHA256": "55c91823c2ec9cf7cfb9724e9b057f1085d8451e0fc25987a5968fc06a398549",
+      "verificationResults": [
+        {
+          "certificate": {
+            "certificateIssuer": "CN=sigstore-intermediate,O=sigstore.dev",
+            "subjectAlternativeName": "https://github.com/hostwright/hostwright/.github/workflows/trusted-release.yml@refs/heads/main",
+            "issuer": "https://token.actions.githubusercontent.com",
+            "buildSignerURI": "https://github.com/hostwright/hostwright/.github/workflows/trusted-release.yml@refs/heads/main",
+            "buildSignerDigest": "b969a32caaa250f81b75fd6ced34d42e34d7b855",
+            "runnerEnvironment": "github-hosted",
+            "sourceRepositoryURI": "https://github.com/hostwright/hostwright",
+            "sourceRepositoryDigest": "b969a32caaa250f81b75fd6ced34d42e34d7b855",
+            "sourceRepositoryRef": "refs/heads/main",
+            "runInvocationURI": "https://github.com/hostwright/hostwright/actions/runs/37170124704/attempts/1"
+          },
+          "verifiedTimestamps": [
+            {
+              "type": "Tlog",
+              "uri": "https://rekor.sigstore.dev",
+              "timestamp": "2026-10-04T00:29:02-04:00"
+            }
+          ],
+          "statementType": "https://in-toto.io/Statement/v1",
+          "predicateType": "https://slsa.dev/provenance/v1",
+          "subjects": [
+            {
+              "name": "SOURCE_SHA256SUMS",
+              "digest": {
+                "sha256": "d919c866ab7ef3e9564c5c5f3f30ec8aad768971bd765385cdab23857dd9a9cb"
+              }
+            },
+            {
+              "name": "hostwright-0.0.2-rc.1-b969a32caaa2-corresponding-source.tar.gz",
+              "digest": {
+                "sha256": "5197cf38c48bfdf5bd96cb2de51808bf5a8fd3491af180fb397a967fbbf147cb"
+              }
+            },
+            {
+              "name": "source-manifest.json",
+              "digest": {
+                "sha256": "3354db225b4e6b2419c711e88f1496b7ed8e4809061cd2a3b51d2df65f2952ee"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "retainedReceiptSHA256": "55c91823c2ec9cf7cfb9724e9b057f1085d8451e0fc25987a5968fc06a398549",
+      "verificationResults": [
+        {
+          "certificate": {
+            "certificateIssuer": "CN=sigstore-intermediate,O=sigstore.dev",
+            "subjectAlternativeName": "https://github.com/hostwright/hostwright/.github/workflows/trusted-release.yml@refs/heads/main",
+            "issuer": "https://token.actions.githubusercontent.com",
+            "buildSignerURI": "https://github.com/hostwright/hostwright/.github/workflows/trusted-release.yml@refs/heads/main",
+            "buildSignerDigest": "b969a32caaa250f81b75fd6ced34d42e34d7b855",
+            "runnerEnvironment": "github-hosted",
+            "sourceRepositoryURI": "https://github.com/hostwright/hostwright",
+            "sourceRepositoryDigest": "b969a32caaa250f81b75fd6ced34d42e34d7b855",
+            "sourceRepositoryRef": "refs/heads/main",
+            "runInvocationURI": "https://github.com/hostwright/hostwright/actions/runs/37170124704/attempts/1"
+          },
+          "verifiedTimestamps": [
+            {
+              "type": "Tlog",
+              "uri": "https://rekor.sigstore.dev",
+              "timestamp": "2026-10-04T00:29:02-04:00"
+            }
+          ],
+          "statementType": "https://in-toto.io/Statement/v1",
+          "predicateType": "https://slsa.dev/provenance/v1",
+          "subjects": [
+            {
+              "name": "SOURCE_SHA256SUMS",
+              "digest": {
+                "sha256": "d919c866ab7ef3e9564c5c5f3f30ec8aad768971bd765385cdab23857dd9a9cb"
+              }
+            },
+            {
+              "name": "hostwright-0.0.2-rc.1-b969a32caaa2-corresponding-source.tar.gz",
+              "digest": {
+                "sha256": "5197cf38c48bfdf5bd96cb2de51808bf5a8fd3491af180fb397a967fbbf147cb"
+              }
+            },
+            {
+              "name": "source-manifest.json",
+              "digest": {
+                "sha256": "3354db225b4e6b2419c711e88f1496b7ed8e4809061cd2a3b51d2df65f2952ee"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "retainedReceiptSHA256": "55c91823c2ec9cf7cfb9724e9b057f1085d8451e0fc25987a5968fc06a398549",
+      "verificationResults": [
+        {
+          "certificate": {
+            "certificateIssuer": "CN=sigstore-intermediate,O=sigstore.dev",
+            "subjectAlternativeName": "https://github.com/hostwright/hostwright/.github/workflows/trusted-release.yml@refs/heads/main",
+            "issuer": "https://token.actions.githubusercontent.com",
+            "buildSignerURI": "https://github.com/hostwright/hostwright/.github/workflows/trusted-release.yml@refs/heads/main",
+            "buildSignerDigest": "b969a32caaa250f81b75fd6ced34d42e34d7b855",
+            "runnerEnvironment": "github-hosted",
+            "sourceRepositoryURI": "https://github.com/hostwright/hostwright",
+            "sourceRepositoryDigest": "b969a32caaa250f81b75fd6ced34d42e34d7b855",
+            "sourceRepositoryRef": "refs/heads/main",
+            "runInvocationURI": "https://github.com/hostwright/hostwright/actions/runs/37170124704/attempts/1"
+          },
+          "verifiedTimestamps": [
+            {
+              "type": "Tlog",
+              "uri": "https://rekor.sigstore.dev",
+              "timestamp": "2026-10-04T00:29:02-04:00"
+            }
+          ],
+          "statementType": "https://in-toto.io/Statement/v1",
+          "predicateType": "https://slsa.dev/provenance/v1",
+          "subjects": [
+            {
+              "name": "SOURCE_SHA256SUMS",
+              "digest": {
+                "sha256": "d919c866ab7ef3e9564c5c5f3f30ec8aad768971bd765385cdab23857dd9a9cb"
+              }
+            },
+            {
+              "name": "hostwright-0.0.2-rc.1-b969a32caaa2-corresponding-source.tar.gz",
+              "digest": {
+                "sha256": "5197cf38c48bfdf5bd96cb2de51808bf5a8fd3491af180fb397a967fbbf147cb"
+              }
+            },
+            {
+              "name": "source-manifest.json",
+              "digest": {
+                "sha256": "3354db225b4e6b2419c711e88f1496b7ed8e4809061cd2a3b51d2df65f2952ee"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "receiptType": "Selected retained successful verification fields; not independently re-verifiable cryptographic bundles."
+}

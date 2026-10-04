@@ -1,0 +1,221 @@
+{
+  "counts": {
+    "Python": {
+      "allSuitesOK": true,
+      "passed": 278,
+      "reported": 279,
+      "skipped": 1,
+      "suites": 28
+    },
+    "SwiftTesting": {
+      "failed": 0,
+      "passed": 61
+    },
+    "XCTest": {
+      "failed": 0,
+      "passed": 3358,
+      "reported": 3362,
+      "skipped": 4
+    }
+  },
+  "finalSourceReview": {
+    "blockingFindings": [],
+    "originalInputID": "final-review",
+    "originalSHA256": "0f11342995dcb12eec8ce6ca34b0549146cf406f87afc17cd2d91c441db9db84",
+    "verdict": "No new blocking correctness/security defect found within reviewed scope; actual device qualification remains pending."
+  },
+  "fixes": [
+    {
+      "change": "schema2 seven/15 exact layouts",
+      "conclusion": "Only the exact published seven-file and legacy 15-file inventories are accepted. Sorted unique paths, safe paths, identity, positive size, SHA syntax, exact modes and allowed directory ancestry remain mandatory. No arbitrary subset/superset or duplicate is allowed.",
+      "sourceFiles": [
+        {
+          "actualN": {
+            "gitBlob": "32ed5e528f7ee512a1e9a36a67cca74fc78568e6",
+            "gitMode": "100644",
+            "sha256": "bc7bb60da2b3357b774f677f5e67a8446d5b580fa694af204431aba5e36fba9d",
+            "sizeBytes": 66979
+          },
+          "baselineM": {
+            "gitBlob": "e0f31e76100ccfe39119aaa84ad80595b4c41b01",
+            "gitMode": "100644",
+            "sha256": "b88029cc6d215fbea09518a7e26ba03e1b93b7b9c06772008c60555d750a0948",
+            "sizeBytes": 66581
+          },
+          "path": "Sources/HostwrightDistribution/DistributionModels.swift"
+        },
+        {
+          "actualN": {
+            "gitBlob": "529ebc73c6f71d079adc2d4d45985cc3ab63f0ec",
+            "gitMode": "100644",
+            "sha256": "763430ca01829593cf2e828187938e785a2693fc6cec6eb3164c46b22b5845c3",
+            "sizeBytes": 25124
+          },
+          "baselineM": {
+            "gitBlob": "9669fa063e96628abc71ca08d01282de7d5b4fc3",
+            "gitMode": "100644",
+            "sha256": "736bebbcbc4691cc3a1292b8c3bc840135093187936a1eb8e6b1faea66417182",
+            "sizeBytes": 21498
+          },
+          "path": "Tests/HostwrightDistributionTests/DistributionModelsTests.swift"
+        }
+      ]
+    },
+    {
+      "change": "lazy default runtime version",
+      "conclusion": "Default runtimeVersion is lazy, so absent CLI does not prevent authenticated control startup. Generic scheduler provider and version checks still precede pressure persistence and authority effects. Runtime wait remains bounded; native manual lifecycle uses selected adapter inventory and its own real admission context.",
+      "sourceFiles": [
+        {
+          "actualN": {
+            "gitBlob": "c51370e8b2ac29a3b40201a0da771ef6aa73f74f",
+            "gitMode": "100644",
+            "sha256": "50b8381ad7a9b7ae9e2632490f3ca24bbda0e1659280a08b946b8179df97ce4f",
+            "sizeBytes": 57449
+          },
+          "baselineM": {
+            "gitBlob": "656661b3c732b2cb6a8f013798d98e0ec4c59452",
+            "gitMode": "100644",
+            "sha256": "33ac941f6098b83c80b42e4b2a36428731d2e08e28b7afc6d9256ed324e8b835",
+            "sizeBytes": 56656
+          },
+          "path": "Sources/HostwrightDaemon/HostwrightDaemonControlService.swift"
+        }
+      ]
+    },
+    {
+      "change": "SDK imported root separate from manifest variant",
+      "conclusion": "Signed OCI layout still validates pinned child manifest 15a70c\u2026 while configuration binds the SDK synthesized root c58d7f\u2026 separately. The actual helper checks exact reference/root AND .current platform variant before InitImage/initfs/ContainerManager. Extracted require logic is source-identical to the prior predicate. Pinned SDK .current is linux/normalized machine architecture; real SDK import synthesizes the annotated indirect index.",
+      "sourceFiles": [
+        {
+          "actualN": {
+            "gitBlob": "87ac917c889dbf62c1d585983aeb269951757a8c",
+            "gitMode": "100644",
+            "sha256": "f2e6a5cc82c033fa087e85b057d09c0f3db9cfdcfb4ef040584623a578bd2f7d",
+            "sizeBytes": 2618
+          },
+          "baselineM": {
+            "gitBlob": "06cde8096240f4716d6a5d34bd0787684a1feca9",
+            "gitMode": "100644",
+            "sha256": "1d864a50b4a6dbd6965bc20376ee9d3cebe9a6005b6565ee1a6a3d7470fc3c58",
+            "sizeBytes": 2317
+          },
+          "path": "Sources/HostwrightCore/ContainerizationRuntimeAssetContract.swift"
+        },
+        {
+          "actualN": {
+            "gitBlob": "55fb20d03a6e2475bdd28021070625cfe8358119",
+            "gitMode": "100644",
+            "sha256": "6bc5c54c268d95c423f40879bdbea029d128b169f4f29487bf530206f9d164d0",
+            "sizeBytes": 32092
+          },
+          "baselineM": {
+            "gitBlob": "fdb0c400f533adc08c8f6bbea14ff0ec4d4aa0a8",
+            "gitMode": "100644",
+            "sha256": "e280e2f2c83ab3f93ed352b051717e826e50eeb2e863c336d3fecc60d2a6ca60",
+            "sizeBytes": 32037
+          },
+          "path": "Sources/HostwrightRuntime/ContainerizationHelperBootstrap.swift"
+        },
+        {
+          "actualN": {
+            "gitBlob": "29b3671267ef7223126331bf07591e3727325489",
+            "gitMode": "100644",
+            "sha256": "141411687edf2331b0a6718ecc0c7f2c749844401d2049d0187a5bb9c23560b0",
+            "sizeBytes": 23705
+          },
+          "baselineM": {
+            "gitBlob": "97cd56d2925bdde5eca5b43bfe03902b32f67702",
+            "gitMode": "100644",
+            "sha256": "e1c3e9ea56c9558c7c544659a7afeb7a401f4724981012454e9fe706316d98b7",
+            "sizeBytes": 23721
+          },
+          "path": "Sources/HostwrightDistribution/DistributionContainerizationAssets.swift"
+        },
+        {
+          "actualN": {
+            "gitBlob": "9a1a8628c1a1c985876077fce30a9000a4ccdf7a",
+            "gitMode": "100644",
+            "sha256": "cf7aae03932915c339ac8f3806a85a8f60857f25dc2e552fa52fd600879e81d8",
+            "sizeBytes": 919
+          },
+          "baselineM": null,
+          "path": "Sources/HostwrightContainerizationHelper/ContainerizationHelperInitImage.swift"
+        },
+        {
+          "actualN": {
+            "gitBlob": "46e1228436bcf99502d77e46b39edbe6a797c535",
+            "gitMode": "100644",
+            "sha256": "dd4d33168ff80217bd4d9ad8345f20025fdfd9bda70e8f7f147ca0b4820d47bc",
+            "sizeBytes": 114082
+          },
+          "baselineM": {
+            "gitBlob": "d5782cf7955dc061ddde0b295a84e0969c0f29fc",
+            "gitMode": "100644",
+            "sha256": "418252c4174f54ab5c807674700fe10430813a520f84ec2ef220747568e75f70",
+            "sizeBytes": 114935
+          },
+          "path": "Sources/HostwrightContainerizationHelper/ContainerizationFrameworkBackend.swift"
+        }
+      ]
+    },
+    {
+      "change": "shutdown signal lifetime",
+      "conclusion": "withExtendedLifetime(signals) after awaited daemon run retains SIGINT/SIGTERM sources across the normal run. Main converts failures into a nonthrowing result; unchanged shutdown-token loop and deferred control listener/lease cleanup remain. Retained optimized full production SIL confirms old release before await versus new fix_lifetime after normal continuation.",
+      "sourceFiles": [
+        {
+          "actualN": {
+            "gitBlob": "be930c731a5bdb94c60a03bc43b1b028f4e8f568",
+            "gitMode": "100644",
+            "sha256": "4b4018a142f985167584949a78f33efca27af3f1239f52b1bac8e4bbe92bd078",
+            "sizeBytes": 8541
+          },
+          "baselineM": {
+            "gitBlob": "b3b679d260ecad0ce6c9a563102d19f92847743c",
+            "gitMode": "100644",
+            "sha256": "8acf35fa19d8aee8a3179d0c7e7c75de922fff3f259d288cc82d24586a232d45",
+            "sizeBytes": 8520
+          },
+          "path": "Sources/HostwrightDaemon/HostwrightDaemonEntrypoint.swift"
+        },
+        {
+          "actualN": {
+            "gitBlob": "7d23b5f24623f59fdc6e569c1d2c4593ca6eefe8",
+            "gitMode": "100644",
+            "sha256": "fd0e01681feacf7662ea65dc84c1d1a46602f88a8aefb0f58d4d98a395bf0f91",
+            "sizeBytes": 77902
+          },
+          "baselineM": {
+            "gitBlob": "7d23b5f24623f59fdc6e569c1d2c4593ca6eefe8",
+            "gitMode": "100644",
+            "sha256": "fd0e01681feacf7662ea65dc84c1d1a46602f88a8aefb0f58d4d98a395bf0f91",
+            "sizeBytes": 77902
+          },
+          "path": "Sources/HostwrightDaemonCore/DaemonCore.swift"
+        }
+      ]
+    }
+  ],
+  "kind": "phase14-source-and-ci-support-preparation",
+  "limits": [
+    "Source/CI support only; no runtime, signing, device, GUI, VM, Phase15 qualification or issue-closure pass.",
+    "Local regression receipts preserve their recorded historical source stage; they are not relabeled as actual N binary runs.",
+    "CI ran reviewed head591 and a same-tree pull-request merge ref; actual N merge has the same tree.",
+    "Original build591 and actual N same-tree aliases are disclosed without rebuilding or changing original receipt identity.",
+    "Optimized full-production source proof used warm debug imports, DEBUG and enable-testing settings; actual signed graceful shutdown remains device work.",
+    "The earlier unsigned reproducibility failure is retained as a failure with unresolved cause; a later matching pair does not establish a fix."
+  ],
+  "publicationStatus": "private-preparation-pending-review",
+  "schemaVersion": 1,
+  "scope": "Four actual PR357 source fixes and retained final CI/source review only",
+  "source": {
+    "PR": "https://github.com/hostwright/hostwright/pull/357",
+    "actualMergedCommit": "3f7db51451c2bd66d1932c559289637e9e64db31",
+    "actualTree": "95c9cc2e09b216cef7aed299e12224fe9d2c08c3",
+    "baselineCommit": "10bf526ad148edb5bc70b48de24b4ad8a6a0d8f7",
+    "mergeInputID": "actual-merge",
+    "mergedAt": "2026-10-03T02:28:52Z",
+    "remoteCommitInputID": "actual-merged-commit",
+    "reviewedAndMergedTreesIdentical": true,
+    "reviewedHead": "591f44fec964410679326cb9a370da2c5ed10528"
+  }
+}

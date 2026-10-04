@@ -1,0 +1,378 @@
+{
+  "actualPhysicalExecution": false,
+  "attempt": 1,
+  "executed": 9,
+  "failed": 0,
+  "kind": "hostwright.phase14.new-native-source-CI-method-support.v1",
+  "methods": [
+    {
+      "caseIdentifier": "-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeCompensationAndRecoveryRetainExactPriorBinding]",
+      "executedCount": 1,
+      "method": "testNativeCompensationAndRecoveryRetainExactPriorBinding",
+      "rawArtifactLogObservations": [
+        {
+          "class": "HostwrightCLITests.LifecycleProbeLiveIntegrationTests",
+          "identifier": "-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeCompensationAndRecoveryRetainExactPriorBinding]",
+          "line": 9643,
+          "method": "testNativeCompensationAndRecoveryRetainExactPriorBinding",
+          "raw": "Test Case '-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeCompensationAndRecoveryRetainExactPriorBinding]' started.",
+          "seconds": null,
+          "status": "started"
+        },
+        {
+          "class": "HostwrightCLITests.LifecycleProbeLiveIntegrationTests",
+          "identifier": "-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeCompensationAndRecoveryRetainExactPriorBinding]",
+          "line": 9644,
+          "method": "testNativeCompensationAndRecoveryRetainExactPriorBinding",
+          "raw": "Test Case '-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeCompensationAndRecoveryRetainExactPriorBinding]' passed (0.410 seconds).",
+          "seconds": "0.410",
+          "status": "passed"
+        }
+      ],
+      "rawGHLogObservations": [
+        {
+          "line": 10458,
+          "raw": "test\tPull-request regression gate\t2026-10-03T11:56:38.4013190Z Test Case '-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeCompensationAndRecoveryRetainExactPriorBinding]' started."
+        },
+        {
+          "line": 10459,
+          "raw": "test\tPull-request regression gate\t2026-10-03T11:56:38.4014300Z Test Case '-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeCompensationAndRecoveryRetainExactPriorBinding]' passed (0.410 seconds)."
+        }
+      ],
+      "reportedDurationSeconds": 0.41,
+      "skippedCount": 0,
+      "sourceLine": 244,
+      "sourcePath": "Tests/HostwrightCLITests/LifecycleProbeLiveIntegrationTests.swift",
+      "status": "passed"
+    },
+    {
+      "caseIdentifier": "-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeDownAndRemovalRequireExactPostconditionsAndKeepNativeFences]",
+      "executedCount": 1,
+      "method": "testNativeDownAndRemovalRequireExactPostconditionsAndKeepNativeFences",
+      "rawArtifactLogObservations": [
+        {
+          "class": "HostwrightCLITests.LifecycleProbeLiveIntegrationTests",
+          "identifier": "-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeDownAndRemovalRequireExactPostconditionsAndKeepNativeFences]",
+          "line": 9645,
+          "method": "testNativeDownAndRemovalRequireExactPostconditionsAndKeepNativeFences",
+          "raw": "Test Case '-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeDownAndRemovalRequireExactPostconditionsAndKeepNativeFences]' started.",
+          "seconds": null,
+          "status": "started"
+        },
+        {
+          "class": "HostwrightCLITests.LifecycleProbeLiveIntegrationTests",
+          "identifier": "-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeDownAndRemovalRequireExactPostconditionsAndKeepNativeFences]",
+          "line": 9646,
+          "method": "testNativeDownAndRemovalRequireExactPostconditionsAndKeepNativeFences",
+          "raw": "Test Case '-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeDownAndRemovalRequireExactPostconditionsAndKeepNativeFences]' passed (0.610 seconds).",
+          "seconds": "0.610",
+          "status": "passed"
+        }
+      ],
+      "rawGHLogObservations": [
+        {
+          "line": 10460,
+          "raw": "test\tPull-request regression gate\t2026-10-03T11:56:38.4015370Z Test Case '-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeDownAndRemovalRequireExactPostconditionsAndKeepNativeFences]' started."
+        },
+        {
+          "line": 10461,
+          "raw": "test\tPull-request regression gate\t2026-10-03T11:56:38.4016780Z Test Case '-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeDownAndRemovalRequireExactPostconditionsAndKeepNativeFences]' passed (0.610 seconds)."
+        }
+      ],
+      "reportedDurationSeconds": 0.61,
+      "skippedCount": 0,
+      "sourceLine": 113,
+      "sourcePath": "Tests/HostwrightCLITests/LifecycleProbeLiveIntegrationTests.swift",
+      "status": "passed"
+    },
+    {
+      "caseIdentifier": "-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeNoEffectWithAnActualFenceHandoffKeepsTheExistingGroupProjection]",
+      "executedCount": 1,
+      "method": "testNativeNoEffectWithAnActualFenceHandoffKeepsTheExistingGroupProjection",
+      "rawArtifactLogObservations": [
+        {
+          "class": "HostwrightCLITests.LifecycleProbeLiveIntegrationTests",
+          "identifier": "-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeNoEffectWithAnActualFenceHandoffKeepsTheExistingGroupProjection]",
+          "line": 9647,
+          "method": "testNativeNoEffectWithAnActualFenceHandoffKeepsTheExistingGroupProjection",
+          "raw": "Test Case '-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeNoEffectWithAnActualFenceHandoffKeepsTheExistingGroupProjection]' started.",
+          "seconds": null,
+          "status": "started"
+        },
+        {
+          "class": "HostwrightCLITests.LifecycleProbeLiveIntegrationTests",
+          "identifier": "-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeNoEffectWithAnActualFenceHandoffKeepsTheExistingGroupProjection]",
+          "line": 9648,
+          "method": "testNativeNoEffectWithAnActualFenceHandoffKeepsTheExistingGroupProjection",
+          "raw": "Test Case '-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeNoEffectWithAnActualFenceHandoffKeepsTheExistingGroupProjection]' passed (0.248 seconds).",
+          "seconds": "0.248",
+          "status": "passed"
+        }
+      ],
+      "rawGHLogObservations": [
+        {
+          "line": 10462,
+          "raw": "test\tPull-request regression gate\t2026-10-03T11:56:38.4018550Z Test Case '-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeNoEffectWithAnActualFenceHandoffKeepsTheExistingGroupProjection]' started."
+        },
+        {
+          "line": 10463,
+          "raw": "test\tPull-request regression gate\t2026-10-03T11:56:38.4019970Z Test Case '-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeNoEffectWithAnActualFenceHandoffKeepsTheExistingGroupProjection]' passed (0.248 seconds)."
+        }
+      ],
+      "reportedDurationSeconds": 0.248,
+      "skippedCount": 0,
+      "sourceLine": 138,
+      "sourcePath": "Tests/HostwrightCLITests/LifecycleProbeLiveIntegrationTests.swift",
+      "status": "passed"
+    },
+    {
+      "caseIdentifier": "-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeObservationRejectsStaleOperationAndExpiredOrMissingAuthority]",
+      "executedCount": 1,
+      "method": "testNativeObservationRejectsStaleOperationAndExpiredOrMissingAuthority",
+      "rawArtifactLogObservations": [
+        {
+          "class": "HostwrightCLITests.LifecycleProbeLiveIntegrationTests",
+          "identifier": "-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeObservationRejectsStaleOperationAndExpiredOrMissingAuthority]",
+          "line": 9649,
+          "method": "testNativeObservationRejectsStaleOperationAndExpiredOrMissingAuthority",
+          "raw": "Test Case '-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeObservationRejectsStaleOperationAndExpiredOrMissingAuthority]' started.",
+          "seconds": null,
+          "status": "started"
+        },
+        {
+          "class": "HostwrightCLITests.LifecycleProbeLiveIntegrationTests",
+          "identifier": "-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeObservationRejectsStaleOperationAndExpiredOrMissingAuthority]",
+          "line": 9650,
+          "method": "testNativeObservationRejectsStaleOperationAndExpiredOrMissingAuthority",
+          "raw": "Test Case '-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeObservationRejectsStaleOperationAndExpiredOrMissingAuthority]' passed (1.583 seconds).",
+          "seconds": "1.583",
+          "status": "passed"
+        }
+      ],
+      "rawGHLogObservations": [
+        {
+          "line": 10464,
+          "raw": "test\tPull-request regression gate\t2026-10-03T11:56:38.4021230Z Test Case '-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeObservationRejectsStaleOperationAndExpiredOrMissingAuthority]' started."
+        },
+        {
+          "line": 10465,
+          "raw": "test\tPull-request regression gate\t2026-10-03T11:56:38.4022430Z Test Case '-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeObservationRejectsStaleOperationAndExpiredOrMissingAuthority]' passed (1.583 seconds)."
+        }
+      ],
+      "reportedDurationSeconds": 1.583,
+      "skippedCount": 0,
+      "sourceLine": 156,
+      "sourcePath": "Tests/HostwrightCLITests/LifecycleProbeLiveIntegrationTests.swift",
+      "status": "passed"
+    },
+    {
+      "caseIdentifier": "-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeObservationRejectsUnrelatedOwnershipAndUnplannedNode]",
+      "executedCount": 1,
+      "method": "testNativeObservationRejectsUnrelatedOwnershipAndUnplannedNode",
+      "rawArtifactLogObservations": [
+        {
+          "class": "HostwrightCLITests.LifecycleProbeLiveIntegrationTests",
+          "identifier": "-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeObservationRejectsUnrelatedOwnershipAndUnplannedNode]",
+          "line": 9651,
+          "method": "testNativeObservationRejectsUnrelatedOwnershipAndUnplannedNode",
+          "raw": "Test Case '-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeObservationRejectsUnrelatedOwnershipAndUnplannedNode]' started.",
+          "seconds": null,
+          "status": "started"
+        },
+        {
+          "class": "HostwrightCLITests.LifecycleProbeLiveIntegrationTests",
+          "identifier": "-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeObservationRejectsUnrelatedOwnershipAndUnplannedNode]",
+          "line": 9652,
+          "method": "testNativeObservationRejectsUnrelatedOwnershipAndUnplannedNode",
+          "raw": "Test Case '-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeObservationRejectsUnrelatedOwnershipAndUnplannedNode]' passed (1.561 seconds).",
+          "seconds": "1.561",
+          "status": "passed"
+        }
+      ],
+      "rawGHLogObservations": [
+        {
+          "line": 10466,
+          "raw": "test\tPull-request regression gate\t2026-10-03T11:56:38.4023640Z Test Case '-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeObservationRejectsUnrelatedOwnershipAndUnplannedNode]' started."
+        },
+        {
+          "line": 10467,
+          "raw": "test\tPull-request regression gate\t2026-10-03T11:56:38.4024730Z Test Case '-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeObservationRejectsUnrelatedOwnershipAndUnplannedNode]' passed (1.561 seconds)."
+        }
+      ],
+      "reportedDurationSeconds": 1.561,
+      "skippedCount": 0,
+      "sourceLine": 209,
+      "sourcePath": "Tests/HostwrightCLITests/LifecycleProbeLiveIntegrationTests.swift",
+      "status": "passed"
+    },
+    {
+      "caseIdentifier": "-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeObservationRestoresOnlyTheProvenPriorFenceOnNoEffect]",
+      "executedCount": 1,
+      "method": "testNativeObservationRestoresOnlyTheProvenPriorFenceOnNoEffect",
+      "rawArtifactLogObservations": [
+        {
+          "class": "HostwrightCLITests.LifecycleProbeLiveIntegrationTests",
+          "identifier": "-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeObservationRestoresOnlyTheProvenPriorFenceOnNoEffect]",
+          "line": 9653,
+          "method": "testNativeObservationRestoresOnlyTheProvenPriorFenceOnNoEffect",
+          "raw": "Test Case '-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeObservationRestoresOnlyTheProvenPriorFenceOnNoEffect]' started.",
+          "seconds": null,
+          "status": "started"
+        },
+        {
+          "class": "HostwrightCLITests.LifecycleProbeLiveIntegrationTests",
+          "identifier": "-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeObservationRestoresOnlyTheProvenPriorFenceOnNoEffect]",
+          "line": 9654,
+          "method": "testNativeObservationRestoresOnlyTheProvenPriorFenceOnNoEffect",
+          "raw": "Test Case '-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeObservationRestoresOnlyTheProvenPriorFenceOnNoEffect]' passed (0.201 seconds).",
+          "seconds": "0.201",
+          "status": "passed"
+        }
+      ],
+      "rawGHLogObservations": [
+        {
+          "line": 10468,
+          "raw": "test\tPull-request regression gate\t2026-10-03T11:56:38.4025910Z Test Case '-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeObservationRestoresOnlyTheProvenPriorFenceOnNoEffect]' started."
+        },
+        {
+          "line": 10469,
+          "raw": "test\tPull-request regression gate\t2026-10-03T11:56:38.4027360Z Test Case '-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeObservationRestoresOnlyTheProvenPriorFenceOnNoEffect]' passed (0.201 seconds)."
+        }
+      ],
+      "reportedDurationSeconds": 0.201,
+      "skippedCount": 0,
+      "sourceLine": 92,
+      "sourcePath": "Tests/HostwrightCLITests/LifecycleProbeLiveIntegrationTests.swift",
+      "status": "passed"
+    },
+    {
+      "caseIdentifier": "-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeStopStartRestartObservesTheCurrentOperationFence]",
+      "executedCount": 1,
+      "method": "testNativeStopStartRestartObservesTheCurrentOperationFence",
+      "rawArtifactLogObservations": [
+        {
+          "class": "HostwrightCLITests.LifecycleProbeLiveIntegrationTests",
+          "identifier": "-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeStopStartRestartObservesTheCurrentOperationFence]",
+          "line": 9655,
+          "method": "testNativeStopStartRestartObservesTheCurrentOperationFence",
+          "raw": "Test Case '-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeStopStartRestartObservesTheCurrentOperationFence]' started.",
+          "seconds": null,
+          "status": "started"
+        },
+        {
+          "class": "HostwrightCLITests.LifecycleProbeLiveIntegrationTests",
+          "identifier": "-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeStopStartRestartObservesTheCurrentOperationFence]",
+          "line": 9656,
+          "method": "testNativeStopStartRestartObservesTheCurrentOperationFence",
+          "raw": "Test Case '-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeStopStartRestartObservesTheCurrentOperationFence]' passed (0.604 seconds).",
+          "seconds": "0.604",
+          "status": "passed"
+        }
+      ],
+      "rawGHLogObservations": [
+        {
+          "line": 10470,
+          "raw": "test\tPull-request regression gate\t2026-10-03T11:56:38.4028510Z Test Case '-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeStopStartRestartObservesTheCurrentOperationFence]' started."
+        },
+        {
+          "line": 10471,
+          "raw": "test\tPull-request regression gate\t2026-10-03T11:56:38.4029600Z Test Case '-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testNativeStopStartRestartObservesTheCurrentOperationFence]' passed (0.604 seconds)."
+        }
+      ],
+      "reportedDurationSeconds": 0.604,
+      "skippedCount": 0,
+      "sourceLine": 11,
+      "sourcePath": "Tests/HostwrightCLITests/LifecycleProbeLiveIntegrationTests.swift",
+      "status": "passed"
+    },
+    {
+      "caseIdentifier": "-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testSDKCompletedHintsPreserveHistoricalRestartAndCurrentStartOnlyScopes]",
+      "executedCount": 1,
+      "method": "testSDKCompletedHintsPreserveHistoricalRestartAndCurrentStartOnlyScopes",
+      "rawArtifactLogObservations": [
+        {
+          "class": "HostwrightCLITests.LifecycleProbeLiveIntegrationTests",
+          "identifier": "-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testSDKCompletedHintsPreserveHistoricalRestartAndCurrentStartOnlyScopes]",
+          "line": 9673,
+          "method": "testSDKCompletedHintsPreserveHistoricalRestartAndCurrentStartOnlyScopes",
+          "raw": "Test Case '-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testSDKCompletedHintsPreserveHistoricalRestartAndCurrentStartOnlyScopes]' started.",
+          "seconds": null,
+          "status": "started"
+        },
+        {
+          "class": "HostwrightCLITests.LifecycleProbeLiveIntegrationTests",
+          "identifier": "-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testSDKCompletedHintsPreserveHistoricalRestartAndCurrentStartOnlyScopes]",
+          "line": 9674,
+          "method": "testSDKCompletedHintsPreserveHistoricalRestartAndCurrentStartOnlyScopes",
+          "raw": "Test Case '-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testSDKCompletedHintsPreserveHistoricalRestartAndCurrentStartOnlyScopes]' passed (0.299 seconds).",
+          "seconds": "0.299",
+          "status": "passed"
+        }
+      ],
+      "rawGHLogObservations": [
+        {
+          "line": 10488,
+          "raw": "test\tPull-request regression gate\t2026-10-03T11:56:38.4053730Z Test Case '-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testSDKCompletedHintsPreserveHistoricalRestartAndCurrentStartOnlyScopes]' started."
+        },
+        {
+          "line": 10489,
+          "raw": "test\tPull-request regression gate\t2026-10-03T11:56:38.4054910Z Test Case '-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testSDKCompletedHintsPreserveHistoricalRestartAndCurrentStartOnlyScopes]' passed (0.299 seconds)."
+        }
+      ],
+      "reportedDurationSeconds": 0.299,
+      "skippedCount": 0,
+      "sourceLine": 300,
+      "sourcePath": "Tests/HostwrightCLITests/LifecycleProbeLiveIntegrationTests.swift",
+      "status": "passed"
+    },
+    {
+      "caseIdentifier": "-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testSDKCompletedRestartHintsRejectMalformedPairsAndUnprovedProjections]",
+      "executedCount": 1,
+      "method": "testSDKCompletedRestartHintsRejectMalformedPairsAndUnprovedProjections",
+      "rawArtifactLogObservations": [
+        {
+          "class": "HostwrightCLITests.LifecycleProbeLiveIntegrationTests",
+          "identifier": "-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testSDKCompletedRestartHintsRejectMalformedPairsAndUnprovedProjections]",
+          "line": 9675,
+          "method": "testSDKCompletedRestartHintsRejectMalformedPairsAndUnprovedProjections",
+          "raw": "Test Case '-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testSDKCompletedRestartHintsRejectMalformedPairsAndUnprovedProjections]' started.",
+          "seconds": null,
+          "status": "started"
+        },
+        {
+          "class": "HostwrightCLITests.LifecycleProbeLiveIntegrationTests",
+          "identifier": "-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testSDKCompletedRestartHintsRejectMalformedPairsAndUnprovedProjections]",
+          "line": 9676,
+          "method": "testSDKCompletedRestartHintsRejectMalformedPairsAndUnprovedProjections",
+          "raw": "Test Case '-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testSDKCompletedRestartHintsRejectMalformedPairsAndUnprovedProjections]' passed (0.853 seconds).",
+          "seconds": "0.853",
+          "status": "passed"
+        }
+      ],
+      "rawGHLogObservations": [
+        {
+          "line": 10490,
+          "raw": "test\tPull-request regression gate\t2026-10-03T11:56:38.4057120Z Test Case '-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testSDKCompletedRestartHintsRejectMalformedPairsAndUnprovedProjections]' started."
+        },
+        {
+          "line": 10491,
+          "raw": "test\tPull-request regression gate\t2026-10-03T11:56:38.4061610Z Test Case '-[HostwrightCLITests.LifecycleProbeLiveIntegrationTests testSDKCompletedRestartHintsRejectMalformedPairsAndUnprovedProjections]' passed (0.853 seconds)."
+        }
+      ],
+      "reportedDurationSeconds": 0.853,
+      "skippedCount": 0,
+      "sourceLine": 325,
+      "sourcePath": "Tests/HostwrightCLITests/LifecycleProbeLiveIntegrationTests.swift",
+      "status": "passed"
+    }
+  ],
+  "notEvidenceReport": true,
+  "originalPrivateMethodInventorySHA256": "961187c787971716d819b44fec0970dfd4a5c88c9e86925717c301fcb124fe38",
+  "passed": 9,
+  "reviewedHead": "33256770d09a3dc18e70974d576f5e465af74ebc",
+  "run": 37119884332,
+  "runtimeSigningDeviceOrIssueClosureClaimed": false,
+  "skipped": 0,
+  "sourceCommit": "cd3325a8b0ccb27c095d621bf4a3eb10ca1835da",
+  "sourceTree": "fea43a6d18d3a3d51356b512ec2aa96e3ab5b47c"
+}

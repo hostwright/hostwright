@@ -4,7 +4,16 @@
 
 ## Current Behavior
 
-Before the first authenticated foreground connection, run `hostwright daemon bootstrap-identities`. This declares the actual CLI and control companion identities for the selected local state without installing or starting a LaunchAgent. Use the same `HOSTWRIGHT_APPLICATION_SUPPORT_DIR`, `HOSTWRIGHT_CACHE_DIR`, `HOSTWRIGHT_LOG_DIR`, and `HOSTWRIGHT_STATE_DB` settings for bootstrap, the foreground daemon, and subsequent CLI commands. Keep these paths private to the current user.
+Before the first authenticated foreground connection, prepare the selected state database's parent as its unprivileged owner, then run `hostwright daemon bootstrap-identities`. For a fresh installed payload using the default paths:
+
+```bash
+install -d -m700 "$HOME/Library/Application Support/Hostwright/state"
+hostwright daemon bootstrap-identities --json
+```
+
+Installed bootstrap validates the existing database parent before preparing runtime support, so an absent parent causes exit 64. Automatic first-state initialization remains unqualified; this foreground setup requires explicit owner preparation. Bootstrap declares the actual CLI and control companion identities for the selected local state without installing or starting a LaunchAgent. Use the same `HOSTWRIGHT_APPLICATION_SUPPORT_DIR`, `HOSTWRIGHT_CACHE_DIR`, `HOSTWRIGHT_LOG_DIR`, and `HOSTWRIGHT_STATE_DB` settings for bootstrap, the foreground daemon, and subsequent CLI commands. Keep these paths private to the current user and retain the same explicit config/manifest path.
+
+The signed Phase 14 candidate at `b969a32caaa2` completed ten confirmed native CLI cycles through the authenticated foreground daemon: 40 up, restart, down, and remove actions. This covers manual Containerization lifecycle execution; unattended Containerization mutation remains unqualified. Native GUI interaction, VM package cases, scoped security assessment, and final installed-device cleanup remain pending. The [desktop evidence boundary](../roadmap/v0.0.2/PHASE14-DESKTOP-CONSOLE-RFC.md#evidence-boundary) records the current source, runtime, signing, and remaining qualification scope.
 
 The foreground loop remains available:
 

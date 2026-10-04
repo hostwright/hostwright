@@ -1,0 +1,2955 @@
+{
+  "kind": "hostwright.phase14.measured-unit-contract-extraction.v2",
+  "sourceCommit": "cd3325a8b0ccb27c095d621bf4a3eb10ca1835da",
+  "signingRun": 37138219739,
+  "attempt": 1,
+  "job": 111247060564,
+  "recordedAt": "2026-10-03T18:16:54Z",
+  "regressionStep": {
+    "name": "Run repository regression gate",
+    "status": "completed",
+    "conclusion": "success",
+    "number": 4,
+    "started_at": "2026-10-03T17:03:50Z",
+    "completed_at": "2026-10-03T18:15:54Z"
+  },
+  "recordedAtBasis": "Actual environment observation completion at second precision for the production ISO8601 formatter; original precision retained separately.",
+  "environmentObservationCompletedAt": "2026-10-03T18:16:54.568507+00:00",
+  "regressionStepDurationMilliseconds": 4324000,
+  "selectedResults": {
+    "executed": 70,
+    "passed": 70,
+    "failed": 0,
+    "blocked": 0
+  },
+  "suites": [
+    {
+      "suite": "DistributionModelsTests",
+      "qualifiedClass": "HostwrightDistributionTests.DistributionModelsTests",
+      "count": 14,
+      "results": [
+        {
+          "test": "testArtifactSchemaOnePreservesPublishedPhaseTwoLayout",
+          "status": "passed",
+          "durationSeconds": "0.001",
+          "durationMilliseconds": 1,
+          "startSelectedLogLine": 2,
+          "resultSelectedLogLine": 3
+        },
+        {
+          "test": "testArtifactSchemaTwoPreservesPreDesktopReleaseLayout",
+          "status": "passed",
+          "durationSeconds": "0.000",
+          "durationMilliseconds": 0,
+          "startSelectedLogLine": 4,
+          "resultSelectedLogLine": 5
+        },
+        {
+          "test": "testDistributionJSONRejectsUnknownAndNoncanonicalFields",
+          "status": "passed",
+          "durationSeconds": "0.001",
+          "durationMilliseconds": 1,
+          "startSelectedLogLine": 6,
+          "resultSelectedLogLine": 7
+        },
+        {
+          "test": "testGeneratedVersionPairsPreserveStrictTransitionProperties",
+          "status": "passed",
+          "durationSeconds": "0.001",
+          "durationMilliseconds": 1,
+          "startSelectedLogLine": 8,
+          "resultSelectedLogLine": 9
+        },
+        {
+          "test": "testInstallationStatusAcceptsPublishedDev12NestedSchemaTwoManifest",
+          "status": "passed",
+          "durationSeconds": "0.002",
+          "durationMilliseconds": 2,
+          "startSelectedLogLine": 10,
+          "resultSelectedLogLine": 11
+        },
+        {
+          "test": "testInstallManifestAcceptsActualPublishedDev12SchemaTwo",
+          "status": "passed",
+          "durationSeconds": "0.000",
+          "durationMilliseconds": 0,
+          "startSelectedLogLine": 12,
+          "resultSelectedLogLine": 13
+        },
+        {
+          "test": "testInstallManifestPreservesPriorShippedLayoutAndEmitsCurrentLayout",
+          "status": "passed",
+          "durationSeconds": "0.001",
+          "durationMilliseconds": 1,
+          "startSelectedLogLine": 14,
+          "resultSelectedLogLine": 15
+        },
+        {
+          "test": "testManifestRequiresExactSafePayloadLayout",
+          "status": "passed",
+          "durationSeconds": "0.001",
+          "durationMilliseconds": 1,
+          "startSelectedLogLine": 16,
+          "resultSelectedLogLine": 17
+        },
+        {
+          "test": "testPathPolicyRejectsAbsoluteTraversalControlAndNestedFileNames",
+          "status": "passed",
+          "durationSeconds": "0.000",
+          "durationMilliseconds": 0,
+          "startSelectedLogLine": 18,
+          "resultSelectedLogLine": 19
+        },
+        {
+          "test": "testPostCommitCleanupReportsPendingWithoutTurningCommittedMutationIntoFailure",
+          "status": "passed",
+          "durationSeconds": "0.000",
+          "durationMilliseconds": 0,
+          "startSelectedLogLine": 20,
+          "resultSelectedLogLine": 21
+        },
+        {
+          "test": "testPublishedDev12InstallManifestRejectsModifiedLayoutsAndMetadata",
+          "status": "passed",
+          "durationSeconds": "0.001",
+          "durationMilliseconds": 1,
+          "startSelectedLogLine": 22,
+          "resultSelectedLogLine": 23
+        },
+        {
+          "test": "testSemanticVersionOrderingAndLifecycleTransitionPolicyFailClosed",
+          "status": "passed",
+          "durationSeconds": "0.001",
+          "durationMilliseconds": 1,
+          "startSelectedLogLine": 24,
+          "resultSelectedLogLine": 25
+        },
+        {
+          "test": "testSPDXAndProvenanceMustBindExactArchiveAndSource",
+          "status": "passed",
+          "durationSeconds": "0.002",
+          "durationMilliseconds": 2,
+          "startSelectedLogLine": 26,
+          "resultSelectedLogLine": 27
+        },
+        {
+          "test": "testSupportedPackageExcludesDeferredServiceExecutables",
+          "status": "passed",
+          "durationSeconds": "0.000",
+          "durationMilliseconds": 0,
+          "startSelectedLogLine": 28,
+          "resultSelectedLogLine": 29
+        }
+      ],
+      "sourceFile": "Tests/HostwrightDistributionTests/DistributionModelsTests.swift",
+      "sourceFileSHA256": "763430ca01829593cf2e828187938e785a2693fc6cec6eb3164c46b22b5845c3",
+      "startSelectedLogLine": 1,
+      "endSelectedLogLine": 31,
+      "rawSummary": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T18:09:37.1947010Z \t Executed 14 tests, with 0 failures (0 unexpected) in 0.012 (0.013) seconds",
+      "suiteReportedDurationSeconds": "0.012",
+      "suiteReportedWallSeconds": "0.013"
+    },
+    {
+      "suite": "DistributionLifecycleModelsTests",
+      "qualifiedClass": "HostwrightDistributionTests.DistributionLifecycleModelsTests",
+      "count": 3,
+      "results": [
+        {
+          "test": "testLifecycleContractsAllowBoundManagedServiceStatesAndRejectUnboundCheckpoints",
+          "status": "passed",
+          "durationSeconds": "0.002",
+          "durationMilliseconds": 2,
+          "startSelectedLogLine": 33,
+          "resultSelectedLogLine": 34
+        },
+        {
+          "test": "testLifecycleJournalAndStatusArePathBoundCanonicalContracts",
+          "status": "passed",
+          "durationSeconds": "0.002",
+          "durationMilliseconds": 2,
+          "startSelectedLogLine": 35,
+          "resultSelectedLogLine": 36
+        },
+        {
+          "test": "testLifecycleJournalRejectsInvalidOperationShapeAndUnverifiedRollback",
+          "status": "passed",
+          "durationSeconds": "0.002",
+          "durationMilliseconds": 2,
+          "startSelectedLogLine": 37,
+          "resultSelectedLogLine": 38
+        }
+      ],
+      "sourceFile": "Tests/HostwrightDistributionTests/DistributionLifecycleModelsTests.swift",
+      "sourceFileSHA256": "6f6350c5ecaef55d7eefde0fccc301f2a1827ebe3690adc1fd8a3add1de36275",
+      "startSelectedLogLine": 32,
+      "endSelectedLogLine": 40,
+      "rawSummary": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T18:09:37.1929420Z \t Executed 3 tests, with 0 failures (0 unexpected) in 0.006 (0.007) seconds",
+      "suiteReportedDurationSeconds": "0.006",
+      "suiteReportedWallSeconds": "0.007"
+    },
+    {
+      "suite": "DistributionPackageLifecycleTests",
+      "qualifiedClass": "HostwrightDistributionTests.DistributionPackageLifecycleTests",
+      "count": 9,
+      "results": [
+        {
+          "test": "testDesktopBuildVersionsUseThreeComponentsAndPreserveChannelOrder",
+          "status": "passed",
+          "durationSeconds": "0.000",
+          "durationMilliseconds": 0,
+          "startSelectedLogLine": 42,
+          "resultSelectedLogLine": 43
+        },
+        {
+          "test": "testPackageOriginIsAdditiveAndBindsCurrentPayloadToNewestReceipt",
+          "status": "passed",
+          "durationSeconds": "0.001",
+          "durationMilliseconds": 1,
+          "startSelectedLogLine": 44,
+          "resultSelectedLogLine": 45
+        },
+        {
+          "test": "testPackageOriginRejectsInstalledPayloadVersionMismatch",
+          "status": "passed",
+          "durationSeconds": "0.001",
+          "durationMilliseconds": 1,
+          "startSelectedLogLine": 46,
+          "resultSelectedLogLine": 47
+        },
+        {
+          "test": "testPackageReceiptParserRequiresExactIdentifierVersionAndRootLocation",
+          "status": "passed",
+          "durationSeconds": "0.000",
+          "durationMilliseconds": 0,
+          "startSelectedLogLine": 48,
+          "resultSelectedLogLine": 49
+        },
+        {
+          "test": "testPostinstallEntrypointUsesOnlyLockedPackageLifecycleArguments",
+          "status": "passed",
+          "durationSeconds": "0.001",
+          "durationMilliseconds": 1,
+          "startSelectedLogLine": 50,
+          "resultSelectedLogLine": 51
+        },
+        {
+          "test": "testPreinstallEntrypointUsesArchivedCompanionAndLockedReadOnlyArguments",
+          "status": "passed",
+          "durationSeconds": "0.000",
+          "durationMilliseconds": 0,
+          "startSelectedLogLine": 52,
+          "resultSelectedLogLine": 53
+        },
+        {
+          "test": "testQualificationVersionsMapMonotonicallyToApplePackageVersions",
+          "status": "passed",
+          "durationSeconds": "0.000",
+          "durationMilliseconds": 0,
+          "startSelectedLogLine": 54,
+          "resultSelectedLogLine": 55
+        },
+        {
+          "test": "testReleaseCandidateAndStablePackageVersionsFollowPublishedDevelopmentReceipts",
+          "status": "passed",
+          "durationSeconds": "0.000",
+          "durationMilliseconds": 0,
+          "startSelectedLogLine": 56,
+          "resultSelectedLogLine": 57
+        },
+        {
+          "test": "testReleasePackageChannelsRejectAmbiguousOrOutOfRangeIdentifiers",
+          "status": "passed",
+          "durationSeconds": "0.000",
+          "durationMilliseconds": 0,
+          "startSelectedLogLine": 58,
+          "resultSelectedLogLine": 59
+        }
+      ],
+      "sourceFile": "Tests/HostwrightDistributionTests/DistributionPackageLifecycleTests.swift",
+      "sourceFileSHA256": "32b7d226ad4f0487a343cec75baec709f0603b9ea38cadbf343bf1653b3992c1",
+      "startSelectedLogLine": 41,
+      "endSelectedLogLine": 61,
+      "rawSummary": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T18:09:37.1959710Z \t Executed 9 tests, with 0 failures (0 unexpected) in 0.004 (0.004) seconds",
+      "suiteReportedDurationSeconds": "0.004",
+      "suiteReportedWallSeconds": "0.004"
+    },
+    {
+      "suite": "DistributionContainerizationAssetSecurityTests",
+      "qualifiedClass": "HostwrightDistributionTests.DistributionContainerizationAssetSecurityTests",
+      "count": 8,
+      "results": [
+        {
+          "test": "testLoadRejectsModifiedGuestLoaderEvenWhenELFShapeIsValid",
+          "status": "passed",
+          "durationSeconds": "0.007",
+          "durationMilliseconds": 7,
+          "startSelectedLogLine": 63,
+          "resultSelectedLogLine": 64
+        },
+        {
+          "test": "testLoadRejectsNonPrivateRootAndIntermediateDirectory",
+          "status": "passed",
+          "durationSeconds": "0.001",
+          "durationMilliseconds": 1,
+          "startSelectedLogLine": 65,
+          "resultSelectedLogLine": 66
+        },
+        {
+          "test": "testLoadRejectsSymlinkedIntermediateDirectory",
+          "status": "passed",
+          "durationSeconds": "0.001",
+          "durationMilliseconds": 1,
+          "startSelectedLogLine": 67,
+          "resultSelectedLogLine": 68
+        },
+        {
+          "test": "testLoadRejectsWritableAssetFile",
+          "status": "passed",
+          "durationSeconds": "0.002",
+          "durationMilliseconds": 2,
+          "startSelectedLogLine": 69,
+          "resultSelectedLogLine": 70
+        },
+        {
+          "test": "testValidatedCopyRejectsInPlaceMutation",
+          "status": "passed",
+          "durationSeconds": "0.001",
+          "durationMilliseconds": 1,
+          "startSelectedLogLine": 71,
+          "resultSelectedLogLine": 72
+        },
+        {
+          "test": "testValidatedCopyRejectsParentDirectoryDrift",
+          "status": "passed",
+          "durationSeconds": "0.000",
+          "durationMilliseconds": 0,
+          "startSelectedLogLine": 73,
+          "resultSelectedLogLine": 74
+        },
+        {
+          "test": "testValidatedCopyRejectsPathReplacement",
+          "status": "passed",
+          "durationSeconds": "0.001",
+          "durationMilliseconds": 1,
+          "startSelectedLogLine": 75,
+          "resultSelectedLogLine": 76
+        },
+        {
+          "test": "testValidatedCopyStreamsTheBoundFileWithExactMode",
+          "status": "passed",
+          "durationSeconds": "0.002",
+          "durationMilliseconds": 2,
+          "startSelectedLogLine": 77,
+          "resultSelectedLogLine": 78
+        }
+      ],
+      "sourceFile": "Tests/HostwrightDistributionTests/DistributionContainerizationAssetSecurityTests.swift",
+      "sourceFileSHA256": "13bcae5a07ebef18d27a531f9f580b708fda15c18ebcf7a0baeccbed2aede8e0",
+      "startSelectedLogLine": 62,
+      "endSelectedLogLine": 80,
+      "rawSummary": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:19:14.1654650Z \t Executed 8 tests, with 0 failures (0 unexpected) in 0.013 (0.014) seconds",
+      "suiteReportedDurationSeconds": "0.013",
+      "suiteReportedWallSeconds": "0.014"
+    },
+    {
+      "suite": "TrustedReleaseTests",
+      "qualifiedClass": "HostwrightDistributionTests.TrustedReleaseTests",
+      "count": 36,
+      "results": [
+        {
+          "test": "testArchiveNotaryTicketsAcceptRecordedDesktopBundleAndExecutable",
+          "status": "passed",
+          "durationSeconds": "0.001",
+          "durationMilliseconds": 1,
+          "startSelectedLogLine": 82,
+          "resultSelectedLogLine": 83
+        },
+        {
+          "test": "testArchiveNotaryTicketsBindBundleToFinalDesktopExecutableHash",
+          "status": "passed",
+          "durationSeconds": "0.001",
+          "durationMilliseconds": 1,
+          "startSelectedLogLine": 84,
+          "resultSelectedLogLine": 85
+        },
+        {
+          "test": "testArchiveNotaryTicketsRejectChangedRecordedDesktopInventory",
+          "status": "passed",
+          "durationSeconds": "0.002",
+          "durationMilliseconds": 2,
+          "startSelectedLogLine": 86,
+          "resultSelectedLogLine": 87
+        },
+        {
+          "test": "testArchiveNotaryTicketsRequireEverySignedExecutableHash",
+          "status": "passed",
+          "durationSeconds": "0.000",
+          "durationMilliseconds": 0,
+          "startSelectedLogLine": 88,
+          "resultSelectedLogLine": 89
+        },
+        {
+          "test": "testCleanBuildArgumentsUseOneDeterministicReleaseContract",
+          "status": "passed",
+          "durationSeconds": "0.000",
+          "durationMilliseconds": 0,
+          "startSelectedLogLine": 90,
+          "resultSelectedLogLine": 91
+        },
+        {
+          "test": "testCleanBuildCommandEvidenceRecordsExactDeterministicInvocation",
+          "status": "passed",
+          "durationSeconds": "0.000",
+          "durationMilliseconds": 0,
+          "startSelectedLogLine": 92,
+          "resultSelectedLogLine": 93
+        },
+        {
+          "test": "testCleanBuildDependencyInventoryUsesParsedSwiftPMGraph",
+          "status": "passed",
+          "durationSeconds": "0.001",
+          "durationMilliseconds": 1,
+          "startSelectedLogLine": 94,
+          "resultSelectedLogLine": 95
+        },
+        {
+          "test": "testCleanBuildInventoryRequiresQualifiedSecurityRevisions",
+          "status": "passed",
+          "durationSeconds": "0.002",
+          "durationMilliseconds": 2,
+          "startSelectedLogLine": 96,
+          "resultSelectedLogLine": 97
+        },
+        {
+          "test": "testCMSDecoderAuthenticatesPublicDetachedFixtureAndReadsActualSubjectKeyIdentifier",
+          "status": "passed",
+          "durationSeconds": "0.002",
+          "durationMilliseconds": 2,
+          "startSelectedLogLine": 98,
+          "resultSelectedLogLine": 99
+        },
+        {
+          "test": "testCMSDecoderRejectsEmbeddedContentForMatchingAndDifferentDetachedInput",
+          "status": "passed",
+          "durationSeconds": "0.000",
+          "durationMilliseconds": 0,
+          "startSelectedLogLine": 100,
+          "resultSelectedLogLine": 101
+        },
+        {
+          "test": "testCMSDecoderRejectsEmptyEmbeddedContentWithNonemptyDetachedInput",
+          "status": "passed",
+          "durationSeconds": "0.000",
+          "durationMilliseconds": 0,
+          "startSelectedLogLine": 102,
+          "resultSelectedLogLine": 103
+        },
+        {
+          "test": "testCMSDecoderRejectsTamperedDetachedContentDespiteUnchangedSignerCertificate",
+          "status": "passed",
+          "durationSeconds": "0.000",
+          "durationMilliseconds": 0,
+          "startSelectedLogLine": 104,
+          "resultSelectedLogLine": 105
+        },
+        {
+          "test": "testCMSSignerInspectorRejectsMalformedAndEmptyInputs",
+          "status": "passed",
+          "durationSeconds": "0.001",
+          "durationMilliseconds": 1,
+          "startSelectedLogLine": 106,
+          "resultSelectedLogLine": 107
+        },
+        {
+          "test": "testCMSSigningCertificateRejectsMissingAndAmbiguousIdentifiers",
+          "status": "passed",
+          "durationSeconds": "0.000",
+          "durationMilliseconds": 0,
+          "startSelectedLogLine": 108,
+          "resultSelectedLogLine": 109
+        },
+        {
+          "test": "testCMSSigningCertificateRequiresExactFingerprintAndCommonName",
+          "status": "passed",
+          "durationSeconds": "0.000",
+          "durationMilliseconds": 0,
+          "startSelectedLogLine": 110,
+          "resultSelectedLogLine": 111
+        },
+        {
+          "test": "testContainerizationHelperSigningUsesOnlyVirtualizationEntitlement",
+          "status": "passed",
+          "durationSeconds": "0.000",
+          "durationMilliseconds": 0,
+          "startSelectedLogLine": 112,
+          "resultSelectedLogLine": 113
+        },
+        {
+          "test": "testCurrentSchemaRejectsEmptyDependencyInventory",
+          "status": "passed",
+          "durationSeconds": "0.001",
+          "durationMilliseconds": 1,
+          "startSelectedLogLine": 114,
+          "resultSelectedLogLine": 115
+        },
+        {
+          "test": "testDeveloperIDParserSelectsOnlyExactApplicationAndInstallerIdentities",
+          "status": "passed",
+          "durationSeconds": "0.001",
+          "durationMilliseconds": 1,
+          "startSelectedLogLine": 116,
+          "resultSelectedLogLine": 117
+        },
+        {
+          "test": "testDistributionHashHonorsPreCancellation",
+          "status": "passed",
+          "durationSeconds": "0.000",
+          "durationMilliseconds": 0,
+          "startSelectedLogLine": 118,
+          "resultSelectedLogLine": 119
+        },
+        {
+          "test": "testDistributionRunnerRestrictsDeterministicSwiftEnvironment",
+          "status": "passed",
+          "durationSeconds": "0.192",
+          "durationMilliseconds": 192,
+          "startSelectedLogLine": 120,
+          "resultSelectedLogLine": 121
+        },
+        {
+          "test": "testHomebrewFormulaUsesImmutableArtifactAndCompleteInstalledSurface",
+          "status": "passed",
+          "durationSeconds": "0.002",
+          "durationMilliseconds": 2,
+          "startSelectedLogLine": 122,
+          "resultSelectedLogLine": 123
+        },
+        {
+          "test": "testNotarytoolLogParserRejectsIncompleteOrMismatchedArchiveTickets",
+          "status": "passed",
+          "durationSeconds": "0.000",
+          "durationMilliseconds": 0,
+          "startSelectedLogLine": 124,
+          "resultSelectedLogLine": 125
+        },
+        {
+          "test": "testNotarytoolLogParserRequiresExactArchiveTicketContents",
+          "status": "passed",
+          "durationSeconds": "0.000",
+          "durationMilliseconds": 0,
+          "startSelectedLogLine": 126,
+          "resultSelectedLogLine": 127
+        },
+        {
+          "test": "testNotarytoolParserRequiresAcceptedUUIDBoundJSON",
+          "status": "passed",
+          "durationSeconds": "0.000",
+          "durationMilliseconds": 0,
+          "startSelectedLogLine": 128,
+          "resultSelectedLogLine": 129
+        },
+        {
+          "test": "testPreCancelledTrustedReleaseCreatesNoOutputAndReadsNoIdentity",
+          "status": "passed",
+          "durationSeconds": "0.000",
+          "durationMilliseconds": 0,
+          "startSelectedLogLine": 130,
+          "resultSelectedLogLine": 131
+        },
+        {
+          "test": "testPublishedPhaseTwoReleaseSchemaRemainsVerifiable",
+          "status": "passed",
+          "durationSeconds": "0.001",
+          "durationMilliseconds": 1,
+          "startSelectedLogLine": 132,
+          "resultSelectedLogLine": 133
+        },
+        {
+          "test": "testPublishedSchemaOneEmptyDependencyInventoryRemainsVerifiable",
+          "status": "passed",
+          "durationSeconds": "0.001",
+          "durationMilliseconds": 1,
+          "startSelectedLogLine": 134,
+          "resultSelectedLogLine": 135
+        },
+        {
+          "test": "testRenderedHomebrewFormulaPassesRealRubyAndHomebrewStyle",
+          "status": "passed",
+          "durationSeconds": "3.769",
+          "durationMilliseconds": 3769,
+          "startSelectedLogLine": 136,
+          "resultSelectedLogLine": 137
+        },
+        {
+          "test": "testReproducibilityMismatchNamesSortedDifferingPayloadPaths",
+          "status": "passed",
+          "durationSeconds": "0.000",
+          "durationMilliseconds": 0,
+          "startSelectedLogLine": 138,
+          "resultSelectedLogLine": 139
+        },
+        {
+          "test": "testRevisionOnlyProvenanceKeepsExactCommitAndRejectsMissingOrDuplicateIdentity",
+          "status": "passed",
+          "durationSeconds": "0.000",
+          "durationMilliseconds": 0,
+          "startSelectedLogLine": 140,
+          "resultSelectedLogLine": 141
+        },
+        {
+          "test": "testStructuredReleaseOutputsAndRetentionPolicyAreStable",
+          "status": "passed",
+          "durationSeconds": "0.011",
+          "durationMilliseconds": 11,
+          "startSelectedLogLine": 142,
+          "resultSelectedLogLine": 143
+        },
+        {
+          "test": "testTrustedManifestAndProvenanceBindEveryPublishedArtifact",
+          "status": "passed",
+          "durationSeconds": "0.005",
+          "durationMilliseconds": 5,
+          "startSelectedLogLine": 144,
+          "resultSelectedLogLine": 145
+        },
+        {
+          "test": "testTrustedReleaseRequestRejectsSecretsAndMutableIdentifiersBeforeIO",
+          "status": "passed",
+          "durationSeconds": "0.000",
+          "durationMilliseconds": 0,
+          "startSelectedLogLine": 146,
+          "resultSelectedLogLine": 147
+        },
+        {
+          "test": "testTrustedReleaseRequiresMatchingActualToolVersionsFromBothCleanBuilds",
+          "status": "passed",
+          "durationSeconds": "0.000",
+          "durationMilliseconds": 0,
+          "startSelectedLogLine": 148,
+          "resultSelectedLogLine": 149
+        },
+        {
+          "test": "testTrustedSPDXInventoriesArchiveAndPackageWithLicense",
+          "status": "passed",
+          "durationSeconds": "0.001",
+          "durationMilliseconds": 1,
+          "startSelectedLogLine": 150,
+          "resultSelectedLogLine": 151
+        },
+        {
+          "test": "testVerifierRejectsUntrustedTeamAndMissingReleaseInventory",
+          "status": "passed",
+          "durationSeconds": "0.005",
+          "durationMilliseconds": 5,
+          "startSelectedLogLine": 152,
+          "resultSelectedLogLine": 153
+        }
+      ],
+      "sourceFile": "Tests/HostwrightDistributionTests/TrustedReleaseTests.swift",
+      "sourceFileSHA256": "a536a60c9d63fa6605da29f5820ea055c3a7b63bb212f6628f6d5495e037ef6f",
+      "startSelectedLogLine": 81,
+      "endSelectedLogLine": 155,
+      "rawSummary": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T18:15:19.2516960Z \t Executed 36 tests, with 0 failures (0 unexpected) in 4.001 (4.004) seconds",
+      "suiteReportedDurationSeconds": "4.001",
+      "suiteReportedWallSeconds": "4.004"
+    }
+  ],
+  "wholeXCTest": {
+    "executed": 3456,
+    "passed": 3446,
+    "failed": 0,
+    "skipped": 10
+  },
+  "wholeSwiftTesting": {
+    "tests": 61,
+    "suites": 6,
+    "failed": 0
+  },
+  "notAddedToSelectedCounts": [
+    "wholeXCTest",
+    "wholeSwiftTesting",
+    "historicalSupport"
+  ],
+  "skipsOutsideSelectedScope": [
+    {
+      "suite": "HostwrightRuntimeTests.LifecycleGate05LiveTests",
+      "test": "testAppleCLIConfirmedCreateAndDeleteThroughSecureBoundary",
+      "status": "skipped",
+      "reason": "Set HOSTWRIGHT_PHASE04_LIVE=1 on the explicit Phase 04 live cell.",
+      "resultDisclosureLogLine": 583,
+      "reasonDisclosureLogLine": 582
+    },
+    {
+      "suite": "HostwrightContainerizationHelperTests.Phase07ContainerizationNetworkLiveTests",
+      "test": "testRealContainerizationNetworksIsolateAndDualAttachmentConnects",
+      "status": "skipped",
+      "reason": "Enable only the explicit Phase 07 Gate 1 or Gate 12 Containerization cell.",
+      "resultDisclosureLogLine": 660,
+      "reasonDisclosureLogLine": 659
+    },
+    {
+      "suite": "HostwrightNetworkHelperTests.Phase07LANExposureLiveTests",
+      "test": "testExplicitLANPolicyServesTahoeVMAndFailsClosed",
+      "status": "skipped",
+      "reason": "Set HOSTWRIGHT_PHASE07_GATE08_LAN_LIVE=1 only for the attended Tahoe LAN evidence lane.",
+      "resultDisclosureLogLine": 663,
+      "reasonDisclosureLogLine": 662
+    },
+    {
+      "suite": "HostwrightRuntimeTests.Phase07LocalNetworkForwardingLiveTests",
+      "test": "testAuthorizedLocalhostForwardingSurvivesCancellationRestartAndConflict",
+      "status": "skipped",
+      "reason": "Set HOSTWRIGHT_PHASE07_GATE15_LIVE=1 only after explicitly granting Local Network permission.",
+      "resultDisclosureLogLine": 666,
+      "reasonDisclosureLogLine": 665
+    },
+    {
+      "suite": "HostwrightRuntimeTests.Phase07LocalNetworkForwardingLiveTests",
+      "test": "testDeniedLocalNetworkPermissionFailsClosedAndCleansUpExactly",
+      "status": "skipped",
+      "reason": "Set HOSTWRIGHT_PHASE07_GATE15_DENIED_LIVE=1 only on the explicit denied-permission live cell.",
+      "resultDisclosureLogLine": 668,
+      "reasonDisclosureLogLine": 667
+    },
+    {
+      "suite": "HostwrightRuntimeTests.Phase07NetworkGate01LiveTests",
+      "test": "testAppleCLIProjectNetworksIsolateAndExplicitDualAttachmentConnects",
+      "status": "skipped",
+      "reason": "Set HOSTWRIGHT_PHASE07_GATE01_LIVE=1 on the explicit Phase 07 Gate 1 live cell.",
+      "resultDisclosureLogLine": 671,
+      "reasonDisclosureLogLine": 670
+    },
+    {
+      "suite": "HostwrightSchedulerTests.Phase10SchedulerQualificationTests",
+      "test": "testPhase10SchedulerQualificationPerformanceCell",
+      "status": "skipped",
+      "reason": "Set HOSTWRIGHT_PHASE10_SCHEDULER_QUAL_PERFORMANCE=1 to run the 1,000-workload x 100-node performance cell.",
+      "resultDisclosureLogLine": 678,
+      "reasonDisclosureLogLine": 677
+    },
+    {
+      "suite": "HostwrightRegistryTests.RegistryAuthenticationTests",
+      "test": "testLiveDockerHubBearerScopeWhenExplicitlyEnabled",
+      "status": "skipped",
+      "reason": "Set HOSTWRIGHT_LIVE_REGISTRY=1 for the explicit TLS/token-service cell.",
+      "resultDisclosureLogLine": 705,
+      "reasonDisclosureLogLine": 704
+    },
+    {
+      "suite": "HostwrightNetworkHelperTests.ServiceTunnelTahoeVMHarnessTests",
+      "test": "testExistingTahoeVMEchoesAuthenticatedFrame",
+      "status": "skipped",
+      "reason": "Set HOSTWRIGHT_GATE13_TAHOE_VM=1 only for the attended existing-VM evidence lane.",
+      "resultDisclosureLogLine": 791,
+      "reasonDisclosureLogLine": 790
+    },
+    {
+      "suite": "HostwrightNetworkHelperTests.ServiceTunnelTahoeVMHarnessTests",
+      "test": "testQualificationConfigurationUsesCanonicalHelperFrame",
+      "status": "skipped",
+      "reason": "Set HOSTWRIGHT_GATE13_HELPER_CONFIGURATION for the attended canonical-frame check.",
+      "resultDisclosureLogLine": 793,
+      "reasonDisclosureLogLine": 792
+    }
+  ],
+  "warningsOutsideSelectedScope": [
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:54.7573840Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1086:22: warning: 'SecKeychainCopyDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 1
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:54.7576080Z      |                      `- warning: 'SecKeychainCopyDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 2
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:54.7577470Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1110:26: warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 3
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:54.7578860Z      |                          `- warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 4
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:54.7580140Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1114:29: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 5
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:54.7581530Z      |                             `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 6
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:54.7582640Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1127:29: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 7
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:54.7583760Z      |                             `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 8
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:54.7584850Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1138:42: warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 9
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:54.7586660Z      |                                          `- warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 10
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:54.7587620Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:2096:23: warning: treating a forced downcast to 'SecCertificate' as optional will never produce 'nil'",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 11
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:54.7589000Z      |                |      `- warning: treating a forced downcast to 'SecCertificate' as optional will never produce 'nil'",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 12
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:54.7590860Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:2263:22: warning: 'SecKeychainGetStatus' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 13
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:54.7592040Z      |                      `- warning: 'SecKeychainGetStatus' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 14
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:54.8865310Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1086:22: warning: 'SecKeychainCopyDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 15
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:54.8866670Z      |                      `- warning: 'SecKeychainCopyDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 16
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:54.8867720Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1110:26: warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 17
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:54.8868980Z      |                          `- warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 18
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:54.8870030Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1114:29: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 19
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:54.8871570Z      |                             `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 20
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:54.8872630Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1127:29: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 21
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:54.8873880Z      |                             `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 22
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:54.8874980Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1138:42: warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 23
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:54.8876780Z      |                                          `- warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 24
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:54.8877820Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:2096:23: warning: treating a forced downcast to 'SecCertificate' as optional will never produce 'nil'",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 25
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:54.8879140Z      |                |      `- warning: treating a forced downcast to 'SecCertificate' as optional will never produce 'nil'",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 26
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:54.8880260Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:2263:22: warning: 'SecKeychainGetStatus' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 27
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:54.8881590Z      |                      `- warning: 'SecKeychainGetStatus' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 28
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.0172180Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1086:22: warning: 'SecKeychainCopyDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 29
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.0173840Z      |                      `- warning: 'SecKeychainCopyDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 30
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.0174860Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1110:26: warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 31
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.0176100Z      |                          `- warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 32
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.0177130Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1114:29: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 33
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.0178480Z      |                             `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 34
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.0179640Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1127:29: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 35
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.0181110Z      |                             `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 36
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.0182760Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1138:42: warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 37
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.0184830Z      |                                          `- warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 38
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.0185940Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:2096:23: warning: treating a forced downcast to 'SecCertificate' as optional will never produce 'nil'",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 39
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.0187270Z      |                |      `- warning: treating a forced downcast to 'SecCertificate' as optional will never produce 'nil'",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 40
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.0188390Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:2263:22: warning: 'SecKeychainGetStatus' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 41
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.0189760Z      |                      `- warning: 'SecKeychainGetStatus' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 42
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.1464670Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1086:22: warning: 'SecKeychainCopyDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 43
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.1466440Z      |                      `- warning: 'SecKeychainCopyDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 44
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.1467940Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1110:26: warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 45
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.1469380Z      |                          `- warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 46
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.1470420Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1114:29: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 47
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.1471620Z      |                             `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 48
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.1472720Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1127:29: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 49
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.1474020Z      |                             `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 50
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.1475220Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1138:42: warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 51
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.1477090Z      |                                          `- warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 52
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.1478070Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:2096:23: warning: treating a forced downcast to 'SecCertificate' as optional will never produce 'nil'",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 53
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.1479360Z      |                |      `- warning: treating a forced downcast to 'SecCertificate' as optional will never produce 'nil'",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 54
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.1480460Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:2263:22: warning: 'SecKeychainGetStatus' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 55
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.1487470Z      |                      `- warning: 'SecKeychainGetStatus' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 56
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.2759590Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1086:22: warning: 'SecKeychainCopyDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 57
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.2760920Z      |                      `- warning: 'SecKeychainCopyDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 58
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.2761940Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1110:26: warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 59
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.2763280Z      |                          `- warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 60
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.2764310Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1114:29: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 61
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.2766120Z      |                             `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 62
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.2767150Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1127:29: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 63
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.2768440Z      |                             `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 64
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.2769530Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1138:42: warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 65
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.2771270Z      |                                          `- warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 66
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.2772250Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:2096:23: warning: treating a forced downcast to 'SecCertificate' as optional will never produce 'nil'",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 67
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.2773480Z      |                |      `- warning: treating a forced downcast to 'SecCertificate' as optional will never produce 'nil'",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 68
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.2774790Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:2263:22: warning: 'SecKeychainGetStatus' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 69
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.2776320Z      |                      `- warning: 'SecKeychainGetStatus' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 70
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.4048670Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1086:22: warning: 'SecKeychainCopyDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 71
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.4050650Z      |                      `- warning: 'SecKeychainCopyDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 72
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.4051670Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1110:26: warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 73
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.4052930Z      |                          `- warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 74
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.4053950Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1114:29: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 75
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.4055160Z      |                             `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 76
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.4056200Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1127:29: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 77
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.4057290Z      |                             `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 78
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.4058560Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1138:42: warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 79
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.4060360Z      |                                          `- warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 80
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.4061310Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:2096:23: warning: treating a forced downcast to 'SecCertificate' as optional will never produce 'nil'",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 81
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.4062530Z      |                |      `- warning: treating a forced downcast to 'SecCertificate' as optional will never produce 'nil'",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 82
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.4063550Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:2263:22: warning: 'SecKeychainGetStatus' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 83
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.4064750Z      |                      `- warning: 'SecKeychainGetStatus' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 84
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.5345910Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1086:22: warning: 'SecKeychainCopyDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 85
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.5347270Z      |                      `- warning: 'SecKeychainCopyDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 86
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.5348550Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1110:26: warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 87
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.5349920Z      |                          `- warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 88
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.5350950Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1114:29: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 89
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.5352130Z      |                             `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 90
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.5353150Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1127:29: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 91
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.5354220Z      |                             `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 92
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.5355300Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1138:42: warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 93
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.5357000Z      |                                          `- warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 94
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.5357950Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:2096:23: warning: treating a forced downcast to 'SecCertificate' as optional will never produce 'nil'",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 95
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.5359200Z      |                |      `- warning: treating a forced downcast to 'SecCertificate' as optional will never produce 'nil'",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 96
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.5360220Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:2263:22: warning: 'SecKeychainGetStatus' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 97
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.5361410Z      |                      `- warning: 'SecKeychainGetStatus' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 98
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.6633520Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1086:22: warning: 'SecKeychainCopyDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 99
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.6634830Z      |                      `- warning: 'SecKeychainCopyDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 100
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.6635870Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1110:26: warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 101
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.6637130Z      |                          `- warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 102
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.6638170Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1114:29: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 103
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.6639630Z      |                             `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 104
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.6640800Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1127:29: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 105
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.6641910Z      |                             `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 106
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.6643000Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1138:42: warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 107
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.6644740Z      |                                          `- warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 108
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.6645790Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:2096:23: warning: treating a forced downcast to 'SecCertificate' as optional will never produce 'nil'",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 109
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.6647030Z      |                |      `- warning: treating a forced downcast to 'SecCertificate' as optional will never produce 'nil'",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 110
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.6648020Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:2263:22: warning: 'SecKeychainGetStatus' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 111
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.6649350Z      |                      `- warning: 'SecKeychainGetStatus' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 112
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.7923640Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1086:22: warning: 'SecKeychainCopyDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 113
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.7925440Z      |                      `- warning: 'SecKeychainCopyDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 114
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.7927360Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1110:26: warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 115
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.7928700Z      |                          `- warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 116
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.7929760Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1114:29: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 117
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.7930990Z      |                             `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 118
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.7932050Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1127:29: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 119
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.7933170Z      |                             `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 120
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.7934510Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1138:42: warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 121
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.7936340Z      |                                          `- warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 122
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.7937320Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:2096:23: warning: treating a forced downcast to 'SecCertificate' as optional will never produce 'nil'",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 123
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.7938550Z      |                |      `- warning: treating a forced downcast to 'SecCertificate' as optional will never produce 'nil'",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 124
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.7939570Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:2263:22: warning: 'SecKeychainGetStatus' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 125
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.7940800Z      |                      `- warning: 'SecKeychainGetStatus' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 126
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.9214560Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1086:22: warning: 'SecKeychainCopyDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 127
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.9215890Z      |                      `- warning: 'SecKeychainCopyDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 128
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.9217240Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1110:26: warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 129
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.9218600Z      |                          `- warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 130
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.9219610Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1114:29: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 131
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.9220790Z      |                             `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 132
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.9221820Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1127:29: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 133
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.9222900Z      |                             `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 134
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.9223970Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1138:42: warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 135
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.9234880Z      |                                          `- warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 136
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.9236050Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:2096:23: warning: treating a forced downcast to 'SecCertificate' as optional will never produce 'nil'",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 137
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.9237520Z      |                |      `- warning: treating a forced downcast to 'SecCertificate' as optional will never produce 'nil'",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 138
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.9238640Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:2263:22: warning: 'SecKeychainGetStatus' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 139
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:55.9239870Z      |                      `- warning: 'SecKeychainGetStatus' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 140
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:56.0501500Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1086:22: warning: 'SecKeychainCopyDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 141
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:56.0502870Z      |                      `- warning: 'SecKeychainCopyDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 142
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:56.0503910Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1110:26: warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 143
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:56.0505170Z      |                          `- warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 144
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:56.0506200Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1114:29: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 145
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:56.0507770Z      |                             `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 146
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:56.0508940Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1127:29: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 147
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:56.0510040Z      |                             `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 148
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:56.0511130Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1138:42: warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 149
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:56.0512850Z      |                                          `- warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 150
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:56.0513800Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:2096:23: warning: treating a forced downcast to 'SecCertificate' as optional will never produce 'nil'",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 151
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:56.0515010Z      |                |      `- warning: treating a forced downcast to 'SecCertificate' as optional will never produce 'nil'",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 152
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:56.0516000Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:2263:22: warning: 'SecKeychainGetStatus' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 153
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:56.0517270Z      |                      `- warning: 'SecKeychainGetStatus' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 154
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:56.1787310Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1086:22: warning: 'SecKeychainCopyDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 155
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:56.1789320Z      |                      `- warning: 'SecKeychainCopyDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 156
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:56.1790340Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1110:26: warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 157
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:56.1791630Z      |                          `- warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 158
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:56.1792660Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1114:29: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 159
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:56.1793870Z      |                             `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 160
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:56.1794920Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1127:29: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 161
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:56.1796010Z      |                             `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 162
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:56.1797250Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:1138:42: warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 163
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:56.1799070Z      |                                          `- warning: 'kSecUseAuthenticationUIFail' was deprecated in macOS 11.0: Instead of kSecUseAuthenticationUI, use kSecUseAuthenticationContext and set LAContext.interactionNotAllowed property [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 164
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:56.1800040Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:2096:23: warning: treating a forced downcast to 'SecCertificate' as optional will never produce 'nil'",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 165
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:56.1801250Z      |                |      `- warning: treating a forced downcast to 'SecCertificate' as optional will never produce 'nil'",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 166
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:56.1802240Z <release-source-root>/Sources/HostwrightCluster/ClusterCertificateLifecycle.swift:2263:22: warning: 'SecKeychainGetStatus' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 167
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:09:56.1803540Z      |                      `- warning: 'SecKeychainGetStatus' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 168
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.6556180Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7412:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 169
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.6557840Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 170
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.6558810Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7440:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 171
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.6559950Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 172
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.6627060Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7412:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 173
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.6630960Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 174
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.6631850Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7440:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 175
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.6632860Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 176
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.6698660Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7412:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 177
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.6699800Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 178
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.6700700Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7440:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 179
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.6701680Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 180
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.6770830Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7412:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 181
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.6772390Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 182
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.6773300Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7440:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 183
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.6774480Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 184
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.6843740Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7412:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 185
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.6844970Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 186
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.6845890Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7440:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 187
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.6847020Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 188
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.6915750Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7412:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 189
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.6917350Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 190
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.6920580Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7440:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 191
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.6922360Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 192
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.6992250Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7412:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 193
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.6993370Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 194
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.6994210Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7440:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 195
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.6995170Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 196
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7067830Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7412:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 197
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7068990Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 198
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7069900Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7440:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 199
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7070930Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 200
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7141890Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7412:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 201
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7144210Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 202
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7146110Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7440:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 203
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7147100Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 204
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7217750Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7412:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 205
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7227670Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 206
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7229030Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7440:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 207
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7230010Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 208
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7290860Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7412:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 209
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7291980Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 210
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7293180Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7440:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 211
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7294320Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 212
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7364920Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7412:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 213
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7366320Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 214
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7368170Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7440:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 215
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7369290Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 216
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7439550Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7412:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 217
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7440790Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 218
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7441680Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7440:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 219
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7442990Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 220
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7511670Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7412:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 221
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7513060Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 222
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7513880Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7440:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 223
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7514850Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 224
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7586840Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7412:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 225
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7588010Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 226
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7589070Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7440:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 227
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7590120Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 228
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7657530Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7412:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 229
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7659070Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 230
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7659900Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7440:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 231
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7661300Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 232
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7731290Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7412:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 233
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7732420Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 234
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7733190Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7440:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 235
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7734270Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 236
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7801040Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7412:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 237
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7802090Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 238
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7803530Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7440:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 239
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7804560Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 240
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7871370Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7412:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 241
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7872620Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 242
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7873450Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7440:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 243
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7874440Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 244
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7941580Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7412:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 245
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7942740Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 246
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7943650Z <release-source-root>/Sources/HostwrightCLI/LifecycleLiveDriver.swift:7440:50: warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 247
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:10:11.7944660Z      |                                                  `- warning: result of call to 'admit(manifest:subjectID:profileResolution:)' is unused [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 248
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.1186610Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:219:13: warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 249
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.1188050Z     |             `- warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 250
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.1189040Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:223:13: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 251
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.1190250Z     |             `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 252
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.1191300Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:227:17: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 253
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.1192520Z     |                 `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 254
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.1193560Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:235:13: warning: 'SecKeychainCopyDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 255
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.1195210Z     |             `- warning: 'SecKeychainCopyDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 256
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.1196220Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:239:13: warning: 'SecKeychainCopySearchList' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 257
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.1197710Z     |             `- warning: 'SecKeychainCopySearchList' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 258
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.1198670Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:254:17: warning: 'SecKeychainCreate' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 259
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.1199920Z     |                 `- warning: 'SecKeychainCreate' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 260
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.1200850Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:266:24: warning: 'SecKeychainSetDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 261
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.1202170Z     |                        `- warning: 'SecKeychainSetDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 262
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.1203140Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:268:13: warning: 'SecKeychainSetSearchList' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 263
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.1204330Z     |             `- warning: 'SecKeychainSetSearchList' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 264
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.1205180Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:273:21: warning: 'SecKeychainUnlock' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 265
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.1206300Z     |                     `- warning: 'SecKeychainUnlock' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 266
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.1207220Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:280:17: warning: 'SecKeychainDelete' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 267
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.1208260Z     |                 `- warning: 'SecKeychainDelete' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 268
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.1209250Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:281:17: warning: 'SecKeychainSetDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 269
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.1210330Z     |                 `- warning: 'SecKeychainSetDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 270
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.1211250Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:282:17: warning: 'SecKeychainSetSearchList' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 271
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.1212420Z     |                 `- warning: 'SecKeychainSetSearchList' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 272
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.1213240Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:291:24: warning: 'SecKeychainLock' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 273
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.1214420Z     |                        `- warning: 'SecKeychainLock' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 274
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.1215320Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:304:13: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 275
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.1216640Z     |             `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 276
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.1217630Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:311:13: warning: 'SecKeychainUnlock' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 277
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.1218680Z     |             `- warning: 'SecKeychainUnlock' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 278
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.5799940Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:219:13: warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 279
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.5801130Z     |             `- warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 280
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.5801970Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:223:13: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 281
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.5802970Z     |             `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 282
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.5803790Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:227:17: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 283
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.5805090Z     |                 `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 284
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.5805990Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:235:13: warning: 'SecKeychainCopyDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 285
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.5807190Z     |             `- warning: 'SecKeychainCopyDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 286
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.5808060Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:239:13: warning: 'SecKeychainCopySearchList' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 287
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.5809060Z     |             `- warning: 'SecKeychainCopySearchList' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 288
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.5809820Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:254:17: warning: 'SecKeychainCreate' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 289
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.5810950Z     |                 `- warning: 'SecKeychainCreate' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 290
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.5811830Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:266:24: warning: 'SecKeychainSetDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 291
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.5813060Z     |                        `- warning: 'SecKeychainSetDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 292
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.5813980Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:268:13: warning: 'SecKeychainSetSearchList' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 293
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.5815240Z     |             `- warning: 'SecKeychainSetSearchList' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 294
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.5816080Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:273:21: warning: 'SecKeychainUnlock' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 295
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.5817170Z     |                     `- warning: 'SecKeychainUnlock' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 296
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.5818070Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:280:17: warning: 'SecKeychainDelete' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 297
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.5819020Z     |                 `- warning: 'SecKeychainDelete' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 298
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.5819980Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:281:17: warning: 'SecKeychainSetDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 299
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.5821020Z     |                 `- warning: 'SecKeychainSetDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 300
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.5821930Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:282:17: warning: 'SecKeychainSetSearchList' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 301
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.5823070Z     |                 `- warning: 'SecKeychainSetSearchList' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 302
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.5823870Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:291:24: warning: 'SecKeychainLock' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 303
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.5825100Z     |                        `- warning: 'SecKeychainLock' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 304
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.5825980Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:304:13: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 305
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.5827250Z     |             `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 306
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.5828150Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:311:13: warning: 'SecKeychainUnlock' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 307
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:56.5829180Z     |             `- warning: 'SecKeychainUnlock' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 308
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:57.0213470Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:219:13: warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 309
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:57.0214800Z     |             `- warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 310
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:57.0215730Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:223:13: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 311
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:57.0216870Z     |             `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 312
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:57.0218230Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:227:17: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 313
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:57.0219300Z     |                 `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 314
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:57.0220350Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:235:13: warning: 'SecKeychainCopyDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 315
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:57.0221460Z     |             `- warning: 'SecKeychainCopyDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 316
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:57.0222290Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:239:13: warning: 'SecKeychainCopySearchList' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 317
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:57.0223330Z     |             `- warning: 'SecKeychainCopySearchList' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 318
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:57.0224150Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:254:17: warning: 'SecKeychainCreate' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 319
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:57.0225270Z     |                 `- warning: 'SecKeychainCreate' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 320
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:57.0226150Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:266:24: warning: 'SecKeychainSetDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 321
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:57.0227390Z     |                        `- warning: 'SecKeychainSetDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 322
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:57.0228400Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:268:13: warning: 'SecKeychainSetSearchList' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 323
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:57.0229620Z     |             `- warning: 'SecKeychainSetSearchList' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 324
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:57.0230460Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:273:21: warning: 'SecKeychainUnlock' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 325
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:57.0231480Z     |                     `- warning: 'SecKeychainUnlock' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 326
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:57.0232390Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:280:17: warning: 'SecKeychainDelete' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 327
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:57.0233360Z     |                 `- warning: 'SecKeychainDelete' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 328
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:57.0234330Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:281:17: warning: 'SecKeychainSetDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 329
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:57.0235390Z     |                 `- warning: 'SecKeychainSetDefault' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 330
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:57.0236300Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:282:17: warning: 'SecKeychainSetSearchList' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 331
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:57.0237630Z     |                 `- warning: 'SecKeychainSetSearchList' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 332
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:57.0238440Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:291:24: warning: 'SecKeychainLock' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 333
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:57.0239670Z     |                        `- warning: 'SecKeychainLock' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 334
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:57.0240550Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:304:13: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 335
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:57.0241760Z     |             `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 336
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:57.0242680Z <release-source-root>/Tests/HostwrightSecretsTests/HostwrightSecretsIntegrationTests.swift:311:13: warning: 'SecKeychainUnlock' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 337
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:57.0243700Z     |             `- warning: 'SecKeychainUnlock' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 338
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:59.7755070Z <release-source-root>/Tests/HostwrightSchedulerTests/Phase10SchedulerQualificationConfiguration.swift:258:20: warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 339
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:59.7759180Z     |                    `- warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 340
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:59.7798030Z <release-source-root>/Tests/HostwrightSchedulerTests/Phase10SchedulerQualificationConfiguration.swift:258:20: warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 341
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:59.7799630Z     |                    `- warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 342
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:59.7840040Z <release-source-root>/Tests/HostwrightSchedulerTests/Phase10SchedulerQualificationConfiguration.swift:258:20: warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 343
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:59.7841460Z     |                    `- warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 344
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:59.7882350Z <release-source-root>/Tests/HostwrightSchedulerTests/Phase10SchedulerQualificationConfiguration.swift:258:20: warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 345
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:59.7883810Z     |                    `- warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 346
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:59.7924430Z <release-source-root>/Tests/HostwrightSchedulerTests/Phase10SchedulerQualificationConfiguration.swift:258:20: warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 347
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:59.7925950Z     |                    `- warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 348
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:59.7966610Z <release-source-root>/Tests/HostwrightSchedulerTests/Phase10SchedulerQualificationConfiguration.swift:258:20: warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 349
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:59.7968120Z     |                    `- warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 350
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:59.8008360Z <release-source-root>/Tests/HostwrightSchedulerTests/Phase10SchedulerQualificationConfiguration.swift:258:20: warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 351
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:59.8009770Z     |                    `- warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 352
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:59.8050340Z <release-source-root>/Tests/HostwrightSchedulerTests/Phase10SchedulerQualificationConfiguration.swift:258:20: warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 353
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:59.8051880Z     |                    `- warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 354
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:59.8092460Z <release-source-root>/Tests/HostwrightSchedulerTests/Phase10SchedulerQualificationConfiguration.swift:258:20: warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 355
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:59.8093860Z     |                    `- warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 356
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:59.8134890Z <release-source-root>/Tests/HostwrightSchedulerTests/Phase10SchedulerQualificationConfiguration.swift:258:20: warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 357
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:59.8136350Z     |                    `- warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 358
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:59.8176080Z <release-source-root>/Tests/HostwrightSchedulerTests/Phase10SchedulerQualificationConfiguration.swift:258:20: warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 359
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:59.8182740Z     |                    `- warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 360
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:59.8218250Z <release-source-root>/Tests/HostwrightSchedulerTests/Phase10SchedulerQualificationConfiguration.swift:258:20: warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 361
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:59.8219530Z     |                    `- warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 362
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:59.8259300Z <release-source-root>/Tests/HostwrightSchedulerTests/Phase10SchedulerQualificationConfiguration.swift:258:20: warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 363
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:59.8260760Z     |                    `- warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 364
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:59.8302680Z <release-source-root>/Tests/HostwrightSchedulerTests/Phase10SchedulerQualificationConfiguration.swift:258:20: warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 365
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:59.8304470Z     |                    `- warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 366
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:59.8344260Z <release-source-root>/Tests/HostwrightSchedulerTests/Phase10SchedulerQualificationConfiguration.swift:258:20: warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 367
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:59.8345820Z     |                    `- warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 368
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:59.8386360Z <release-source-root>/Tests/HostwrightSchedulerTests/Phase10SchedulerQualificationConfiguration.swift:258:20: warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 369
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:59.8387830Z     |                    `- warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 370
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:59.8427450Z <release-source-root>/Tests/HostwrightSchedulerTests/Phase10SchedulerQualificationConfiguration.swift:258:20: warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 371
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:59.8428860Z     |                    `- warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 372
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:59.8469130Z <release-source-root>/Tests/HostwrightSchedulerTests/Phase10SchedulerQualificationConfiguration.swift:258:20: warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 373
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:59.8470630Z     |                    `- warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 374
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:59.8513430Z <release-source-root>/Tests/HostwrightSchedulerTests/Phase10SchedulerQualificationConfiguration.swift:258:20: warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 375
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:12:59.8514910Z     |                    `- warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 376
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:13:29.6164080Z <release-source-root>/Tests/HostwrightDistributionTests/DistributionIntegrationTests.swift:799:17: warning: initialization of immutable value 'repository' was never used; consider replacing with assignment to '_' or removing it [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 377
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:13:29.6165530Z      |                 `- warning: initialization of immutable value 'repository' was never used; consider replacing with assignment to '_' or removing it [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 378
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:13:29.6197870Z <release-source-root>/Tests/HostwrightDistributionTests/DistributionIntegrationTests.swift:799:17: warning: initialization of immutable value 'repository' was never used; consider replacing with assignment to '_' or removing it [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 379
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:13:29.6199340Z      |                 `- warning: initialization of immutable value 'repository' was never used; consider replacing with assignment to '_' or removing it [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 380
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:13:29.6231450Z <release-source-root>/Tests/HostwrightDistributionTests/DistributionIntegrationTests.swift:799:17: warning: initialization of immutable value 'repository' was never used; consider replacing with assignment to '_' or removing it [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 381
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:13:29.6232830Z      |                 `- warning: initialization of immutable value 'repository' was never used; consider replacing with assignment to '_' or removing it [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 382
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:13:29.6264880Z <release-source-root>/Tests/HostwrightDistributionTests/DistributionIntegrationTests.swift:799:17: warning: initialization of immutable value 'repository' was never used; consider replacing with assignment to '_' or removing it [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 383
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:13:29.6266250Z      |                 `- warning: initialization of immutable value 'repository' was never used; consider replacing with assignment to '_' or removing it [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 384
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:13:29.6298380Z <release-source-root>/Tests/HostwrightDistributionTests/DistributionIntegrationTests.swift:799:17: warning: initialization of immutable value 'repository' was never used; consider replacing with assignment to '_' or removing it [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 385
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:13:29.6303860Z      |                 `- warning: initialization of immutable value 'repository' was never used; consider replacing with assignment to '_' or removing it [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 386
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:13:29.6331800Z <release-source-root>/Tests/HostwrightDistributionTests/DistributionIntegrationTests.swift:799:17: warning: initialization of immutable value 'repository' was never used; consider replacing with assignment to '_' or removing it [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 387
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:13:29.6333200Z      |                 `- warning: initialization of immutable value 'repository' was never used; consider replacing with assignment to '_' or removing it [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 388
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:13:29.6365330Z <release-source-root>/Tests/HostwrightDistributionTests/DistributionIntegrationTests.swift:799:17: warning: initialization of immutable value 'repository' was never used; consider replacing with assignment to '_' or removing it [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 389
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:13:29.6366960Z      |                 `- warning: initialization of immutable value 'repository' was never used; consider replacing with assignment to '_' or removing it [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 390
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:13:29.6398410Z <release-source-root>/Tests/HostwrightDistributionTests/DistributionIntegrationTests.swift:799:17: warning: initialization of immutable value 'repository' was never used; consider replacing with assignment to '_' or removing it [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 391
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:13:29.6399790Z      |                 `- warning: initialization of immutable value 'repository' was never used; consider replacing with assignment to '_' or removing it [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 392
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:13:29.6432070Z <release-source-root>/Tests/HostwrightDistributionTests/DistributionIntegrationTests.swift:799:17: warning: initialization of immutable value 'repository' was never used; consider replacing with assignment to '_' or removing it [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 393
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:13:29.6433440Z      |                 `- warning: initialization of immutable value 'repository' was never used; consider replacing with assignment to '_' or removing it [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 394
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:13:29.6466250Z <release-source-root>/Tests/HostwrightDistributionTests/DistributionIntegrationTests.swift:799:17: warning: initialization of immutable value 'repository' was never used; consider replacing with assignment to '_' or removing it [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 395
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:13:29.6467780Z      |                 `- warning: initialization of immutable value 'repository' was never used; consider replacing with assignment to '_' or removing it [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 396
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:13:29.6498810Z <release-source-root>/Tests/HostwrightDistributionTests/DistributionIntegrationTests.swift:799:17: warning: initialization of immutable value 'repository' was never used; consider replacing with assignment to '_' or removing it [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 397
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:13:29.6500160Z      |                 `- warning: initialization of immutable value 'repository' was never used; consider replacing with assignment to '_' or removing it [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 398
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:13:29.6531200Z <release-source-root>/Tests/HostwrightDistributionTests/DistributionIntegrationTests.swift:799:17: warning: initialization of immutable value 'repository' was never used; consider replacing with assignment to '_' or removing it [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 399
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:13:29.6532530Z      |                 `- warning: initialization of immutable value 'repository' was never used; consider replacing with assignment to '_' or removing it [#no-usage]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 400
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:14:06.5722530Z <release-source-root>/Tests/HostwrightCLITests/RuntimeProvidersCommandTests.swift:19:18: warning: weak variable 'retainedClient' was never mutated; consider changing to 'let' constant [#WeakMutability]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 401
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:14:06.5723840Z     |                  `- warning: weak variable 'retainedClient' was never mutated; consider changing to 'let' constant [#WeakMutability]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 402
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:14:06.5751260Z <release-source-root>/Tests/HostwrightCLITests/RuntimeProvidersCommandTests.swift:19:18: warning: weak variable 'retainedClient' was never mutated; consider changing to 'let' constant [#WeakMutability]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 403
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:14:06.5752820Z     |                  `- warning: weak variable 'retainedClient' was never mutated; consider changing to 'let' constant [#WeakMutability]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 404
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:14:06.5780420Z <release-source-root>/Tests/HostwrightCLITests/RuntimeProvidersCommandTests.swift:19:18: warning: weak variable 'retainedClient' was never mutated; consider changing to 'let' constant [#WeakMutability]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 405
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:14:06.5781590Z     |                  `- warning: weak variable 'retainedClient' was never mutated; consider changing to 'let' constant [#WeakMutability]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 406
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:14:06.5809650Z <release-source-root>/Tests/HostwrightCLITests/RuntimeProvidersCommandTests.swift:19:18: warning: weak variable 'retainedClient' was never mutated; consider changing to 'let' constant [#WeakMutability]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 407
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:14:06.5810820Z     |                  `- warning: weak variable 'retainedClient' was never mutated; consider changing to 'let' constant [#WeakMutability]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 408
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:14:06.5838960Z <release-source-root>/Tests/HostwrightCLITests/RuntimeProvidersCommandTests.swift:19:18: warning: weak variable 'retainedClient' was never mutated; consider changing to 'let' constant [#WeakMutability]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 409
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:14:06.5840250Z     |                  `- warning: weak variable 'retainedClient' was never mutated; consider changing to 'let' constant [#WeakMutability]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 410
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:14:06.5867620Z <release-source-root>/Tests/HostwrightCLITests/RuntimeProvidersCommandTests.swift:19:18: warning: weak variable 'retainedClient' was never mutated; consider changing to 'let' constant [#WeakMutability]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 411
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:14:06.5868780Z     |                  `- warning: weak variable 'retainedClient' was never mutated; consider changing to 'let' constant [#WeakMutability]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 412
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:14:06.5897040Z <release-source-root>/Tests/HostwrightCLITests/RuntimeProvidersCommandTests.swift:19:18: warning: weak variable 'retainedClient' was never mutated; consider changing to 'let' constant [#WeakMutability]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 413
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:14:06.5898200Z     |                  `- warning: weak variable 'retainedClient' was never mutated; consider changing to 'let' constant [#WeakMutability]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 414
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:14:06.5925780Z <release-source-root>/Tests/HostwrightCLITests/RuntimeProvidersCommandTests.swift:19:18: warning: weak variable 'retainedClient' was never mutated; consider changing to 'let' constant [#WeakMutability]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 415
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:14:06.5926950Z     |                  `- warning: weak variable 'retainedClient' was never mutated; consider changing to 'let' constant [#WeakMutability]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 416
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:14:06.5954960Z <release-source-root>/Tests/HostwrightCLITests/RuntimeProvidersCommandTests.swift:19:18: warning: weak variable 'retainedClient' was never mutated; consider changing to 'let' constant [#WeakMutability]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 417
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:14:06.5956120Z     |                  `- warning: weak variable 'retainedClient' was never mutated; consider changing to 'let' constant [#WeakMutability]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 418
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:14:06.5988680Z <release-source-root>/Tests/HostwrightCLITests/RuntimeProvidersCommandTests.swift:19:18: warning: weak variable 'retainedClient' was never mutated; consider changing to 'let' constant [#WeakMutability]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 419
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:14:06.5989960Z     |                  `- warning: weak variable 'retainedClient' was never mutated; consider changing to 'let' constant [#WeakMutability]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 420
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:14:06.6013060Z <release-source-root>/Tests/HostwrightCLITests/RuntimeProvidersCommandTests.swift:19:18: warning: weak variable 'retainedClient' was never mutated; consider changing to 'let' constant [#WeakMutability]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 421
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:14:06.6014210Z     |                  `- warning: weak variable 'retainedClient' was never mutated; consider changing to 'let' constant [#WeakMutability]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 422
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:14:06.6042140Z <release-source-root>/Tests/HostwrightCLITests/RuntimeProvidersCommandTests.swift:19:18: warning: weak variable 'retainedClient' was never mutated; consider changing to 'let' constant [#WeakMutability]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 423
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:14:06.6043280Z     |                  `- warning: weak variable 'retainedClient' was never mutated; consider changing to 'let' constant [#WeakMutability]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 424
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:14:06.6071460Z <release-source-root>/Tests/HostwrightCLITests/RuntimeProvidersCommandTests.swift:19:18: warning: weak variable 'retainedClient' was never mutated; consider changing to 'let' constant [#WeakMutability]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 425
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:14:06.6072780Z     |                  `- warning: weak variable 'retainedClient' was never mutated; consider changing to 'let' constant [#WeakMutability]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 426
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:14:06.6100290Z <release-source-root>/Tests/HostwrightCLITests/RuntimeProvidersCommandTests.swift:19:18: warning: weak variable 'retainedClient' was never mutated; consider changing to 'let' constant [#WeakMutability]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 427
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:14:06.6101440Z     |                  `- warning: weak variable 'retainedClient' was never mutated; consider changing to 'let' constant [#WeakMutability]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 428
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:14:06.6129460Z <release-source-root>/Tests/HostwrightCLITests/RuntimeProvidersCommandTests.swift:19:18: warning: weak variable 'retainedClient' was never mutated; consider changing to 'let' constant [#WeakMutability]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 429
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:14:06.6130580Z     |                  `- warning: weak variable 'retainedClient' was never mutated; consider changing to 'let' constant [#WeakMutability]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 430
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:14:06.6158180Z <release-source-root>/Tests/HostwrightCLITests/RuntimeProvidersCommandTests.swift:19:18: warning: weak variable 'retainedClient' was never mutated; consider changing to 'let' constant [#WeakMutability]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 431
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:14:06.6159320Z     |                  `- warning: weak variable 'retainedClient' was never mutated; consider changing to 'let' constant [#WeakMutability]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 432
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:14:06.6187060Z <release-source-root>/Tests/HostwrightCLITests/RuntimeProvidersCommandTests.swift:19:18: warning: weak variable 'retainedClient' was never mutated; consider changing to 'let' constant [#WeakMutability]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 433
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:14:06.6188190Z     |                  `- warning: weak variable 'retainedClient' was never mutated; consider changing to 'let' constant [#WeakMutability]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 434
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:14:06.6215740Z <release-source-root>/Tests/HostwrightCLITests/RuntimeProvidersCommandTests.swift:19:18: warning: weak variable 'retainedClient' was never mutated; consider changing to 'let' constant [#WeakMutability]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 435
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:14:06.6216880Z     |                  `- warning: weak variable 'retainedClient' was never mutated; consider changing to 'let' constant [#WeakMutability]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 436
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:14:06.6244780Z <release-source-root>/Tests/HostwrightCLITests/RuntimeProvidersCommandTests.swift:19:18: warning: weak variable 'retainedClient' was never mutated; consider changing to 'let' constant [#WeakMutability]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 437
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T17:14:06.6245930Z     |                  `- warning: weak variable 'retainedClient' was never mutated; consider changing to 'let' constant [#WeakMutability]",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 438
+    },
+    {
+      "raw": "Build, sign, notarize, and verify\tRun repository regression gate\t2026-10-03T18:15:41.1140220Z rmdir: <regression-integration-root>: Directory not empty",
+      "outsideSelectedCounts": true,
+      "disclosureLogLine": 842
+    }
+  ],
+  "historicalSupport": [],
+  "scope": "Actual named XCTest methods, compared to immutable source files. Other full-gate results and historical evidence are excluded.",
+  "durationBasis": "Official GitHub step start/end for command duration; XCTest printed measurements for cases/suites. Buffered forwarding times are not test durations."
+}

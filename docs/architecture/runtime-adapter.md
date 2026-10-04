@@ -33,11 +33,15 @@ The helper uses a private mode-`0700` runtime directory and mode-`0600` socket, 
 
 Containerization 0.35.0 imports the shipped init image manifest into an indirect OCI index. Bootstrap pins that imported root separately from the Linux ARM64 manifest variant; helper startup verifies both. The packaged layout retains its original index and manifest hashes.
 
+The signed B9 candidate at `b969a32caaa2` completed ten native up/restart/down/remove cycles, with authenticated status and finite-log reads plus actual guest HTTP, response-hash, cgroup, heartbeat, and new-instance proof. Framework manifest health remains unsupported/unknown; measured in-guest health is separate evidence. See the [current desktop qualification scope](../roadmap/v0.0.2/PHASE14-DESKTOP-CONSOLE-RFC.md#evidence-boundary).
+
+A stopped native resource can retain its exact committed Up admission when a stale admission fence makes release proof unknown, as required by the [advisory scheduler contract](advisory-scheduler.md). Each qualified cycle ends with Remove proving exact absence and zero active reservations, ownership, and ports. Immediate capacity reclamation by Down, Down-to-Up without Remove, and the broader authenticated-lifecycle harness remain unqualified.
+
 Not implemented:
 
 - image pull, build, load, push, tag, image delete, or prune;
 - provider operations not advertised by the selected provider, including unsupported network enforcement or exposure modes;
-- unattended daemon runtime mutation;
+- unattended daemon runtime mutation with the Containerization provider;
 - broad or unmanaged cleanup.
 
 Runtime mutation remains plan-confirmed and ownership-scoped. Lifecycle commands can create, start, stop, restart, and remove exact managed instances; update composes those primitives with health-gated promotion and compensation. Interactive operations use their own bounded provider interface and are advertised only after qualification.

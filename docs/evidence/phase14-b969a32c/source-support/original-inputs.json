@@ -1,0 +1,131 @@
+{
+  "inputs": [
+    {
+      "id": "merged-source",
+      "sha256": "b961d0c8d1797371d6f2fabff653eda24d1fb1068f626640141875d77329f167",
+      "sizeBytes": 697
+    },
+    {
+      "id": "merged-source-root-acceptance",
+      "sha256": "f6dc53872e0f37ad7515b76f1e19b82814b97f12cac2ec794d980eb544e4a618",
+      "sizeBytes": 2565
+    },
+    {
+      "id": "actual-merge-object",
+      "sha256": "a93c6a5722203f3a1821324641013a0328907564d60134f949c78fd12c5b0655",
+      "sizeBytes": 2750
+    },
+    {
+      "id": "synthetic-merge-object",
+      "sha256": "be12000bed8541dd0ab0030254b0a94eb02be3f6e69c0166d194caf0cafca9bc",
+      "sizeBytes": 2670
+    },
+    {
+      "id": "ci-summary",
+      "sha256": "cc70e9ef5fe09e3253308e4a5207c820ea0474af385682e6b9f3f29ba0753e7d",
+      "sizeBytes": 383
+    },
+    {
+      "id": "ci-check-readback",
+      "sha256": "f18b47eb5167f4b04a43f390257f5a257b03a476982d762d7e2999fbd0f63aa9",
+      "sizeBytes": 2006
+    },
+    {
+      "id": "local-final-proof",
+      "sha256": "4ae76114703d1eb5fb6ffdb2c6fbdfe827395f5b704b4ce99a971b148c57fc77",
+      "sizeBytes": 23531
+    },
+    {
+      "id": "local-root-review",
+      "sha256": "19b9dce0a2d006d1035d03f1dac5b1d011e1a22edc1e5915b83b2f8ebd7767a8",
+      "sizeBytes": 912
+    },
+    {
+      "id": "focused-local-proof",
+      "sha256": "2c7d9de4f52c01e0f20192c0699b567cc1c216766119f472a2c3033eccfc5884",
+      "sizeBytes": 14492
+    },
+    {
+      "id": "affected-local-result",
+      "sha256": "2637132eaff2cacc10e07db2b9b3ad93b91df6b1f39b4d68dd85ec7f98e6bc95",
+      "sizeBytes": 920
+    },
+    {
+      "id": "affected-local-stdout",
+      "sha256": "22a3e5cf82a2e1fffd4cb2312d764ccfbff8e6a0b6b5cde37d94c4c6814b711d",
+      "sizeBytes": 16106
+    },
+    {
+      "id": "affected-local-stderr",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "sizeBytes": 0
+    },
+    {
+      "id": "reviewed-source-diff",
+      "sha256": "26ee22ad76a4a9298bd7247fe8147a5d9ff47c6d80bceaee073029c25668d227",
+      "sizeBytes": 19222
+    },
+    {
+      "id": "runtime-authentication",
+      "sha256": "17249167c30133d842417030924bd5aab50d6a0dab53603f40b77f850901f2ce",
+      "sizeBytes": 3048
+    },
+    {
+      "id": "runtime-root-acceptance",
+      "sha256": "2ddf0cafc55615516090309245f7502be50423b0b6edbe5c4546e80133c974ab",
+      "sizeBytes": 3435
+    },
+    {
+      "id": "original-source-support",
+      "sha256": "e931d70dc44abe9afe2f8ee25a152f4c45c49f0b6a7fedcd49f85080f57f0851",
+      "sizeBytes": 2229
+    },
+    {
+      "id": "original-unresolved-reproducibility",
+      "sha256": "1c01b2f178665c36adfa5d3e39e3f7306815d54b72b3a9f4bcd715e4a4b00323",
+      "sizeBytes": 3758
+    },
+    {
+      "id": "ci-run-37157672266",
+      "sha256": "9ca1cc113a25e97ef85b1909d23958280d2f8c2e44fa6df1e65322e615894924",
+      "sizeBytes": 12877
+    },
+    {
+      "id": "ci-run-37157672270",
+      "sha256": "f76aff4e82e124599a1dad7b88a4d8ee6bb01d6c31a8ced5abe7e235d00aa113",
+      "sizeBytes": 12909
+    },
+    {
+      "id": "ci-run-37157960293",
+      "sha256": "4853a4dd0a6d66de5d804a45ca99ddfb47a960257ed5b990f89998f221da84e5",
+      "sizeBytes": 12909
+    },
+    {
+      "id": "fresh-hostwright-dist-build",
+      "sha256": "77e92cac574b9a4c6ce74969fe4fe72c7a5f04c2cd042b4fb8557a1dec240580",
+      "sizeBytes": 2447
+    },
+    {
+      "id": "fresh-hostwright-dist-log",
+      "sha256": "a237e66fe731d2ee1dedeb16828f4637714428c69a82e0c9574ae64a9764f919",
+      "sizeBytes": 21281
+    },
+    {
+      "id": "fresh-source-inputs",
+      "sha256": "5b6bd3966860ed2b501cfa404417088559958ba7df851d15d9d0a973fdb1dada",
+      "sizeBytes": 168824
+    },
+    {
+      "id": "fresh-hostwright-runtime-conformance-build",
+      "sha256": "03f4feb20365d3bfa3ed34be9b0d9518ebd6e43e4accee10f820c7d9c0a31ff9",
+      "sizeBytes": 2509
+    },
+    {
+      "id": "fresh-hostwright-runtime-conformance-log",
+      "sha256": "40d5d69f73f5ae80f7c88b4ba1bd128264eee5f1d4c495789ea04892304a4605",
+      "sizeBytes": 156662
+    }
+  ],
+  "kind": "hostwright.phase14.sanitized-source-support-input-index.v1",
+  "originalsRemainPrivate": true
+}

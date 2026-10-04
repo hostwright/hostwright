@@ -1,0 +1,84 @@
+{
+  "actualAffectedResults": {
+    "actualExitCode": 0,
+    "countNote": "Five focused methods are included in broader47; do not sum to52.",
+    "durationSeconds": 309.478132583,
+    "executed": 47,
+    "failed": 0,
+    "noRebuild": true,
+    "passed": 47,
+    "skipped": 0,
+    "suiteCounts": {
+      "DistributionDurableLifecycleTests": {
+        "executed": 38,
+        "failed": 0,
+        "passed": 38,
+        "skipped": 0
+      },
+      "DistributionPackageLifecycleTests": {
+        "executed": 9,
+        "failed": 0,
+        "passed": 9,
+        "skipped": 0
+      }
+    },
+    "swiftTestingExecuted": 0,
+    "uniqueFocusedAndAffectedCaseCount": 47
+  },
+  "actualCommittedHead": "92fd0b0b4ad29527934369fe0c1cc04c80c2b662",
+  "actualExecutionSourceBinding": {
+    "claimOfExactHeadCI": false,
+    "commitCompletedAt": "2026-10-03T22:10:24.416671+00:00",
+    "sameBytesAsNowCommitted": true,
+    "startedFromBaseCommit": "cd3325a8b0ccb27c095d621bf4a3eb10ca1835da",
+    "startedWithUncommittedReviewedInputs": true,
+    "testCompletedAt": "2026-10-03T22:10:11.965601+00:00",
+    "testsCompletedBeforeLocalCommit": true
+  },
+  "failedAttemptDescriptionReceipt": {
+    "inputID": "focused-local-proof",
+    "sha256": "2c7d9de4f52c01e0f20192c0699b567cc1c216766119f472a2c3033eccfc5884",
+    "sizeBytes": 14492
+  },
+  "fiveFocusedMethodsIncludedIn47": true,
+  "focusedMethods": [
+    "testTerminalCleanupAcceptsLegacyPriorOwnerStatePathFromPairedAdoption",
+    "testTerminalCleanupPreservesExistingOwnerStateAndExactCompensation",
+    "testTerminalCleanupProofBindsCompletedGenerationAndExactDispositions",
+    "testTerminalCleanupRejectsMismatchedAdoptedOwnerReceipt",
+    "testTerminalCleanupRejectsUnexpectedAndUnpairedOwnerStatePaths"
+  ],
+  "fullSigningGatePass": false,
+  "historicalFailedAttemptDescriptions": {
+    "initialBuild": "Copied PCM relocation failure, no tests executed",
+    "productBuildR3": "SwiftPM parser rejected mutually exclusive product/build-tests flags before compiler",
+    "secondBuild": "Capacity guard stopped before test execution",
+    "testR5": "All five actual methods including unchanged test failed in existing ad-hoc CodeResources fixture assembly under inherited077, before cleanup assertions; no code/binary change in corrected022 rerun"
+  },
+  "kind": "hostwright.phase14.private-local-repair-proof-draft.v1",
+  "originalActualWaitResult": {
+    "inputID": "affected-local-result",
+    "sha256": "2637132eaff2cacc10e07db2b9b3ad93b91df6b1f39b4d68dd85ec7f98e6bc95",
+    "sizeBytes": 920
+  },
+  "originalProof": {
+    "inputID": "local-final-proof",
+    "sha256": "4ae76114703d1eb5fb6ffdb2c6fbdfe827395f5b704b4ce99a971b148c57fc77",
+    "sizeBytes": 23531
+  },
+  "originalRawLog": {
+    "inputID": "affected-local-stdout",
+    "sha256": "22a3e5cf82a2e1fffd4cb2312d764ccfbff8e6a0b6b5cde37d94c4c6814b711d",
+    "sizeBytes": 16106
+  },
+  "originalStderr": {
+    "inputID": "affected-local-stderr",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "sizeBytes": 0
+  },
+  "sameExactSourceBytesInCurrentMergedTree": true,
+  "signedUpgradeOrDevicePass": false,
+  "sourceCommit": "b969a32caaa250f81b75fd6ced34d42e34d7b855",
+  "sourceTree": "408f1a5e96d75e7e64da6358c71b770bb3f29b25",
+  "testsRerunByPreparation": false
+}

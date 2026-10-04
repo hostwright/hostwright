@@ -1,0 +1,89 @@
+{
+  "CIAttributedToReviewedHead": true,
+  "PR": 358,
+  "PRURL": "https://github.com/hostwright/hostwright/pull/358",
+  "Python": {
+    "executedTestsExcludingSkips": 278,
+    "failedTests": 0,
+    "invocationCount": 28,
+    "passedTests": 278,
+    "reportedTestsIncludingSkips": 279,
+    "skippedTests": 1,
+    "uniquePythonTestMethodIdentitiesEstablished": false
+  },
+  "SwiftTesting": {
+    "failedTests": 0,
+    "passedTests": 61,
+    "reportedTests": 61,
+    "skippedTests": 0
+  },
+  "XCTest": {
+    "actualParsedDistinctCaseTerminalCount": 3371,
+    "executedTestsExcludingSkips": 3367,
+    "failedTests": 0,
+    "invocations": [
+      {
+        "closingSuiteLine": 14129,
+        "executedTestsExcludingSkips": 3362,
+        "failures": 0,
+        "passedTests": 3362,
+        "rawSuite": "Test Suite 'Selected tests' passed at 2026-10-03 12:04:03.472.",
+        "rawSummary": "\t Executed 3366 tests, with 4 tests skipped and 0 failures (0 unexpected) in 686.734 (687.375) seconds",
+        "reportedDurationSeconds": 686.734,
+        "reportedTestsIncludingSkips": 3366,
+        "reportedWallDurationSeconds": 687.375,
+        "skippedTests": 4,
+        "summaryLine": 14130,
+        "unexpectedFailures": 0
+      },
+      {
+        "closingSuiteLine": 14318,
+        "executedTestsExcludingSkips": 5,
+        "failures": 0,
+        "passedTests": 5,
+        "rawSuite": "Test Suite 'Selected tests' passed at 2026-10-03 12:04:55.921.",
+        "rawSummary": "\t Executed 5 tests, with 0 failures (0 unexpected) in 48.189 (48.192) seconds",
+        "reportedDurationSeconds": 48.189,
+        "reportedTestsIncludingSkips": 5,
+        "reportedWallDurationSeconds": 48.192,
+        "skippedTests": 0,
+        "summaryLine": 14319,
+        "unexpectedFailures": 0
+      }
+    ],
+    "nestedSuiteCountsAdded": false,
+    "passedTests": 3367,
+    "reportedTestsIncludingSkips": 3371,
+    "skippedTests": 4,
+    "terminalCounts": {
+      "passed": 3367,
+      "skipped": 4
+    }
+  },
+  "attempt": 1,
+  "disclosures": {
+    "PythonSkips": 1,
+    "XCTestSkips": 4,
+    "caseAndCITotalsMustNotBeAddedToSignedQualificationTotals": true,
+    "originalSkipInventorySHA256": "7081990b31fdfc5084d42d6ab214c446a80333ab8dd3272f1675e5b82508f204",
+    "originalWarningInventorySHA256": "1e488d182d07c931cc51df50160538ea45a9d4af910f093e011a9b316ead44b3",
+    "rawWarningMarkerLines": 439,
+    "warningCountMeansLinesNotDistinctWarnings": true
+  },
+  "identicalReviewedAndMergedTree": true,
+  "kind": "hostwright.phase14.source-CI-public-support.v1",
+  "newNativeRegressionMethods": 9,
+  "notEvidenceReport": true,
+  "originalArtifactLogSHA256": "e5d15458becfb21c1c7323fc03039b004c8d815c3a6776da5191d06fb47d4de2",
+  "originalOfficialRunLogSHA256": "1ca280d4287294512ee67be3ae590a54d92208e8e7a242055325e8f1594692ee",
+  "originalPrivateCountsSHA256": "850ced29a05e4a01139c9fb94e061283f5aee54c8de34d914bb48e8c8e101112",
+  "originalPrivateReceiptSHA256": "44406417e6603bdbcf4c53a5512a9d629378233f593adb442f2efd4f0b0b9cd4",
+  "reviewedHead": "33256770d09a3dc18e70974d576f5e465af74ebc",
+  "run": 37119884332,
+  "runURL": "https://github.com/hostwright/hostwright/actions/runs/37119884332/attempts/1",
+  "runtimeSigningDeviceOrIssueClosureClaimed": false,
+  "sourceCommit": "cd3325a8b0ccb27c095d621bf4a3eb10ca1835da",
+  "sourceTree": "fea43a6d18d3a3d51356b512ec2aa96e3ab5b47c",
+  "status": "official-source-CI-passed",
+  "testsRerunForRetention": false
+}

@@ -1,0 +1,150 @@
+{
+  "kind": "hostwright.phase14.actual-current-signed-source-status.v1",
+  "recordedAt": "2026-10-04T05:17:05.881296+00:00",
+  "status": "accepted-source-runtime-signing-selected-unit-and-native40-evidence-remaining-qualification-pending",
+  "sourceCommit": "b969a32caaa250f81b75fd6ced34d42e34d7b855",
+  "sourceTree": "408f1a5e96d75e7e64da6358c71b770bb3f29b25",
+  "reviewedSourceCommit": "92fd0b0b4ad29527934369fe0c1cc04c80c2b662",
+  "documentationStorageScope": "Measurements remain bound to this source. A later documentation-storage commit does not become the measured build source.",
+  "runtime": {
+    "run": 37160477208,
+    "attempt": 1,
+    "status": "completed/success",
+    "workflowURL": "https://github.com/hostwright/hostwright/actions/runs/37160477208/attempts/1",
+    "authenticationSHA256": "17249167c30133d842417030924bd5aab50d6a0dab53603f40b77f850901f2ce",
+    "rootAcceptanceSHA256": "2ddf0cafc55615516090309245f7502be50423b0b6edbe5c4546e80133c974ab",
+    "archiveSHA256": "5197cf38c48bfdf5bd96cb2de51808bf5a8fd3491af180fb397a967fbbf147cb",
+    "payloadCount": 7
+  },
+  "signing": {
+    "run": 37170124704,
+    "attempt": 1,
+    "status": "completed/success",
+    "workflowURL": "https://github.com/hostwright/hostwright/actions/runs/37170124704/attempts/1",
+    "rootAcceptedAt": "2026-10-04T04:51:05.509701+00:00",
+    "rootAcceptanceSHA256": "de81ad9fb46841a5ee3eb056ae05731f123022ea320088f3ab83927a0193f0f3",
+    "acceptedHandoffSHA256": "ddb18a86092d6e7bad88bc2309392b30664d9f7d45218e7786cda57d255663c1",
+    "authenticationSHA256": "e47ebdc97f1682cc0ed44f0115aeaae13fe7449e2415f199ebdaacebb19274fe",
+    "inventorySHA256": "340e924ec13944ea87a8760bb0050bb7d7b72549004138d777d3b598a12f09e0",
+    "authenticatedSubjects": 7,
+    "trustedVerificationCommandCount": 33,
+    "distributionStages": 13,
+    "distributionCommandRecords": 173,
+    "archive": {
+      "fileName": "hostwright-0.0.2-rc.1-macos-arm64-b969a32caaa2.zip",
+      "sha256": "5b82867fce546defa2097c8b1b4f7fc05b0e2039941705cbf52960437f897a37",
+      "sizeBytes": 186659497
+    },
+    "package": {
+      "fileName": "hostwright-0.0.2-rc.1-macos-arm64-b969a32caaa2.pkg",
+      "sha256": "7aebf9ea9d1188ffa801b2580e0b12ffb16a2fd9d955121b61be246e96fb55df",
+      "sizeBytes": 196041078
+    },
+    "publicEvidence": "../distribution-stage/authentication-extract.json"
+  },
+  "unitEvidence": {
+    "selectedMethods": 70,
+    "selectedSuites": 5,
+    "wholeXCTest": {
+      "executed": 3460,
+      "passed": 3450,
+      "failed": 0,
+      "skipped": 10
+    },
+    "wholeSwiftTesting": {
+      "tests": 61,
+      "suites": 6,
+      "failed": 0
+    },
+    "skipsOutsideSelectedScope": 10,
+    "warningsOutsideSelectedScope": 439,
+    "regressionCommandDurationMilliseconds": 4095000,
+    "fullLaneTotalsAddedToSelectedCounts": false,
+    "publicEvidence": "../unit-contract/extraction.json"
+  },
+  "sourceValidationSupport": {
+    "uniqueLocalPassedCases": 47,
+    "focusedTerminalCleanupSubset": 5,
+    "focusedSubsetAddedAgain": false,
+    "sourceCISuccessfulChecks": 4,
+    "sourceCISkippedChecks": 2,
+    "localExecutionAttribution": "Reviewed precommit bytes later committed and merged unchanged; the 47 local cases are not added to fresh signing-regression totals."
+  },
+  "reproducibilityDisclosure": {
+    "allNineBinaryHashesEqual": true,
+    "retainedRegularFilesRehashed": 286,
+    "workerObjectCountPerGeneration": 131,
+    "workerObjectDifferences": [
+      {
+        "generation1": {
+          "sha256": "edd4d9d329583c67d406a81e7d81e75b2f89a4d485bf1064e81c3839cc49eef2",
+          "sizeBytes": 105064
+        },
+        "generation2": {
+          "sha256": "d63088542760849ce7837eb507720901157d6d45114a617bd4787a2c2a5877bc",
+          "sizeBytes": 105064
+        },
+        "object": "SystemPackage.build/SystemString.swift.o"
+      }
+    ],
+    "workerObjectsEqual": false,
+    "cause": "Unresolved diagnostic raw worker-object difference; all nine captured binary hashes match.",
+    "addedToUnitOrDistributionStageCounts": false
+  },
+  "datedPreparationSnapshot": {
+    "file": "runtime-signing-input-status.json",
+    "sha256": "95c562255e97961b954b6b4871ce90a57f5584ae18ed0da5a49932ed3a0097ed",
+    "preparedAt": "2026-10-04T02:51:26.245226+00:00",
+    "status": "Historical preparation snapshot. Its null/pending signing and device fields are preserved verbatim and are not current signed-stage status.",
+    "readme": "README.md",
+    "currentStatusFile": "actual-current-signed-source-status.json"
+  },
+  "deviceAndClosureEvidence": {
+    "physical40": "accepted",
+    "nativeGUI15": "pending",
+    "macOSVMPackageMatrix9": "pending",
+    "deviceCleanup": "pending",
+    "scopedIndependentSecurityAssessment": "pending",
+    "finalPhase14Closure": "pending"
+  },
+  "releasePublishedOrTagCreated": false,
+  "devicePassTransferredFromHistoricalSource": false,
+  "historicalUnsignedFailureCause": "Unresolved; preserved in unresolved-reproducibility.json. Later matching binaries do not establish the earlier failure cause.",
+  "scope": "Actual accepted source/runtime/signing, selected unit evidence and ten physical CLI cycles (40 actions). Authenticated native GUI, macOS VM package matrix, installed-device final cleanup, scoped security, release publication and issue closure remain unqualified.",
+  "nativeLifecycleEvidence": {
+    "status": "accepted-ten-cycles-forty-real-actions-GUI-cleanup-pending",
+    "rootAcceptedAt": "2026-10-04T05:06:46.821393+00:00",
+    "rootAcceptanceSHA256": "8feb61502ee3b61197f5436709e741526460a67550d2a066de291fe6d14ea55a",
+    "completedCycles": 10,
+    "verifiedActions": 40,
+    "rawActionExitCodesAllZero": true,
+    "everyRemoveZero": true,
+    "execution": {
+      "childPID": 18350,
+      "actualWaitExitCode": 0,
+      "receiptSHA256": "ce4e492580457f4c7659131cfc4776b15d803478b9616d020a65af089febc08d"
+    },
+    "outerWait": {
+      "exitCode": 0,
+      "receiptSHA256": "4e33486e831b1764166045de63d5e444a48008ea80d735a6aea8cc691f224ac5"
+    },
+    "provenanceRoles": [
+      "root-actual-native40-acceptance",
+      "actual-native-execution-result",
+      "actual-native-tool-outer-wait"
+    ],
+    "GUIOrVMPassInferred": false,
+    "finalInstalledCleanupPassInferred": false
+  },
+  "pendingDeviceProgress": {
+    "nativeGUI": {
+      "completed": 0,
+      "required": 15
+    },
+    "macOSVMPackageMatrix": {
+      "completed": 0,
+      "required": 9
+    },
+    "hostUIAvailability": "locked-awaiting-normal-unlock"
+  }
+}

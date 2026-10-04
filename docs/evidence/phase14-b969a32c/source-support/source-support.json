@@ -1,0 +1,68 @@
+{
+  "PR": 359,
+  "actualMergedTreeEqualsReviewedAndSyntheticTrees": true,
+  "changedInputs": [
+    {
+      "blob": "96ca3307b74b5c2baa77105d0d8cae488e407f93",
+      "equalsFrozenReviewedInput": true,
+      "path": "Sources/HostwrightDistribution/DistributionInstalledLifecycle.swift",
+      "sha256": "8a4cffa06d1968b01cd4e43517aceee9861c5537c3de0e62f1166455a1ab59ec",
+      "sizeBytes": 201403
+    },
+    {
+      "blob": "bfce4a7323ad59f1775a8fa1e44d04b96d450c45",
+      "equalsFrozenReviewedInput": true,
+      "path": "Sources/HostwrightDistribution/DistributionTerminalCleanup.swift",
+      "sha256": "9beac0ab93e06c1d2f99269b3426957886c506e59d4833e10506ba18c01decf4",
+      "sizeBytes": 4756
+    },
+    {
+      "blob": "b8357c2e3ae8b05afdc7029f85aa3f355b0ba62f",
+      "equalsFrozenReviewedInput": true,
+      "path": "Tests/HostwrightDistributionTests/DistributionDurableLifecycleTests.swift",
+      "sha256": "7a9a7fbf8279a1a4ac144fbae1ebf88977da246df7253cb1ab70d92fb00d7614",
+      "sizeBytes": 168644
+    }
+  ],
+  "fixContract": {
+    "actualAdoptedReceiptHashGenerationManifestPathOwnerCheckedBeforeDeletion": true,
+    "compensationRestoresExactPriorStatusIncludingNilPath": true,
+    "existingPriorPathRemainsExact": true,
+    "legacyNilPathOnlyFromValidatedPairedOwnerSnapshot": true,
+    "publicSchemaOrAPIChange": false
+  },
+  "kind": "hostwright.phase14.private-source-support-draft.v1",
+  "localProof": {
+    "inputID": "local-final-proof",
+    "sha256": "4ae76114703d1eb5fb6ffdb2c6fbdfe827395f5b704b4ce99a971b148c57fc77",
+    "sizeBytes": 23531
+  },
+  "mergeParents": [
+    "cd3325a8b0ccb27c095d621bf4a3eb10ca1835da",
+    "92fd0b0b4ad29527934369fe0c1cc04c80c2b662"
+  ],
+  "mergedAt": "2026-10-03T22:46:13Z",
+  "mergedSourceReceipt": {
+    "inputID": "merged-source",
+    "sha256": "b961d0c8d1797371d6f2fabff653eda24d1fb1068f626640141875d77329f167",
+    "sizeBytes": 697
+  },
+  "originalMAndNAndCDResultsRelabeled": false,
+  "originalSourceSupport": {
+    "inputID": "original-source-support",
+    "sha256": "e931d70dc44abe9afe2f8ee25a152f4c45c49f0b6a7fedcd49f85080f57f0851",
+    "sizeBytes": 2229
+  },
+  "reviewedHead": "92fd0b0b4ad29527934369fe0c1cc04c80c2b662",
+  "reviewedHeadTree": "408f1a5e96d75e7e64da6358c71b770bb3f29b25",
+  "rootReview": {
+    "inputID": "local-root-review",
+    "sha256": "19b9dce0a2d006d1035d03f1dac5b1d011e1a22edc1e5915b83b2f8ebd7767a8",
+    "sizeBytes": 912
+  },
+  "scope": "Exact current source and retained review support only. Prior PR357/358 proofs retain original source IDs; no new signing, runtime execution, physical/GUI/VM, Phase15 or closure pass.",
+  "sourceCommit": "b969a32caaa250f81b75fd6ced34d42e34d7b855",
+  "sourceTree": "408f1a5e96d75e7e64da6358c71b770bb3f29b25",
+  "status": "private-preparation-for-root-review",
+  "syntheticMergeCommit": "fd07220eb9b569fb14e2f0a92b637c14e8c0849d"
+}

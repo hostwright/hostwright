@@ -1,0 +1,105 @@
+{
+  "countsOverlap": "Focused counts overlap final CI; do not sum them as unique cases.",
+  "desktopAutomaticProviderSourceTrace": {
+    "actualGUIClaimed": false,
+    "condition": "Compatible native available and CLI unavailable, or existing native binding preserved; unavailable/mismatched existing binding fails closed.",
+    "genericDefaultCLISchedulerVersionUsed": false,
+    "route": "Desktop preview/execute \u2192 authenticated persistent CLI route \u2192 automatic provider selector \u2192 native selected adapter \u2192 manual owned lifecycle admission."
+  },
+  "historicalFocusedCounts": {
+    "SDK": {
+      "PythonFailed": 0,
+      "PythonPassed": 34,
+      "SwiftFailed": 0,
+      "SwiftPassed": 64,
+      "SwiftSkipped": 0,
+      "baseCommit": "ec4898be4279f544beecf61985960d54f776c879"
+    },
+    "daemon": {
+      "failed": 0,
+      "head": "591f44fec964410679326cb9a370da2c5ed10528",
+      "passed": 254,
+      "skipped": 0,
+      "tree": "95c9cc2e09b216cef7aed299e12224fe9d2c08c3"
+    },
+    "lazyRuntime": {
+      "failed": 0,
+      "head": "ec4898be4279f544beecf61985960d54f776c879",
+      "passed": 41,
+      "skipped": 0,
+      "tree": "31a89841faf38c4c58ed8a61ea4dfba22b0b70a9"
+    },
+    "schema2": {
+      "failed": 0,
+      "passed": 26,
+      "redCases": 2,
+      "sourceStage": "local schema2 correction over baselineM"
+    }
+  },
+  "kind": "four-fix-retained-regression-and-source-proof",
+  "optimizedSignalLifetime": {
+    "actualHistoricalFailureSource": "10bf526ad148edb5bc70b48de24b4ad8a6a0d8f7",
+    "baseCommit": "6025c75a90425e36ef9ccc043a9ad47c1c7fae91",
+    "claim": "Source lifetime retention through awaited daemon run.",
+    "compilerResultSHA256": "d2ae1e79e03242862632945d65ecc0e67c0ccbf6d1c404a518b852c54b91e9fb",
+    "greenEntrypointSHA256": "4b4018a142f985167584949a78f33efca27af3f1239f52b1bac8e4bbe92bd078",
+    "limitation": "Actual optimized SIL proves the ownership change. Retained warm debug imports, DEBUG and enable-testing settings are disclosed; this is not a new signed release binary or live SIGTERM shutdown pass. No daemon/helper/runtime process was launched.",
+    "productionSourceCount": 14,
+    "semanticReceiptSHA256": "0c755f983306bdae5ecc20cd9e85c13f626a2ef1ca26988b72f0c004f2c0ea3e",
+    "signedShutdownClaimed": false,
+    "unchangedProductionSources": 13,
+    "versions": [
+      {
+        "actualAwaitedDaemonOperationSHA256": "7adee875b788e0a65f9b98c60ece2c3e8fbb55f9ae11370fc850f1c303427fdb",
+        "arrayCreatedAt": {
+          "SILLine": 67474,
+          "block": "bb39"
+        },
+        "awaitAt": {
+          "SILLine": 67553,
+          "block": "bb42"
+        },
+        "lifetimeBarriers": [
+          {
+            "SILLine": 67596,
+            "block": "bb46"
+          }
+        ],
+        "mainExcerptSHA256": "a9ee9612a73bc228d3adc1393764f4efbd9f6c0985e1a1ddbebfb1a080fe1841",
+        "optimizedSILSHA256": "2f4c93003be345d5d417902c36d3d4cb6c9c6a9c4724684fea012934493eda45",
+        "releaseLocations": [
+          {
+            "SILLine": 67826,
+            "block": "bb62"
+          }
+        ],
+        "sourceArray": "%294",
+        "version": "green"
+      },
+      {
+        "actualAwaitedDaemonOperationSHA256": "3dabc8acff8621caa6f6c7df994d687124fe5c2e5b372996ad6ca520abc0f2c3",
+        "arrayCreatedAt": {
+          "SILLine": 67468,
+          "block": "bb39"
+        },
+        "awaitAt": {
+          "SILLine": 67548,
+          "block": "bb42"
+        },
+        "lifetimeBarriers": [],
+        "mainExcerptSHA256": "a1f380344312efe61e69a8c09cb24cb7533c02be32ce8a14c3e013f1df6e8c6a",
+        "optimizedSILSHA256": "110962c66894d812456292656b9f58c31d10f85612718ff3b966a0956eb0f8d6",
+        "releaseLocations": [
+          {
+            "SILLine": 67469,
+            "block": "bb39"
+          }
+        ],
+        "sourceArray": "%294",
+        "version": "red"
+      }
+    ]
+  },
+  "regressionsOrDevicesExecutedForThisBundle": false,
+  "schemaVersion": 1
+}

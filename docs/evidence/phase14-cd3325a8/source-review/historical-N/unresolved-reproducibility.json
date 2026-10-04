@@ -1,0 +1,110 @@
+{
+  "allMismatchSizesAndModesEqual": true,
+  "attempt": 1,
+  "boundary": "isolated unsigned payload comparison before Developer ID signing/notarization",
+  "causeHypothesis": "Shared NetworkProviders/WasmKit compilation or linkage may account for six product differences. Need retained differing object/binary bytes; this is not a proven cause.",
+  "causeStatus": "unresolved; no proven root cause or corrective source fix",
+  "diagnosisInputID": "repro-boundary-review",
+  "exitCode": 65,
+  "failedJob": 110721684545,
+  "failedStep": "Build the trusted release twice and verify every trust stage",
+  "hypothesisIsNotProof": true,
+  "kind": "unresolved-prior-unsigned-reproducibility-failure",
+  "laterPair": {
+    "attempt": "2",
+    "binaryMismatchCount": 0,
+    "claim": "Only this actual retained pair matched; does not explain the earlier failure or qualify N.",
+    "comparisonInputID": "later-unsigned-pair",
+    "run": "36969951719",
+    "sourceCommit": "51c94cc081671ce2d3de1abaa12706042acc108c",
+    "workerObjectCount": 131,
+    "workerObjectsEqual": false
+  },
+  "mismatches": [
+    {
+      "first": {
+        "mode": "0o755",
+        "sha256": "d98b777b702db2465812fd372f8beb9cb390bcb3386248574cf569cc8bbf3378",
+        "sizeBytes": 57834216
+      },
+      "path": "bin/hostwright",
+      "second": {
+        "mode": "0o755",
+        "sha256": "7c13ff886e028092ef215f8dbc1932e7d6c12be1c3f72affd5a06d57df676cca",
+        "sizeBytes": 57834216
+      }
+    },
+    {
+      "first": {
+        "mode": "0o755",
+        "sha256": "e7572577264bae58be1b26fdff3c7aeed457ac7c5e0e5b7842313c4c0500acac",
+        "sizeBytes": 58164656
+      },
+      "path": "bin/hostwright-control",
+      "second": {
+        "mode": "0o755",
+        "sha256": "c340bcdaffd90b6dd1a0ca10f27d4fb2ab82c9aca39816916bf9ff95128b47c6",
+        "sizeBytes": 58164656
+      }
+    },
+    {
+      "first": {
+        "mode": "0o755",
+        "sha256": "7664d15c0244acb38ad0e2ee2c3e81f2dcd512ee68c5c663030c3c9d16404631",
+        "sizeBytes": 40359976
+      },
+      "path": "bin/hostwright-network-helper",
+      "second": {
+        "mode": "0o755",
+        "sha256": "a1b21f880a2f5f4deef9d83970499ab7aeb1fe55fbaef0f23336074d8b3c0b20",
+        "sizeBytes": 40359976
+      }
+    },
+    {
+      "first": {
+        "mode": "0o755",
+        "sha256": "7361273e8c49c9bb6a45f0b8a12d2549bb1692565da4c8deabb473ded54178c5",
+        "sizeBytes": 3258272
+      },
+      "path": "bin/hostwright-network-provider-worker",
+      "second": {
+        "mode": "0o755",
+        "sha256": "c61c6a2645bd1e062d88e7ba22db9f2a8ab13f0146be98bf1d4b3f9e36104d19",
+        "sizeBytes": 3258272
+      }
+    },
+    {
+      "first": {
+        "mode": "0o755",
+        "sha256": "d04362b7440e7de96a4cd417fef857c63c1c2a05d03b8c587dea300e31806f62",
+        "sizeBytes": 59016968
+      },
+      "path": "bin/hostwrightd",
+      "second": {
+        "mode": "0o755",
+        "sha256": "73a7708243783618714daeb6a933c5ffaf71f9474d87167b977e46c8a742e018",
+        "sizeBytes": 59016968
+      }
+    },
+    {
+      "first": {
+        "mode": "0o755",
+        "sha256": "961e7dba616ea1d6e3d554176bdd2cdac333e901d06125b35213d93f509d31ab",
+        "sizeBytes": 59093920
+      },
+      "path": "libexec/hostwright/Hostwright.app/Contents/MacOS/hostwright-desktop",
+      "second": {
+        "mode": "0o755",
+        "sha256": "3aeb96839f5fb998c1c05abb5a65d3b7064de4fa7d9d26551811db8b3469ec14",
+        "sizeBytes": 59093920
+      }
+    }
+  ],
+  "notarizationReached": false,
+  "rootCauseFixedClaimed": false,
+  "run": 36969951719,
+  "runURL": "https://github.com/hostwright/hostwright/actions/runs/36969951719",
+  "schemaVersion": 1,
+  "sourceCommit": "51c94cc081671ce2d3de1abaa12706042acc108c",
+  "unsignedOutputsRetained": false
+}

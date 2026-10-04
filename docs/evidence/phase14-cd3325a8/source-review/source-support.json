@@ -1,0 +1,23 @@
+{
+  "independentSourceReviewSHA256": "e244a7df3a0c55d1cf637e2ca3bf05d5577b558c271a939f17c5400b1fa39dd8",
+  "kind": "hostwright.phase14.native-fence-source-public-support.v1",
+  "mergedPR": {
+    "baseRefOid": "3f7db51451c2bd66d1932c559289637e9e64db31",
+    "headRefOid": "33256770d09a3dc18e70974d576f5e465af74ebc",
+    "mergeCommit": {
+      "oid": "cd3325a8b0ccb27c095d621bf4a3eb10ca1835da"
+    },
+    "mergedAt": "2026-10-03T12:07:46Z",
+    "state": "MERGED",
+    "url": "https://github.com/hostwright/hostwright/pull/358"
+  },
+  "mergedTree": "fea43a6d18d3a3d51356b512ec2aa96e3ab5b47c",
+  "notEvidenceReport": true,
+  "reviewedHead": "33256770d09a3dc18e70974d576f5e465af74ebc",
+  "reviewedTree": "fea43a6d18d3a3d51356b512ec2aa96e3ab5b47c",
+  "runtimeSigningDeviceOrIssueClosureClaimed": false,
+  "scope": "Persisted plan, resource, and active lease authority for native up/restart/down/remove; source CI support only. Fresh signed native observations remain required.",
+  "sourceCommit": "cd3325a8b0ccb27c095d621bf4a3eb10ca1835da",
+  "sourceMergeReceiptSHA256": "5e09be89c6442f28045231cae1de3fdab2f7e78366648009b5911d394c4c3d24",
+  "sourceTree": "fea43a6d18d3a3d51356b512ec2aa96e3ab5b47c"
+}

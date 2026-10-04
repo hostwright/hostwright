@@ -1,0 +1,101 @@
+{
+  "sourceCommit": "b969a32caaa250f81b75fd6ced34d42e34d7b855",
+  "runID": 37170124704,
+  "attempt": 1,
+  "stages": [
+    {
+      "detail": "Two isolated clean builds produced byte-identical shipped payloads.",
+      "identifier": "source-reproducibility",
+      "status": "passed"
+    },
+    {
+      "detail": "All shipped Mach-O executables use hardened-runtime Developer ID signatures.",
+      "identifier": "developer-id-application-signing",
+      "status": "passed"
+    },
+    {
+      "detail": "Created one exact signed ZIP archive with a manifest-bound payload.",
+      "identifier": "archive",
+      "status": "passed"
+    },
+    {
+      "detail": "Apple accepted the exact signed ZIP and published matching tickets for every signed executable.",
+      "identifier": "archive-notarization",
+      "status": "passed"
+    },
+    {
+      "detail": "Built a flat package signed by the exact Developer ID Installer identity.",
+      "identifier": "installer-package",
+      "status": "passed"
+    },
+    {
+      "detail": "Apple accepted the exact signed installer package.",
+      "identifier": "package-notarization",
+      "status": "passed"
+    },
+    {
+      "detail": "Stapled and independently validated the package ticket for offline Gatekeeper use.",
+      "identifier": "package-stapling",
+      "status": "passed"
+    },
+    {
+      "detail": "Gatekeeper accepted the signed package as Notarized Developer ID software.",
+      "identifier": "gatekeeper",
+      "status": "passed"
+    },
+    {
+      "detail": "Generated and validated separate SPDX 2.3 inventories for archive and package.",
+      "identifier": "sbom",
+      "status": "passed"
+    },
+    {
+      "detail": "Generated source- and digest-bound in-toto/SLSA-shaped release provenance.",
+      "identifier": "provenance",
+      "status": "passed"
+    },
+    {
+      "detail": "Generated an exact sorted SHA-256 inventory for every release artifact and unsigned sidecar.",
+      "identifier": "checksums",
+      "status": "passed"
+    },
+    {
+      "detail": "Developer ID CMS signatures cover checksums, release manifest, provenance, and release evidence.",
+      "identifier": "detached-signatures",
+      "status": "passed"
+    },
+    {
+      "detail": "A fresh extraction verified paths, payload bytes, signatures, package ticket, SBOMs, provenance, and checksums.",
+      "identifier": "independent-verification",
+      "status": "passed"
+    }
+  ],
+  "descriptorReceipts": {
+    "checksumDescriptor": {
+      "fileName": "SHA256SUMS",
+      "sha256": "0b003a402b49ad158f2a8cd0ab4923c04063086c0854ae636ab24870f1f34328",
+      "sizeBytes": 669
+    },
+    "checksumSignature": {
+      "fileName": "SHA256SUMS.cms",
+      "sha256": "eae78610c5ff73094508e5d049911a602b71c385fd3b9b4f5a582ebe19b04a29",
+      "sizeBytes": 3422
+    },
+    "manifestDescriptor": {
+      "fileName": "release-manifest.json",
+      "sha256": "ba70ed2790fbeec4f15ecf90058a26e2c4e55bf092313554b7d1e04d89d448fc",
+      "sizeBytes": 7632
+    },
+    "manifestSignature": {
+      "fileName": "release-manifest.json.cms",
+      "sha256": "a6e0282e2dd04617712015cf320eebb4cbd82e8bf2e8d2289db00fd34ba0c2a4",
+      "sizeBytes": 3422
+    },
+    "provenanceSignature": {
+      "fileName": "provenance.intoto.json.cms",
+      "sha256": "3c41c9f297ce5b4642ceddd1afa7f7768b2de22cedc6ed25494a02e69c3083fa",
+      "sizeBytes": 3422
+    }
+  },
+  "productionEvidenceSHA256": "f2a76db4270912dfe141683344e5fadc563ee2d7b3f40bd76e3d7d2dd3cf49b3",
+  "scope": "Production build/sign/notary/CMS/verification stage checks, not unit cases or device/VM outcomes."
+}

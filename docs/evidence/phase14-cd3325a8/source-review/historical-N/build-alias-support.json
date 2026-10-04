@@ -1,0 +1,47 @@
+{
+  "kind": "original-build591-actual-N-same-tree-alias-support",
+  "limitation": "Local preparation products and exact original build identities only; no signed release, runtime or device qualification.",
+  "products": [
+    {
+      "actualCandidateSource": "3f7db51451c2bd66d1932c559289637e9e64db31",
+      "aliasInputID": "alias-hostwright-dist",
+      "binarySHA256": "68ff4cf3247b4c1955e4d437807e21797e8ba377046290093ad7cbe847e6a472",
+      "binarySizeBytes": 52106544,
+      "buildCommand": "xcrun swift build --jobs 1 --product hostwright-dist",
+      "buildFinishedAt": "2026-10-03T01:45:32.877746+00:00",
+      "buildStartedAt": "2026-10-03T01:45:21.000456+00:00",
+      "originalBuildExitCode": 0,
+      "originalBuildInputID": "original-build-hostwright-dist",
+      "originalBuildResult": "passed",
+      "originalBuildSource": "591f44fec964410679326cb9a370da2c5ed10528",
+      "product": "hostwright-dist",
+      "rebuiltAfterMerge": false,
+      "runtimeOrLifecycleStarted": false,
+      "signedQualificationClaimed": false,
+      "sourceInputsCompared": 1029,
+      "sourceInputsIdentical": true,
+      "tree": "95c9cc2e09b216cef7aed299e12224fe9d2c08c3"
+    },
+    {
+      "actualCandidateSource": "3f7db51451c2bd66d1932c559289637e9e64db31",
+      "aliasInputID": "alias-hostwright-runtime-conformance",
+      "binarySHA256": "06af0ef3fff579e04c8e4555ba78e5ed5f2588baff50e743fe7318c1667a23a7",
+      "binarySizeBytes": 161387008,
+      "buildCommand": "xcrun swift build --jobs 1 --product hostwright-runtime-conformance",
+      "buildFinishedAt": "2026-10-03T01:45:51.355142+00:00",
+      "buildStartedAt": "2026-10-03T01:45:32.898322+00:00",
+      "originalBuildExitCode": 0,
+      "originalBuildInputID": "original-build-hostwright-runtime-conformance",
+      "originalBuildResult": "passed",
+      "originalBuildSource": "591f44fec964410679326cb9a370da2c5ed10528",
+      "product": "hostwright-runtime-conformance",
+      "rebuiltAfterMerge": false,
+      "runtimeOrLifecycleStarted": false,
+      "signedQualificationClaimed": false,
+      "sourceInputsCompared": 1029,
+      "sourceInputsIdentical": true,
+      "tree": "95c9cc2e09b216cef7aed299e12224fe9d2c08c3"
+    }
+  ],
+  "schemaVersion": 1
+}

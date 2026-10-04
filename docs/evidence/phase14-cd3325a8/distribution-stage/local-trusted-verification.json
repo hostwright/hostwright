@@ -1,0 +1,42 @@
+{
+  "archive": {
+    "fileName": "hostwright-0.0.2-rc.1-macos-arm64-cd3325a8b0cc.zip",
+    "sha256": "218f44424d00769ded5af5c5e77ed9922ad972a533b80ace7c499da8e7378c20",
+    "sizeBytes": 186656120
+  },
+  "archiveSBOM": {
+    "fileName": "hostwright-0.0.2-rc.1-macos-arm64-cd3325a8b0cc.archive.spdx.json",
+    "sha256": "82b4cef51f798be42a620c6486b4feb16cf34310d1b87e10da8b8227a5530000",
+    "sizeBytes": 15153
+  },
+  "cleanup": {
+    "exactResourceIdentifiers": [
+      "<trusted-verification-root>"
+    ],
+    "message": "The exact private trusted-release verification root was removed.",
+    "status": "succeeded"
+  },
+  "kind": "trustedReleaseVerification",
+  "package": {
+    "fileName": "hostwright-0.0.2-rc.1-macos-arm64-cd3325a8b0cc.pkg",
+    "sha256": "fc2000721cca6edb166b4a7a9a3760be030ec0155fc50c3bb2a2b9d2d2c0022f",
+    "sizeBytes": 196034429
+  },
+  "packageSBOM": {
+    "fileName": "hostwright-0.0.2-rc.1-macos-arm64-cd3325a8b0cc.pkg.spdx.json",
+    "sha256": "f53a498075a8b36f7b41c27213b93a19dcd2263071a2288016bfbce1b4b2c3cf",
+    "sizeBytes": 15153
+  },
+  "packageVersion": "0.0.2-rc.1",
+  "provenance": {
+    "fileName": "provenance.intoto.json",
+    "sha256": "5ec504475fbbca8fe2dae6b8baa1de2c61b17bc0b7bc7749d50669ab3a71b1de",
+    "sizeBytes": 12420
+  },
+  "releaseTag": "v0.0.2-rc.1",
+  "schemaVersion": 1,
+  "signerTeamIdentifier": "993YC3JY4Q",
+  "sourceCommit": "cd3325a8b0ccb27c095d621bf4a3eb10ca1835da",
+  "status": "passed",
+  "verificationCommandCount": 33
+}

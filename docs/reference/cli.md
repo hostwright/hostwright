@@ -562,6 +562,8 @@ Command semantics:
 - `rm` removes only verified Hostwright-owned resources in safe reverse dependency order;
 - `update` performs the declared rolling or recreate transition, health-gates promotion, retains the prior revision until success, and restores the last verified revision when exact compensation is provable.
 
+For Containerization, a successful `down` can conservatively retain the exact committed Up admission when its original fence no longer supplies authoritative release proof. The stopped resource and that charge remain visible; the [advisory scheduler contract](../architecture/advisory-scheduler.md) requires retaining unknown or stale-fence capacity. Current native qualification verifies `rm` then proves exact absence and zero active reservations. Immediate Down reclamation and Down-to-Up without Remove remain unqualified.
+
 Legacy manifest port strings publish to localhost by default. Structured Phase 07 networking executes through exact Hostwright-owned project networks, DNS, ingress, host-access, certificate, policy, and tunnel boundaries; unsupported providers or unavailable exposure modes still fail before mutation. Guarded binds, tmpfs, and declared `hostwright-local` named volumes continue to execute through the Phase 06 storage boundary. Secret references are resolved only when the configured backend is available and never enter plan output, state, logs, or diagnostics.
 
 ## Interactive and streaming commands
@@ -571,6 +573,8 @@ Legacy manifest port strings publish to localhost by default. Structured Phase 0
 Streams use 64 KiB chunks, at most 1 MiB queued per stream, bounded diagnostics, backpressure, stdin closure, TTY resize, an allowed signal set, cancellation, and complete process-tree cleanup. JSON streams use NDJSON/base64 frames and cannot be combined with an interactive TTY.
 
 Host copy paths must be absolute and pass descriptor-based no-symlink confinement. Container paths and archive entries reject traversal. `inspect` and `stats` render normalized structured provider results; log follow resumes from bounded provider state after a supported restart without uncontrolled duplication.
+
+Known native-provider limitation observed in the historical signed N candidate at `3f7db51451c2`: `hostwright stats` with `--runtime-provider containerization --json` exits 0 with empty client output because its finite reply is written to the daemon's stdout. Native CLI stats delivery is not qualified. The [Phase 14 desktop contract](../roadmap/v0.0.2/PHASE14-DESKTOP-CONSOLE-RFC.md) covers reviewed lifecycle operations, status, finite logs, events and connection states; stats are outside that contract. The retained stats failure is supplementary evidence and is not counted as a passed lifecycle or GUI check. The actual B9 comparison retains six unchanged production inputs at that output-delivery boundary; the current 40-action proof does not execute client stats, substitute daemon stdout, or claim a stats pass.
 
 ## `hostwright status [path] [--state-db <path>] [--output text|json]`
 

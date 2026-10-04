@@ -31,7 +31,7 @@ Requirements:
 - macOS 26 or later;
 - Xcode command-line tools with a Swift 6.2-compatible toolchain;
 - network access only to clone dependencies/source;
-- Apple `container` installed only for live runtime commands.
+- Apple `container` installed for live commands using the Apple CLI provider; Containerization uses the bundled helper.
 
 An idle local daemon can open its authenticated Control API socket without an available
 runtime, allowing the desktop to connect and display runtime availability. Runtime
@@ -94,7 +94,14 @@ That machinery passed credentialed qualification for the immutable dev.11 and de
 
 ## State and Installed Lifecycle Reality
 
-State-backed commands now use `~/Library/Application Support/Hostwright/state/state.sqlite` when no `--state-db` or `HOSTWRIGHT_STATE_DB` override is present. State-writing commands create the documented Application Support, cache, and log roots with private permissions. A compatible legacy `~/.hostwright/state.sqlite` is moved through a synchronized, identity-bound, resumable journal; unknown legacy files are preserved.
+State-backed commands now use `~/Library/Application Support/Hostwright/state/state.sqlite` when no `--state-db` or `HOSTWRIGHT_STATE_DB` override is present. Ordinary state-writing commands create the documented Application Support, cache, and log roots with private permissions. Installed `daemon bootstrap-identities` is an exception: it validates the selected database's existing parent before preparing runtime support. For a fresh installation using the default paths, prepare that parent as the unprivileged state owner before bootstrap:
+
+```bash
+install -d -m700 "$HOME/Library/Application Support/Hostwright/state"
+hostwright daemon bootstrap-identities --json
+```
+
+Use the same owner and local-path settings for bootstrap, the foreground daemon, and its clients; the config/manifest path remains explicit. Existing parents must satisfy the current-user ownership, non-symlink and private-permission policy. Historical clean-VM evidence recorded exit 64 for first bootstrap without this state parent; automatic first-state initialization remains unqualified. The foreground setup above is an explicit owner-preparation prerequisite. A compatible legacy `~/.hostwright/state.sqlite` is moved through a synchronized, identity-bound, resumable journal; unknown legacy files are preserved.
 
 Inspect the selected paths without creating them:
 
@@ -122,7 +129,9 @@ A source checkout remains separate from an installed prefix. Deleting the checko
 
 ## Gate Before Package Claims
 
-Phase 02 qualification passed on a clean macOS 26 Apple-silicon VM. Evidence covers Gatekeeper, package and tap install, reboot-surviving service operation, dev.11-to-dev.12 upgrade, rollback, repair, downgrade refusal, uninstall, state backup/restore/migration, signed doctor cells, sanitizer lanes, abrupt-power recovery, and exact owned cleanup. Final GA requirements remain in the [v0.0.2 implementation plan](../roadmap/v0.0.2/IMPLEMENTATION_PLAN.md) and [distribution evidence rules](testing-evidence.md).
+The current `0.0.2-rc.1` desktop candidate at `b969a32caaa2` has authenticated runtime `37160477208/a1`, signed/notarized stage `37170124704/a1`, and [retained B9 source/unit/signing evidence](../evidence/phase14-b969a32c/source-support/CURRENT.md). Its ten native CLI cycles passed. The 15 native GUI checks, nine package-only macOS VM cases, independent scoped security assessment, and installed-device cleanup remain pending; stage cleanup does not establish installed cleanup. The [Phase 14 evidence boundary](../roadmap/v0.0.2/PHASE14-DESKTOP-CONSOLE-RFC.md#evidence-boundary) records the completed and pending scopes. This candidate is not a GA or publication claim.
+
+Historical Phase 02 qualification passed on a clean macOS 26 Apple-silicon VM. Evidence covers Gatekeeper, package and tap install, reboot-surviving service operation, dev.11-to-dev.12 upgrade, rollback, repair, downgrade refusal, uninstall, state backup/restore/migration, signed doctor cells, sanitizer lanes, abrupt-power recovery, and exact owned cleanup. Final GA requirements remain in the [v0.0.2 implementation plan](../roadmap/v0.0.2/IMPLEMENTATION_PLAN.md) and [distribution evidence rules](testing-evidence.md).
 
 All production installer, distribution, extension, tool-inspection, and Apple-runtime subprocesses use the [secure process execution boundary](process-execution.md). The trusted distribution tool propagates one cancellation token through identity lookup, both clean builds, archive/package operations, notarization, verification, install lifecycle, and cleanup; SIGINT/SIGTERM enter the same path. Phase 02 issue #116 implements that shared boundary, and the credentialed qualification pipeline passed it for both immutable prereleases.
 

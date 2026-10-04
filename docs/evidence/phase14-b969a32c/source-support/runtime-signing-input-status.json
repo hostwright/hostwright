@@ -1,0 +1,38 @@
+{
+  "device": {
+    "GUI15": null,
+    "VM9": null,
+    "cleanup": null,
+    "physical40": null,
+    "securityAssessment": null
+  },
+  "kind": "hostwright.phase14.private-current-input-status.v1",
+  "runtime": {
+    "attempt": 1,
+    "authentication": {
+      "inputID": "runtime-authentication",
+      "sha256": "17249167c30133d842417030924bd5aab50d6a0dab53603f40b77f850901f2ce",
+      "sizeBytes": 3048
+    },
+    "newRuntimeExecutedByPreparation": false,
+    "rootAcceptance": {
+      "inputID": "runtime-root-acceptance",
+      "sha256": "2ddf0cafc55615516090309245f7502be50423b0b6edbe5c4546e80133c974ab",
+      "sizeBytes": 3435
+    },
+    "run": 37160477208,
+    "status": "accepted-full-authenticated-runtime",
+    "subjects": 7
+  },
+  "scope": "Existing runtime receipt identity and pending inputs only; no signing/device/report/closure pass.",
+  "signing": {
+    "attempt": 1,
+    "authentication": null,
+    "finalStage": null,
+    "fullRegressionResults": null,
+    "run": 37170124704,
+    "status": "pending-genuine-final-regression-and-authenticated-stage"
+  },
+  "sourceCommit": "b969a32caaa250f81b75fd6ced34d42e34d7b855",
+  "sourceTree": "408f1a5e96d75e7e64da6358c71b770bb3f29b25"
+}

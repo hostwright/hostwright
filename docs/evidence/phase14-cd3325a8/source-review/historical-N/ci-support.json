@@ -1,0 +1,182 @@
+{
+  "PythonSkip": {
+    "count": 1,
+    "rawSummary": "OK (skipped=1)",
+    "reason": "macOS executable inspection unavailable on Linux",
+    "reasonEvidence": "Inferred from committed test-stage-corresponding-source.py; raw log reports skip count."
+  },
+  "XCTestSkips": [
+    {
+      "reason": "Explicit 1000-workload \u00d7 100-node scheduler performance lane disabled."
+    },
+    {
+      "reason": "Explicit live registry TLS/token-service lane disabled."
+    },
+    {
+      "reason": "Attended existing Tahoe VM echo lane disabled."
+    },
+    {
+      "reason": "Attended canonical tunnel-helper configuration lane disabled."
+    }
+  ],
+  "actualMergedCommit": "3f7db51451c2bd66d1932c559289637e9e64db31",
+  "checkoutBindings": [
+    {
+      "commit": "d9989f2f019b5ae512f9a24236768716a4d161ea",
+      "job": 111099688360,
+      "rawLine": 130
+    },
+    {
+      "commit": "d9989f2f019b5ae512f9a24236768716a4d161ea",
+      "job": 111099688545,
+      "rawLine": 106
+    },
+    {
+      "commit": "d9989f2f019b5ae512f9a24236768716a4d161ea",
+      "job": 111099688917,
+      "rawLine": 104
+    },
+    {
+      "commit": "d9989f2f019b5ae512f9a24236768716a4d161ea",
+      "job": 111099689002,
+      "rawLine": 106
+    }
+  ],
+  "closureClaimed": false,
+  "counts": {
+    "Python": {
+      "allSuitesOK": true,
+      "passed": 278,
+      "reported": 279,
+      "skipped": 1,
+      "suites": 28
+    },
+    "SwiftTesting": {
+      "failed": 0,
+      "passed": 61
+    },
+    "XCTest": {
+      "failed": 0,
+      "passed": 3358,
+      "reported": 3362,
+      "skipped": 4
+    }
+  },
+  "coverage": "scripts/test.sh pr: selected fast tests and five durable-lifecycle sentinels. Not full release qualification.",
+  "governanceSkippedJobs": [
+    {
+      "conclusion": "skipped",
+      "html_url": "https://github.com/hostwright/hostwright/actions/runs/37087143519/job/111099690120",
+      "id": 111099690120,
+      "name": "issue-closure-gate"
+    }
+  ],
+  "headCommit": "591f44fec964410679326cb9a370da2c5ed10528",
+  "kind": "same-tree-final-PR-CI-support",
+  "runs": [
+    {
+      "attempt": 1,
+      "conclusion": "success",
+      "event": "pull_request",
+      "head": "591f44fec964410679326cb9a370da2c5ed10528",
+      "id": 37087143409,
+      "jobs": [
+        {
+          "conclusion": "success",
+          "html_url": "https://github.com/hostwright/hostwright/actions/runs/37087143409/job/111099688360",
+          "id": 111099688360,
+          "name": "runtime-provenance"
+        },
+        {
+          "conclusion": "success",
+          "html_url": "https://github.com/hostwright/hostwright/actions/runs/37087143409/job/111099688545",
+          "id": 111099688545,
+          "name": "test"
+        }
+      ],
+      "name": "CI",
+      "url": "https://github.com/hostwright/hostwright/actions/runs/37087143409"
+    },
+    {
+      "attempt": 1,
+      "conclusion": "success",
+      "event": "pull_request",
+      "head": "591f44fec964410679326cb9a370da2c5ed10528",
+      "id": 37087143494,
+      "jobs": [
+        {
+          "conclusion": "success",
+          "html_url": "https://github.com/hostwright/hostwright/actions/runs/37087143494/job/111099688917",
+          "id": 111099688917,
+          "name": "core-documentation"
+        }
+      ],
+      "name": "Documentation and website",
+      "url": "https://github.com/hostwright/hostwright/actions/runs/37087143494"
+    },
+    {
+      "attempt": 1,
+      "conclusion": "success",
+      "event": "pull_request",
+      "head": "591f44fec964410679326cb9a370da2c5ed10528",
+      "id": 37087143519,
+      "jobs": [
+        {
+          "conclusion": "success",
+          "html_url": "https://github.com/hostwright/hostwright/actions/runs/37087143519/job/111099689002",
+          "id": 111099689002,
+          "name": "pull-request-closure-gate"
+        },
+        {
+          "conclusion": "skipped",
+          "html_url": "https://github.com/hostwright/hostwright/actions/runs/37087143519/job/111099690120",
+          "id": 111099690120,
+          "name": "issue-closure-gate"
+        }
+      ],
+      "name": "Roadmap governance",
+      "url": "https://github.com/hostwright/hostwright/actions/runs/37087143519"
+    }
+  ],
+  "schemaVersion": 1,
+  "sourceInputs": [
+    {
+      "commit": "591f44fec964410679326cb9a370da2c5ed10528",
+      "path": ".github/workflows/ci.yml",
+      "sha256": "d0e05e83da280013f889135a16ce13cc5f86f3c12c13830cc0c4e91cb69edb68",
+      "sizeBytes": 7092
+    },
+    {
+      "commit": "591f44fec964410679326cb9a370da2c5ed10528",
+      "path": ".github/workflows/runtime-ingredients.yml",
+      "sha256": "3ef29c60633ec1f1f64f8fa6c24cffe3353e222b86322eee5d24b04cae753b7e",
+      "sizeBytes": 44293
+    },
+    {
+      "commit": "591f44fec964410679326cb9a370da2c5ed10528",
+      "path": ".github/workflows/trusted-release.yml",
+      "sha256": "3e08f8ae609d22fd23e029ea39bfd8e8c7d23981fcaee1fa2afa5f12e199eead",
+      "sizeBytes": 18177
+    },
+    {
+      "commit": "591f44fec964410679326cb9a370da2c5ed10528",
+      "path": "scripts/test.sh",
+      "sha256": "ee9ce31800e9a501e906d3fe10994c317ad3abe90dc8856b6462cbb8f038dd49",
+      "sizeBytes": 3186
+    },
+    {
+      "commit": "591f44fec964410679326cb9a370da2c5ed10528",
+      "path": "Package.swift",
+      "sha256": "e30424dca74e22556a5ef847dfe043a28491cff3338848efc030e21ddf906e90",
+      "sizeBytes": 35413
+    },
+    {
+      "commit": "591f44fec964410679326cb9a370da2c5ed10528",
+      "path": "Package.resolved",
+      "sha256": "b019f91d4de15a986c3fd35dcd8f730d00103337c8027be33adbbc0302d4a3dc",
+      "sizeBytes": 8708
+    }
+  ],
+  "tree": "95c9cc2e09b216cef7aed299e12224fe9d2c08c3",
+  "treeIdentical": true
+}

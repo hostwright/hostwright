@@ -1,0 +1,207 @@
+{
+  "applicationSigner": {
+    "kind": "developer-id-application",
+    "sha1Fingerprint": "A6CFABEC0AA50ABE00A745BAFA83BC24783AA5DB",
+    "teamIdentifier": "993YC3JY4Q"
+  },
+  "architecture": "arm64",
+  "archive": {
+    "fileName": "hostwright-0.0.2-rc.1-macos-arm64-cd3325a8b0cc.zip",
+    "sha256": "218f44424d00769ded5af5c5e77ed9922ad972a533b80ace7c499da8e7378c20",
+    "sizeBytes": 186656120
+  },
+  "archiveNotarization": {
+    "artifactFileName": "hostwright-0.0.2-rc.1-macos-arm64-cd3325a8b0cc.zip",
+    "gatekeeperSource": "Notarized Developer ID",
+    "status": "Accepted",
+    "submissionID": "3b606a34-9eb4-483b-b499-9b639e2b9b6f",
+    "ticketAttachment": "online-ticket"
+  },
+  "archiveSBOM": {
+    "fileName": "hostwright-0.0.2-rc.1-macos-arm64-cd3325a8b0cc.archive.spdx.json",
+    "sha256": "82b4cef51f798be42a620c6486b4feb16cf34310d1b87e10da8b8227a5530000",
+    "sizeBytes": 15153
+  },
+  "artifactID": "hostwright-0.0.2-rc.1-macos-arm64-cd3325a8b0cc",
+  "createdAt": "2026-10-03T19:11:38Z",
+  "installerSigner": {
+    "kind": "developer-id-installer",
+    "sha1Fingerprint": "FC367A603551DCC979B9BE162C796B527CC0EB36",
+    "teamIdentifier": "993YC3JY4Q"
+  },
+  "minimumMacOSMajorVersion": 26,
+  "package": {
+    "fileName": "hostwright-0.0.2-rc.1-macos-arm64-cd3325a8b0cc.pkg",
+    "sha256": "fc2000721cca6edb166b4a7a9a3760be030ec0155fc50c3bb2a2b9d2d2c0022f",
+    "sizeBytes": 196034429
+  },
+  "packageNotarization": {
+    "artifactFileName": "hostwright-0.0.2-rc.1-macos-arm64-cd3325a8b0cc.pkg",
+    "gatekeeperSource": "Notarized Developer ID",
+    "status": "Accepted",
+    "submissionID": "337c63aa-fbe7-4c8c-a5f9-365069996506",
+    "ticketAttachment": "stapled"
+  },
+  "packageSBOM": {
+    "fileName": "hostwright-0.0.2-rc.1-macos-arm64-cd3325a8b0cc.pkg.spdx.json",
+    "sha256": "f53a498075a8b36f7b41c27213b93a19dcd2263071a2288016bfbce1b4b2c3cf",
+    "sizeBytes": 15153
+  },
+  "packageVersion": "0.0.2-rc.1",
+  "payloadFiles": [
+    {
+      "mode": 493,
+      "path": "bin/hostwright",
+      "sha256": "9a0477e1128c1a82a8385ff9f56b0766406df34223b5bda39eb210ab1c1a4485",
+      "sizeBytes": 57557808
+    },
+    {
+      "mode": 493,
+      "path": "bin/hostwright-containerization-helper",
+      "sha256": "b8398cb08f5a9c4adab712889c3a47f054277a4274feba6bd8c9864b87e4dea0",
+      "sizeBytes": 49758272
+    },
+    {
+      "mode": 493,
+      "path": "bin/hostwright-control",
+      "sha256": "606436f00938d195a45399f7da6d2c114a0f394124e664a5419a558f0098d011",
+      "sizeBytes": 57886352
+    },
+    {
+      "mode": 493,
+      "path": "bin/hostwright-dist",
+      "sha256": "a5ad77d588e655c270dfb081efe51bd4a6ab441e26f2c649d0793fd2f8edb1da",
+      "sizeBytes": 33504288
+    },
+    {
+      "mode": 493,
+      "path": "bin/hostwright-network-helper",
+      "sha256": "07626a53b82b0358e4b874cd0803dde034118651289db5604367e2e871b73e30",
+      "sizeBytes": 40144960
+    },
+    {
+      "mode": 493,
+      "path": "bin/hostwright-network-provider-worker",
+      "sha256": "8af938463fd759ce1dc15814bf0dc0165dc2d9b09ba52378c27cd488d102c186",
+      "sizeBytes": 3258960
+    },
+    {
+      "mode": 493,
+      "path": "bin/hostwright-storage-helper",
+      "sha256": "b6b02b841ac0da617a1252a528e42377dab41434579ef83d09e0d9cd2c0debb4",
+      "sizeBytes": 13010416
+    },
+    {
+      "mode": 493,
+      "path": "bin/hostwrightd",
+      "sha256": "2285fb82ff4acd2dcf0cd6882c6c245dc101d2dd895da545d6c61b6263d17cf3",
+      "sizeBytes": 58733296
+    },
+    {
+      "mode": 420,
+      "path": "libexec/hostwright/Hostwright.app/Contents/Info.plist",
+      "sha256": "9f3b7a530714fafd019189e3eab07da61c7993c9ea3a4bb20f65267f8a14b861",
+      "sizeBytes": 829
+    },
+    {
+      "mode": 493,
+      "path": "libexec/hostwright/Hostwright.app/Contents/MacOS/hostwright-desktop",
+      "sha256": "ba84445f0859beb20703aa9f68ba441e198d6b79c82dc4093c619906bc16981c",
+      "sizeBytes": 59135664
+    },
+    {
+      "mode": 420,
+      "path": "libexec/hostwright/Hostwright.app/Contents/_CodeSignature/CodeResources",
+      "sha256": "6686de10a28a2fe11b36cbb86dcbacc827cfc4ea116b4dabf1845e5aee629e9b",
+      "sizeBytes": 2200
+    },
+    {
+      "mode": 420,
+      "path": "share/doc/hostwright/LICENSE",
+      "sha256": "01b928a7846acbaad3d17de5ad5c33b463f5133fcfb21ca15ca997c646055f9f",
+      "sizeBytes": 11356
+    },
+    {
+      "mode": 420,
+      "path": "share/doc/hostwright/README.md",
+      "sha256": "e5ffbe8e59cadfa777427a88bc137c4f2d39b7f734c3523258cb4750f6a8b54f",
+      "sizeBytes": 12509
+    },
+    {
+      "mode": 420,
+      "path": "share/doc/hostwright/THIRD_PARTY_NOTICES",
+      "sha256": "aabffc94f8804cb4d4fcbb2f19b081f652b870d5c0dc7e48d4f1d378ec06565b",
+      "sizeBytes": 7080595
+    },
+    {
+      "mode": 420,
+      "path": "share/doc/hostwright/runtime-license-inventory.json",
+      "sha256": "af957d89f71d323a02eb8a327a7762db46bb976e52227c0b2e677ad6985501ce",
+      "sizeBytes": 25258
+    },
+    {
+      "mode": 420,
+      "path": "share/doc/hostwright/third-party-license-inventory.json",
+      "sha256": "fe84667aac2b8e32d62990de1c0b154e6f1f592cdc8db0c82261b83a38fb7f7c",
+      "sizeBytes": 1043932
+    },
+    {
+      "mode": 493,
+      "path": "share/hostwright/containerization/guest/hostwright-netfilter",
+      "sha256": "a411dbcf1efaaf0ea0da17d76e3376a92b99037a8cb00af6588e8ecc6f3f7e99",
+      "sizeBytes": 2949246
+    },
+    {
+      "mode": 420,
+      "path": "share/hostwright/containerization/kernel/vmlinux-6.18.15-186",
+      "sha256": "55f86b8394c1d46551836f5c1d3525cdc8d505aeb9bb630c608edb564674239d",
+      "sizeBytes": 16148992
+    },
+    {
+      "mode": 420,
+      "path": "share/hostwright/containerization/vminit/blobs/sha256/15a70c63c9ca254020d8bdbe1b6e48332db0629881f563624bfd319412a37ea3",
+      "sha256": "15a70c63c9ca254020d8bdbe1b6e48332db0629881f563624bfd319412a37ea3",
+      "sizeBytes": 406
+    },
+    {
+      "mode": 420,
+      "path": "share/hostwright/containerization/vminit/blobs/sha256/3c6b087fc41b30d44dac2951f0ee798b242fac8e00db9b6375e25ef48765418d",
+      "sha256": "3c6b087fc41b30d44dac2951f0ee798b242fac8e00db9b6375e25ef48765418d",
+      "sizeBytes": 67222934
+    },
+    {
+      "mode": 420,
+      "path": "share/hostwright/containerization/vminit/blobs/sha256/7812fb606774f30d8b6d36c2a37a6e12ae719ece3fc34775f9b87ee94639e257",
+      "sha256": "7812fb606774f30d8b6d36c2a37a6e12ae719ece3fc34775f9b87ee94639e257",
+      "sizeBytes": 151
+    },
+    {
+      "mode": 420,
+      "path": "share/hostwright/containerization/vminit/index.json",
+      "sha256": "ca910ca52793fbd5269c98aff0ba03091238558ac087d47967611f9d033076d1",
+      "sizeBytes": 240
+    },
+    {
+      "mode": 420,
+      "path": "share/hostwright/containerization/vminit/oci-layout",
+      "sha256": "18f0797eab35a4597c1e9624aa4f15fd91f6254e5538c1e0d193b2a95dd4acc6",
+      "sizeBytes": 30
+    },
+    {
+      "mode": 420,
+      "path": "share/hostwright/examples/hostwright.yaml",
+      "sha256": "156e42749344a7fc21f76e027740f11ff5847f1d2815bc8cb911a005b4756a71",
+      "sizeBytes": 744
+    }
+  ],
+  "platform": "macos",
+  "provenance": {
+    "fileName": "provenance.intoto.json",
+    "sha256": "5ec504475fbbca8fe2dae6b8baa1de2c61b17bc0b7bc7749d50669ab3a71b1de",
+    "sizeBytes": 12420
+  },
+  "releaseTag": "v0.0.2-rc.1",
+  "schemaVersion": 3,
+  "sourceCommit": "cd3325a8b0ccb27c095d621bf4a3eb10ca1835da",
+  "sourceDirty": false
+}

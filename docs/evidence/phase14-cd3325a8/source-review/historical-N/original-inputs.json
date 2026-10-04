@@ -1,0 +1,581 @@
+{
+  "files": [
+    {
+      "fileName": "review.json",
+      "id": "final-review",
+      "role": "final independent four-fix source review",
+      "sha256": "0f11342995dcb12eec8ce6ca34b0549146cf406f87afc17cd2d91c441db9db84",
+      "sizeBytes": 21395
+    },
+    {
+      "fileName": "source-inventory.json",
+      "id": "source-inventory",
+      "role": "actual cumulative source Git/blob/byte inventory",
+      "sha256": "0c289cbfa77353d783fa405051409bdb113d6ebf5700bdb2363ad2a05f87d318",
+      "sizeBytes": 38181
+    },
+    {
+      "fileName": "evidence-inventory.json",
+      "id": "evidence-inventory",
+      "role": "original retained proof inventory",
+      "sha256": "01ce24a78d6cd8a36cd01eee31e9bc4a7ef8cbf72a53003d7ea275f907547356",
+      "sizeBytes": 19535
+    },
+    {
+      "fileName": "cumulative-M-to-N.patch",
+      "id": "cumulative-diff",
+      "role": "exact baseline-to-merged-source patch",
+      "sha256": "dd85e33c827ffd023a3081c4a4263f07ce84a947b3b6bc7579ed956c698c3cbf",
+      "sizeBytes": 60365
+    },
+    {
+      "fileName": "receipt.json",
+      "id": "proof-005",
+      "role": "historical schema repair",
+      "sha256": "3dd0bf684024af0ab2b281d65e3090f74369a4b3cf313b57441ec7014722d09d",
+      "sizeBytes": 14669
+    },
+    {
+      "fileName": "root-review.json",
+      "id": "proof-006",
+      "role": "historical schema review",
+      "sha256": "7b0a831d1dad745c952359644c5b294e18d777c4dcce3e2902c2e1dbfe010bef",
+      "sizeBytes": 303
+    },
+    {
+      "fileName": "installed-manifest.json",
+      "id": "proof-007",
+      "role": "historical real Dev12 VM manifest/status",
+      "sha256": "945ac49fcc5f35433e248de739540e931e79782a505841b1d164901757980f86",
+      "sizeBytes": 1685
+    },
+    {
+      "fileName": "installed-status.json",
+      "id": "proof-008",
+      "role": "historical real Dev12 VM manifest/status",
+      "sha256": "fde35f0181c3ce70b9ef2cd2ba0ec63f344cb92ed3c48c2281ff8fc9f0e68051",
+      "sizeBytes": 2274
+    },
+    {
+      "fileName": "dev12-schema2-regression-before-fix.log",
+      "id": "proof-009",
+      "role": "historical schema regression-before-fix log",
+      "sha256": "28ada90a3bf5f171b7de804392086322ddbc187ae27ae39c7a44ba3e08034c05",
+      "sizeBytes": 4186
+    },
+    {
+      "fileName": "dev12-schema2-regression-before-fix.exit",
+      "id": "proof-010",
+      "role": "historical schema regression-before-fix exit",
+      "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+      "sizeBytes": 2
+    },
+    {
+      "fileName": "dev12-schema2-regression-red.log",
+      "id": "proof-011",
+      "role": "historical schema regression-red log",
+      "sha256": "b897a35e80fbe005f8660cfcdff83629cf085d3bd166fd96c9d26c6ce8de020a",
+      "sizeBytes": 244903
+    },
+    {
+      "fileName": "dev12-schema2-regression-red.exit",
+      "id": "proof-012",
+      "role": "historical schema regression-red exit",
+      "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+      "sizeBytes": 2
+    },
+    {
+      "fileName": "dev12-schema2-regression-green.log",
+      "id": "proof-013",
+      "role": "historical schema regression-green log",
+      "sha256": "7c14daa84296bc9f70e1ed215df61144c4ec7b6880e59e91a503fc996f40adf9",
+      "sizeBytes": 10664
+    },
+    {
+      "fileName": "dev12-schema2-regression-green.exit",
+      "id": "proof-014",
+      "role": "historical schema regression-green exit",
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "sizeBytes": 2
+    },
+    {
+      "fileName": "dev12-schema2-lint.log",
+      "id": "proof-015",
+      "role": "historical schema lint log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "sizeBytes": 0
+    },
+    {
+      "fileName": "dev12-schema2-lint.exit",
+      "id": "proof-016",
+      "role": "historical schema lint exit",
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "sizeBytes": 2
+    },
+    {
+      "fileName": "dev12-schema2-docs.log",
+      "id": "proof-017",
+      "role": "historical schema docs log",
+      "sha256": "d87452fe86dbcc87d3e96cf2357477b5d473f862461b42b0508e006582bea0e1",
+      "sizeBytes": 1968
+    },
+    {
+      "fileName": "dev12-schema2-docs.exit",
+      "id": "proof-018",
+      "role": "historical schema docs exit",
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "sizeBytes": 2
+    },
+    {
+      "fileName": "dev12-schema2-diff-check.log",
+      "id": "proof-019",
+      "role": "historical schema diff-check log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "sizeBytes": 0
+    },
+    {
+      "fileName": "dev12-schema2-diff-check.exit",
+      "id": "proof-020",
+      "role": "historical schema diff-check exit",
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "sizeBytes": 2
+    },
+    {
+      "fileName": "final-receipt.json",
+      "id": "proof-021",
+      "role": "historical lazy runtime summary",
+      "sha256": "6d029b8251ccea23cc9339d62fa66496a7d0d3a5709a3598d866ecd3686b502c",
+      "sizeBytes": 10442
+    },
+    {
+      "fileName": "daemon-runtime-pressure-final-green.log",
+      "id": "proof-022",
+      "role": "historical lazy runtime proof",
+      "sha256": "c6ea287d5050c252a63f1309318409b348ec4b01a2cff3b98f50c525d76a40b4",
+      "sizeBytes": 15028
+    },
+    {
+      "fileName": "daemon-runtime-unavailable-red.log",
+      "id": "proof-023",
+      "role": "historical lazy runtime proof",
+      "sha256": "8268168931586794cb81e4620033e9f87d9e7aae4b566f6d62a14a6a61106e48",
+      "sizeBytes": 9242
+    },
+    {
+      "fileName": "daemon-pressure-order-registered-node-red.log",
+      "id": "proof-024",
+      "role": "historical lazy runtime proof",
+      "sha256": "25512ecdea830e79febd4627181031628ff5e5b7c66f287ff943ca9d2a720e36",
+      "sizeBytes": 4620
+    },
+    {
+      "fileName": "daemon-runtime-pressure-final-lint-exit.json",
+      "id": "proof-025",
+      "role": "historical lazy runtime proof",
+      "sha256": "f629ab3647a248f9979b2c98922983da42f06d8344f3456d09b6b4d9a05b4f13",
+      "sizeBytes": 402
+    },
+    {
+      "fileName": "daemon-runtime-pressure-final-docs-exit.json",
+      "id": "proof-026",
+      "role": "historical lazy runtime proof",
+      "sha256": "616fc12b40382462aa25f67adc643566cb430c4df85272f1e9d655b245fd8548",
+      "sizeBytes": 282
+    },
+    {
+      "fileName": "daemon-runtime-review-r3.json",
+      "id": "proof-027",
+      "role": "historical lazy runtime proof",
+      "sha256": "04e01c7d1db665b946b20604a152e8656e14f48a725b61e5bb8b3a045a136ee1",
+      "sizeBytes": 16512
+    },
+    {
+      "fileName": "local-verification.json",
+      "id": "proof-028",
+      "role": "historical SDK summary",
+      "sha256": "e21ce36ade923ce6a5d0a46b86a4b41775383925e0b36fa57ae6e2604c755d42",
+      "sizeBytes": 5039
+    },
+    {
+      "fileName": "independent-review.json",
+      "id": "proof-029",
+      "role": "historical SDK review",
+      "sha256": "e4b6830a5cbcec1cf09b917b90d7286f904ac89d5f0308605738a97003d07b39",
+      "sizeBytes": 12399
+    },
+    {
+      "fileName": "green-r1-receipt.json",
+      "id": "proof-030",
+      "role": "historical SDK execution receipt",
+      "sha256": "06650a4c3b873f6349218fd0159b47aa9648b75b6856e064b175cbaf3cc96ab3",
+      "sizeBytes": 649
+    },
+    {
+      "fileName": "green-r1.log",
+      "id": "proof-031",
+      "role": "historical SDK raw log",
+      "sha256": "8d82ecd6ff3d86391fb1bf26b1367f28b79f8810f6d00a350fae609bbe38c1e5",
+      "sizeBytes": 33486
+    },
+    {
+      "fileName": "python-r1-receipt.json",
+      "id": "proof-032",
+      "role": "historical SDK execution receipt",
+      "sha256": "ce2e22bde2ab96928e5a021e79464391ab758770dc79f4804b2774e3aff460f4",
+      "sizeBytes": 395
+    },
+    {
+      "fileName": "python-r1.log",
+      "id": "proof-033",
+      "role": "historical SDK raw log",
+      "sha256": "0fe284a9e85129653044939ef7203b50e390a977225aaaa72fbf37c4009ee8ec",
+      "sizeBytes": 133
+    },
+    {
+      "fileName": "root-verification.json",
+      "id": "proof-034",
+      "role": "signal lifetime root review",
+      "sha256": "c6b7d890c67159b47af6884b484e33a054bf600b290cd9df0cacf0365f4c3a85",
+      "sizeBytes": 1410
+    },
+    {
+      "fileName": "independent-lifetime-review.json",
+      "id": "proof-035",
+      "role": "signal lifetime independent review",
+      "sha256": "e287196f0347ef70b5a53a768790cf878c202382904518d61522a0906879181b",
+      "sizeBytes": 2149
+    },
+    {
+      "fileName": "daemon-tests-receipt.json",
+      "id": "proof-036",
+      "role": "historical daemon execution receipt",
+      "sha256": "d2822d6baed7fe8f6057c6028163cdc663a1d4a8274d7a1dc63eef48bd5ea2b2",
+      "sizeBytes": 533
+    },
+    {
+      "fileName": "daemon-tests.log",
+      "id": "proof-037",
+      "role": "historical daemon raw log",
+      "sha256": "5b69327bc6dab164df1a1722438bb27a89ffd211b5f6d531f83f74436725afdd",
+      "sizeBytes": 88781
+    },
+    {
+      "fileName": "semantic-receipt.json",
+      "id": "proof-038",
+      "role": "actual production optimized semantic proof",
+      "sha256": "0c755f983306bdae5ecc20cd9e85c13f626a2ef1ca26988b72f0c004f2c0ea3e",
+      "sizeBytes": 39143
+    },
+    {
+      "fileName": "compile-result.json",
+      "id": "proof-039",
+      "role": "optimized compiler raw result",
+      "sha256": "d2ae1e79e03242862632945d65ecc0e67c0ccbf6d1c404a518b852c54b91e9fb",
+      "sizeBytes": 4890
+    },
+    {
+      "fileName": "HostwrightDaemon.sil",
+      "id": "proof-040",
+      "role": "green actual optimized optimizedSIL",
+      "sha256": "2f4c93003be345d5d417902c36d3d4cb6c9c6a9c4724684fea012934493eda45",
+      "sizeBytes": 24555344
+    },
+    {
+      "fileName": "Entrypoint-main.sil",
+      "id": "proof-041",
+      "role": "green actual optimized main",
+      "sha256": "a9ee9612a73bc228d3adc1393764f4efbd9f6c0985e1a1ddbebfb1a080fe1841",
+      "sizeBytes": 93639
+    },
+    {
+      "fileName": "Entrypoint-awaited-operation.sil",
+      "id": "proof-042",
+      "role": "green actual optimized actualAwaitedDaemonOperation",
+      "sha256": "7adee875b788e0a65f9b98c60ece2c3e8fbb55f9ae11370fc850f1c303427fdb",
+      "sizeBytes": 53662
+    },
+    {
+      "fileName": "HostwrightDaemon.sil",
+      "id": "proof-043",
+      "role": "red actual optimized optimizedSIL",
+      "sha256": "110962c66894d812456292656b9f58c31d10f85612718ff3b966a0956eb0f8d6",
+      "sizeBytes": 24599511
+    },
+    {
+      "fileName": "Entrypoint-main.sil",
+      "id": "proof-044",
+      "role": "red actual optimized main",
+      "sha256": "a1f380344312efe61e69a8c09cb24cb7533c02be32ce8a14c3e013f1df6e8c6a",
+      "sizeBytes": 100403
+    },
+    {
+      "fileName": "Entrypoint-awaited-operation.sil",
+      "id": "proof-045",
+      "role": "red actual optimized actualAwaitedDaemonOperation",
+      "sha256": "3dabc8acff8621caa6f6c7df994d687124fe5c2e5b372996ad6ca520abc0f2c3",
+      "sizeBytes": 60242
+    },
+    {
+      "fileName": "ci-summary.json",
+      "id": "proof-046",
+      "role": "actual premerge same-tree CI summary",
+      "sha256": "61f852243e4148857a8cc34ae532e7fd86369239cf1bd8821d5040cf5453923a",
+      "sizeBytes": 17967
+    },
+    {
+      "fileName": "result.json",
+      "id": "proof-047",
+      "role": "actual CI run/source/log receipt",
+      "sha256": "74bd10d94831e9b536b5e2e1fd2862d2f1abd8f51d932eabbb75409c3bded645",
+      "sizeBytes": 8176
+    },
+    {
+      "fileName": "watch-completed.json",
+      "id": "proof-048",
+      "role": "retained raw PR CI artifact",
+      "sha256": "bcd6e8f8c683c16d6b73af04356296867bdc8a57b835c9f7b531aa7ee64c0e9c",
+      "sizeBytes": 210
+    },
+    {
+      "fileName": "pr-final.json",
+      "id": "proof-049",
+      "role": "retained raw PR CI artifact",
+      "sha256": "c32a011c08fc498e6fd6a85466405885aef6e111290c741a747f7f345368cd7f",
+      "sizeBytes": 1753
+    },
+    {
+      "fileName": "run-37087143409-completed.json",
+      "id": "proof-050",
+      "role": "retained raw PR CI artifact",
+      "sha256": "4005196cd3c78f0f393e7579229e86b04e2417ebf54e8a5ad14617e8bc5fab57",
+      "sizeBytes": 12886
+    },
+    {
+      "fileName": "jobs-37087143409-completed.json",
+      "id": "proof-051",
+      "role": "retained raw PR CI artifact",
+      "sha256": "16884128365b144f4c1c0b403f7cb77d629a670abc1478d3037756214b03bb8b",
+      "sizeBytes": 5081
+    },
+    {
+      "fileName": "run-37087143494-completed.json",
+      "id": "proof-052",
+      "role": "retained raw PR CI artifact",
+      "sha256": "a4590aa34ce0315605686597a79f611c929d021ba158f9ecd1c89b6fab76f57b",
+      "sizeBytes": 12916
+    },
+    {
+      "fileName": "jobs-37087143494-completed.json",
+      "id": "proof-053",
+      "role": "retained raw PR CI artifact",
+      "sha256": "16a4d2f06b3f221abdc64e2c63254768b6b40b7566a95edd5dd8ce18f7566e93",
+      "sizeBytes": 1791
+    },
+    {
+      "fileName": "run-37087143519-completed.json",
+      "id": "proof-054",
+      "role": "retained raw PR CI artifact",
+      "sha256": "8eb5f611a581563e196debdd15a3832d6be2b5540626f3328f2d8bbada26c415",
+      "sizeBytes": 12918
+    },
+    {
+      "fileName": "jobs-37087143519-completed.json",
+      "id": "proof-055",
+      "role": "retained raw PR CI artifact",
+      "sha256": "eb4f2267c54b8b98b91cb532cf4a56d0528c6b49f354e58054b0d3ab7dde2254",
+      "sizeBytes": 2835
+    },
+    {
+      "fileName": "job-111099688360.log",
+      "id": "proof-056",
+      "role": "retained raw PR CI artifact",
+      "sha256": "345c0baf840a089de5a4888aa3c1f8e668fdb0a9f8dfa59cfefda2ef0983942f",
+      "sizeBytes": 72799
+    },
+    {
+      "fileName": "job-111099688545.log",
+      "id": "proof-057",
+      "role": "retained raw PR CI artifact",
+      "sha256": "ec99c9aaa61fc5d7a908f9ab6f558a5f00493bff1fe31d74e13f1486f57bccf1",
+      "sizeBytes": 2413101
+    },
+    {
+      "fileName": "job-111099688917.log",
+      "id": "proof-058",
+      "role": "retained raw PR CI artifact",
+      "sha256": "3b2565dde30aada206f9a7a735046b30c959bba84cacdfa954173b8d99a3454c",
+      "sizeBytes": 298286
+    },
+    {
+      "fileName": "job-111099689002.log",
+      "id": "proof-059",
+      "role": "retained raw PR CI artifact",
+      "sha256": "e58996a9ec8a82117f57f981d3dd067f0f52a831a95221c4275efd91658ddf99",
+      "sizeBytes": 17744
+    },
+    {
+      "fileName": "commit-591f44fec964410679326cb9a370da2c5ed10528.json",
+      "id": "proof-060",
+      "role": "retained raw PR CI artifact",
+      "sha256": "b7abcbc314c2b7729890be64a5fafa11fedbac9d7bd8f9f45fdab2b17925203c",
+      "sizeBytes": 1801
+    },
+    {
+      "fileName": "commit-d9989f2f019b5ae512f9a24236768716a4d161ea.json",
+      "id": "proof-061",
+      "role": "retained raw PR CI artifact",
+      "sha256": "cd611c4dab0e8a94aeafbfed70b95e920b0df3d2b678044854cb35e627137287",
+      "sizeBytes": 2670
+    },
+    {
+      "fileName": "receipt.json",
+      "id": "proof-062",
+      "role": "failed M actual SDK root evidence",
+      "sha256": "f8a806a789da495d28544a0cbf211e5394987bc7d0acb4e21f85640e34d8cef9",
+      "sizeBytes": 37455
+    },
+    {
+      "fileName": "receipt.json",
+      "id": "proof-063",
+      "role": "failed M actual shutdown evidence",
+      "sha256": "880435c989ca0a68ca6fe55bc64546099b1227a86f0cb029c883b18db02cc35a",
+      "sizeBytes": 15154
+    },
+    {
+      "fileName": "result.json",
+      "id": "actual-merge",
+      "role": "actual reviewed PR357 merge receipt",
+      "sha256": "a4bd335ae3ad56f0a4dcea3e31282c6af406c62529a60226405f485ddf370e18",
+      "sizeBytes": 627
+    },
+    {
+      "fileName": "intent.json",
+      "id": "merge-inputs",
+      "role": "exact reviewed merge input binding",
+      "sha256": "538dd36c2923f3046320d1299e80b14d3b8cd073ee692271e6b96084da9ce825",
+      "sizeBytes": 1539
+    },
+    {
+      "fileName": "release-chain-ci-bound.json",
+      "id": "proof-066",
+      "role": "original premerge proof bound to actual merge",
+      "sha256": "56479b90380b2efdb3aef5a0f13ea9da6eb57b58eb3df9391db9655279cfe71b",
+      "sizeBytes": 14550
+    },
+    {
+      "fileName": "merged-commit.stdout",
+      "id": "actual-merged-commit",
+      "role": "actual merged Git commit API response",
+      "sha256": "40da6fd0360d885460d16c60f811f5d561d92006a7b7d69dbfb7ad6e72b5fff1",
+      "sizeBytes": 2784
+    },
+    {
+      "fileName": "result.json",
+      "id": "build-alias-summary",
+      "role": "original same-tree product aliases receipt",
+      "sha256": "dbf8ddfad406a2adf669d692898b252f989d48d18db3d82bf02d47fc4d07c1ff",
+      "sizeBytes": 2165
+    },
+    {
+      "fileName": "source-inputs.json",
+      "id": "build591-source-inputs",
+      "role": "original build591 compiler source inputs",
+      "sha256": "83f63455d0181a799bdfebb1616639e6131b6edd5a1ec600f0988c25fb58237f",
+      "sizeBytes": 140689
+    },
+    {
+      "fileName": "hostwright-dist-alias.json",
+      "id": "alias-hostwright-dist",
+      "role": "actual merged N same-tree alias for hostwright-dist",
+      "sha256": "738e05dbd738ca5071b01480270c140292a2f5d83b7f0558f1d9451a4ea9486a",
+      "sizeBytes": 3360
+    },
+    {
+      "fileName": "hostwright-dist-receipt.json",
+      "id": "original-build-hostwright-dist",
+      "role": "original591 build receipt for hostwright-dist",
+      "sha256": "c61fd6bf0e7553e18e61e687626bd2f0885519627e056845d009d049d7e7985f",
+      "sizeBytes": 1641
+    },
+    {
+      "fileName": "hostwright-dist.log",
+      "id": "proof-072",
+      "role": "original591 build raw log for hostwright-dist",
+      "sha256": "cf08f87783c618d76705fc3584e914f6645bc2ebf3e52e6747c32f1eb47fce32",
+      "sizeBytes": 835
+    },
+    {
+      "fileName": "hostwright-runtime-conformance-alias.json",
+      "id": "alias-hostwright-runtime-conformance",
+      "role": "actual merged N same-tree alias for hostwright-runtime-conformance",
+      "sha256": "ca5e8b5f51a729ec23c55294aa13afd6568f29c84858bc5651d243e0373cfce2",
+      "sizeBytes": 3467
+    },
+    {
+      "fileName": "hostwright-runtime-conformance-receipt.json",
+      "id": "original-build-hostwright-runtime-conformance",
+      "role": "original591 build receipt for hostwright-runtime-conformance",
+      "sha256": "d507aeebea597d35610bc9fc8421e3985a501162bfe6f51c165024346bdcd6cc",
+      "sizeBytes": 1717
+    },
+    {
+      "fileName": "hostwright-runtime-conformance.log",
+      "id": "proof-075",
+      "role": "original591 build raw log for hostwright-runtime-conformance",
+      "sha256": "19a105ff0975cf45c9cf9fcf36c9c06b49b37406898a18e38b9cab8440f49b44",
+      "sizeBytes": 6333
+    },
+    {
+      "fileName": "diagnosis.json",
+      "id": "proof-076",
+      "role": "original unsigned reproducibility failure diagnosis.json",
+      "sha256": "60523fdeefe3f57532357cc9ac46f851401a6c8481e7f25cda8903580cbf1d8e",
+      "sizeBytes": 4769
+    },
+    {
+      "fileName": "jobs.json",
+      "id": "proof-077",
+      "role": "original unsigned reproducibility failure jobs.json",
+      "sha256": "edfb0171185cba9a89e152ba3b483586aa46e01c281e9fdf2f2b27255456f7f9",
+      "sizeBytes": 6041
+    },
+    {
+      "fileName": "run.json",
+      "id": "proof-078",
+      "role": "original unsigned reproducibility failure run.json",
+      "sha256": "e1ee58edebfef567ce8ded4061e169aeb65cebf1cf7993f78e02a33cd816fe45",
+      "sizeBytes": 12363
+    },
+    {
+      "fileName": "run.log",
+      "id": "proof-079",
+      "role": "original unsigned reproducibility failure run.log",
+      "sha256": "dfabb227f1e33eb5a0286a0337569e408069a310b136c029eb21f4f6cfaf6bd1",
+      "sizeBytes": 2958978
+    },
+    {
+      "fileName": "SHA256SUMS",
+      "id": "unsigned-failure-checksums",
+      "role": "original failure checksum manifest",
+      "sha256": "741828ebc81af00bbef2eb7ca4d950652460669a37b062f464d2f92d736dbaad",
+      "sizeBytes": 306
+    },
+    {
+      "fileName": "trusted-release-36969951719-repro-boundary-review.json",
+      "id": "repro-boundary-review",
+      "role": "prior repro read-only root-cause boundary review",
+      "sha256": "2973751fa22f873adbfc931240fe9b12a4b0b544ec9ed2507d435fb1fa1e003e",
+      "sizeBytes": 2575
+    },
+    {
+      "fileName": "comparison.json",
+      "id": "later-unsigned-pair",
+      "role": "later retained actual pair comparison",
+      "sha256": "63933a7862b5a2eb2d03351345dced28ad9dd7fc7b82094eb7d96155c7e24e79",
+      "sizeBytes": 2254
+    }
+  ],
+  "kind": "original-proof-checksum-identities",
+  "originalBytesPubliclyCopied": false,
+  "schemaVersion": 1
+}

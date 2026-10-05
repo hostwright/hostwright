@@ -274,6 +274,6 @@ Epic: [#283](https://github.com/hostwright/hostwright/issues/283) — required
 | `P15-C07` | [#277](https://github.com/hostwright/hostwright/issues/277) | Verify local backup, recovery and interruption handling | required | open |
 | `P15-C08` | [#278](https://github.com/hostwright/hostwright/issues/278) | Verify release upgrade lineage and rollback | required | open |
 | `P15-C09` | [#279](https://github.com/hostwright/hostwright/issues/279) | Execute local quickstarts and synchronize public documentation | required | open |
-| `P15-C10` | [#280](https://github.com/hostwright/hostwright/issues/280) | Document local release support and incident recovery | required | open |
+| `P15-C10` | [#280](https://github.com/hostwright/hostwright/issues/280) | Document local release support and incident recovery | required | closed: completed |
 | `P15-C11` | [#281](https://github.com/hostwright/hostwright/issues/281) | Publish and verify signed v0.0.2 local release artifacts | required | open |
 | `P15-C12` | [#282](https://github.com/hostwright/hostwright/issues/282) | Submit the unqualified Homebrew-core formula | deferred | closed: not planned |

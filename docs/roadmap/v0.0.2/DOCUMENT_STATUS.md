@@ -1,52 +1,23 @@
-# Documentation Status and Source of Truth
+# Documentation sources
 
-The v0.0.2 truth reset separates current contracts from immutable history. A file’s existence does not make every sentence a current support claim.
+Use these records for current behavior and release scope:
 
-## Current and Normative
+- `README.md` and `docs/reference/`: setup, commands, compatibility, and operation.
+- `docs/roadmap/v0.0.2/IMPLEMENTATION_PLAN.md`: accepted release scope and remaining gates.
+- `docs/roadmap/v0.0.2/issues.json`: issue identities, hierarchy, ownership, and dispositions.
+- `Sources/HostwrightCore/HostwrightIdentity.swift`, `ContractVersions.swift`, and `CapabilityCatalog.swift`: executable version and capability declarations.
+- `schemas/` and `contracts/v0.0.2/`: machine-readable contracts and fixtures.
+- `docs/release/RELEASE_PROCESS.md`: qualification, approval, and publication.
+- `docs/design/`: architecture and scope decisions, including ADRs 0015 and 0016.
 
-- `README.md`: current development entry point.
-- `docs/roadmap/v0.0.2/IMPLEMENTATION_PLAN.md`: scope, architecture, limitation register, phase sequence, evidence, SLOs, and fallbacks.
-- `docs/roadmap/v0.0.2/issues.json`: exhaustive issue identity, hierarchy, labels, milestone, and ownership.
-- `Sources/HostwrightCore/HostwrightIdentity.swift`: development and target release versions.
-- `Sources/HostwrightCore/ContractVersions.swift`: public contract versions.
-- `Sources/HostwrightCore/CapabilityCatalog.swift` and `hostwright capabilities --json`: exact build capability state.
-- `schemas/hostwright-yaml.schema.json`: executable manifest schema contract.
-- `schemas/hostwright-evidence.schema.json` and `docs/reference/testing-evidence.md`: evidence contract.
-- `docs/reference/install.md`, `compatibility.md`, `manifest.md`, `cli.md`, `local-paths.md`, and `security-safety.md`: current behavior and constraints.
-- `docs/release/RELEASE_PROCESS.md`: active v0.0.2 release ladder and gate.
-- ADRs 0007–0009 and 0015: v0.0.2 identity, saga, scope, and compatibility decisions.
+Resolve disagreements against the implementation and its tests before changing public claims. The website must match these references; see [website and documentation](../../architecture/documentation-site-public-education.md).
 
-When these disagree, executable contract tests and capability output expose the failure; the disagreement must be fixed before merge.
+## Retained history
 
-## Immutable Historical Release Material
+Superseded plans, implementation diaries, and session notes are available in Git history. They do not define current support. The test-suite disposition and deletion records under `docs/devlog/` retain the audit for ADR 0016.
 
-`docs/release/IMMUTABLE_RELEASES.json` records checksums for release-note artifacts whose original claims must not be rewritten. Current index/reference docs may annotate their status without editing the artifact.
+`docs/release/IMMUTABLE_RELEASES.json` protects the exact bytes of historical release notes. Preserve those files and published evidence. Current documentation may explain their status without changing the original record.
 
-The first locked artifact is `docs/release/v0.1.0-alpha.1-notes.md`. It is a historical candidate record, not the current target.
+## Checks
 
-## Historical but Editable for Annotation
-
-These records preserve why earlier work was built and what evidence existed, but their scope, “non-goal,” phase number, release target, and “deferred/rejected” language are superseded:
-
-- `docs/IMPLEMENTATION_PLAN.md`;
-- `docs/BUILD_STATUS.md` below its v0.0.2 banner;
-- `docs/requirements/REQUIREMENTS.md`, `ACCEPTANCE_MATRIX.md`, and `SOURCE_TRACEABILITY.md` until their IDs are migrated into the v0.0.2 workstreams;
-- `docs/devlog/` and `docs/learning/`;
-- earlier research and boundary documents under `docs/architecture/`;
-- distribution/beta readiness documents that describe the former phase program;
-- ADRs 0005 and 0006, now explicitly superseded.
-
-Historical files can still contain valuable implementation detail and tests may preserve exact phrases. They cannot override the active plan or make an unsupported feature a permanent non-goal.
-
-## Website Repository
-
-`hostwright/hostwright.dev` is a separate repository. CI checks it out independently, typechecks, builds, scans internal links, and verifies the v0.0.2 contract markers. Website presentation can differ, but version, installation, limitation, compatibility, and roadmap claims must agree with the current core sources above.
-
-## Enforcement
-
-- `scripts/check-current-truth.py` verifies release/contract values, Manifest v3 examples/schema, state schema v24, active docs, and immutable historical hashes.
-- `scripts/roadmap-governance.py` validates the 183-issue historical ledger, explicit required/deferred scope, and clean evidence or not-planned closure rules.
-- `scripts/check-docs.sh` validates current repository links and executes each checked-in quickstart manifest.
-- `.github/workflows/docs-site.yml` validates both repositories together.
-
-Changing a current contract requires code, golden tests, migration evidence, docs, capability output, and any affected website content in the same reviewed delivery sequence.
+`check-current-truth.py` validates versions, schema and evidence-class consistency, examples, and immutable hashes. `roadmap-governance.py` validates issue relationships and closure evidence. `check-docs.sh` checks links and executable manifest examples. Release qualification runs the documentation validators against a snapshot of the exact source commit.

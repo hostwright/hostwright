@@ -163,6 +163,7 @@ func makeDocumentationSnapshotRepository() throws -> URL {
     ]
     let paths = Set(try RepositoryTestInputs.trackedFiles(in: source).filter { path in
         prefixes.contains { path.hasPrefix($0) }
+            && FileManager.default.fileExists(atPath: source.appendingPathComponent(path).path)
     }).union(required)
     for path in paths.sorted() {
         let destination = root.appendingPathComponent(path)
@@ -1316,6 +1317,30 @@ final class ReleaseQualificationRegistryTests: XCTestCase {
             missingReceipt.blockers[0].detail,
             "committed license-policy receipts are missing for identities: yams"
         )
+    }
+
+    func testLicensePolicyLaneIgnoresOversizedUnselectedNotice() throws {
+        var fixture = try makeLicensePolicySnapshotFixture()
+        fixture.files["THIRD_PARTY_NOTICES"] = Data(
+            repeating: UInt8(ascii: "x"),
+            count: ReleaseQualificationLimits.maximumSourceFileBytes + 1
+        )
+        let execution = try licensePolicyLaneExecution(files: fixture.files)
+        XCTAssertEqual(execution.status, .passed)
+        XCTAssertTrue(execution.blockers.isEmpty)
+        XCTAssertTrue(execution.failures.isEmpty)
+    }
+
+    func testLicensePolicyLaneStillRefusesOversizedSelectedInput() throws {
+        var fixture = try makeLicensePolicySnapshotFixture()
+        fixture.files["Package.swift"] = Data(
+            repeating: UInt8(ascii: "x"),
+            count: ReleaseQualificationLimits.maximumSourceFileBytes + 1
+        )
+        let execution = try licensePolicyLaneExecution(files: fixture.files)
+        XCTAssertEqual(execution.status, .blocked)
+        XCTAssertEqual(execution.blockers.map(\.reason), [.outputLimitExceeded])
+        XCTAssertEqual(execution.commands.count, 1)
     }
 
     func testCommittedLicensePolicyPassesWithExactDirectReceipts() throws {

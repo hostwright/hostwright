@@ -171,15 +171,15 @@ Epic: [#219](https://github.com/hostwright/hostwright/issues/219) — required
 
 | Marker | Issue | Workstream | Release disposition | Recorded state |
 | --- | ---: | --- | --- | --- |
-| `P10-C01` | [#207](https://github.com/hostwright/hostwright/issues/207) | Qualify local resource admission and release | required | open |
-| `P10-C02` | [#208](https://github.com/hostwright/hostwright/issues/208) | Qualify single-host hard placement filters | required | open |
-| `P10-C03` | [#209](https://github.com/hostwright/hostwright/issues/209) | Qualify deterministic local resource packing | required | open |
+| `P10-C01` | [#207](https://github.com/hostwright/hostwright/issues/207) | Qualify local resource admission and release | required | closed: completed |
+| `P10-C02` | [#208](https://github.com/hostwright/hostwright/issues/208) | Qualify single-host hard placement filters | required | closed: completed |
+| `P10-C03` | [#209](https://github.com/hostwright/hostwright/issues/209) | Qualify deterministic local resource packing | required | closed: completed |
 | `P10-C04` | [#210](https://github.com/hostwright/hostwright/issues/210) | Implement dominant-resource fairness | deferred | closed: not planned |
 | `P10-C05` | [#211](https://github.com/hostwright/hostwright/issues/211) | Implement topology, affinity, and anti-affinity scoring | deferred | closed: not planned |
 | `P10-C06` | [#212](https://github.com/hostwright/hostwright/issues/212) | Implement priority, preemption, and disruption budgets | deferred | closed: not planned |
-| `P10-C07` | [#213](https://github.com/hostwright/hostwright/issues/213) | Qualify stable local placement | required | open |
-| `P10-C08` | [#214](https://github.com/hostwright/hostwright/issues/214) | Expose local admission and rejection explanations | required | open |
-| `P10-C09` | [#215](https://github.com/hostwright/hostwright/issues/215) | Qualify safe local pressure deferral | required | open |
+| `P10-C07` | [#213](https://github.com/hostwright/hostwright/issues/213) | Qualify stable local placement | required | closed: completed |
+| `P10-C08` | [#214](https://github.com/hostwright/hostwright/issues/214) | Expose local admission and rejection explanations | required | closed: completed |
+| `P10-C09` | [#215](https://github.com/hostwright/hostwright/issues/215) | Qualify safe local pressure deferral | required | closed: completed |
 | `P10-C10` | [#216](https://github.com/hostwright/hostwright/issues/216) | Implement Apple VM memory-reclamation strategy | deferred | closed: not planned |
 | `P10-C11` | [#217](https://github.com/hostwright/hostwright/issues/217) | Implement accelerator inventory and reservations | deferred | closed: not planned |
 | `P10-C12` | [#218](https://github.com/hostwright/hostwright/issues/218) | Implement the host-native Metal, Core ML, and MLX service | deferred | closed: not planned |
@@ -232,7 +232,7 @@ Epic: [#257](https://github.com/hostwright/hostwright/issues/257) — required
 | --- | ---: | --- | --- | --- |
 | `P13-C01` | [#248](https://github.com/hostwright/hostwright/issues/248) | Implement the version-negotiated Docker Engine API | deferred | closed: not planned |
 | `P13-C02` | [#249](https://github.com/hostwright/hostwright/issues/249) | Implement the authenticated local Docker socket and context | deferred | closed: not planned |
-| `P13-C03` | [#250](https://github.com/hostwright/hostwright/issues/250) | Ship the narrow Compose conversion and lifecycle workflow | required | open |
+| `P13-C03` | [#250](https://github.com/hostwright/hostwright/issues/250) | Ship the narrow Compose conversion and lifecycle workflow | required | closed: completed |
 | `P13-C04` | [#251](https://github.com/hostwright/hostwright/issues/251) | Implement supported Podman client compatibility | deferred | closed: not planned |
 | `P13-C05` | [#252](https://github.com/hostwright/hostwright/issues/252) | Pass Testcontainers Java, Go, Node, Python, and .NET matrices | deferred | closed: not planned |
 | `P13-C06` | [#253](https://github.com/hostwright/hostwright/issues/253) | Ship GitHub Actions integration | deferred | closed: not planned |
@@ -247,9 +247,9 @@ Epic: [#270](https://github.com/hostwright/hostwright/issues/270) — required
 | Marker | Issue | Workstream | Release disposition | Recorded state |
 | --- | ---: | --- | --- | --- |
 | `P14-C01` | [#258](https://github.com/hostwright/hostwright/issues/258) | Ship the signed local SwiftUI console and menu bar | required | closed: completed |
-| `P14-C02` | [#259](https://github.com/hostwright/hostwright/issues/259) | Add reviewed desktop up, down and restart | required | open |
-| `P14-C03` | [#260](https://github.com/hostwright/hostwright/issues/260) | Show local services, health, logs and events | required | open |
-| `P14-C04` | [#261](https://github.com/hostwright/hostwright/issues/261) | Verify accessibility of the local desktop workflows | required | open |
+| `P14-C02` | [#259](https://github.com/hostwright/hostwright/issues/259) | Add reviewed desktop up, down and restart | required | closed: completed |
+| `P14-C03` | [#260](https://github.com/hostwright/hostwright/issues/260) | Show local services, health, logs and events | required | closed: completed |
+| `P14-C04` | [#261](https://github.com/hostwright/hostwright/issues/261) | Verify accessibility of the local desktop workflows | required | closed: completed |
 | `P14-C05` | [#262](https://github.com/hostwright/hostwright/issues/262) | Verify signed desktop packaging and ownership contracts | required | closed: completed |
 | `P14-C06` | [#263](https://github.com/hostwright/hostwright/issues/263) | Implement team roles, approvals, and change workflow | deferred | closed: not planned |
 | `P14-C07` | [#264](https://github.com/hostwright/hostwright/issues/264) | Implement MDM deployment, managed policy, and compliance | deferred | closed: not planned |
@@ -267,10 +267,10 @@ Epic: [#283](https://github.com/hostwright/hostwright/issues/283) — required
 | --- | ---: | --- | --- | --- |
 | `P15-C01` | [#271](https://github.com/hostwright/hostwright/issues/271) | Freeze the supported local compatibility matrix | required | open |
 | `P15-C02` | [#272](https://github.com/hostwright/hostwright/issues/272) | Review shipped local security boundaries | required | open |
-| `P15-C03` | [#273](https://github.com/hostwright/hostwright/issues/273) | Run bounded fuzzing and retained corpus replay | required | open |
-| `P15-C04` | [#274](https://github.com/hostwright/hostwright/issues/274) | Run supported local sanitizer lanes | required | open |
+| `P15-C03` | [#273](https://github.com/hostwright/hostwright/issues/273) | Run bounded fuzzing and retained corpus replay | required | closed: completed |
+| `P15-C04` | [#274](https://github.com/hostwright/hostwright/issues/274) | Run supported local sanitizer lanes | required | closed: completed |
 | `P15-C05` | [#275](https://github.com/hostwright/hostwright/issues/275) | Complete release dependency and supply-chain checks | required | open |
-| `P15-C06` | [#276](https://github.com/hostwright/hostwright/issues/276) | Measure bounded single-Mac performance and stability | required | open |
+| `P15-C06` | [#276](https://github.com/hostwright/hostwright/issues/276) | Measure bounded single-Mac performance and stability | required | closed: completed |
 | `P15-C07` | [#277](https://github.com/hostwright/hostwright/issues/277) | Verify local backup, recovery and interruption handling | required | open |
 | `P15-C08` | [#278](https://github.com/hostwright/hostwright/issues/278) | Verify release upgrade lineage and rollback | required | open |
 | `P15-C09` | [#279](https://github.com/hostwright/hostwright/issues/279) | Execute local quickstarts and synchronize public documentation | required | open |

@@ -21,6 +21,7 @@ REQUIRED_GATES = {
     'secret-scan', 'license-policy-sbom', 'independent-review', 'desktop-accessibility',
     'compose-execution', 'provider-apple-container-1.0.0', 'provider-apple-container-1.1.0',
     'provider-containerization-0.35.0', 'single-host-soak',
+    'local-backup-recovery', 'public-education',
 }
 
 def digest(path):
@@ -47,7 +48,7 @@ def contained_digest(root, relative):
         raise ValueError('attachment escapes evidence directory')
     return digest(path)
 
-def load(path):
+def load(path, expected_sha256=None):
     def pairs(items):
         result = {}
         for key, value in items:
@@ -56,7 +57,12 @@ def load(path):
             result[key] = value
         return result
     digest(path)
-    return json.loads(path.read_text(), object_pairs_hook=pairs)
+    data = path.read_bytes()
+    if expected_sha256 is not None and hashlib.sha256(data).hexdigest() != expected_sha256:
+        raise ValueError('JSON changed between binding and parsing')
+    def invalid_constant(value):
+        raise ValueError('non-finite JSON value: ' + value)
+    return json.loads(data.decode('utf-8'), object_pairs_hook=pairs, parse_constant=invalid_constant)
 
 def version(value):
     if value == '0.0.2':

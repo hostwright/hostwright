@@ -1,6 +1,6 @@
 # Storage
 
-Hostwright manages persistent storage on one Mac through Storage Provider API v1 and current schema-v23 state, retaining the historical schema-v17 storage rows. The shipped provider ID is `hostwright-local`. It stores only Hostwright-owned data below:
+Hostwright manages persistent storage on one Mac through Storage Provider API v1 and current schema-v24 state, retaining the historical schema-v17 storage rows. The shipped provider ID is `hostwright-local`. It stores only Hostwright-owned data below:
 
 ```text
 ~/Library/Application Support/Hostwright/storage/providers/hostwright-local
@@ -119,7 +119,7 @@ Remote backup publishes one exact backup-scoped manifest and its encrypted chunk
 
 Deleting a backup removes only encrypted chunks no longer referenced by any remaining verified backup set. Unknown or malformed catalog entries fail cleanup closed instead of making an unreferenced-content assumption.
 
-Restore always targets a new volume identity. Hostwright verifies the complete backup before promotion, rechecks target ownership and fencing, and preserves the prior authoritative target until the new target is proven. It refuses in-place overwrite, source/target aliasing, changed evidence, or ambiguous effects.
+Restore requires a distinct target volume in the same project and project generation as the backup or snapshot. Provision the target through a manifest with a different volume name, then stop and remove its workload with the volume's `retain` policy before restoring. Hostwright verifies the complete backup before promotion, rechecks target ownership and fencing, and preserves the prior target until the restored data is proven. It refuses source/target aliasing, cross-project restore, changed evidence, or ambiguous effects.
 
 ## Capacity and Pressure
 
@@ -146,8 +146,8 @@ Recovery resumes only the persisted operation, authority, plan, and provider jou
 
 ## Control API and Provider Boundary
 
-The one-shot Control API v2 exposes the same non-interactive `volume` operations and validation as the CLI. It does not add a listener or alternate mutation path.
+The authenticated Control API 2.2 exposes the same non-interactive `volume` operations and validation as the CLI. Storage mutations use the same provider authority and confirmation checks.
 
 `hostwright-storage-helper` is the signed out-of-process boundary for provider requests. Frames are bounded and canonical; peer UID, process identity, executable signature, protocol version, capability digest, deadlines, request IDs, idempotency keys, and mutation context are verified. Revocation, replay, malformed frames, unsafe sockets, cancellation, crash, and helper replacement fail closed.
 
-Remote/shared volumes, network storage systems, multi-Mac attachment authority, Kubernetes CSI adapters, and unmanaged/global garbage collection are not Phase 06 capabilities.
+Remote/shared volumes, network storage systems, multi-Mac attachment authority, Kubernetes CSI adapters, and unmanaged/global garbage collection are outside the local release scope.

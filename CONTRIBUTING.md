@@ -1,57 +1,25 @@
 # Contributing
 
-Hostwright changes should be small, testable, and honest about runtime boundaries.
+Use the current [release plan](docs/roadmap/v0.0.2/IMPLEMENTATION_PLAN.md) and the issue's acceptance criteria to scope a change. The first release targets one Mac, local CLI and desktop operation, and narrow Compose import.
 
-## Ground Rules
-
-- Keep the first supported release local and single-host.
-- Use Swift and Swift Package Manager unless a design record approves another tool.
-- Keep dependencies minimal.
-- Add or update tests for changed behavior.
-- Do not add runtime mutation before dry-run planning and adapter boundaries exist.
-- Do not add destructive behavior without explicit confirmation design.
-- Do not add unsupported compatibility claims.
-- Do not add release artifacts, tags, GitHub Releases, website implementation, GUI code, cloud services, tunnels, DNS integration, Kubernetes/CRI/Docker API behavior, multi-host mutation, or accelerator support without a dedicated approved issue.
-- Keep docs changes tied to changed behavior, release truth, or the scoped research issue. Avoid broad roadmap wording churn.
-
-## Local Checks
+## Build and test
 
 ```bash
-swift build
-swift test list || swift test --list-tests
-swift test
-scripts/grep-orchard.sh .
-scripts/test.sh
-scripts/lint.sh
+swift build --jobs 1
+scripts/test.sh pr
+scripts/check-docs.sh
 ```
 
-## Runtime Boundaries
+`scripts/test.sh full` runs the full suite and integration checks. Expensive or attended checks also have `qualification distribution`, `qualification release`, and `qualification live` shards. Run the lanes relevant to the changed behavior; record unavailable or skipped environments as such. See [testing and evidence](docs/reference/testing-evidence.md) for release requirements.
 
-All runtime behavior must go through `RuntimeAdapter`. CLI, daemon, state, reconciler, and health modules must not shell out directly to Apple container or any other runtime.
+## Code changes
 
-SQLite access must stay inside `HostwrightState`. State writes require explicit state database paths; no hidden default user database path should be introduced.
+Follow the existing SwiftPM modules. Route runtime access through `RuntimeAdapter`, SQLite access through `HostwrightState`, and child processes through the reviewed process runner. Validate external inputs where they enter the system. Preserve ownership, confirmation, and recovery checks when changing mutations.
 
-## Issue Scope
+Keep fixes focused. Add regression coverage for defects and update command examples when behavior changes. Keep generated output, private state, local evidence, credentials, and personal notes outside commits.
 
-Before implementing a roadmap issue, read the issue body, `docs/IMPLEMENTATION_PLAN.md`, `docs/reference/limitations.md`, `docs/reference/security-safety.md`, and the relevant requirement/acceptance rows.
+## Pull requests
 
-Each PR should include:
+Describe the problem, the resulting behavior, and the checks run. Link the relevant issue and state any remaining limitation. Use `Refs #NN` while work is incomplete. A final roadmap closure requires `status:verification`, clean evidence, and `Closes #NN`; see the [release process](docs/release/RELEASE_PROCESS.md).
 
-- the issue reference or closing keyword;
-- a short summary of changed behavior;
-- explicit safety boundaries and non-goals;
-- tests and commands run;
-- risks and follow-ups.
-
-## Review Triggers
-
-Ask for maintainer review before changing:
-
-- dependencies, license, naming, release strategy, or public support claims;
-- runtime command construction, lifecycle mutation, cleanup, daemon behavior, state migrations, policy bypass, secret handling, diagnostics, or redaction;
-- distribution artifacts, signing, notarization, SBOM, provenance, installers, package channels, or release tags;
-- website, GUI, cloud, tunnel, DNS, external orchestrator, multi-host, or accelerator scope.
-
-## Fixtures And Local Material
-
-Keep local-only files, private source material, `.DS_Store`, `.build`, `site/`, and generated artifacts out of commits. Test fixtures should be small, reviewed, deterministic, and free of real secrets.
+Maintainer review covers changes to dependencies, public contracts, state migrations, secrets, runtime authority, destructive operations, and distribution. Changes to release scope or architecture belong in a short design record. See [governance](GOVERNANCE.md) for release authority and [the security policy](SECURITY.md) for private reporting.

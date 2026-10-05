@@ -5,7 +5,6 @@ public enum HostwrightContractVersions {
     public static let storageProviderAPI = 1
     public static let networkProviderSPI = 1
     public static let pluginABI = 1
-    // P09 owns schema 22; P10 appends scheduler and accelerator migrations as 23/24.
     public static let stateSchema = 24
 }
 

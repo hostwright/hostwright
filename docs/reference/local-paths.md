@@ -1,6 +1,6 @@
 # Local Paths, Permissions, and Legacy Migration
 
-Status: implemented for the `0.0.2-dev` single-Mac path, SQLite hardening, state maintenance, explicit-prefix distribution lifecycle, and exact per-user LaunchAgent lifecycle. Unattended reconciliation and release-wide soak qualification remain later gates.
+Status: implemented for the single-Mac path, SQLite hardening, state maintenance, explicit-prefix distribution lifecycle, exact per-user LaunchAgent lifecycle, and unattended local reconciliation. The current `0.0.2-rc.3` candidate requires exact-source recovery and release-wide soak qualification before promotion.
 
 ## Default Layout
 

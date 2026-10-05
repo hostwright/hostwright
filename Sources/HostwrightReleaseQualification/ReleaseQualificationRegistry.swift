@@ -809,8 +809,6 @@ public struct ReleaseQualificationLocalLaneRunner: Sendable {
         "Sources/HostwrightCore/HostwrightIdentity.swift",
         "contracts/v0.0.2/README.md",
         "contracts/v0.0.2/versions.json",
-        "docs/BUILD_STATUS.md",
-        "docs/IMPLEMENTATION_PLAN.md",
         "docs/architecture/documentation-site-public-education.md",
         "docs/architecture/plugin-extension-architecture.md",
         "docs/architecture/runtime-adapter.md",
@@ -824,10 +822,6 @@ public struct ReleaseQualificationLocalLaneRunner: Sendable {
         "docs/reference/manifest.md",
         "docs/release/IMMUTABLE_RELEASES.json",
         "docs/release/RELEASE_PROCESS.md",
-        "docs/release/beta-readiness.md",
-        "docs/requirements/ACCEPTANCE_MATRIX.md",
-        "docs/requirements/REQUIREMENTS.md",
-        "docs/requirements/SOURCE_TRACEABILITY.md",
         "docs/roadmap/v0.0.2/IMPLEMENTATION_PLAN.md",
         "docs/roadmap/v0.0.2/issues.json",
         "schemas/hostwright-evidence.schema.json",
@@ -1373,6 +1367,9 @@ public struct ReleaseQualificationLocalLaneRunner: Sendable {
         var objectSizes: [String: Int] = [:]
         var totalBytes = 0
         for entry in entries {
+            guard entry.size <= ReleaseQualificationLimits.maximumSourceFileBytes else {
+                throw ReleaseQualificationContractError.oversizedInput
+            }
             totalBytes += entry.size
             guard totalBytes <= ReleaseQualificationLimits.maximumSourceScanBytes else {
                 throw ReleaseQualificationContractError.oversizedInput
@@ -1652,7 +1649,7 @@ public struct ReleaseQualificationLocalLaneRunner: Sendable {
             switch (fields[0], fields[1]) {
             case ("100644", "blob"), ("100755", "blob"):
                 guard let size = Int(fields[3]),
-                      (0...ReleaseQualificationLimits.maximumSourceFileBytes).contains(size) else {
+                      size >= 0 else {
                     throw ReleaseQualificationContractError.tamperedEvidence
                 }
                 regularEntries.append(
@@ -1664,7 +1661,7 @@ public struct ReleaseQualificationLocalLaneRunner: Sendable {
                 )
             case ("120000", "blob"):
                 guard let size = Int(fields[3]),
-                      (0...ReleaseQualificationLimits.maximumSourceFileBytes).contains(size) else {
+                      size >= 0 else {
                     throw ReleaseQualificationContractError.tamperedEvidence
                 }
                 nonRegularPaths.append(path)

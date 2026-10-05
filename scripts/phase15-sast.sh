@@ -9,7 +9,17 @@ case "$evidence_root" in
 esac
 
 source_commit="$(git -C "$repository_root" rev-parse HEAD)"
-mkdir -p "$evidence_root"
+test -z "$(git -C "$repository_root" status --porcelain=v1 --untracked-files=all)"
+python3 - "$repository_root" "$evidence_root" <<'PY'
+import pathlib
+import sys
+source = pathlib.Path(sys.argv[1]).resolve()
+evidence = pathlib.Path(sys.argv[2])
+if evidence.is_symlink() or evidence.exists() or source == evidence.resolve() or source in evidence.resolve().parents:
+    raise SystemExit('SAST requires a new evidence directory outside the clean checkout')
+evidence.mkdir(mode=0o700, parents=True)
+PY
+semgrep_version="$(semgrep --version)"
 
 semgrep scan \
     --config "$repository_root/contracts/v0.0.2/security/semgrep-hostwright.yml" \
@@ -18,17 +28,24 @@ semgrep scan \
     --json \
     --output "$evidence_root/semgrep.json" \
     "$repository_root/Sources" "$repository_root/scripts" \
-    2>"$evidence_root/semgrep.stderr.log"
+    >"$evidence_root/semgrep.stdout.log" 2>"$evidence_root/semgrep.stderr.log"
 
-python3 - "$evidence_root" "$source_commit" "$(semgrep --version)" <<'PY'
+python3 - "$evidence_root" "$source_commit" "$semgrep_version" "$repository_root" <<'PY'
 import hashlib
 import json
 import pathlib
+import subprocess
 import sys
 
 root = pathlib.Path(sys.argv[1])
 commit = sys.argv[2]
-version = sys.argv[3]
+semgrep_version = sys.argv[3]
+source = pathlib.Path(sys.argv[4])
+if (subprocess.check_output(['git', '-C', str(source), 'rev-parse', 'HEAD'], text=True).strip() != commit
+        or subprocess.check_output(['git', '-C', str(source), 'status', '--porcelain=v1', '--untracked-files=all'], text=True).strip()
+        or subprocess.check_output(['semgrep', '--version'], text=True).strip() != semgrep_version):
+    raise SystemExit('source or scanner changed during SAST qualification')
+version = json.loads((source / 'contracts/v0.0.2/versions.json').read_text())['productVersion']
 result_path = root / "semgrep.json"
 result_bytes = result_path.read_bytes()
 results = json.loads(result_bytes)
@@ -45,7 +62,14 @@ receipt = {
     "schemaVersion": 1,
     "status": "passed",
     "sourceCommit": commit,
-    "semgrepVersion": version,
+    "version": version,
+    "executionMode": "real",
+    "sourceCleanBefore": True,
+    "sourceCleanAfter": True,
+    "blockers": [],
+    "failures": [],
+    "semgrepVersion": semgrep_version,
+    "attachments": {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in root.iterdir() if p.is_file()},
     "findingCount": 0,
     "warningCount": len(errors),
     "warningTypes": sorted({

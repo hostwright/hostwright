@@ -1573,7 +1573,7 @@ struct StorageCommandRunner {
             let volume = try await requireVolume(volumeID, client: client)
             let store = try storageStore()
             let state = StorageStateRepository(store: store)
-            _ = try requireStateVolume(volume, state: state)
+            let stateVolume = try requireStateVolume(volume, store: store)
             let plan = planSHA256(
                 "snapshot-create",
                 [volumeID, snapshotID, name]
@@ -1581,7 +1581,7 @@ struct StorageCommandRunner {
             let group = try acquireDataProtectionGroup(
                 operation: "snapshot-create",
                 resourceID: snapshotID,
-                projectID: volume.projectID,
+                projectID: stateVolume.projectID,
                 planSHA256: plan,
                 store: store
             )
@@ -1723,7 +1723,7 @@ struct StorageCommandRunner {
                 volumeID,
                 client: client
             )
-            _ = try requireStateVolume(volume, state: state)
+            let stateVolume = try requireStateVolume(volume, store: store)
             let plan = planSHA256(
                 "snapshot-retain",
                 [snapshotID, volumeID, owner, digest]
@@ -1731,7 +1731,7 @@ struct StorageCommandRunner {
             let group = try acquireDataProtectionGroup(
                 operation: "snapshot-retain",
                 resourceID: snapshotID,
-                projectID: volume.projectID,
+                projectID: stateVolume.projectID,
                 planSHA256: plan,
                 store: store
             )
@@ -1797,7 +1797,7 @@ struct StorageCommandRunner {
                 volumeID,
                 client: client
             )
-            _ = try requireStateVolume(volume, state: state)
+            let stateVolume = try requireStateVolume(volume, store: store)
             let plan = planSHA256(
                 "snapshot-export",
                 [snapshotID, volumeID, digest, outputPath]
@@ -1805,7 +1805,7 @@ struct StorageCommandRunner {
             let group = try acquireDataProtectionGroup(
                 operation: "snapshot-export",
                 resourceID: snapshotID,
-                projectID: volume.projectID,
+                projectID: stateVolume.projectID,
                 planSHA256: plan,
                 store: store
             )
@@ -1876,7 +1876,7 @@ struct StorageCommandRunner {
                 volumeID,
                 client: client
             )
-            _ = try requireStateVolume(volume, state: state)
+            let stateVolume = try requireStateVolume(volume, store: store)
             let plan = planSHA256(
                 "snapshot-delete",
                 [
@@ -1899,7 +1899,7 @@ struct StorageCommandRunner {
             let group = try acquireDataProtectionGroup(
                 operation: "snapshot-delete",
                 resourceID: snapshotID,
-                projectID: volume.projectID,
+                projectID: stateVolume.projectID,
                 planSHA256: plan,
                 store: store
             )
@@ -1968,7 +1968,7 @@ struct StorageCommandRunner {
             let store = try storageStore()
             let state = StorageStateRepository(store: store)
             for volume in volumes {
-                _ = try requireStateVolume(volume, state: state)
+                _ = try requireStateVolume(volume, store: store)
             }
             let plan = planSHA256(
                 "backup-create",
@@ -1985,7 +1985,9 @@ struct StorageCommandRunner {
             let group = try acquireDataProtectionGroup(
                 operation: "backup-create",
                 resourceID: backupID,
-                projectID: first.projectID,
+                projectID: try requireStateVolume(
+                    first, store: store
+                ).projectID,
                 planSHA256: plan,
                 store: store
             )
@@ -2209,7 +2211,9 @@ struct StorageCommandRunner {
             let group = try acquireDataProtectionGroup(
                 operation: "backup-verify",
                 resourceID: backupID,
-                projectID: volumes[0].projectID,
+                projectID: try requireStateVolume(
+                    volumes[0], store: store
+                ).projectID,
                 planSHA256: plan,
                 store: store
             )
@@ -2292,7 +2296,9 @@ struct StorageCommandRunner {
             let group = try acquireDataProtectionGroup(
                 operation: "backup-retain",
                 resourceID: backupID,
-                projectID: volumes[0].projectID,
+                projectID: try requireStateVolume(
+                    volumes[0], store: store
+                ).projectID,
                 planSHA256: plan,
                 store: store
             )
@@ -2398,7 +2404,9 @@ struct StorageCommandRunner {
             let group = try acquireDataProtectionGroup(
                 operation: "backup-delete",
                 resourceID: backupID,
-                projectID: volumes[0].projectID,
+                projectID: try requireStateVolume(
+                    volumes[0], store: store
+                ).projectID,
                 planSHA256: plan,
                 store: store
             )
@@ -2485,8 +2493,9 @@ struct StorageCommandRunner {
 
     private func requireStateVolume(
         _ observed: LocalStorageVolumeObservation,
-        state: StorageStateRepository
+        store: SQLiteStateStore
     ) throws -> StorageStateVolumeRecord {
+        let state = StorageStateRepository(store: store)
         guard let record = try state.loadVolume(
             id: observed.volumeID
         ),
@@ -2494,7 +2503,9 @@ struct StorageCommandRunner {
         record.providerVolumeID == observed.volumeID,
         record.generation == Int64(observed.generation),
         record.fencingToken == observed.fencingToken,
-        record.lifecycleState == .available else {
+        record.lifecycleState == .available,
+        try store.desiredStates.loadProject(id: record.projectID)
+            .resourceUUID == observed.projectID else {
             throw diagnostic(
                 .storageConflict,
                 "Provider volume ownership does not match authoritative schema-v15 state."
@@ -2577,7 +2588,7 @@ struct StorageCommandRunner {
             client: client
         )
         for volume in observed {
-            _ = try requireStateVolume(volume, state: state)
+            _ = try requireStateVolume(volume, store: store)
         }
         return observed
     }
@@ -2995,7 +3006,8 @@ struct StorageCommandRunner {
         )
         if let existing = try store.operationGroups.load(id: id) {
             guard existing.planHash == planSHA256,
-                  existing.fencingToken == fence else {
+                  existing.fencingToken == fence,
+                  existing.projectID == projectID else {
                 throw diagnostic(
                     .storageConflict,
                     "Existing data-protection operation has different authority."

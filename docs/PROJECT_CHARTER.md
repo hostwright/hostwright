@@ -1,22 +1,5 @@
-# Hostwright Project Charter
+# Project scope
 
-Hostwright is a Mac-native desired-state control plane for Apple container workloads.
+Hostwright manages container workloads on one Apple silicon Mac. The first release covers the CLI, local CPU/memory admission, narrow Compose import, and a native desktop console. [ADR 0015](design/adr-0015-reduced-local-release.md) records that scope and its deferrals.
 
-The first supported release is intentionally narrow: one local Apple silicon Mac, macOS 26+, Apple container workloads, and a conservative control-plane foundation. Phase 40 keeps current core on the single-host path; Kubernetes-class, CRI, cloud, multi-host, remote-placement, and accelerator-aware platform work require separate approval and proof.
-
-## Product Boundary
-
-Hostwright should:
-
-- read and validate `hostwright.yaml`;
-- store desired state locally;
-- observe runtime state through a `RuntimeAdapter`;
-- compute drift and planned actions before mutation;
-- expose health, status, events, and logs interfaces;
-- fail clearly when platform or runtime assumptions are not met.
-
-Hostwright should not present itself as a cluster orchestrator, compatibility shim, cloud control plane, multi-host platform, accelerator scheduler, web dashboard, or production hosting platform.
-
-## Engineering Boundary
-
-Swift and Swift Package Manager are the default implementation path. Runtime operations are isolated behind adapter and process-execution boundaries. Destructive operations require dry-run and confirmation design before they exist.
+Runtime providers isolate Apple container access. SQLite stores local intent, ownership, and recovery records. Mutations require reviewed plans, current authority, and verified outcomes. The [release plan](roadmap/v0.0.2/IMPLEMENTATION_PLAN.md) and [compatibility matrix](reference/compatibility.md) define the remaining qualification requirements.

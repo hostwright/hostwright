@@ -2,7 +2,9 @@
 
 For database incidents, follow the [local state recovery runbook](local-recovery.md) before collecting a new bundle. Bundle recovery below applies to bundle file effects, while state recovery handles interrupted database maintenance.
 
-Phase 08 Gate 15 adds a schema-v1, local-only support-bundle workflow under `hostwright diagnostics support` over the current schema-v24 state database. It preserves the earlier `hostwright diagnostics --bundle <path>` diagnostics-v1 export. Support bundles add preview and confirmation, optional macOS CMS encryption, durable file-effect recovery, retained ownership evidence, and receipt-proven exact deletion. They add no listener, uploader, hosted support service, credential-store reader, state migration, or Phase 09 API.
+`hostwright diagnostics support` collects a bounded local bundle from an existing schema-v24 database. Preview and confirmation control collection. Optional macOS CMS encryption protects the output; retained receipts support recovery and exact deletion. The separate `hostwright diagnostics --bundle <path>` command retains its diagnostics-v1 format.
+
+Confirmation authorizes local collection only. Inspect the bundle and choose a recipient and private channel before sharing it. Follow [the security reporting policy](../../SECURITY.md) for sensitive reports. Hostwright does not upload bundles or delete them automatically.
 
 ## Preview and create
 
@@ -53,6 +55,7 @@ To encrypt before anything reaches disk, provide a non-secret Keychain certifica
 hostwright diagnostics support create \
   --state-db /absolute/private/state.sqlite \
   --output-path /absolute/private/new-support-v1.cms \
+  --manifest /absolute/private/hostwright.yaml \
   --confirm-preview <previewSHA256> \
   --encrypt-recipient support-recipient@example.test \
   --output json

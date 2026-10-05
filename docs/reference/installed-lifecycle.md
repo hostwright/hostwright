@@ -1,6 +1,6 @@
 # Installed Distribution Lifecycle
 
-Status: implemented and qualified in `0.0.2-dev` for an explicit local install prefix and a verifier-produced trusted, developer, or staged Apple Installer artifact. The vendor tap, signed `.pkg`, and public qualification artifacts passed signing, publication, and clean-Mac evidence. They remain unsupported prerelease channels, not `v0.0.2` GA.
+Status: implemented for an explicit local install prefix and a verifier-produced trusted, developer, or staged Apple Installer artifact. Historical development artifacts retain their original signing, publication, and clean-Mac evidence. The current `0.0.2-rc.3` candidate still requires its complete signed VM lifecycle and protected qualification acceptance. Published development channels remain unsupported; no supported RC or `v0.0.2` GA has been published.
 
 ## Boundary
 
@@ -8,15 +8,7 @@ Status: implemented and qualified in `0.0.2-dev` for an explicit local install p
 
 The operator supplies an existing, normalized, absolute `--prefix`. The prefix must be a real non-symlink directory, owned by root or the invoking user, and not writable by group or other users. `/`, `/System`, `/Library`, `/usr`, `/bin`, and `/sbin` are refused. Hostwright does not choose or create an implicit system prefix.
 
-The schema-2 ownership manifest records exactly these payload files and their digest, size, and mode:
-
-- `bin/hostwright`
-- `bin/hostwright-control`
-- `bin/hostwright-dist`
-- `bin/hostwrightd`
-- `share/hostwright/examples/hostwright.yaml`
-- `share/doc/hostwright/LICENSE`
-- `share/doc/hostwright/README.md`
+The verified artifact and installation manifests define the exact payload inventory, including each file's digest, size, and mode. Current artifacts use schema 3 and installation ownership uses schema 4. Payloads include the CLI, daemon, desktop app, required helpers, runtime assets, examples, and license notices. Earlier schemas remain subject to their documented compatibility rules.
 
 Installed lifecycle metadata is private to the prefix:
 
@@ -54,6 +46,8 @@ Installed lifecycle commands currently require `--output json`.
 An Apple Installer package uses a narrower bridge into the same lifecycle. Its payload is installed only into the private root-owned `/Library/Application Support/Hostwright/InstallerPayload` staging directory. The package `postinstall` runs `hostwright-dist package-apply`, which requires elevated authority and exact `/usr/local`, verifies the `dev.hostwright.cli` receipt and version, the complete staged manifest and file digests, root ownership and modes, and Developer ID Application signatures from the exact Team ID embedded by the trusted release build before mutation. It then selects only `install`, a strictly newer `upgrade`, or an exact-version-and-commit `repair`; downgrade and same-version/different-commit candidates are refused.
 
 ## Commands
+
+Before upgrading an installation with bound state, follow [prepared owner state and one-generation rollback](#prepared-owner-state-and-one-generation-rollback). A bare `--state-db` argument does not replace the required owner-state preparation and signature binding.
 
 ```bash
 hostwright-dist install <artifact-source> --prefix <path> [--state-db <absolute-path>] --output json

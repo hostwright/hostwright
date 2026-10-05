@@ -383,13 +383,13 @@ hostwright state compact hostwright.yaml --dry-run --json
 hostwright state compact hostwright.yaml --confirm-compact <confirmationToken> --json
 ```
 
-`state retention` is read-only. Its schema-v1 report lists all ten declared classes, producer availability, current/candidate/held/recovery-critical counts, bounded candidate identity digests, database pressure, blockers, and any pending compaction plan. Metrics report `producerAvailable: true` with zero separate sample records because they project retained authoritative rows. Logs, traces, and support evidence remain zero with `producerAvailable: false` until their owning Phase 08 gates exist; Hostwright does not fabricate them.
+`state retention` is read-only. Its schema-v1 report lists all ten declared classes, producer availability, current/candidate/held/recovery-critical counts, bounded candidate identity digests, database pressure, blockers, and any pending compaction plan. Metrics project retained authoritative rows rather than separate sample records. Use each class's reported availability and counts; support-bundle receipts have their own retention class, separate from events, audits, and traces.
 
 `state compact --dry-run` deterministically applies age, count, recovery-horizon, minimum-record, and exact hold rules. Confirmation binds the policy, current database, complete non-backup safety counts, exact candidate identities, and blockers. Execution first creates a verified private online backup, revalidates under the exclusive state fence, records a strict private journal, deletes database candidates in one transaction, atomically stages exact catalog deletions, compacts free pages, and reruns complete integrity checks. Eligible operation history includes terminal unreferenced ledger rows and only succeeded unreferenced operation groups; the latter removes its exact child steps in the same transaction. Every durable and torn-commit checkpoint resumes only with the same exact token. Missing, referenced, active, interrupted, failed, ambiguous, held, future-dated, finalizer-incomplete, or identity-changed records remain untouched.
 
 Retention never calls the Apple runtime, a native/global prune, or wildcard deletion. A pressure hold means the already-eligible safe candidates cannot prove the configured target; it does not shorten recovery or bypass ownership, finalizers, leases, foreign keys, or holds.
 
-Do not confuse `hostwright state recover` with `hostwright recovery`: the former repairs the state-database maintenance saga; the latter is read-only inspection of workload operation recovery records.
+`hostwright state recover` resolves interrupted database maintenance. `hostwright recovery` inspects workload operation records; its confirmed `resume` and `rollback` subcommands can execute the persisted operation's recovery actions.
 
 ## `hostwright migrate preview <path> [--json | --output text|json]`
 

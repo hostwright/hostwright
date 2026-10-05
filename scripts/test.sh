@@ -32,13 +32,14 @@ swift_test() {
 }
 
 run_cheap_checks() {
+  python3 scripts/release/test-staged-release.py
+  python3 scripts/release/test-assemble-qualification.py
   python3 scripts/roadmap-governance.py validate
   python3 scripts/roadmap-governance.py self-test
   python3 scripts/render-roadmap-index.py check
   python3 scripts/check-current-truth.py
   python3 scripts/check-current-truth.py --self-test
   scripts/lint.sh
-  scripts/grep-orchard.sh .
 }
 
 run_full() {

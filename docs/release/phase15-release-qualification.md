@@ -92,6 +92,11 @@ The deliberately small accepted SPDX expression set is `Apache-2.0`, `BSD-2-Clau
 
 ## Focused verification
 
+Final promotion additionally requires the real local backup/recovery and public
+education receipts and the complete signed VM matrix. The checked export assembler
+validates raw receipts without synthesizing results; see
+[release promotion](../reference/release-promotion.md#assemble-the-private-export).
+
 The narrow local check is:
 
 ```bash
@@ -111,3 +116,7 @@ scripts/phase15-critical-fuzz.sh
 The executable also supports deterministic corpus replay without libFuzzer. Set `HOSTWRIGHT_FUZZ_TARGET` to one frozen target and pass one or more corpus files to `hostwright-critical-fuzzer`.
 
 Remaining Phase 15 gates follow the [accepted local release scope](../design/adr-0015-reduced-local-release.md): ten lifecycle cycles per supported provider, one checkpointed 30-minute physical-host soak, five minutes of fuzzing per shipped critical parser/protocol with retained corpus replay, supported sanitizers, and one clean release candidate with independent signed-artifact lifecycle verification. Qualification uses one physical M4 Pro Mac and one macOS VM, alongside the required security, recovery, signing/notarization and provenance evidence. Multi-Mac qualification and Homebrew-core submission are deferred.
+
+The [retained RC.2 object variance assessment](rc2-object-variance-assessment.md)
+preserves its original build identity and limits. It provides no qualification
+for the current candidate or final-version bytes.

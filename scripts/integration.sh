@@ -31,7 +31,7 @@ if [[ ! -x "$hostwright_control" ]]; then
 fi
 
 workdir="$(mktemp -d "${TMPDIR:-/tmp}/hostwright-integration.XXXXXX")"
-workdir="$(cd "$workdir" && pwd -P)"
+workdir="$(swift -e 'import Foundation; print(URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true).resolvingSymlinksInPath().path)' "$workdir")"
 manifest="$workdir/hostwright.yaml"
 plan_json="$workdir/plan.json"
 status_json="$workdir/status.json"
@@ -48,6 +48,7 @@ state_database="$state_directory/state.sqlite"
 state_digest="$(printf '%s' "$state_database" | shasum -a 256 | awk '{print substr($1, 1, 16)}')"
 state_access_lock="$state_directory/.hostwright-$state_digest-access-v1.lock"
 state_writer_lock="$state_access_lock.writer"
+state_service_lock="$state_access_lock.service"
 state_maintenance_journal="$state_directory/.hostwright-$state_digest-maintenance-v1.json"
 state_backups="$state_directory/.hostwright-$state_digest-backups"
 state_integrity_json="$workdir/state-integrity.json"
@@ -83,7 +84,7 @@ cleanup() {
   trap - EXIT
   set +e
   chmod 700 "$readonly_dir" 2>/dev/null
-  rm -f "$manifest" "$plan_json" "$status_json" "$doctor_json" "$doctor_state_json" "$default_paths_json" "$paths_before_json" "$paths_after_json" "$state_integrity_json" "$state_backup_json" "$state_catalog_json" "$state_restore_plan_json" "$state_restore_result_json" "$state_recovery_json" "$team_profile" "$team_plan_json" "$stack_file" "$team_import_json" "$invalid_profile" "$overwrite_stdout" "$overwrite_stderr" "$missing_stdout" "$missing_stderr" "$benchmark_existing_report" "$benchmark_absent_report" "$unexpected_distribution_report" "$extension_fixture" "$extension_declaration" "$extension_failure_declaration" "$extension_json" "$control_request" "$control_response" "$control_rejected_request" "$control_rejected_response" "$readonly_dir/hostwright.yaml" "$state_database" "$state_database-wal" "$state_database-shm" "$state_database-journal" "$state_access_lock" "$state_writer_lock" "$state_maintenance_journal"
+  rm -f "$manifest" "$plan_json" "$status_json" "$doctor_json" "$doctor_state_json" "$default_paths_json" "$paths_before_json" "$paths_after_json" "$state_integrity_json" "$state_backup_json" "$state_catalog_json" "$state_restore_plan_json" "$state_restore_result_json" "$state_recovery_json" "$team_profile" "$team_plan_json" "$stack_file" "$team_import_json" "$invalid_profile" "$overwrite_stdout" "$overwrite_stderr" "$missing_stdout" "$missing_stderr" "$benchmark_existing_report" "$benchmark_absent_report" "$unexpected_distribution_report" "$extension_fixture" "$extension_declaration" "$extension_failure_declaration" "$extension_json" "$control_request" "$control_response" "$control_rejected_request" "$control_rejected_response" "$readonly_dir/hostwright.yaml" "$state_database" "$state_database-wal" "$state_database-shm" "$state_database-journal" "$state_access_lock" "$state_writer_lock" "$state_service_lock" "$state_maintenance_journal"
   if [[ -d "$state_backups" ]]; then
     shopt -s nullglob
     for backup_directory in "$state_backups"/backup-*; do
@@ -95,7 +96,9 @@ cleanup() {
   fi
   rmdir "$readonly_dir" 2>/dev/null
   rmdir "$state_directory" 2>/dev/null
-  rmdir "$workdir"
+  if ! rmdir "$workdir"; then
+    [[ "$exit_code" -ne 0 ]] || exit_code=1
+  fi
   exit "$exit_code"
 }
 trap cleanup EXIT

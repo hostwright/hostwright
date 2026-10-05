@@ -44,6 +44,9 @@ class VendorTapContracts(unittest.TestCase):
             for name in NAMES:
                 file=directory/'payload/bin'/name;file.parent.mkdir(parents=True,exist_ok=True)
                 file.write_bytes(('unit fixture '+role+' '+name).encode());files.append({'path':'bin/'+name,'sha256':sha(file)})
+            for relative in ['share/hostwright/examples/hostwright.yaml','share/doc/hostwright/LICENSE','share/doc/hostwright/README.md'] + ([] if version in ('0.0.2-dev.11','0.0.2-dev.12') else ['libexec/hostwright/Hostwright.app/Contents/MacOS/hostwright-desktop','libexec/hostwright/Hostwright.app/Contents/Info.plist','libexec/hostwright/Hostwright.app/Contents/_CodeSignature/CodeResources','share/doc/hostwright/THIRD_PARTY_NOTICES.txt','share/hostwright/containerization/vminit/index.json']):
+                file=directory/'payload'/relative;file.parent.mkdir(parents=True,exist_ok=True)
+                file.write_bytes(('unit fixture '+role+' '+relative).encode());files.append({'path':relative,'sha256':sha(file)})
             item={'version':version,'tag':'v'+version,'sourceCommit':commit,'tapCommit':tap,'payloadFiles':files}
             if '-dev.' in version: number=int(version.split('-dev.')[1])
             elif '-rc.' in version:number=1000+int(version.split('-rc.')[1])
@@ -105,12 +108,19 @@ class VendorTapContracts(unittest.TestCase):
         for field in ['archive','package','payloadFiles','formulaSHA256','releaseManifestSHA256']:
             self.inventory=copy.deepcopy(original);del self.inventory['candidate'][field];self.write_inventory()
             self.assertNotEqual(self.run_contract().returncode,0,field)
-        self.inventory=copy.deepcopy(original);self.inventory['candidate']['payloadFiles'].pop();self.write_inventory()
+        self.inventory=copy.deepcopy(original);self.inventory['candidate']['payloadFiles']=[item for item in self.inventory['candidate']['payloadFiles'] if item['path']!='bin/hostwright-storage-helper'];self.write_inventory()
         self.assertIn('required executable',self.run_contract().stderr)
         self.inventory=copy.deepcopy(original);self.inventory['candidate']['payloadFiles'].append(self.inventory['candidate']['payloadFiles'][0]);self.write_inventory()
         self.assertIn('Duplicate',self.run_contract().stderr)
         self.inventory=copy.deepcopy(original);self.inventory['candidate']['payloadFiles'][0]['path']='../escape';self.write_inventory()
         self.assertIn('Unsafe payload',self.run_contract().stderr)
+
+    def test_current_receipts_require_complete_signed_desktop(self):
+        self.receipts();original=copy.deepcopy(self.inventory)
+        for relative in ['libexec/hostwright/Hostwright.app/Contents/MacOS/hostwright-desktop','libexec/hostwright/Hostwright.app/Contents/Info.plist','libexec/hostwright/Hostwright.app/Contents/_CodeSignature/CodeResources']:
+            self.inventory=copy.deepcopy(original)
+            self.inventory['candidate']['payloadFiles']=[item for item in self.inventory['candidate']['payloadFiles'] if item['path']!=relative]
+            self.write_inventory();self.assertIn('signed desktop',self.run_contract().stderr)
 
     def test_receipt_file_digest_private_mode_and_symlink_rejected(self):
         self.receipts();self.inventory_path.write_text('{}');self.assertIn('SHA256 mismatch',self.run_contract().stderr)
@@ -127,6 +137,52 @@ class VendorTapContracts(unittest.TestCase):
             changed=args[0] if operation!='installed' else args[0]/'bin/hostwright-storage-helper'
             original=changed.read_bytes();changed.write_bytes(original+b'changed')
             self.assertNotEqual(self.run_function(operation,version,*args).returncode,0,operation);changed.write_bytes(original)
+
+    def test_tap_payload_relocation_preserves_full_signed_bytes(self):
+        self.receipts();item=self.inventory['candidate'];prefix=self.root/'candidate/payload'
+        example=prefix/'share/hostwright/examples/hostwright.yaml'
+        example.rename(prefix/'share/hostwright/hostwright.yaml')
+        result=self.run_function('installed-tap',item['version'],prefix)
+        self.assertEqual(result.returncode,0,result.stderr)
+        for relative in ['bin/hostwright-network-helper','libexec/hostwright/Hostwright.app/Contents/MacOS/hostwright-desktop','share/hostwright/hostwright.yaml','share/doc/hostwright/THIRD_PARTY_NOTICES.txt']:
+            file=prefix/relative;original=file.read_bytes();file.write_bytes(original+b'changed')
+            self.assertNotEqual(self.run_function('installed-tap',item['version'],prefix).returncode,0,relative)
+            file.write_bytes(original)
+        desktop=prefix/'libexec/hostwright/Hostwright.app/Contents/Info.plist';desktop.unlink()
+        self.assertNotEqual(self.run_function('installed-tap',item['version'],prefix).returncode,0)
+
+    def test_qualification_config_replacement_preserves_owned_identity_and_refuses_drift(self):
+        target=self.root/'hostwright.yaml';source=self.root/'candidate.yaml'
+        target.write_bytes(b'version: 2\n');target.chmod(0o600);source.write_bytes(b'version: 3\n')
+        original=target.read_bytes();original_sha=sha(target);candidate_sha=sha(source)
+        definitions=SCRIPT.read_text().split('\ncommand="${1:-}"\n')[0]
+        def replace(expected=original_sha,candidate=candidate_sha):
+            return subprocess.run(['/bin/bash','-s','--',str(target),expected,str(source),candidate],
+                                  input=definitions+'\nreplace_qualification_config "$@"\n',
+                                  env=self.env,capture_output=True,text=True,timeout=10)
+        for expected,candidate in [('f'*64,candidate_sha),(original_sha,'e'*64)]:
+            self.assertNotEqual(replace(expected,candidate).returncode,0)
+            self.assertEqual(target.read_bytes(),original)
+        target.chmod(0o644);self.assertNotEqual(replace().returncode,0);target.chmod(0o600)
+        stale=target.with_name(target.name+'.qualification-next');stale.write_text('unowned')
+        self.assertNotEqual(replace().returncode,0);self.assertEqual(stale.read_text(),'unowned');stale.unlink()
+        result=replace();self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(target.read_bytes(),source.read_bytes());self.assertEqual(target.stat().st_mode&0o777,0o600)
+        self.assertFalse(stale.exists())
+        self.assertNotEqual(replace().returncode,0)
+
+    def test_current_service_checks_follow_bootstrap_and_matching_daemon_start(self):
+        source=SCRIPT.read_text();prepare=source.split('\nprepare() {',1)[1].split('\nresume() {',1)[0]
+        self.assertLess(prepare.index('bootstrap_installed_identities'),prepare.index('brew services start'))
+        self.assertLess(prepare.index('wait_for_service'),prepare.index('verify_installed "$baseline_version"'))
+        resume=source.split('\nresume() {',1)[1].split('\ncleanup_failed_run() {',1)[0]
+        upgrade=resume[resume.index('brew services stop'):]
+        steps=['brew services stop','brew upgrade','verify_installation_payload','replace_qualification_config','bootstrap_installed_identities','brew services start','wait_for_service','verify_installed "$candidate_version"']
+        offsets=[upgrade.index(step) for step in steps];self.assertEqual(offsets,sorted(offsets))
+        self.assertIn('baseline-config.yaml',prepare)
+        snapshot=source.split('package_snapshot_digest() {',1)[1].split('expect_package_refusal()',1)[0]
+        self.assertIn('inventory_check installed "$candidate_version" "$package_prefix"',snapshot)
+        self.assertIn('inventory_check installed "$candidate_version" "$package_staging_root"',snapshot)
 
     def test_release_manifest_cannot_omit_full_payload_even_if_rebound(self):
         self.receipts();directory=self.root/'candidate';path=directory/'release-manifest.json'

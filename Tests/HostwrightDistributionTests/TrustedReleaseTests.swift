@@ -981,6 +981,8 @@ final class TrustedReleaseTests: XCTestCase {
         ))
         XCTAssertTrue(formula.contains("assert_equal \"1.0.0\", storage_helper_version"))
         XCTAssertTrue(formula.contains("pkgshare.install \"share/hostwright/containerization\""))
+        XCTAssertTrue(formula.contains("libexec.install \"libexec/hostwright\""))
+        XCTAssertTrue(formula.contains("assert_path_exists libexec/\"hostwright/Hostwright.app/Contents/MacOS/hostwright-desktop\""))
         XCTAssertTrue(formula.contains("service do"))
         XCTAssertTrue(formula.contains("depends_on arch: :arm64"))
         XCTAssertTrue(formula.contains("depends_on macos: :tahoe"))

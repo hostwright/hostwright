@@ -417,6 +417,12 @@ public enum HomebrewFormulaRenderer {
         let version = request.manifest.packageVersion
         let documentation = ["share/doc/hostwright/LICENSE", "share/doc/hostwright/README.md"]
             + (request.manifest.schemaVersion >= 3 ? DistributionThirdPartyNotices.payloadModes.keys.sorted() : [])
+        let desktopLines = request.manifest.payloadFiles.contains { $0.path == DistributionLayout.desktopExecutablePath }
+            ? """
+                  system "/usr/bin/codesign", "--verify", "--strict", "--verbose=2", "libexec/hostwright/Hostwright.app"
+                  libexec.install "libexec/hostwright"
+              """
+            : ""
         let documentationLines = documentation.map { "      " + $0 }.joined(separator: "\n")
         return """
         class Hostwright < Formula
@@ -445,6 +451,7 @@ public enum HomebrewFormulaRenderer {
               system "/usr/bin/codesign", "--verify", "--strict", "--verbose=2", "bin/#{name}"
             end
             bin.install executables.map { |name| "bin/#{name}" }
+        \(desktopLines)
             documentation = %w[
         \(documentationLines)
             ]
@@ -485,6 +492,7 @@ public enum HomebrewFormulaRenderer {
             assert_equal version.to_s, shell_output("#{bin}/hostwrightd --version").strip
             assert_path_exists pkgshare/"containerization/kernel/\(DistributionContainerizationAssets.kernelFileName)"
             assert_path_exists pkgshare/"containerization/vminit/index.json"
+            assert_path_exists libexec/"hostwright/Hostwright.app/Contents/MacOS/hostwright-desktop"
           end
         end
         """ + "\n"

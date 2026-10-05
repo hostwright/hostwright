@@ -98,7 +98,7 @@
   "signerTeamIdentifier": "993YC3JY4Q",
   "cleanup": {
     "exactResourceIdentifiers": [
-      "/var/folders/jt/494kvbz95495w99y4kmwd2040000gn/T/hostwright-dist-release-verify-C8D0AC88-B5B2-4B89-AEC7-9A21B45D0E4E"
+      "hostwright-dist-release-verify-C8D0AC88-B5B2-4B89-AEC7-9A21B45D0E4E"
     ],
     "message": "The exact private trusted-release verification root was removed.",
     "status": "succeeded"

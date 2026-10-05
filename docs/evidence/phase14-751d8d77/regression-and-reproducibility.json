@@ -534,7 +534,7 @@
     "passed": 73,
     "skipped": 0,
     "sourceMethods": {
-      "path": "/Users/dev/.codex/phase14-checkpoint-20260928/actual-source-support-751d8d77/source-methods.json",
+      "fileName": "source-methods.json",
       "sha256": "a215ac785509843b953e6b0316c2fc17abd0d5787b45af8ff8f4d5f9f40295fc",
       "sizeBytes": 9542
     }

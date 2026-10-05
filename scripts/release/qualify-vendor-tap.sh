@@ -558,11 +558,20 @@ remove_owned_file() {
 }
 
 remove_owned_config_directory() {
-  local path="$1"
-  [[ -e "$path" || -L "$path" ]] || return 0
-  [[ -d "$path" && ! -L "$path" && "$(stat -f '%u:%Lp' "$path")" == "$(id -u):700" ]] \
-    || die "Qualification config directory ownership changed; preserving it." 70
-  rmdir "$path" || die "Qualification config directory contains remaining files; cleanup is incomplete." 70
+  python3 - "$1" <<'PYTHON'
+import os,stat,sys
+from pathlib import Path
+path=Path(sys.argv[1])
+try:
+    info=path.lstat()
+except FileNotFoundError:sys.exit(0)
+try:
+    if not path.is_absolute() or path.resolve()!=path or not stat.S_ISDIR(info.st_mode) or info.st_uid!=os.getuid() or stat.S_IMODE(info.st_mode)!=0o700:
+        raise ValueError('Qualification config directory ownership changed; preserving it')
+    os.rmdir(path)
+except (ValueError,OSError) as error:
+    print('Qualification config cleanup incomplete: '+str(error),file=sys.stderr);sys.exit(70)
+PYTHON
 }
 
 

@@ -99,6 +99,9 @@ class AssemblyTests(unittest.TestCase):
             path.write_text(json.dumps(changed))
             with self.subTest(field=field), self.assertRaises(ValueError): self.assemble()
             self.assertFalse(self.args.output.exists())
+        path.write_text('[]')
+        with self.assertRaisesRegex(ValueError, 'must be an object'): self.assemble()
+        self.assertFalse(self.args.output.exists())
         path.write_text(json.dumps(original))
         (self.raw / 'local-backup-recovery/raw.log').write_text('tampered output')
         with self.assertRaises(ValueError): self.assemble()
@@ -119,6 +122,24 @@ class AssemblyTests(unittest.TestCase):
         report.write_text(json.dumps(changed))
         with self.assertRaises(ValueError): self.assemble()
         self.assertFalse(self.args.output.exists())
+
+    def test_changed_json_cannot_be_parsed_under_an_older_digest(self):
+        original_load = stage.load
+        targets = [self.input_path, self.raw / 'public-education/complete.json']
+        for target in targets:
+            original = target.read_bytes()
+            def swap_before_parse(path, expected_sha256=None):
+                if path == target:
+                    target.write_bytes(original + b'\n')
+                    try:
+                        return original_load(path, expected_sha256=expected_sha256)
+                    finally:
+                        target.write_bytes(original)
+                return original_load(path, expected_sha256=expected_sha256)
+            with self.subTest(path=target.name), mock.patch.object(stage, 'load', side_effect=swap_before_parse):
+                with self.assertRaisesRegex(ValueError, 'between binding and parsing'):
+                    self.assemble()
+            self.assertFalse(self.args.output.exists())
 
 
 if __name__ == '__main__':

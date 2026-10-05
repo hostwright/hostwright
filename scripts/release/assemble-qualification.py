@@ -29,8 +29,8 @@ def assemble(a):
     source_binding = staged.source_stage.verify_contract(a.stage, a.commit, a.version)
     if source_binding != actual['correspondingSource']:
         raise ValueError('independent source verification differs from staged inventory')
-    staged.contained_digest(a.input_root, a.inputs)
-    inputs = staged.load(a.input_root / a.inputs)
+    inputs_hash = staged.contained_digest(a.input_root, a.inputs)
+    inputs = staged.load(a.input_root / a.inputs, expected_sha256=inputs_hash)
     if (not isinstance(inputs, dict) or set(inputs) != {'kind', 'gates'} or inputs['kind'] != 'hostwright.qualification-inputs.v1'
             or not isinstance(inputs['gates'], dict) or set(inputs['gates']) != staged.REQUIRED_GATES):
         raise ValueError('inputs must identify every required gate exactly once')
@@ -40,7 +40,9 @@ def assemble(a):
             raise ValueError('gate report path must be relative')
         report_hash = staged.contained_digest(a.input_root, relative)
         report_path = pathlib.PurePosixPath(relative)
-        gate = staged.load(a.input_root / relative)
+        gate = staged.load(a.input_root / relative, expected_sha256=report_hash)
+        if not isinstance(gate, dict):
+            raise ValueError('raw gate report must be an object: ' + name)
         attachments = gate.get('attachments')
         if not isinstance(attachments, dict) or not attachments:
             raise ValueError('raw report lacks command evidence: ' + name)

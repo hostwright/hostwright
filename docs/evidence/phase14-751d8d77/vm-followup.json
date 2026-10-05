@@ -13,7 +13,7 @@
   "historicalOriginalFailuresPreserved": [
     "post-reboot wrapper64 before genuine state recovery",
     "cleanup wrapper1 from cross-reboot device identifier before corrected observer",
-    "upgrade/rollback owner-receipt mismatch72; #363 repair not yet signed-VM-qualified"
+    "upgrade stateAPI66/owner-session timeout72 and fixture legacy-ledger/compensation/recovery72 preserved; #363 signed-VM repair unqualified"
   ],
   "currentSourceCommit": "751d8d771bf1e74a01e30b30c22c5f6843d4b70d",
   "currentVMCompletedCases": 0,

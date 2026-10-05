@@ -47,6 +47,10 @@ final class ContractVersionsTests: XCTestCase {
             "storage.persistent": .stable,
             "secrets.keychain": .experimental,
             "registries.authentication": .experimental,
+            "gui.native": .experimental,
+            "ci.distribution": .experimental,
+            "distribution.vendor-tap": .experimental,
+            "daemon.reconciliation": .experimental,
             "scheduler.optimization": .unavailable,
             "accelerators.host-native": .unavailable,
             "accelerators.guest-passthrough": .blocked,
@@ -54,7 +58,7 @@ final class ContractVersionsTests: XCTestCase {
             "interop.kubernetes": .unavailable,
             "cloud.control-plane": .unavailable,
             "multi-host.ha": .unavailable,
-            "team.mdm": .experimental,
+            "team.mdm": .unavailable,
         ]
         for (identifier, expected) in states.sorted(by: { $0.key < $1.key }) {
             let capability = try XCTUnwrap(report.capabilities.first { $0.identifier == identifier }, identifier)
@@ -72,6 +76,20 @@ final class ContractVersionsTests: XCTestCase {
             XCTAssertEqual(Set(capability.requiredEvidence), expected, identifier)
         }
     }
+
+    func testReleaseGateUsesTheAcceptedSingleMacEvidenceScope() throws {
+        let release = try XCTUnwrap(HostwrightCapabilityCatalog.report.capabilities.first {
+            $0.identifier == "release.ga"
+        })
+        XCTAssertEqual(release.state, .unavailable)
+        XCTAssertFalse(release.requiredEvidence.contains(.multiHost))
+        for required in [HostwrightEvidenceClass.localIntegration, .liveRuntime,
+                         .distributionArtifact, .migrationUpgrade,
+                         .securityAssessment, .resilienceChaos, .uxAccessibility] {
+            XCTAssertTrue(release.requiredEvidence.contains(required))
+        }
+    }
+
     func testVerificationConstitutionIncludesEveryV002EvidenceClass() {
         XCTAssertEqual(
             Set(HostwrightEvidenceClass.allCases.map(\.rawValue)),

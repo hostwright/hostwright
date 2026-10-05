@@ -8,6 +8,7 @@ import pathlib
 import shutil
 import subprocess
 import time
+from swift_test_results import full_suite_results, verify_checkpoint_results
 
 
 def sha(path):
@@ -83,6 +84,8 @@ def lane(name, command, env=None, minimum=0):
         for relative, expected in old.get('retainedFiles', {}).items():
             if sha(root / relative) != expected:
                 raise ValueError('resume refused: retained corpus/binary changed')
+        if a.mode == 'sanitizers':
+            verify_checkpoint_results(old, log.read_text(errors='replace'))
         return old
     started = time.time()
     started_monotonic = time.monotonic()
@@ -115,8 +118,11 @@ def lane(name, command, env=None, minimum=0):
                   sourceCleanBefore=True, sourceCleanAfter=clean_after, sourceCommit=commit, logSHA256=sha(log))
     if a.mode == 'sanitizers':
         text = log.read_text(errors='replace')
-        if "Test Suite 'All tests' passed" not in text and 'Test run with' not in text:
+        try:
+            result['fullSuiteResults'] = full_suite_results(text)
+        except ValueError as error:
             result['status'] = 'failed'
+            result['failureReason'] = str(error)
     if a.mode == 'fuzz' and name not in {'build'}:
         text = log.read_text(errors='replace')
         if name.startswith('fuzz-') and ('DONE' not in text or 'stat::number_of_executed_units:' not in text):

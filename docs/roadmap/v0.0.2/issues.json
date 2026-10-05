@@ -525,7 +525,7 @@
       "child": null,
       "parent": 284,
       "title": "Phase 14 \u2014 Local desktop console and lifecycle actions",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/270",
       "labels": [
         "area:ci",
@@ -535,14 +535,14 @@
         "area:multi-host",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:docs",
         "type:epic",
         "type:implementation",
         "type:research",
         "type:roadmap",
         "type:security",
-        "type:testing"
+        "type:testing",
+        "status:verification"
       ],
       "assignees": [
         "d3v07"
@@ -561,7 +561,7 @@
         "ux-accessibility",
         "security-assessment"
       ],
-      "stateReason": null
+      "stateReason": "completed"
     },
     {
       "marker": "P15",
@@ -5055,7 +5055,7 @@
       "child": 1,
       "parent": 270,
       "title": "P14-C01: Ship the signed local SwiftUI console and menu bar",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/258",
       "labels": [
         "area:ci",
@@ -5065,12 +5065,12 @@
         "area:multi-host",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:docs",
         "type:implementation",
         "type:research",
         "type:security",
-        "type:testing"
+        "type:testing",
+        "status:verification"
       ],
       "assignees": [
         "d3v07"
@@ -5088,7 +5088,7 @@
         "distribution-artifact",
         "ux-accessibility"
       ],
-      "stateReason": null
+      "stateReason": "completed"
     },
     {
       "marker": "P14-C02",
@@ -5226,7 +5226,7 @@
       "child": 5,
       "parent": 270,
       "title": "P14-C05: Verify signed desktop packaging and ownership contracts",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/262",
       "labels": [
         "area:ci",
@@ -5236,12 +5236,12 @@
         "area:multi-host",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:docs",
         "type:implementation",
         "type:research",
         "type:security",
-        "type:testing"
+        "type:testing",
+        "status:verification"
       ],
       "assignees": [
         "d3v07"
@@ -5259,7 +5259,7 @@
         "distribution-artifact",
         "security-assessment"
       ],
-      "stateReason": null
+      "stateReason": "completed"
     },
     {
       "marker": "P14-C06",

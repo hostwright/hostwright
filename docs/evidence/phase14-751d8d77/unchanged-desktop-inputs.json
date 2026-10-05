@@ -1,0 +1,241 @@
+{
+  "sourceCommit": "751d8d771bf1e74a01e30b30c22c5f6843d4b70d",
+  "sourceTree": "a8a58a5045718f0bb9691bfca1fd479b39e7afa2",
+  "comparedSourceCommit": "994cf93c9e73308a73b5b396134c69407c49b215",
+  "inputCount": 33,
+  "inputs": [
+    {
+      "path": "Sources/HostwrightCLI/CLIControlAuthorizationScope.swift",
+      "mode": "100644",
+      "gitBlobID": "9107454949817e36b129ee885211b139b86bddbf",
+      "sha256": "df86f48d56b89cd92ea4c2126b7ee229fa482ee1fb5ccfaa52a0952ab742d85b",
+      "sizeBytes": 13012
+    },
+    {
+      "path": "Sources/HostwrightControlPlane/ControlPlaneFoundation.swift",
+      "mode": "100644",
+      "gitBlobID": "53fb94c773037bcb41b3949bf048a175bdf5b31c",
+      "sha256": "743e60c7885b6c9c58c89d1bc86fcaca59c6cebcc3fde6c589128a4696601a5c",
+      "sizeBytes": 31792
+    },
+    {
+      "path": "Sources/HostwrightControlPlane/ControlProtocolCompatibility.swift",
+      "mode": "100644",
+      "gitBlobID": "3ad02637784308cf4343e267b5118509ce481698",
+      "sha256": "80c804479ce074379364e3a3a0cb939e51e5ac308d7382ef51acff59aa121354",
+      "sizeBytes": 2157
+    },
+    {
+      "path": "Sources/HostwrightControlPlane/ControlStreamFrameContract.swift",
+      "mode": "100644",
+      "gitBlobID": "315bde7f23245f77ae2ee173a7cfab6b44e7f041",
+      "sha256": "67f8b9f5a9351fad05be4266782c612e209762b1e3bcd3bfa594af2236c9fb85",
+      "sizeBytes": 6811
+    },
+    {
+      "path": "Sources/HostwrightControlPlane/GovernanceContracts.swift",
+      "mode": "100644",
+      "gitBlobID": "506d9ce0c530cda9994fc9c434d5ce8c5dc1dd5a",
+      "sha256": "e19258fabba7728cffed1abfdb8bbbd3d01e2bc3a1c7c59e230be2182cddefe1",
+      "sizeBytes": 24659
+    },
+    {
+      "path": "Sources/HostwrightControlPlane/ProfilePluginContracts.swift",
+      "mode": "100644",
+      "gitBlobID": "ae210197a7df2f55b3a97459ba639a36d5ef2bd7",
+      "sha256": "ef9f9b087d876a3811ccd009666e81fa07f8f28c97f83face7e0e2f86ca9b2cf",
+      "sizeBytes": 19705
+    },
+    {
+      "path": "Sources/HostwrightControlPlane/SchedulerControlProtocol.swift",
+      "mode": "100644",
+      "gitBlobID": "44668c90e1f801f12f1a3cf6e643ebf72cb78a1e",
+      "sha256": "1b083aef218553b793afdcf3b92e57932618ce0d7d5bad1e449f4ad07f5b6f14",
+      "sizeBytes": 6095
+    },
+    {
+      "path": "Sources/HostwrightControlPlane/XPCContracts.swift",
+      "mode": "100644",
+      "gitBlobID": "90d13bf88f23cd56e5311b813be7b94ce9bf61d3",
+      "sha256": "9f32d5e43159bd36377b8cbd27355845d66ab3ddbba2dd0f6f2d19752951d5bb",
+      "sizeBytes": 5468
+    },
+    {
+      "path": "Sources/HostwrightControlSecurity/ControlPeerAuthenticator.swift",
+      "mode": "100644",
+      "gitBlobID": "26729b225365a9038334e3998f2c7177530b6619",
+      "sha256": "3613a9ea144ef2633d58a41b8504fb5f9bd80d0b589d02f72fab08999630d97d",
+      "sizeBytes": 27928
+    },
+    {
+      "path": "Sources/HostwrightControlTransport/ControlFrameCodec.swift",
+      "mode": "100644",
+      "gitBlobID": "6df6369097433ff15859384aaf5f895a956ad325",
+      "sha256": "71c476fad92a0592a6d9b297a13bdf9c06fc3cab816f38539e31814528391538",
+      "sizeBytes": 10248
+    },
+    {
+      "path": "Sources/HostwrightControlTransport/ControlStreamConnectionContext.swift",
+      "mode": "100644",
+      "gitBlobID": "f192513792c0c6b89b8f89bad58b09ca2cfa37fd",
+      "sha256": "fa2ec659a71f8a62b10da914586f48324a86a1e2a2733e711c223d8e55ffab67",
+      "sizeBytes": 22429
+    },
+    {
+      "path": "Sources/HostwrightControlTransport/ControlStreamGlobalBudget.swift",
+      "mode": "100644",
+      "gitBlobID": "30964d881077d3912f3d2592860df6ef4a06ba6e",
+      "sha256": "eb020f3a46bdf90c837ed90d18241645df17d552046be59d65747e4a94343b7b",
+      "sizeBytes": 1489
+    },
+    {
+      "path": "Sources/HostwrightControlTransport/ControlStreamProducer.swift",
+      "mode": "100644",
+      "gitBlobID": "41a20be26426fd8386c13a4e3a3883c5ba5b2c43",
+      "sha256": "0f62874e8e39b316c88f46d72b42341bd87e22859923b95e5e77db63630be3dd",
+      "sizeBytes": 3474
+    },
+    {
+      "path": "Sources/HostwrightControlTransport/ControlStreamSessionState.swift",
+      "mode": "100644",
+      "gitBlobID": "e6ccbd806410caa18d6d77eae0bba1bf9e83e0b2",
+      "sha256": "4fe9d69962f02d57a367c6e831d98ca8766af36f22cbd241de6336fd74b9a345",
+      "sizeBytes": 9779
+    },
+    {
+      "path": "Sources/HostwrightControlTransport/ControlUnaryDispatcher.swift",
+      "mode": "100644",
+      "gitBlobID": "3ca01f7ac6fc97ddcc7be5a33a7157b4a6b55317",
+      "sha256": "7de470c649985ecfa0bd83e57ec2c45c0c550d6b7f5441b7d474ff2faa1f52ca",
+      "sizeBytes": 2869
+    },
+    {
+      "path": "Sources/HostwrightControlTransport/PersistentControlClient.swift",
+      "mode": "100644",
+      "gitBlobID": "3c976aad27ac9204beb40c525362c74b491ee598",
+      "sha256": "38f96ba4357fc8cf9688395300a2c85476396773b5691d94f8457578569b8438",
+      "sizeBytes": 12280
+    },
+    {
+      "path": "Sources/HostwrightControlTransport/PersistentControlClientSession.swift",
+      "mode": "100644",
+      "gitBlobID": "9c0b5f7c00cacb50507083efa4a2d6260e426f94",
+      "sha256": "cb1c5ffcd3468a2e2b80ca40d5bd8f81862e6e979f699f5e03c8f278db3ac73f",
+      "sizeBytes": 23181
+    },
+    {
+      "path": "Sources/HostwrightControlTransport/PersistentControlServer.swift",
+      "mode": "100644",
+      "gitBlobID": "d32f4640491ca1272807aaa23eebc805121162e4",
+      "sha256": "0a3f144a2d32cd7a8fe1110b023c51f0550cc9de6a9bbd5ab9800fae825ac5db",
+      "sizeBytes": 42298
+    },
+    {
+      "path": "Sources/HostwrightDaemon/DaemonControlStreamAuthorizationPipeline.swift",
+      "mode": "100644",
+      "gitBlobID": "1591184aedad38cd3146a9fe63eacbfc5958a994",
+      "sha256": "b33794c6c15d3789512cbb9d487fb3fdec0836faf2474f7a39a48d66fde95594",
+      "sizeBytes": 14854
+    },
+    {
+      "path": "Sources/HostwrightDesktopApp/OperationsConsoleView.swift",
+      "mode": "100644",
+      "gitBlobID": "747ffedb311b27e1fddb462ee09314aa1d1d834a",
+      "sha256": "80c0c1380cc64a5e94afa0b040656ed5d909262d90e25eada01ce54902dd95f9",
+      "sizeBytes": 31032
+    },
+    {
+      "path": "Sources/HostwrightDesktopEntry/HostwrightDesktopApp.swift",
+      "mode": "100644",
+      "gitBlobID": "eb449a29da160ce850641c07427269b0cff0a0d7",
+      "sha256": "3fcf342e9b83d3e18792da7857d7cacdc5d83aece2a2346d58eb365b5996801c",
+      "sizeBytes": 623
+    },
+    {
+      "path": "Sources/HostwrightDesktopModel/DesktopActionCatalog.swift",
+      "mode": "100644",
+      "gitBlobID": "ef57c0576c447f6f63a4879d17595c6bb51179b4",
+      "sha256": "39da1ba093a1352ab43f743232d07a97566a80f92cb9917e4a8b60a65bcf145d",
+      "sizeBytes": 41550
+    },
+    {
+      "path": "Sources/HostwrightDesktopModel/DesktopControlTransport.swift",
+      "mode": "100644",
+      "gitBlobID": "d3940518cc1dbc52e48828e263ce4b21e521e9bf",
+      "sha256": "824bd20ea617095eb497eb9b41e265f9bd9cbd9c7d04d2e6f57002118d25454a",
+      "sizeBytes": 4392
+    },
+    {
+      "path": "Sources/HostwrightDesktopModel/DesktopModelTypes.swift",
+      "mode": "100644",
+      "gitBlobID": "4683052bcd47ec21488bf450ed98bf01727eeeb9",
+      "sha256": "937271c4fccb4f01d063a480bfb429d1ed25f5fe9b56649639517dad6d07a3e7",
+      "sizeBytes": 13683
+    },
+    {
+      "path": "Sources/HostwrightDesktopModel/DesktopOperationsModel.swift",
+      "mode": "100644",
+      "gitBlobID": "132191a2c467be5d20a57032ae915b1610b2b38e",
+      "sha256": "f47c956f11d6ba623f7e663856fb89aea8d192e16a374099e977d6aa56475d0f",
+      "sizeBytes": 62975
+    },
+    {
+      "path": "Sources/HostwrightDesktopModel/DesktopTopologyProjection.swift",
+      "mode": "100644",
+      "gitBlobID": "7dd7a14cc457cb0d918a3be95e11e76ce4842241",
+      "sha256": "111b58a3904a9899b53133e0e32e9d8cd03aca987d5d90eec510aed42fb43564",
+      "sizeBytes": 54880
+    },
+    {
+      "path": "Tests/HostwrightCLITests/CLIControlAuthorizationScopeTests.swift",
+      "mode": "100644",
+      "gitBlobID": "d00a6e7dafe4ff0c732c2c008a090114bcb1eff0",
+      "sha256": "a0f08b4829c37200ab604a29c8217511a42e346380be83a40feb626ce1892a69",
+      "sizeBytes": 22410
+    },
+    {
+      "path": "Tests/HostwrightDaemonTests/DaemonControlStreamAuthorizationPipelineTests.swift",
+      "mode": "100644",
+      "gitBlobID": "85ad3278a87636b4707886a863ae058c608851d9",
+      "sha256": "3997239673eb2433b8bf8a30830329b628e008ff615d26af94f4a6fff7444329",
+      "sizeBytes": 18151
+    },
+    {
+      "path": "Tests/HostwrightDesktopModelTests/DesktopActionCatalogTests.swift",
+      "mode": "100644",
+      "gitBlobID": "fa955e71ffc695d09001ecb08d71256769bfd104",
+      "sha256": "fce9b121deb8c7d8972b3759e1d6daaf92ba7ec5128055e91da15977a99de2ad",
+      "sizeBytes": 17988
+    },
+    {
+      "path": "Tests/HostwrightDesktopModelTests/DesktopOperationsModelTests.swift",
+      "mode": "100644",
+      "gitBlobID": "aeabe44aa0e4936503a96636731c6dcdb30e4bca",
+      "sha256": "b0f4eaaf93d38bbfec528a28afae6327e2b24da725731788a02e26927bada09f",
+      "sizeBytes": 80939
+    },
+    {
+      "path": "Tests/HostwrightDesktopModelTests/DesktopTopologyProjectionTests.swift",
+      "mode": "100644",
+      "gitBlobID": "5b8520a9c61a86a7af2e31ec5fc9b394e468b574",
+      "sha256": "a88cd08cfa85de6cc39f33e3d255838b223b034a67349f27078b0c8bf72d00dd",
+      "sizeBytes": 18658
+    },
+    {
+      "path": "Tests/HostwrightDesktopUITests/DesktopAccessibilityContractTests.swift",
+      "mode": "100644",
+      "gitBlobID": "4fb16e389011a1ef9d78b08b7886b224fb1c6342",
+      "sha256": "747ee7b8b8fcd4b1a74635fd8e548298a8ab505e8e968c66bbc392c2424363cc",
+      "sizeBytes": 5193
+    },
+    {
+      "path": "Tests/HostwrightDesktopUITests/DesktopOffscreenSnapshotTests.swift",
+      "mode": "100644",
+      "gitBlobID": "0e8ba43fc7075d4e6dcce5c12e74cc2a88fcfba4",
+      "sha256": "bfc4507a8b3f4a9c8df381f560cb19e660f0e2defbe6032bffacf80b64905a97",
+      "sizeBytes": 10845
+    }
+  ],
+  "comparisonOnly": true,
+  "currentDeviceExecutionClaimed": false
+}

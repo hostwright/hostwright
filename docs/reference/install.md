@@ -118,6 +118,14 @@ Neither choice removes backup catalogs, configuration, caches, logs, unrelated p
 
 A package-owned installation uses elevated `hostwright-dist package-uninstall --prefix /usr/local --data-policy preserve --output json`. It re-verifies lifecycle ownership, the receipt, and the staged payload; after the uninstall transaction commits, it forgets only `dev.hostwright.cli` and removes only verified staging content. Package remove-data planning and uninstall are refused before mutation because the system-wide package lifecycle does not infer or search for a per-user state database. A bounded pending-cleanup marker lets `hostwright-dist recover --prefix /usr/local --output json` finish an interrupted receipt cleanup. Generic archive upgrade or uninstall is refused for a package-owned generation.
 
+Phase 14's `0.0.2-rc.2` candidate passed the authenticated signed/notarized build
+stage. Its desktop acceptance reuses retained physical observations on unchanged
+desktop inputs. The complete signed VM upgrade/rollback/repair/uninstall matrix
+has not passed for this candidate and remains a Phase 15 requirement in #278.
+The reduced Phase 14 completion boundary is recorded in
+[ADR 0015](../design/adr-0015-reduced-local-release.md); it does not promote this RC
+to a supported GA release.
+
 A source checkout remains separate from an installed prefix. Deleting the checkout does not run `hostwright-dist uninstall` and does not remove Application Support data or runtime resources.
 
 ## Gate Before Package Claims

@@ -1,6 +1,6 @@
 # ADR 0015: Reduce v0.0.2 to local CLI, desktop, and Compose import
 
-Status: accepted by the maintainer on 2026-09-07; implementation and release qualification remain pending.
+Status: accepted by the maintainer on 2026-09-07; Phase 14 acceptance amended on 2026-10-05. Final release qualification remains pending.
 
 ## Decision
 
@@ -38,6 +38,34 @@ can enforce the decision. The old July daily schedule is historical; current
 delivery follows scope reset, Phase 10, Phase 13, Phase 14, then Phase 15.
 
 ## Qualification
+
+### Phase 14 implementation acceptance (2026-10-05)
+
+The maintainer reduced Phase 14 to the implemented local desktop and signed RC
+packaging boundary. Close #258 and #262 with the authenticated rc.2 runtime,
+successful signed/notarized two-build stage, current-source regression and
+ownership contracts, and retained physical desktop/accessibility observations.
+Retain each result's original source and artifact binding. Unchanged desktop,
+authentication and lifecycle observation inputs permit reuse of the ten physical
+cycles (40 actions) and 15 GUI checks recorded on `994cf93c`; source comparison
+is support for reuse, not a claim that rc.2 ran those device checks.
+
+The incomplete clean-VM upgrade, rollback, re-upgrade, repair and uninstall matrix
+is transferred to #278 under Phase 15 (#283). It remains a prerequisite for final
+v0.0.2 promotion. Historical VM successes and failures remain recorded; no failed,
+unfinished or unexecuted case becomes a pass through this scope decision. The
+compensation/recovery repair in #363 has current regression coverage, but its
+signed VM reproduction remains unqualified. Phase 14 closure authorizes no GA
+release, tag publication or statement that the entire release gate passed.
+
+The rc.2 trusted stage passed and all nine executable hashes matched between
+the retained builds. One intermediate `SystemPackage` object differed; retain
+that diagnostic under Phase 15 #275 rather than claim all-object reproducibility.
+
+This amendment changes the Phase 14 acceptance boundary only. Preserve the
+existing evidence gate and all final-release security and qualification checks.
+
+### Final release qualification
 
 Run ten live lifecycle cycles per supported provider and a checkpointed 30-minute
 single-host soak; replay retained corpora and fuzz each shipped critical parser or

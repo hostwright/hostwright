@@ -1,6 +1,6 @@
 # Phase 14 native desktop operations console
 
-Status: implemented release contract for #258–#262.
+Status: implemented desktop and signed RC contract for #258–#262; final artifact lifecycle qualification belongs to Phase 15.
 
 ## Product boundary
 
@@ -39,4 +39,6 @@ Automatic in-app updates are deferred. Upgrade, one-generation rollback, repair,
 
 ## Evidence boundary
 
-Unit and integration gates cover strict plan/result decoding, exact route binding, stale confirmation, duplicate clicks, explicit cancellation, disconnect cancellation, accessibility identifiers, action-catalog parity, deterministic app assembly, and ownership-scoped distribution lifecycle. Release qualification additionally retains standard and narrow-window snapshots, live authenticated lifecycle evidence, signed/notarized bundle verification, and clean-VM install, reboot, upgrade, rollback, repair, and uninstall evidence bound to the tested source and artifact hashes.
+Unit and integration gates cover strict plan/result decoding, exact route binding, stale confirmation, duplicate clicks, explicit cancellation, disconnect cancellation, accessibility identifiers, action-catalog parity, deterministic app assembly, and ownership-scoped distribution lifecycle. Phase 14 acceptance uses the signed/notarized rc.2 stage and current-source contracts together with retained physical lifecycle and GUI evidence on its original source. Unchanged desktop/authentication source comparisons support reuse without relabeling historical results as current-device execution.
+
+Under the maintainer's 2026-10-05 amendment to ADR 0015, the remaining clean-VM upgrade, rollback, re-upgrade, repair and uninstall checks move to #278 under Phase 15 (#283). These are still required before final release promotion. Phase 14 closure does not establish complete VM qualification or authorize GA publication.

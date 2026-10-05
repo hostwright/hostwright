@@ -71,7 +71,7 @@ Gate receipts bind the source commit, version, clean state, and hashed raw attac
 
 ## Promotion Steps
 
-1. Verify the reviewed candidate or final-version commit is on protected `main` and matches its clean qualification source.
+1. Verify the reviewed candidate or final-version commit is merged to `main` and matches its clean qualification source.
 2. Run the complete authenticated runtime producer for that commit and verify its archive.
 3. Dispatch trusted staging with the commit, version, unused tag, and producer run ID. Staging builds twice, signs, notarizes, staples, verifies, and retains the exact bytes without publishing a tag or release.
 4. Qualify those staged artifacts, including the independent macOS VM lifecycle, and retain the complete evidence export. Obtain protected acceptance of the exact inventory and independent review report.

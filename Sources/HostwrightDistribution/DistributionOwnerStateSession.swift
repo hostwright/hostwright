@@ -283,10 +283,8 @@ public enum DistributionOwnerStateSessionService {
                 usleep(50_000)
             }
             let receipt: DistributionOwnerStateReceipt = try readPrivateJSON(URL(fileURLWithPath: descriptor.receipt.receiptPath), owner: uid)
-            let compatibleCommittedReceipt = start.recovering && receipt.binding.configuration == descriptor.receipt.binding.configuration &&
-                receipt.binding.ownerUID == uid && receipt.challenge.installationID == descriptor.receipt.challenge.installationID &&
-                receipt.challenge.generation == descriptor.toGeneration
-            guard receipt == descriptor.receipt || compatibleCommittedReceipt else { throw DistributionError.lifecycleFailed("owner service receipt changed") }
+            let compensationValidationRequired = try requiresCompensationValidation(
+                receipt, start: start, ownerUID: uid)
             if !start.recovering {
                 guard try DistributionInstalledLifecycle().preparedOwnerStateReceipt(
                     prefix: URL(fileURLWithPath: receipt.challenge.prefix), configuration: configuration) == receipt else {
@@ -318,6 +316,9 @@ public enum DistributionOwnerStateSessionService {
                 } else if start.recovering {
                     throw DistributionError.lifecycleFailed("owner recovery journal is missing")
                 } else { try writePrivateJSON(journal, to: journalPath, owner: uid) }
+                if compensationValidationRequired {
+                    try validateCompensationReceipt(receipt, descriptor: descriptor, journal: journal, service: service)
+                }
                 try DistributionOwnerStateSessionClient.writeFrame(DistributionOwnerStateSessionReply(sequence: 0, success: true,
                     snapshot: journal.snapshot, revision: try service.verifiedRevision(), head: try keys.loadHead()),
                     descriptor: STDOUT_FILENO, cancellation: cancellation)
@@ -391,6 +392,40 @@ public enum DistributionOwnerStateSessionService {
             try? DistributionOwnerStateSessionClient.writeFrame(DistributionOwnerStateSessionReply(sequence: 0,
                 success: false, message: String(describing: error)), descriptor: STDOUT_FILENO, cancellation: cancellation)
             throw error
+        }
+    }
+
+    static func requiresCompensationValidation(_ receipt: DistributionOwnerStateReceipt,
+        start: DistributionOwnerStateSessionStart, ownerUID uid: uid_t) throws -> Bool {
+        let descriptor = start.descriptor
+        let compatibleCommittedReceipt = start.recovering && receipt.binding.configuration == descriptor.receipt.binding.configuration &&
+            receipt.binding.ownerUID == uid && receipt.challenge.installationID == descriptor.receipt.challenge.installationID &&
+            receipt.challenge.generation == descriptor.toGeneration
+        let compatiblePriorReceipt = start.recovering && receipt.schemaVersion == 1 &&
+            receipt.challenge == descriptor.receipt.challenge && receipt.binding == descriptor.receipt.binding &&
+            receipt.receiptPath == descriptor.receipt.receiptPath
+        guard receipt == descriptor.receipt || compatibleCommittedReceipt || compatiblePriorReceipt else {
+            throw DistributionError.lifecycleFailed("owner service receipt changed")
+        }
+        return receipt != descriptor.receipt && !compatibleCommittedReceipt
+    }
+
+    static func validateCompensationReceipt(_ receipt: DistributionOwnerStateReceipt,
+        descriptor: DistributionOwnerStateSessionDescriptor, journal: DistributionOwnerStateOperationJournal,
+        service: StateUpgradeService) throws {
+        try descriptor.validate()
+        guard receipt.schemaVersion == 1, receipt.challenge == descriptor.receipt.challenge,
+              receipt.binding == descriptor.receipt.binding, receipt.receiptPath == descriptor.receipt.receiptPath,
+              receipt.binding.ownerUID == geteuid(), service.store.configuration == receipt.binding.configuration,
+              journal.schemaVersion == 1, journal.checkpoint == "committed",
+              journal.descriptor == descriptor, journal.descriptorSHA256 == (try descriptor.digest) else {
+            throw DistributionError.lifecycleFailed("prior owner receipt is not bound to committed compensation")
+        }
+        let challenge = try DistributionInstalledLifecycle().validatedPublicStateChallenge(
+            prefix: URL(fileURLWithPath: receipt.challenge.prefix), allowedPendingOperation: descriptor.operationID)
+        guard challenge == receipt.challenge,
+              receipt.preparedRevision == (try service.verifiedRevision()) else {
+            throw DistributionError.lifecycleFailed("compensated owner receipt differs from current prior payload or state")
         }
     }
 

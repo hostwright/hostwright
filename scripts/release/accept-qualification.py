@@ -107,7 +107,8 @@ def arguments():
 def accept(a):
     actual = staged.inventory(a.stage, a.commit, a.version, a.run, a.attempt)
     inventory_path = a.stage / 'stage-inventory.json'
-    if staged.load(inventory_path) != actual:
+    inventory_hash = staged.digest(inventory_path)
+    if staged.load(inventory_path, expected_sha256=inventory_hash) != actual:
         raise ValueError('staged inventory changed')
     independently_verified_source=staged.source_stage.verify_contract(a.stage,a.commit,a.version)
     if independently_verified_source!=actual['correspondingSource']:
@@ -117,15 +118,20 @@ def accept(a):
     gates = {}
     for name in sorted(staged.REQUIRED_GATES):
         path = a.evidence / (name + '.json')
-        gate = staged.load(path)
-        validate_gate(name, gate, a.evidence, a.commit, a.version, staged.digest(inventory_path),
+        receipt_hash = staged.contained_digest(a.evidence, path.name)
+        gate = staged.load(path, expected_sha256=receipt_hash)
+        validate_gate(name, gate, a.evidence, a.commit, a.version, inventory_hash,
                       independently_verified_source, a.reviewer, a.review_sha256)
-        gates[name] = dict(status='passed', sourceCommit=a.commit, version=a.version, receiptSHA256=staged.digest(a.evidence / (name + '.json')))
+        if staged.contained_digest(a.evidence, path.name) != receipt_hash:
+            raise ValueError('gate receipt changed during acceptance: ' + name)
+        gates[name] = dict(status='passed', sourceCommit=a.commit, version=a.version, receiptSHA256=receipt_hash)
+    if staged.digest(inventory_path) != inventory_hash:
+        raise ValueError('staged inventory changed during acceptance')
     receipt = dict(kind='hostwright.promotion-receipt.v2', sourceCommit=a.commit, version=a.version,
-                   buildRunID=a.run, buildRunAttempt=a.attempt, inventorySHA256=staged.digest(inventory_path),
+                   buildRunID=a.run, buildRunAttempt=a.attempt, inventorySHA256=inventory_hash,
                    files=actual['files'], correspondingSource=independently_verified_source, gates=gates, acceptanceActor=a.producer, producer=a.producer, acceptanceRunID=a.acceptance_run,
                    independentReview=dict(status='approved', reviewKind='independent-agent', issuerClaim=a.reviewer, reviewer=a.reviewer, reportSHA256=a.review_sha256, sourceCommit=a.commit,
-                                          inventorySHA256=staged.digest(inventory_path)))
+                                          inventorySHA256=inventory_hash))
     with a.output.open('x') as handle:
         json.dump(receipt, handle, sort_keys=True, separators=(',', ':'))
         handle.write('\n')

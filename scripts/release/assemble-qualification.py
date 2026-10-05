@@ -24,7 +24,8 @@ def assemble(a):
         raise ValueError('unsafe input root or existing export')
     actual = staged.inventory(a.stage, a.commit, a.version, a.run, a.attempt)
     inventory_path = a.stage / 'stage-inventory.json'
-    if staged.load(inventory_path) != actual:
+    inventory_hash = staged.digest(inventory_path)
+    if staged.load(inventory_path, expected_sha256=inventory_hash) != actual:
         raise ValueError('staged inventory changed')
     source_binding = staged.source_stage.verify_contract(a.stage, a.commit, a.version)
     if source_binding != actual['correspondingSource']:
@@ -57,7 +58,7 @@ def assemble(a):
         rebased[str(report_path)] = report_hash
         gate['attachments'] = rebased
         acceptance.validate_gate(name, gate, a.input_root, a.commit, a.version,
-                                 staged.digest(inventory_path), source_binding,
+                                 inventory_hash, source_binding,
                                  a.reviewer, a.review_sha256)
         for path, expected in rebased.items():
             target = 'raw/' + path
@@ -67,6 +68,8 @@ def assemble(a):
         gate['attachments'] = {'raw/' + path: digest for path, digest in rebased.items()}
         gates[name] = gate
 
+    if staged.digest(inventory_path) != inventory_hash:
+        raise ValueError('staged inventory changed during assembly')
     # No pass flags or source bindings are synthesized. All validation precedes output.
     a.output.mkdir(mode=0o700, parents=True, exist_ok=False)
     for relative, expected in files.items():

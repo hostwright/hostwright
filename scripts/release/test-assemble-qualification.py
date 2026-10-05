@@ -125,7 +125,8 @@ class AssemblyTests(unittest.TestCase):
 
     def test_changed_json_cannot_be_parsed_under_an_older_digest(self):
         original_load = stage.load
-        targets = [self.input_path, self.raw / 'public-education/complete.json']
+        targets = [self.bundle / 'stage-inventory.json', self.input_path,
+                   self.raw / 'public-education/complete.json']
         for target in targets:
             original = target.read_bytes()
             def swap_before_parse(path, expected_sha256=None):
@@ -140,6 +141,35 @@ class AssemblyTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'between binding and parsing'):
                     self.assemble()
             self.assertFalse(self.args.output.exists())
+
+    def test_acceptance_binds_parsed_gate_and_inventory_bytes(self):
+        self.assemble()
+        args = argparse.Namespace(**vars(self.args), evidence=self.args.output,
+                                  producer='maintainer', acceptance_run='456')
+        args.output = self.root / 'accepted.json'
+        original_load = stage.load
+        for target in (self.bundle / 'stage-inventory.json',
+                       args.evidence / 'public-education.json'):
+            original = target.read_bytes()
+            for timing in ('before-parse', 'after-parse'):
+                def replace_during_read(path, expected_sha256=None):
+                    if path == target:
+                        if timing == 'before-parse':
+                            target.write_bytes(original + b'\n')
+                        value = original_load(path, expected_sha256=expected_sha256)
+                        if timing == 'after-parse':
+                            target.write_bytes(original + b'\n')
+                        return value
+                    return original_load(path, expected_sha256=expected_sha256)
+                try:
+                    with self.subTest(path=target.name, timing=timing), \
+                         mock.patch.object(stage, 'load', side_effect=replace_during_read), \
+                         mock.patch.object(stage.source_stage, 'verify_contract', return_value=self.binding):
+                        with self.assertRaises(ValueError):
+                            assembler.acceptance.accept(args)
+                    self.assertFalse(args.output.exists())
+                finally:
+                    target.write_bytes(original)
 
 
 if __name__ == '__main__':

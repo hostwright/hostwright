@@ -464,10 +464,12 @@ public enum HomebrewFormulaRenderer {
           def caveats
             <<~EOS
               Hostwright is installed without starting its service. To use hostwrightd,
-              place a reviewed v2 manifest at:
+              place a reviewed Manifest v3 file at:
                 #{etc}/hostwright/hostwright.yaml
               An example is installed at:
                 #{pkgshare}/hostwright.yaml
+              Before starting the service for the first time, declare the installed identities:
+                #{opt_bin}/hostwright daemon bootstrap-identities
             EOS
           end
 
@@ -483,9 +485,6 @@ public enum HomebrewFormulaRenderer {
             assert_equal version.to_s, shell_output("#{bin}/hostwrightd --version").strip
             assert_path_exists pkgshare/"containerization/kernel/\(DistributionContainerizationAssets.kernelFileName)"
             assert_path_exists pkgshare/"containerization/vminit/index.json"
-            capabilities = shell_output("#{bin}/hostwright capabilities --json")
-            assert_match '"schemaVersion":1', capabilities
-            assert_match '"productVersion":"\(version)"', capabilities
           end
         end
         """ + "\n"

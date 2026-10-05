@@ -106,7 +106,7 @@ trap cleanup EXIT
 version="$("$hostwright_cli" --version)"
 golden_version="$(plutil -extract productVersion raw contracts/v0.0.2/versions.json)"
 [[ "$version" == "$golden_version" ]]
-[[ "$version" == "0.0.2-rc.4" ]]
+[[ "$version" == "0.0.2-rc.5" ]]
 
 export HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$application_support"
 export HOSTWRIGHT_CACHE_DIR="$cache_directory"

@@ -4,6 +4,13 @@ Status: v0.0.2 local Compose conversion.
 
 `hostwright import-stack <path>` assesses a narrow safe stack-file subset and either emits a validated `hostwright.yaml` text for review or returns structured diagnostics. It is non-mutating: it does not write files, create state, observe Apple container, contact registries, pull images, or execute runtime actions.
 
+## Prerequisites
+
+Use the CLI and daemon from the same signed installation. Complete
+[identity bootstrap and daemon setup](../architecture/daemon.md) under the same
+macOS account and local paths before running these commands. Import and validation
+use the authenticated Control API even though they do not execute a workload.
+
 ## Command
 
 ```bash

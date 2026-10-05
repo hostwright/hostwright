@@ -1,6 +1,6 @@
 # Install and Upgrade
 
-Status: source candidate preparation (`0.0.2-rc.4`) and the Hostwright-controlled unsupported dev.12 qualification channel are available. The `v0.0.2` release is not GA or production ready.
+Status: source candidate preparation (`0.0.2-rc.5`) and the Hostwright-controlled unsupported dev.12 qualification channel are available. The `v0.0.2` release is not GA or production ready.
 
 ## Package Manager Truth
 
@@ -46,8 +46,14 @@ swift build
 swift test
 scripts/integration.sh
 swift run hostwright --version
-swift run hostwright capabilities --json
+swift run hostwright --help
 ```
+
+Source builds can print version and help locally. Authenticated commands, including
+`capabilities`, `doctor`, validation, and planning, require the CLI and daemon from
+the same signed installation, declared local identities, and a running daemon.
+Follow [daemon setup](../architecture/daemon.md) before executing those commands.
+An unavailable Control API is a refusal, not a successful host check.
 
 The two immutable Phase 02 qualification prereleases are:
 
@@ -96,11 +102,12 @@ That machinery passed credentialed qualification for the immutable dev.11 and de
 
 State-backed commands now use `~/Library/Application Support/Hostwright/state/state.sqlite` when no `--state-db` or `HOSTWRIGHT_STATE_DB` override is present. State-writing commands create the documented Application Support, cache, and log roots with private permissions. A compatible legacy `~/.hostwright/state.sqlite` is moved through a synchronized, identity-bound, resumable journal; unknown legacy files are preserved.
 
-Inspect the selected paths without creating them:
+After identity bootstrap and daemon startup, inspect the selected paths with the
+CLI from that signed installation. These queries do not create the selected paths:
 
 ```bash
-swift run hostwright paths --json
-swift run hostwright doctor --output json
+hostwright paths --json
+hostwright doctor --output json
 ```
 
 The complete precedence, `0700`/`0600` policy, migration failure behavior, and recovery procedure are in [Local Paths, Permissions, and Legacy Migration](local-paths.md).

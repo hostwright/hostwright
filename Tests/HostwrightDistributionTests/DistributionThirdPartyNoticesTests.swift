@@ -58,8 +58,38 @@ final class DistributionThirdPartyNoticesTests: XCTestCase {
         XCTAssertThrowsError(try DistributionThirdPartyNotices.sourcePayload(root: changed, runtimeAssets: assets))
     }
 
-    func testIncompleteRuntimeCorrespondingSourceCannotBecomeTrustedRelease() throws {
-        XCTAssertThrowsError(try DistributionThirdPartyNotices.requireQualifiedRuntimeSource(root: root()))
+    func testRuntimeCorrespondingSourceQualificationUsesTheCommittedEvidenceState() throws {
+        let repository = root()
+        XCTAssertNoThrow(try DistributionThirdPartyNotices.requireQualifiedRuntimeSource(root: repository))
+
+        let data = try DistributionThirdPartyNotices.read(repository.appendingPathComponent("runtime-license-inventory.json"))
+        var inventory = try DistributionThirdPartyNotices.decode(RuntimeLicenseInventory.self, data: data)
+        let qualified = inventory.assets[0]
+        inventory.assets[0] = RuntimeLicenseAsset(
+            identity: qualified.identity,
+            payloadPaths: qualified.payloadPaths,
+            sha256: qualified.sha256,
+            sizeBytes: qualified.sizeBytes,
+            licenseExpression: qualified.licenseExpression,
+            status: qualified.status,
+            sourceReferences: qualified.sourceReferences,
+            blockers: ["test-only missing source coverage"],
+            sourceDistributionEvidence: qualified.sourceDistributionEvidence
+        )
+
+        try withTemporaryRoot { temporary in
+            try DistributionThirdPartyNotices.encode(inventory)
+                .write(to: temporary.appendingPathComponent("runtime-license-inventory.json"))
+            XCTAssertThrowsError(try DistributionThirdPartyNotices.requireQualifiedRuntimeSource(root: temporary)) { error in
+                guard case let DistributionError.invalidArtifact(message) = error else {
+                    return XCTFail("Expected incomplete source evidence to be refused, received \(error)")
+                }
+                XCTAssertEqual(
+                    message,
+                    "Trusted release blocked: runtime corresponding-source, build provenance, or component-license evidence remains incomplete. See runtime-license-inventory.json."
+                )
+            }
+        }
     }
 
     func testSchemaThreeRequiresNoticesAndHistoricalSchemaTwoLayoutRemainsVerifiable() {
@@ -72,5 +102,13 @@ final class DistributionThirdPartyNoticesTests: XCTestCase {
             paths: Set(DistributionLayout.legacyPayloadModesV5.keys)))
         XCTAssertNotNil(DistributionLayout.trustedPayloadModes(schemaVersion: 2,
             paths: Set(DistributionLayout.legacyPayloadModesV4.keys)))
+    }
+
+    private func withTemporaryRoot(_ body: (URL) throws -> Void) throws {
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-runtime-qualification-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        try body(temporary)
     }
 }

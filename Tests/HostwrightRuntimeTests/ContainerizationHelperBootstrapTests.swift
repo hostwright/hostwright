@@ -41,6 +41,7 @@ final class ContainerizationHelperBootstrapTests: XCTestCase {
             document.initImageVariantDigest,
             fixture.assetLock.initImageVariantDigest
         )
+        XCTAssertNotEqual(document.initImageDescriptorDigest, document.initImageVariantDigest)
         XCTAssertEqual(document.rootfsSizeBytes, 4 * 1_024 * 1_024 * 1_024)
         XCTAssertEqual(
             document.guestNetworkPolicyLoaderPath,
@@ -67,6 +68,35 @@ final class ContainerizationHelperBootstrapTests: XCTestCase {
 
         XCTAssertEqual(try Data(contentsOf: fixture.configurationURL), mismatched)
         XCTAssertEqual(try fixture.temporaryConfigurationFiles(), [])
+    }
+
+    func testPrepareRejectsImportedRootAsPackagedManifestBeforePersistence() throws {
+        let fixture = try ContainerizationHelperBootstrapFixture()
+        let indexURL = fixture.initImageLayoutURL.appendingPathComponent("index.json")
+        var index = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: indexURL)) as? [String: Any])
+        var manifests = try XCTUnwrap(index["manifests"] as? [[String: Any]])
+        manifests[0]["digest"] = fixture.assetLock.initImageDescriptorDigest
+        index["manifests"] = manifests
+        let bytes = try JSONSerialization.data(withJSONObject: index, options: [.sortedKeys])
+        try bytes.write(to: indexURL)
+        let original = fixture.assetLock
+        let lock = ContainerizationHelperBootstrapAssetLock(
+            frameworkVersion: original.frameworkVersion,
+            kernel: original.kernel,
+            guestNetworkPolicyLoader: original.guestNetworkPolicyLoader,
+            initImageReference: original.initImageReference,
+            initImageDescriptorDigest: original.initImageDescriptorDigest,
+            initImageLayout: original.initImageLayout,
+            initImageIndexJSON: .init(name: "index.json", sha256: SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined(), size: Int64(bytes.count)),
+            initImageManifest: original.initImageManifest,
+            initImageConfiguration: original.initImageConfiguration,
+            initImageLayer: original.initImageLayer
+        )
+
+        XCTAssertThrowsError(try fixture.prepare(assetLock: lock)) { error in
+            XCTAssertEqual(error as? ContainerizationHelperClientError, .helperLaunchFailed)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.supportURL.path))
     }
 
     func testPrepareRefusesSymlinkTraversalAndUnsafePrivateDirectory() throws {
@@ -145,6 +175,19 @@ final class ContainerizationHelperBootstrapTests: XCTestCase {
         XCTAssertFalse(
             FileManager.default.fileExists(atPath: fixture.supportURL.path)
         )
+    }
+
+    func testPrepareRejectsModifiedGuestLoaderWithValidELFHeader() throws {
+        let fixture = try ContainerizationHelperBootstrapFixture()
+        var modified = try Data(contentsOf: fixture.guestNetworkPolicyLoaderURL)
+        modified[modified.count - 1] ^= 0xff
+        try modified.write(to: fixture.guestNetworkPolicyLoaderURL)
+        XCTAssertEqual(chmod(fixture.guestNetworkPolicyLoaderURL.path, 0o700), 0)
+
+        XCTAssertThrowsError(try fixture.prepare()) { error in
+            XCTAssertEqual(error as? ContainerizationHelperClientError, .helperLaunchFailed)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.supportURL.path))
     }
 
     func testConcurrentPrepareUsesOneExclusiveDurableConfiguration() async throws {
@@ -369,31 +412,39 @@ private final class ContainerizationHelperBootstrapFixture: @unchecked Sendable 
         }
 
         let kernel = Data("fixture-kernel".utf8)
-        let imageIndex = Data("fixture-index".utf8)
-        let imageVariant = Data("fixture-variant".utf8)
         let imageConfiguration = Data("fixture-configuration".utf8)
         let imageLayer = Data("fixture-layer".utf8)
-        let indexLock = Self.lockedFile(data: imageIndex)
-        let variantLock = Self.lockedFile(data: imageVariant)
         let configurationLock = Self.lockedFile(data: imageConfiguration)
         let layerLock = Self.lockedFile(data: imageLayer)
-        assetLock = ContainerizationHelperBootstrapAssetLock(
-            frameworkVersion: ContainerizationRuntimeAssetContract.frameworkVersion,
-            kernel: .init(
-                name: ContainerizationRuntimeAssetContract.kernelFileName,
-                sha256: Self.sha256(kernel),
-                size: Int64(kernel.count)
-            ),
-            initImageReference: ContainerizationRuntimeAssetContract.initImageReference,
-            initImageIndex: indexLock,
-            initImageVariant: variantLock,
-            initImageConfiguration: configurationLock,
-            initImageLayer: layerLock
-        )
-
-        kernelURL = kernelDirectory.appendingPathComponent(assetLock.kernel.name)
-        layerURL = blobDirectory.appendingPathComponent(assetLock.initImageLayer.name)
-        try Self.write(kernel, to: kernelURL)
+        let manifestObject: [String: Any] = [
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "config": [
+                "mediaType": "application/vnd.oci.image.config.v1+json",
+                "digest": "sha256:\(configurationLock.sha256)",
+                "size": imageConfiguration.count
+            ],
+            "layers": [[
+                "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+                "digest": "sha256:\(layerLock.sha256)",
+                "size": imageLayer.count
+            ]]
+        ]
+        let manifestData = try JSONSerialization.data(withJSONObject: manifestObject, options: [.sortedKeys])
+        let manifestLock = Self.lockedFile(data: manifestData)
+        let layoutData = Data(#"{"imageLayoutVersion":"1.0.0"}"#.utf8)
+        let rootIndex: [String: Any] = [
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.index.v1+json",
+            "manifests": [[
+                "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                "digest": "sha256:\(manifestLock.sha256)",
+                "size": manifestData.count
+            ]]
+        ]
+        let rootIndexData = try JSONSerialization.data(withJSONObject: rootIndex, options: [.sortedKeys])
+        let indexLock = Self.lockedFile(data: rootIndexData, name: "index.json")
+        let layoutLock = Self.lockedFile(data: layoutData, name: "oci-layout")
         var guestLoader = Data(repeating: 0, count: 64)
         guestLoader.replaceSubrange(
             0..<20,
@@ -405,35 +456,47 @@ private final class ContainerizationHelperBootstrapFixture: @unchecked Sendable 
                 183, 0
             ]
         )
+        assetLock = ContainerizationHelperBootstrapAssetLock(
+            frameworkVersion: ContainerizationRuntimeAssetContract.frameworkVersion,
+            kernel: .init(
+                name: ContainerizationRuntimeAssetContract.kernelFileName,
+                sha256: Self.sha256(kernel),
+                size: Int64(kernel.count)
+            ),
+            guestNetworkPolicyLoader: .init(
+                name: ContainerizationRuntimeAssetContract.guestNetworkPolicyLoaderFileName,
+                sha256: Self.sha256(guestLoader),
+                size: Int64(guestLoader.count)
+            ),
+            initImageReference: "untagged@sha256:\(manifestLock.sha256)",
+            initImageDescriptorDigest: "sha256:\(Self.sha256(Data("fixture-imported-index".utf8)))",
+            initImageLayout: layoutLock,
+            initImageIndexJSON: indexLock,
+            initImageManifest: manifestLock,
+            initImageConfiguration: configurationLock,
+            initImageLayer: layerLock
+        )
+
+        kernelURL = kernelDirectory.appendingPathComponent(assetLock.kernel.name)
+        layerURL = blobDirectory.appendingPathComponent(assetLock.initImageLayer.name)
+        try Self.write(kernel, to: kernelURL)
         try Self.write(guestLoader, to: guestNetworkPolicyLoaderURL)
         XCTAssertEqual(
             chmod(guestNetworkPolicyLoaderURL.path, 0o700),
             0
         )
-        try Self.write(imageIndex, to: blobDirectory.appendingPathComponent(indexLock.name))
-        try Self.write(imageVariant, to: blobDirectory.appendingPathComponent(variantLock.name))
+        try Self.write(manifestData, to: blobDirectory.appendingPathComponent(manifestLock.name))
         try Self.write(
             imageConfiguration,
             to: blobDirectory.appendingPathComponent(configurationLock.name)
         )
         try Self.write(imageLayer, to: layerURL)
         try Self.write(
-            Data(#"{"imageLayoutVersion":"1.0.0"}"#.utf8),
+            layoutData,
             to: initImageLayoutURL.appendingPathComponent("oci-layout")
         )
-        let rootIndex: [String: Any] = [
-            "schemaVersion": 2,
-            "manifests": [[
-                "mediaType": "application/vnd.oci.image.index.v1+json",
-                "digest": assetLock.initImageDescriptorDigest,
-                "size": imageIndex.count,
-                "annotations": [
-                    "org.opencontainers.image.ref.name": assetLock.initImageReference
-                ]
-            ]]
-        ]
         try Self.write(
-            JSONSerialization.data(withJSONObject: rootIndex, options: [.sortedKeys]),
+            rootIndexData,
             to: initImageLayoutURL.appendingPathComponent("index.json")
         )
 
@@ -451,12 +514,12 @@ private final class ContainerizationHelperBootstrapFixture: @unchecked Sendable 
         try? FileManager.default.removeItem(at: rootURL)
     }
 
-    func prepare() throws {
+    func prepare(assetLock override: ContainerizationHelperBootstrapAssetLock? = nil) throws {
         try ContainerizationHelperBootstrap.prepare(
             configuration: clientConfiguration,
             homeDirectoryURL: homeURL,
             environment: environment,
-            assetLock: assetLock
+            assetLock: override ?? assetLock
         )
     }
 
@@ -488,10 +551,11 @@ private final class ContainerizationHelperBootstrapFixture: @unchecked Sendable 
     }
 
     private static func lockedFile(
-        data: Data
+        data: Data,
+        name: String? = nil
     ) -> ContainerizationHelperBootstrapAssetLock.File {
         let digest = sha256(data)
-        return .init(name: digest, sha256: digest, size: Int64(data.count))
+        return .init(name: name ?? digest, sha256: digest, size: Int64(data.count))
     }
 
     private static func sha256(_ data: Data) -> String {

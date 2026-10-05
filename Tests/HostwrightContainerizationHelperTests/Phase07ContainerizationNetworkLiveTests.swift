@@ -142,7 +142,7 @@ final class Phase07ContainerizationNetworkLiveTests: XCTestCase {
             initImageDescriptorDigest:
                 ContainerizationRuntimeAssetContract.initImageDescriptorDigest,
             initImageVariantDigest:
-                "sha256:\(ContainerizationRuntimeAssetContract.initImageVariantDigest)",
+                ContainerizationRuntimeAssetContract.initImageVariantDigest,
             rootfsSizeBytes: 512 * 1_024 * 1_024,
             guestNetworkPolicyLoaderPath: policyLoaderURL?.path,
             guestNetworkPolicyLoaderSHA256:

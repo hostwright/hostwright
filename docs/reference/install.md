@@ -33,6 +33,12 @@ Requirements:
 - network access only to clone dependencies/source;
 - Apple `container` installed only for live runtime commands.
 
+An idle local daemon can open its authenticated Control API socket without an available
+runtime, allowing the desktop to connect and display runtime availability. Runtime
+version checks run when a scheduler operation needs runtime authority; a missing
+runtime still refuses that operation before scheduler pressure persistence,
+reservation changes, or runtime mutations.
+
 ```bash
 git clone https://github.com/hostwright/hostwright.git
 cd hostwright
@@ -78,7 +84,9 @@ hostwright-dist verify-release ...
 hostwright-dist homebrew-formula ...
 ```
 
-`release` accepts exact Developer ID Application and Installer certificate fingerprints plus the name of a preconfigured `notarytool` Keychain profile. It does not accept a password, API private key, issuer, token, or certificate bytes in argv. It performs two isolated clean builds, rejects observed Swift/Git/tar/notarytool version drift, signs all four shipped executables with hardened runtime and secure timestamps, creates an exact ZIP, submits the ZIP and signed flat `.pkg` to Apple, staples the package, runs Gatekeeper, generates per-artifact SPDX plus digest-bound provenance, signs the manifest/checksums/provenance/release evidence with detached CMS, and independently re-verifies the completed directory before publishing it locally.
+`release` accepts exact Developer ID Application and Installer certificate fingerprints plus the name of a preconfigured `notarytool` Keychain profile. It does not accept a password, API private key, issuer, token, or certificate bytes in argv. It performs two isolated clean builds, rejects observed Swift/Git/tar/notarytool version drift, signs the shipped executables with hardened runtime and secure timestamps, creates an exact ZIP, submits the ZIP and signed flat `.pkg` to Apple, staples the package, runs Gatekeeper, generates per-artifact SPDX plus digest-bound provenance, signs the manifest/checksums/provenance/release evidence with detached CMS, and independently re-verifies the completed directory before publishing it locally.
+
+Detached CMS signing resolves the selected certificate's subject key identifier from public certificate data after matching its exact fingerprint and common name. Missing or ambiguous matches fail before signing. This avoids the common-name identity search that can request access to unrelated private keys. Verification rejects embedded content, checks the signature against the supplied detached content, evaluates normal macOS code-signing trust, and requires the exact selected signer certificate; a successful `security cms` process exit alone is insufficient.
 
 The generated Homebrew formula is accepted only for the exact immutable `https://github.com/hostwright/hostwright/releases/download/<tag>/<archive>` URL from the verified release manifest. Local tests run the rendered formula through real Homebrew Ruby and formula-style checks.
 
@@ -109,6 +117,14 @@ Generic explicitly bound installs offer two exact choices:
 Neither choice removes backup catalogs, configuration, caches, logs, unrelated prefix content, or Apple container resources. Modified, linked, symlinked, wrong-owner, or otherwise ambiguous owned paths fail closed. See [Installed Distribution Lifecycle](installed-lifecycle.md) for commands, checkpoints, recovery, rollback, legacy adoption, service limitations, and troubleshooting.
 
 A package-owned installation uses elevated `hostwright-dist package-uninstall --prefix /usr/local --data-policy preserve --output json`. It re-verifies lifecycle ownership, the receipt, and the staged payload; after the uninstall transaction commits, it forgets only `dev.hostwright.cli` and removes only verified staging content. Package remove-data planning and uninstall are refused before mutation because the system-wide package lifecycle does not infer or search for a per-user state database. A bounded pending-cleanup marker lets `hostwright-dist recover --prefix /usr/local --output json` finish an interrupted receipt cleanup. Generic archive upgrade or uninstall is refused for a package-owned generation.
+
+Phase 14's `0.0.2-rc.2` candidate passed the authenticated signed/notarized build
+stage. Its desktop acceptance reuses retained physical observations on unchanged
+desktop inputs. The complete signed VM upgrade/rollback/repair/uninstall matrix
+has not passed for this candidate and remains a Phase 15 requirement in #278.
+The reduced Phase 14 completion boundary is recorded in
+[ADR 0015](../design/adr-0015-reduced-local-release.md); it does not promote this RC
+to a supported GA release.
 
 A source checkout remains separate from an installed prefix. Deleting the checkout does not run `hostwright-dist uninstall` and does not remove Application Support data or runtime resources.
 

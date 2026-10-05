@@ -8,6 +8,8 @@ The CLI provider selects versioned codecs for Apple `container` 1.0.0 or 1.1.0. 
 
 The helper requires local images. Its private Unix socket uses bounded, length-prefixed canonical JSON, request identities, deadlines, capability digests, mutation context, and idempotency keys. It authenticates the peer UID and signed code requirement. Private directories use mode `0700`, the socket uses `0600`, and frames are capped at 8 MiB.
 
+Containerization 0.35.0 imports the shipped init image manifest into an indirect OCI index. Bootstrap pins that imported root separately from the Linux ARM64 manifest variant; helper startup verifies both. The packaged layout retains its original index and manifest hashes.
+
 ## RuntimeAdapter Protocol Shape
 
 The adapter supplies metadata, capability discovery, observation, planning, logs, readiness, and provider operations. A lifecycle operation checks confirmation, policy, ownership, generation, and the current fence before a provider call. The coordinator records durable intent before effects and verifies the result afterward.

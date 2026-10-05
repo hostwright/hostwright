@@ -187,9 +187,16 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
     let schedulerRuntimeMetadata = try Self.waitForSchedulerRuntime {
       await commandEnvironment.runtimeAdapter().metadata()
     }
-    let schedulerRuntimeVersion = try Self.waitForSchedulerRuntime {
-      try await commandEnvironment.runtimeAdapter().runtimeVersion()
+    let schedulerRuntimeVersion: @Sendable () throws -> String = {
+      try Self.waitForSchedulerRuntime {
+        try await commandEnvironment.runtimeAdapter().runtimeVersion()
+      }
     }
+    let schedulerPressureRefresher = Self.makeSchedulerPressureRefresher(
+      pressureCoordinator: schedulerPressureCoordinator,
+      runtimeMetadata: schedulerRuntimeMetadata,
+      runtimeVersion: schedulerRuntimeVersion
+    )
     let schedulerAuthorityProvider = Self.makeSchedulerAuthorityProvider(
       store: store,
       repository: schedulerRepository,
@@ -584,7 +591,7 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
           pluginRuntime: pluginRuntime,
           schedulerRepository: schedulerRepository,
           schedulerAuthorityProvider: schedulerAuthorityProvider,
-          schedulerPressureCoordinator: schedulerPressureCoordinator,
+          schedulerPressureRefresher: schedulerPressureRefresher,
           schedulerRuntimeMutation: schedulerRuntimeMutation,
           schedulerRuntimeRelease: schedulerRuntimeRelease,
           schedulerPreemptionMutation: schedulerPreemptionMutation)
@@ -621,16 +628,29 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
     }
   }
 
+  static func makeSchedulerPressureRefresher(
+    pressureCoordinator: SchedulerPressureAuthorityCoordinator,
+    runtimeMetadata: RuntimeAdapterMetadata,
+    runtimeVersion: @escaping @Sendable () throws -> String
+  ) -> SchedulerControlOperations.PressureRefresher {
+    { input in
+      try Self.validateGenericSchedulerProvider(runtimeMetadata.providerID)
+      _ = try runtimeVersion()
+      return try pressureCoordinator.refresh(input: input)
+    }
+  }
+
   static func makeSchedulerAuthorityProvider(
     store: SQLiteStateStore,
     repository: SchedulerAdmissionRepository,
     configPath: String,
     pressureCoordinator: SchedulerPressureAuthorityCoordinator,
     runtimeMetadata: RuntimeAdapterMetadata,
-    runtimeVersion: String
+    runtimeVersion: @escaping @Sendable () throws -> String
   ) -> SchedulerControlOperations.AuthorityProvider {
     { projectIdentifier, decision, input in
       try Self.validateGenericSchedulerProvider(runtimeMetadata.providerID)
+      let currentRuntimeVersion = try runtimeVersion()
       let project: SchedulerProjectAuthoritySnapshot
       if HostwrightResourceUUID.isValid(projectIdentifier) {
         guard let resolved = try repository.projectAuthority(
@@ -712,7 +732,7 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
               identityVersion: ownership.identityVersion,
               providerID: runtimeMetadata.providerID,
               providerAPIVersion: runtimeMetadata.providerAPIVersion,
-              providerVersion: runtimeVersion,
+              providerVersion: currentRuntimeVersion,
               providerGeneration: Int64(ownership.providerGeneration),
               fencingToken: ownership.fencingToken
             )
@@ -923,7 +943,7 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
     pluginRuntime: PluginControlRuntime,
     schedulerRepository: SchedulerAdmissionRepository,
     schedulerAuthorityProvider: @escaping SchedulerControlOperations.AuthorityProvider,
-    schedulerPressureCoordinator: SchedulerPressureAuthorityCoordinator,
+    schedulerPressureRefresher: @escaping SchedulerControlOperations.PressureRefresher,
     schedulerRuntimeMutation: @escaping SchedulerControlOperations.RuntimeMutation,
     schedulerRuntimeRelease: @escaping SchedulerControlOperations.RuntimeRelease,
     schedulerPreemptionMutation: @escaping SchedulerControlOperations.PreemptionMutation
@@ -964,9 +984,7 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
       },
       runtimeMutation: schedulerRuntimeMutation,
       runtimeRelease: schedulerRuntimeRelease,
-      pressureRefresher: { input in
-        try schedulerPressureCoordinator.refresh(input: input)
-      },
+      pressureRefresher: schedulerPressureRefresher,
       preemptionMutation: schedulerPreemptionMutation
     ) {
       return response

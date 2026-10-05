@@ -16,7 +16,7 @@ revisions; their original full license files are retained at those exact revisio
 Root package expressions describe the root project's licensing only. They do not
 relicense embedded components or establish which symbols enter a particular binary.
 
-The separate runtime inventory records the pinned Kata kernel and Apple OCI asset
+The separate runtime inventory records the rebuilt Linux kernel and guest OCI asset
 contract, all 27 pins from the guest `vminitd/Package.resolved`, the guest loader's
 seven Go module versions/checksums, and the hashes of its `go.mod` and `go.sum`.
 All 27 guest root/nested license and notice texts are retained at their exact
@@ -38,51 +38,88 @@ An artifact-content SPDX file is not proof that distribution requirements passed
 Trusted release preflight and independent verification refuse incomplete runtime
 source/license qualification.
 
-## Current blocking evidence
+## Runtime producer and signing handoff
 
-- **Kata kernel:** the shipped `vmlinux-6.18.15-186` is pinned to the Kata 3.28.0
-  archive and exact kernel digest. The corresponding kernel source, applied
-  source archive is retained with primary checksum verification; the actual
-  embedded arm64 configuration and GCC 11.4.0/Binutils 2.38 banner are recorded.
-  Applied patches and compilation/installation scripts still need to be packaged
-  with that exact source/config and audited against the shipped bytes. Full build
-  flags are unproven. The approved route is a corresponding-source bundle alongside
-  binaries in the same GitHub release; this bundle is not yet staged/verified.
-  Kata documents how its build script applies patches and configuration and how
-  the suffix identifies configuration revision. See the pinned
-  [kernel build guide](https://github.com/kata-containers/kata-containers/blob/3.28.0/tools/packaging/kernel/README.md).
-  GPLv2's executable-distribution conditions cover corresponding source and
-  compilation/installation scripts; generic upstream links do not by themselves
-  establish the chosen route. See the [GNU GPLv2 FAQ](https://www.gnu.org/licenses/old-licenses/gpl-2.0-faq.en.html).
-  This route supplies source alongside the binaries and creates no written offer.
-- **Apple vminit OCI:** its guest lockfile has 27 pins, including revisions that
-  differ from the host graph. The exact OCI digest-to-source/build provenance and
-  guest component licenses must be qualified independently. The pinned
-  [guest Makefile](https://github.com/apple/containerization/blob/44bec8b9933bc491d0cbf44abac90a1f6aaebf6b/vminitd/Makefile)
-  selects the Swift 6.3 static Linux musl SDK; the
-  [image recipe](https://github.com/apple/containerization/blob/44bec8b9933bc491d0cbf44abac90a1f6aaebf6b/Makefile)
-  constructs the root filesystem from guest binaries. Those recipes do not alone
-  establish the linked runtime contents or licensing of the selected published OCI
-  layer. Guest dependency texts at their actual older revisions are retained; the actual
-  static Swift/musl SDK component inventory remains incomplete.
-- **Guest loader:** actual source is under `Guest/HostwrightNetfilter`, with an
-  existing historical receipt for source `5216c716ff16c8e93bc9e461af3fd95f26ce569b`
-  and two identical Go 1.26.5 ELF builds. That receipt is
-  `prepared-not-runtime-qualified`. Final frozen-source clean build/qualification,
-  and runtime qualification remain required. Actual linked-module and build-setting
-  evidence from both retained binaries is now recorded.
-  Preserved module/cache license documents close the attribution-text collection
-  gap, not these final binary evidence gaps.
+The runtime producer rebuilds the Linux kernel, guest binaries and Go loader twice
+and requires matching payload bytes. It installs the authenticated Swift SDK under
+the build directory to keep the SDK path independent of the user's home directory. The
+signed Linux source archive, applied
+patches, actual configuration, compiler/linker inputs, selected source files,
+complete source inventories and license texts form the corresponding-source
+closure. The guest OCI layout contains a direct image manifest. Its descriptor,
+configuration and layer are locked to rebuilt bytes; it is not the previously
+published GHCR image.
 
-`runtime-license-inventory.json` therefore remains `blocked`. Do not interpret this
-packet as a legal compliance conclusion or authorization to publish. Closing the
-remaining gaps requires actual reviewed source/build/distribution evidence.
+Dispatch `runtime-ingredients.yml` on the reviewed `main` commit. A successful
+loader-only push run is insufficient. The manual run must complete SDK evidence
+selection, native runtime, loader and final provenance jobs. The SDK may come from
+a new compilation or an authenticated retained producer. The final artifact is
+`runtime-provenance-<source SHA>-<run ID>-<attempt>` and contains exactly
+`runtime-provenance.tar.gz`. The manifest and every runtime payload receive GitHub
+attestations from that workflow. Rerun failed jobs to reuse successful upstream
+artifacts. Consumers use each upstream job's original artifact name and authenticate
+its original run attempt; the final handoff is attested by the assembling attempt.
+
+The SDK compiler job retains an authenticated
+`runtime-swift-sdk-checkpoint-<source SHA>-<run ID>-<attempt>` for seven days before
+source mapping begins. It contains compiled SDK bytes, raw object/archive inputs,
+source checkouts, compiler traces, build metadata and referenced temporary sources.
+Host executables outside the SDK are omitted with recorded hashes. Evidence
+collection restores these inputs in a separate job and never runs the SDK compiler.
+A checkpoint is not qualified runtime evidence until source verification passes.
+
+After merging an evidence-only fix, dispatch the workflow on `main` with both
+`sdk_checkpoint_run` and `sdk_checkpoint_attempt` set to the original SDK producer.
+The resolver prefers a complete `runtime-swift-sdk` artifact from that exact
+attempt, falling back to its raw build checkpoint. The consumer authenticates the
+original source SHA, workflow, run, attempt and archive hashes, requires that source
+to be an ancestor of the current commit, and compares source pins, patches,
+materialization, compiler configuration and build steps. Changed compilation inputs
+refuse reuse. Retained inventories must match those source pins; selected runtime
+objects still require complete source evidence. An uploaded SDK alone does not
+establish source qualification. Recovery writes new evidence without replacing the
+original authenticated files. The native runtime still rebuilds twice from the
+current source.
+Leave both inputs empty when a new SDK compilation is required. Checkpoints use
+artifact storage, so retain/download them deliberately before their expiry.
+
+The signing consumer verifies the exact source commit, repository, main ref,
+workflow, run, attempt and payload digests. A valid attestation from another run or
+attempt cannot satisfy the requested handoff. Materialize the retained archive with:
+
+```bash
+python3 scripts/release/materialize-runtime-assets.py \
+  --archive "$ARCHIVE" --output "$ASSETS" --source-commit "$SOURCE_SHA" \
+  --run-id "$RUNTIME_RUN_ID" --attempt "$RUNTIME_ATTEMPT"
+```
+
+Local prepared evidence is useful for reviewing pins and source coverage. It does
+not replace the authenticated producer run for the final merged commit. Source
+qualification also does not establish Developer ID signing, notarization,
+Gatekeeper acceptance, physical-Mac desktop behavior or package lifecycle results.
+Phase 14 requires those independent checks before its final evidence closures;
+publication remains Phase 15 work.
 
 ## Verification and refresh
 
 Run `python3 scripts/release/validate-third-party-notices.py --root "$PWD"` for the
-light source pin/text check. Add `--require-qualified` only for release acceptance;
-it currently refuses the unresolved runtime inventory.
+light source pin/text check. Add `--require-qualified` for release acceptance; it refuses blocked assets or
+missing corresponding-source evidence.
+
+The producer also compares the freshly verified runtime inventory and public
+notices with the committed qualified files. To prepare a reviewed runtime refresh,
+use a complete prepared proof and a clean checkout at that proof's exact source
+commit:
+
+```bash
+python3 scripts/release/qualify-runtime-inventory.py \
+  --prepared-root "$PREPARED_RUNTIME" --source-root "$CLEAN_SOURCE" \
+  --output "$NEW_INVENTORY_OUTPUT"
+```
+
+The output directory must be new and absolute. Review its inventories, notices,
+and kernel configuration together with the actual runtime digest and size updates
+before committing. This local verification does not authenticate a workflow run.
 
 Regenerate from read-only, exact-revision SwiftPM checkouts and Go caches with
 `scripts/release/collect-third-party-notices.py`. Its required arguments are

@@ -246,11 +246,11 @@ Epic: [#270](https://github.com/hostwright/hostwright/issues/270) — required
 
 | Marker | Issue | Workstream | Release disposition | Recorded state |
 | --- | ---: | --- | --- | --- |
-| `P14-C01` | [#258](https://github.com/hostwright/hostwright/issues/258) | Ship the signed local SwiftUI console and menu bar | required | open |
+| `P14-C01` | [#258](https://github.com/hostwright/hostwright/issues/258) | Ship the signed local SwiftUI console and menu bar | required | closed: completed |
 | `P14-C02` | [#259](https://github.com/hostwright/hostwright/issues/259) | Add reviewed desktop up, down and restart | required | open |
 | `P14-C03` | [#260](https://github.com/hostwright/hostwright/issues/260) | Show local services, health, logs and events | required | open |
 | `P14-C04` | [#261](https://github.com/hostwright/hostwright/issues/261) | Verify accessibility of the local desktop workflows | required | open |
-| `P14-C05` | [#262](https://github.com/hostwright/hostwright/issues/262) | Qualify signed desktop package upgrade and rollback | required | open |
+| `P14-C05` | [#262](https://github.com/hostwright/hostwright/issues/262) | Verify signed desktop packaging and ownership contracts | required | closed: completed |
 | `P14-C06` | [#263](https://github.com/hostwright/hostwright/issues/263) | Implement team roles, approvals, and change workflow | deferred | closed: not planned |
 | `P14-C07` | [#264](https://github.com/hostwright/hostwright/issues/264) | Implement MDM deployment, managed policy, and compliance | deferred | closed: not planned |
 | `P14-C08` | [#265](https://github.com/hostwright/hostwright/issues/265) | Build the optional cloud control service | deferred | closed: not planned |

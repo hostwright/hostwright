@@ -95,8 +95,11 @@ class SourceTests(unittest.TestCase):
    (release/'release-manifest.json').write_bytes(source.canonical(dict(artifactID='artifact',archive=dict(fileName=product.name,sha256=source.sha(product)))))
    binding=source.descriptor(root,'a'*40,'0.0.2')
    verified=dict(archiveSHA256=binding['archive']['sha256'],manifestSHA256=binding['manifest']['sha256'],releaseSourceRevision='a'*40,version='0.0.2')
-   with mock.patch.object(source.subprocess,'run',return_value=subprocess.CompletedProcess([],0,stdout=source.canonical(verified))),mock.patch.object(source,'qualified_runtime',return_value={'verified':True}) as validator:
+   runtime_verifier=source.runtime_verifier()
+   with mock.patch.object(source,'runtime_verifier',return_value=runtime_verifier),mock.patch.object(runtime_verifier,'open_source_archive',wraps=runtime_verifier.open_source_archive) as open_archive,mock.patch.object(source.subprocess,'run',return_value=subprocess.CompletedProcess([],0,stdout=source.canonical(verified))),mock.patch.object(source,'qualified_runtime',return_value={'verified':True}) as validator:
     source.verify_contract(root,'a'*40,'0.0.2')
+   self.assertEqual(open_archive.call_count,2)
+   self.assertEqual([call.args[0] for call in open_archive.call_args_list],[bundle,bundle])
    self.assertEqual(validator.call_args.args[1],'a'*40)
    self.assertEqual(validator.call_args.args[2],{'share/hostwright/containerization/kernel/vmlinux':payload})
    import stat

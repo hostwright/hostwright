@@ -525,7 +525,7 @@
       "child": null,
       "parent": 284,
       "title": "Phase 14 \u2014 Local desktop console and lifecycle actions",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/270",
       "labels": [
         "area:ci",
@@ -535,14 +535,14 @@
         "area:multi-host",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:docs",
         "type:epic",
         "type:implementation",
         "type:research",
         "type:roadmap",
         "type:security",
-        "type:testing"
+        "type:testing",
+        "status:verification"
       ],
       "assignees": [
         "d3v07"
@@ -550,9 +550,10 @@
       "releaseDisposition": "required",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
       "acceptanceCriteria": [
-        "Every required child satisfies its reduced acceptance criteria with clean final evidence.",
+        "Every required Phase 14 child satisfies the desktop implementation and signed RC acceptance boundary amended in ADR 0015 on 2026-10-05.",
         "Every deferred child is explicitly closed as not planned under ADR 0015; deferral is not implementation.",
-        "Public capability, compatibility, packaging and documentation claims match the tested local release scope."
+        "Public capability, compatibility, packaging and documentation claims match the tested local release scope.",
+        "Remaining artifact lifecycle qualification is tracked in Phase 15 #278; Phase 14 closure makes no complete VM or GA-release claim."
       ],
       "requiredEvidence": [
         "local-integration",
@@ -560,7 +561,7 @@
         "ux-accessibility",
         "security-assessment"
       ],
-      "stateReason": null
+      "stateReason": "completed"
     },
     {
       "marker": "P15",
@@ -5054,7 +5055,7 @@
       "child": 1,
       "parent": 270,
       "title": "P14-C01: Ship the signed local SwiftUI console and menu bar",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/258",
       "labels": [
         "area:ci",
@@ -5064,12 +5065,12 @@
         "area:multi-host",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:docs",
         "type:implementation",
         "type:research",
         "type:security",
-        "type:testing"
+        "type:testing",
+        "status:verification"
       ],
       "assignees": [
         "d3v07"
@@ -5077,7 +5078,7 @@
       "releaseDisposition": "required",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
       "acceptanceCriteria": [
-        "Package a signed/notarized native app using the existing split-view design and menu-bar health.",
+        "Package a signed/notarized native RC app using the existing split-view design and menu-bar health; reuse source-bound physical observations for unchanged desktop inputs.",
         "Select a local manifest and connect through the authenticated persistent Control API.",
         "Show services, status, logs and events with explicit unavailable/empty/error/reconnect states."
       ],
@@ -5087,7 +5088,7 @@
         "distribution-artifact",
         "ux-accessibility"
       ],
-      "stateReason": null
+      "stateReason": "completed"
     },
     {
       "marker": "P14-C02",
@@ -5224,8 +5225,8 @@
       "phase": 14,
       "child": 5,
       "parent": 270,
-      "title": "P14-C05: Qualify signed desktop package upgrade and rollback",
-      "state": "open",
+      "title": "P14-C05: Verify signed desktop packaging and ownership contracts",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/262",
       "labels": [
         "area:ci",
@@ -5235,12 +5236,12 @@
         "area:multi-host",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
         "type:docs",
         "type:implementation",
         "type:research",
         "type:security",
-        "type:testing"
+        "type:testing",
+        "status:verification"
       ],
       "assignees": [
         "d3v07"
@@ -5248,18 +5249,17 @@
       "releaseDisposition": "required",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
       "acceptanceCriteria": [
-        "Include the app and required helpers in signed distribution manifests and ownership-scoped installation.",
-        "Verify package upgrade, one-generation rollback, repair and uninstall in the macOS VM.",
-        "Preserve user state and modified/unmanaged files; automatic in-app updates are deferred."
+        "Include the app and required helpers in authenticated signed/notarized distribution manifests and ownership-scoped packaging.",
+        "Pass current-source distribution ownership, preservation, compensation and recovery contracts; retain historical device evidence under its original source.",
+        "Transfer the remaining signed VM upgrade, rollback, re-upgrade, repair and uninstall qualification to Phase 15 #278 before final release promotion."
       ],
       "requiredEvidence": [
         "unit-contract",
         "local-integration",
         "distribution-artifact",
-        "migration-upgrade",
         "security-assessment"
       ],
-      "stateReason": null
+      "stateReason": "completed"
     },
     {
       "marker": "P14-C06",
@@ -5676,7 +5676,8 @@
       "acceptanceCriteria": [
         "Verify locked dependencies, reviewed license receipts/texts, secrets, static security and vulnerability policy for shipped artifacts.",
         "Produce and independently verify SBOM, signatures, checksums and provenance.",
-        "Retain exact source/artifact results; empty license receipts and blocked scanners fail required gates."
+        "Retain exact source/artifact results; empty license receipts and blocked scanners fail required gates.",
+        "Retain and assess the S37281269383 intermediate SystemPackage SystemString.swift.o variance before promotion; nine executable hashes matched and the trusted release stage passed, so do not relabel it as all-object reproducibility."
       ],
       "requiredEvidence": [
         "local-integration",
@@ -5800,7 +5801,8 @@
       "acceptanceCriteria": [
         "Exercise preserved dev.11/dev.12 upgrade inputs to the current release schema through supported migrations.",
         "Verify backup, downgrade refusal, interruption recovery and one-generation rollback in the clean VM.",
-        "Bind evidence to actual signed artifacts and preserve historical releases unchanged."
+        "Bind evidence to actual signed artifacts and preserve historical releases unchanged.",
+        "Complete the transferred Phase 14 signed VM upgrade, rollback, re-upgrade, repair and uninstall routes, including the #363 compensation/recovery repair, before release promotion; retain the historical four completed cases with their original bindings."
       ],
       "requiredEvidence": [
         "distribution-artifact",

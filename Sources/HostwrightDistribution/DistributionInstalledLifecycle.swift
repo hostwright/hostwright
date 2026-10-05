@@ -655,7 +655,7 @@ public struct DistributionInstalledLifecycle: Sendable {
         let result = try SecureSubprocessRunner().run(SecureSubprocessRequest(executablePath: "/bin/launchctl",
             arguments: ["asuser", String(receipt.binding.ownerUID), executable.path, "owner-state-probe-child"],
             environment: SecureSubprocessEnvironment.minimal, workingDirectory: "/",
-            standardInput: try DistributionJSON.encode(request), timeoutMilliseconds: 30_000,
+            standardInput: try DistributionJSON.encode(request), timeoutMilliseconds: 300_000,
             maximumStandardOutputBytes: 1_048_576, maximumStandardErrorBytes: 65_536), cancellation: cancellation)
         guard result.exitStatus == 0, result.terminationSignal == nil,
               !result.standardOutputTruncated, !result.standardErrorTruncated,
@@ -765,7 +765,7 @@ public struct DistributionInstalledLifecycle: Sendable {
         }
     }
 
-    private func validatedPublicStateChallenge(
+    func validatedPublicStateChallenge(
         prefix: URL,
         cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation(),
         allowedPendingOperation: String? = nil
@@ -3132,16 +3132,13 @@ public struct DistributionInstalledLifecycle: Sendable {
         }
         let receiptURL = lifecycleRoot(prefix).appendingPathComponent("adopted-owner-state-v1.json")
         let receipt: DistributionOwnerStateReceipt = try readStateBindingJSON(receiptURL, ownerUID: 0, mode: 0o600)
-        guard receipt.challenge.installationID == status.installationID, receipt.challenge.generation == status.generation,
-              receipt.challenge.installedManifestSHA256 == DistributionHash.sha256(data: try DistributionJSON.encode(status.installedManifest)) else {
-            throw DistributionError.lifecycleFailed("terminal cleanup owner receipt differs from completed generation")
-        }
+        try validateOwnerStateReceipt(receipt, prefix: prefix)
         let dispositions = DistributionTerminalCleanup.dispositions(journal)
         let proof = DistributionTerminalCleanup(schemaVersion: 1, journal: journal, completedStatus: status,
             adoptedOwnerReceiptSHA256: DistributionHash.sha256(data: try DistributionJSON.encode(receipt)),
             originalDescriptorSHA256: descriptorSHA256, deleteTransactionRelativePaths: dispositions.delete,
             retainTransactionRelativePaths: dispositions.retain)
-        try proof.validate()
+        try proof.validate(adoptedOwnerReceipt: receipt)
         try writeCanonicalReplacing(proof, to: terminalCleanupURL(prefix), mode: 0o600)
         try finishTerminalMetadataIfPresent(prefix: prefix, remove: false)
     }
@@ -3173,6 +3170,8 @@ public struct DistributionInstalledLifecycle: Sendable {
         }
         try verifyOwnedFiles(proof.completedStatus.installedManifest, prefix: prefix)
         let receipt: DistributionOwnerStateReceipt = try readStateBindingJSON(lifecycleRoot(prefix).appendingPathComponent("adopted-owner-state-v1.json"), ownerUID: 0, mode: 0o600)
+        try validateOwnerStateReceipt(receipt, prefix: prefix)
+        try proof.validate(adoptedOwnerReceipt: receipt)
         guard DistributionHash.sha256(data: try DistributionJSON.encode(receipt)) == proof.adoptedOwnerReceiptSHA256,
               try captureManagedServiceState(prefix: prefix, cancellation: SecureSubprocessCancellation()) == proof.completedStatus.service else {
             throw DistributionError.lifecycleFailed("terminal cleanup completed receipt or service changed")

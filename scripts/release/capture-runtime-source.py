@@ -72,7 +72,7 @@ def capture(repository, commit, output, submodules=None):
         ) as process:
             try:
                 with (staging / "source.tar.gz").open("xb") as raw:
-                    with gzip.GzipFile(filename="", fileobj=raw, mode="wb", mtime=0) as compressed:
+                    with gzip.GzipFile(filename="", fileobj=raw, mode="wb", mtime=0, compresslevel=1) as compressed:
                         with tarfile.open(fileobj=compressed, mode="w|", format=tarfile.PAX_FORMAT) as archive:
                             for name, mode, oid in sorted(entries):
                                 process.stdin.write((oid + "\n").encode())

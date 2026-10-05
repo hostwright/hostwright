@@ -476,6 +476,18 @@ public struct TrustedReleaseVerifier: Sendable {
             cancellation: cancellation
         )
         commands.append(record("expand trusted package into a new private directory", expansion))
+        if manifest.schemaVersion >= 3 {
+            let packageInfo = expansionRoot.appendingPathComponent("PackageInfo")
+            guard try DistributionFileSystem.isRegularNonSymlink(packageInfo),
+                  try DistributionFileSystem.size(of: packageInfo) <= 1_024 * 1_024,
+                  try linkCount(packageInfo) == 1 else {
+                throw DistributionError.invalidArtifact("trusted package has no exact component metadata")
+            }
+            try TrustedReleasePackageComponentPolicy.validatePackageInfo(
+                Data(contentsOf: packageInfo),
+                manifest: manifest
+            )
+        }
         let payloadRoot = expansionRoot.appendingPathComponent("Payload", isDirectory: true)
         guard try DistributionFileSystem.isDirectoryNonSymlink(payloadRoot) else {
             throw DistributionError.invalidArtifact("expanded trusted package has no exact Payload root")

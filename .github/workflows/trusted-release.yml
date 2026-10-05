@@ -180,7 +180,8 @@ jobs:
           test "$(find "$download" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" = 1
           assets="$RUNNER_TEMP/runtime-assets-$RELEASE_COMMIT-$RELEASE_RUNTIME_PROVENANCE_RUN-$attempt"
           python3 scripts/release/materialize-runtime-assets.py \
-            --archive "$archive" --output "$assets" --source-commit "$RELEASE_COMMIT"
+            --archive "$archive" --output "$assets" --source-commit "$RELEASE_COMMIT" \
+            --run-id "$RELEASE_RUNTIME_PROVENANCE_RUN" --attempt "$attempt"
           echo "archive=$archive" >> "$GITHUB_OUTPUT"
           echo "assets=$assets" >> "$GITHUB_OUTPUT"
 

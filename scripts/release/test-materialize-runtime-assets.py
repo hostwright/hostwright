@@ -35,7 +35,8 @@ class RuntimeAssetMaterializerTests(unittest.TestCase):
             case.assemble(source, archive, manifest)
             output = temporary / "assets"
             with mock.patch.object(MATERIALIZER.VERIFIER, "authenticate") as authenticate:
-                result = MATERIALIZER.materialize(archive, output, manifest["sourceCommit"])
+                result = MATERIALIZER.materialize(archive, output, manifest["sourceCommit"],
+                    manifest["producer"]["runID"], manifest["producer"]["attempt"])
             self.assertEqual(authenticate.call_count, len(payloads) + 1)
             self.assertEqual(result["payloadCount"], len(payloads))
             for name, data in payloads.items():
@@ -45,11 +46,9 @@ class RuntimeAssetMaterializerTests(unittest.TestCase):
                 {path.relative_to(output).as_posix() for path in output.rglob("*") if path.is_file()},
                 {name.removeprefix(MATERIALIZER.PREFIX) for name in payloads},
             )
-            self.assertEqual((output / "guest/hostwright-netfilter").stat().st_mode & 0o777, 0o755)
+            self.assertEqual((output / "guest/hostwright-netfilter").stat().st_mode & 0o777, 0o644)
             for path in output.rglob("*"):
-                self.assertEqual(path.stat().st_mode & 0o777, 0o700 if path.is_dir() else (
-                    0o755 if path.relative_to(output).as_posix() == "guest/hostwright-netfilter" else 0o644
-                ))
+                self.assertEqual(path.stat().st_mode & 0o777, 0o700 if path.is_dir() else 0o644)
 
     def test_rejects_existing_output_and_authentication_failure(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -62,11 +61,13 @@ class RuntimeAssetMaterializerTests(unittest.TestCase):
             output = temporary / "assets"
             output.mkdir()
             with self.assertRaisesRegex(ValueError, "must not exist"):
-                MATERIALIZER.materialize(archive, output, manifest["sourceCommit"])
+                MATERIALIZER.materialize(archive, output, manifest["sourceCommit"],
+                    manifest["producer"]["runID"], manifest["producer"]["attempt"])
             output.rmdir()
             with mock.patch.object(MATERIALIZER.VERIFIER, "authenticate", side_effect=ValueError("untrusted")):
                 with self.assertRaisesRegex(ValueError, "untrusted"):
-                    MATERIALIZER.materialize(archive, output, manifest["sourceCommit"])
+                    MATERIALIZER.materialize(archive, output, manifest["sourceCommit"],
+                        manifest["producer"]["runID"], manifest["producer"]["attempt"])
             self.assertFalse(output.exists())
 
     def test_rejects_symlink_archive_and_output_parent(self):
@@ -80,13 +81,35 @@ class RuntimeAssetMaterializerTests(unittest.TestCase):
             archive_link = temporary / "archive-link.tar.gz"
             archive_link.symlink_to(archive)
             with self.assertRaisesRegex(ValueError, "traverses a symlink"):
-                MATERIALIZER.materialize(archive_link, temporary / "assets", manifest["sourceCommit"])
+                MATERIALIZER.materialize(archive_link, temporary / "assets", manifest["sourceCommit"],
+                    manifest["producer"]["runID"], manifest["producer"]["attempt"])
+
             real_parent = temporary / "real-parent"
             real_parent.mkdir()
             parent_link = temporary / "parent-link"
             parent_link.symlink_to(real_parent, target_is_directory=True)
             with self.assertRaisesRegex(ValueError, "traverses a symlink"):
-                MATERIALIZER.materialize(archive, parent_link / "assets", manifest["sourceCommit"])
+                MATERIALIZER.materialize(archive, parent_link / "assets", manifest["sourceCommit"],
+                    manifest["producer"]["runID"], manifest["producer"]["attempt"])
+
+    def test_rejects_other_authenticated_run_or_attempt_before_materializing(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary).resolve()
+            source = root / "input"
+            source.mkdir()
+            case = ASSEMBLER_TEST.RuntimeProvenanceAssemblerTests()
+            manifest, _, _, _ = case.fixture(source)
+            archive = root / "runtime-provenance.tar.gz"
+            case.assemble(source, archive, manifest)
+            run_id, attempt = manifest["producer"]["runID"], manifest["producer"]["attempt"]
+            for requested_run, requested_attempt in ((run_id + 1, attempt), (run_id, attempt + 1)):
+                with self.subTest(run=requested_run, attempt=requested_attempt):
+                    with mock.patch.object(MATERIALIZER.VERIFIER, "authenticate") as authenticate:
+                        with self.assertRaisesRegex(ValueError, "requested producer run/attempt"):
+                            MATERIALIZER.materialize(archive, root / "assets", manifest["sourceCommit"],
+                                                     requested_run, requested_attempt)
+                        authenticate.assert_not_called()
+                    self.assertFalse((root / "assets").exists())
 
 
 if __name__ == "__main__":

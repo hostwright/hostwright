@@ -19,15 +19,10 @@ public enum DistributionContainerizationAssets {
     public static let initImageDescriptorDigest =
         ContainerizationRuntimeAssetContract.initImageDescriptorDigest
     public static let initImageVariantDigest =
-        "sha256:\(ContainerizationRuntimeAssetContract.initImageVariantDigest)"
+        ContainerizationRuntimeAssetContract.initImageVariantDigest
     public static let kernelFileName = ContainerizationRuntimeAssetContract.kernelFileName
     public static let kernelSHA256 = ContainerizationRuntimeAssetContract.kernelSHA256
-    public static let kernelArchiveURL = ContainerizationRuntimeAssetContract.kernelArchiveURL
-    public static let kernelArchiveSHA256 = ContainerizationRuntimeAssetContract.kernelArchiveSHA256
-    public static let kernelArchiveMember = ContainerizationRuntimeAssetContract.kernelArchiveMember
-
-    static let initIndexDigest = ContainerizationRuntimeAssetContract.initImageIndexDigest
-    static let initVariantDigest = ContainerizationRuntimeAssetContract.initImageVariantDigest
+    static let initManifestDigest = ContainerizationRuntimeAssetContract.initImageManifestDigest
     static let initConfigurationDigest =
         ContainerizationRuntimeAssetContract.initImageConfigurationDigest
     static let initLayerDigest = ContainerizationRuntimeAssetContract.initImageLayerDigest
@@ -40,8 +35,7 @@ public enum DistributionContainerizationAssets {
         guestNetworkPolicyLoaderPayloadPath: 0o755,
         "share/hostwright/containerization/vminit/oci-layout": 0o644,
         "share/hostwright/containerization/vminit/index.json": 0o644,
-        "share/hostwright/containerization/vminit/blobs/sha256/\(initIndexDigest)": 0o644,
-        "share/hostwright/containerization/vminit/blobs/sha256/\(initVariantDigest)": 0o644,
+        "share/hostwright/containerization/vminit/blobs/sha256/\(initManifestDigest)": 0o644,
         "share/hostwright/containerization/vminit/blobs/sha256/\(initConfigurationDigest)": 0o644,
         "share/hostwright/containerization/vminit/blobs/sha256/\(initLayerDigest)": 0o644
     ]
@@ -53,10 +47,8 @@ public enum DistributionContainerizationAssets {
             "guest/\(ContainerizationRuntimeAssetContract.guestNetworkPolicyLoaderFileName)",
         "share/hostwright/containerization/vminit/oci-layout": "vminit/oci-layout",
         "share/hostwright/containerization/vminit/index.json": "vminit/index.json",
-        "share/hostwright/containerization/vminit/blobs/sha256/\(initIndexDigest)":
-            "vminit/blobs/sha256/\(initIndexDigest)",
-        "share/hostwright/containerization/vminit/blobs/sha256/\(initVariantDigest)":
-            "vminit/blobs/sha256/\(initVariantDigest)",
+        "share/hostwright/containerization/vminit/blobs/sha256/\(initManifestDigest)":
+            "vminit/blobs/sha256/\(initManifestDigest)",
         "share/hostwright/containerization/vminit/blobs/sha256/\(initConfigurationDigest)":
             "vminit/blobs/sha256/\(initConfigurationDigest)",
         "share/hostwright/containerization/vminit/blobs/sha256/\(initLayerDigest)":
@@ -65,8 +57,13 @@ public enum DistributionContainerizationAssets {
 
     static let expectedSHA256ByPayloadPath: [String: String] = [
         "share/hostwright/containerization/kernel/\(kernelFileName)": kernelSHA256,
-        "share/hostwright/containerization/vminit/blobs/sha256/\(initIndexDigest)": initIndexDigest,
-        "share/hostwright/containerization/vminit/blobs/sha256/\(initVariantDigest)": initVariantDigest,
+        guestNetworkPolicyLoaderPayloadPath:
+            ContainerizationRuntimeAssetContract.guestNetworkPolicyLoaderSHA256,
+        "share/hostwright/containerization/vminit/oci-layout":
+            ContainerizationRuntimeAssetContract.initImageLayoutSHA256,
+        "share/hostwright/containerization/vminit/index.json":
+            ContainerizationRuntimeAssetContract.initImageIndexJSONSHA256,
+        "share/hostwright/containerization/vminit/blobs/sha256/\(initManifestDigest)": initManifestDigest,
         "share/hostwright/containerization/vminit/blobs/sha256/\(initConfigurationDigest)":
             initConfigurationDigest,
         "share/hostwright/containerization/vminit/blobs/sha256/\(initLayerDigest)": initLayerDigest
@@ -75,10 +72,14 @@ public enum DistributionContainerizationAssets {
     static let expectedSizeByPayloadPath: [String: Int64] = [
         "share/hostwright/containerization/kernel/\(kernelFileName)":
             ContainerizationRuntimeAssetContract.kernelSize,
-        "share/hostwright/containerization/vminit/blobs/sha256/\(initIndexDigest)":
-            ContainerizationRuntimeAssetContract.initImageIndexSize,
-        "share/hostwright/containerization/vminit/blobs/sha256/\(initVariantDigest)":
-            ContainerizationRuntimeAssetContract.initImageVariantSize,
+        guestNetworkPolicyLoaderPayloadPath:
+            ContainerizationRuntimeAssetContract.guestNetworkPolicyLoaderSize,
+        "share/hostwright/containerization/vminit/oci-layout":
+            ContainerizationRuntimeAssetContract.initImageLayoutSize,
+        "share/hostwright/containerization/vminit/index.json":
+            ContainerizationRuntimeAssetContract.initImageIndexJSONSize,
+        "share/hostwright/containerization/vminit/blobs/sha256/\(initManifestDigest)":
+            ContainerizationRuntimeAssetContract.initImageManifestSize,
         "share/hostwright/containerization/vminit/blobs/sha256/\(initConfigurationDigest)":
             ContainerizationRuntimeAssetContract.initImageConfigurationSize,
         "share/hostwright/containerization/vminit/blobs/sha256/\(initLayerDigest)":
@@ -171,17 +172,26 @@ public enum DistributionContainerizationAssets {
                         descriptor: descriptor,
                         size: openedMetadata.st_size
                     )
+                    guard let expectedDigest = expectedSHA256ByPayloadPath[payloadPath],
+                          try sha256(descriptor: descriptor, cancellation: cancellation) == expectedDigest else {
+                        throw DistributionError.checksumMismatch(relativePath)
+                    }
                 } else if let maximumSize = metadataMaximumSize(payloadPath: payloadPath) {
                     guard openedMetadata.st_size <= maximumSize else {
                         throw DistributionError.invalidArtifact(
                             "Containerization asset metadata is oversized: \(relativePath)"
                         )
                     }
-                    metadataFiles[payloadPath] = try readData(
+                    let data = try readData(
                         descriptor: descriptor,
                         size: Int(openedMetadata.st_size),
                         cancellation: cancellation
                     )
+                    if let expectedDigest = expectedSHA256ByPayloadPath[payloadPath],
+                       hash(data) != expectedDigest {
+                        throw DistributionError.checksumMismatch(relativePath)
+                    }
+                    metadataFiles[payloadPath] = data
                 } else if let expectedDigest = expectedSHA256ByPayloadPath[payloadPath],
                           try sha256(
                             descriptor: descriptor,
@@ -226,7 +236,9 @@ public enum DistributionContainerizationAssets {
     private static func validateLayoutMetadata(_ files: [String: Data]) throws {
         let layoutPath = "share/hostwright/containerization/vminit/oci-layout"
         let indexPath = "share/hostwright/containerization/vminit/index.json"
-        guard let layoutData = files[layoutPath], let indexData = files[indexPath] else {
+        let manifestPath = "share/hostwright/containerization/vminit/blobs/sha256/\(initManifestDigest)"
+        guard let layoutData = files[layoutPath], let indexData = files[indexPath],
+              let manifestData = files[manifestPath] else {
             throw DistributionError.invalidArtifact("Containerization OCI layout metadata is missing.")
         }
         guard layoutData.count <= 4_096,
@@ -239,15 +251,30 @@ public enum DistributionContainerizationAssets {
         guard indexData.count <= 64 * 1_024,
               let index = try JSONSerialization.jsonObject(with: indexData) as? [String: Any],
               index["schemaVersion"] as? Int == 2,
+              index["mediaType"] as? String == "application/vnd.oci.image.index.v1+json",
               let manifests = index["manifests"] as? [[String: Any]],
               manifests.count == 1,
               let descriptor = manifests.first,
-              descriptor["mediaType"] as? String == "application/vnd.oci.image.index.v1+json",
-              descriptor["digest"] as? String == initImageDescriptorDigest,
-              descriptor["size"] as? Int == 306,
-              let annotations = descriptor["annotations"] as? [String: String],
-              annotations["org.opencontainers.image.ref.name"] == initImageReference else {
+              descriptor["mediaType"] as? String == "application/vnd.oci.image.manifest.v1+json",
+              descriptor["digest"] as? String == initImageVariantDigest,
+              descriptor["size"] as? Int == Int(ContainerizationRuntimeAssetContract.initImageManifestSize),
+              descriptor["annotations"] == nil else {
             throw DistributionError.invalidArtifact("Containerization OCI image descriptor is invalid.")
+        }
+
+        guard manifestData.count == Int(ContainerizationRuntimeAssetContract.initImageManifestSize),
+              let manifest = try JSONSerialization.jsonObject(with: manifestData) as? [String: Any],
+              manifest["schemaVersion"] as? Int == 2,
+              manifest["mediaType"] as? String == "application/vnd.oci.image.manifest.v1+json",
+              let configuration = manifest["config"] as? [String: Any],
+              configuration["mediaType"] as? String == "application/vnd.oci.image.config.v1+json",
+              configuration["digest"] as? String == "sha256:\(initConfigurationDigest)",
+              configuration["size"] as? Int == Int(ContainerizationRuntimeAssetContract.initImageConfigurationSize),
+              let layers = manifest["layers"] as? [[String: Any]], layers.count == 1,
+              layers[0]["mediaType"] as? String == "application/vnd.oci.image.layer.v1.tar+gzip",
+              layers[0]["digest"] as? String == "sha256:\(initLayerDigest)",
+              layers[0]["size"] as? Int == Int(ContainerizationRuntimeAssetContract.initImageLayerSize) else {
+            throw DistributionError.invalidArtifact("Containerization OCI image manifest is invalid.")
         }
     }
 
@@ -388,6 +415,7 @@ public enum DistributionContainerizationAssets {
         switch payloadPath {
         case "share/hostwright/containerization/vminit/oci-layout": 4_096
         case "share/hostwright/containerization/vminit/index.json": 64 * 1_024
+        case "share/hostwright/containerization/vminit/blobs/sha256/\(initManifestDigest)": 4_096
         default: nil
         }
     }
@@ -468,5 +496,9 @@ public enum DistributionContainerizationAssets {
             hasher.update(data: Data(buffer[0..<count]))
         }
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func hash(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 }

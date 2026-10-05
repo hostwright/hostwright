@@ -46,13 +46,31 @@ struct DistributionTerminalCleanup: Codable, Equatable, Sendable {
                 throw DistributionError.lifecycleFailed("terminal cleanup proof differs from restored prior status")
             }
         } else {
+            let expectedStateDatabasePath = journal.priorStatus?.stateDatabasePath
+                ?? (journal.stateSnapshot?.ownerSnapshotPath == nil ? nil : journal.stateSnapshot?.databasePath)
             guard completedStatus.generation == (journal.priorStatus?.generation ?? 0) + 1,
                   completedStatus.installedManifest == journal.toManifest,
-                  completedStatus.stateDatabasePath == journal.priorStatus?.stateDatabasePath,
+                  completedStatus.stateDatabasePath == expectedStateDatabasePath,
                   completedStatus.service == journal.serviceBefore,
                   completedStatus.rollbackOperationID == (journal.operation == .upgrade ? journal.operationID : nil) else {
                 throw DistributionError.lifecycleFailed("terminal cleanup proof differs from published status")
             }
+        }
+    }
+
+    func validate(adoptedOwnerReceipt receipt: DistributionOwnerStateReceipt) throws {
+        try validate()
+        try receipt.challenge.validate()
+        let restoresUnboundPrior = journal.checkpoint == .compensationPublished && completedStatus.stateDatabasePath == nil
+        guard DistributionHash.sha256(data: try DistributionJSON.encode(receipt)) == adoptedOwnerReceiptSHA256,
+              receipt.challenge.installationID == completedStatus.installationID,
+              receipt.challenge.generation == completedStatus.generation,
+              receipt.challenge.prefix == completedStatus.prefix,
+              receipt.challenge.installedManifestSHA256 == DistributionHash.sha256(data: try DistributionJSON.encode(completedStatus.installedManifest)),
+              restoresUnboundPrior || receipt.binding.databasePath == completedStatus.stateDatabasePath,
+              journal.stateSnapshot == nil || (journal.stateSnapshot?.databasePath == receipt.binding.databasePath
+                && journal.stateSnapshot?.ownerUID == receipt.binding.ownerUID) else {
+            throw DistributionError.lifecycleFailed("terminal cleanup owner receipt differs from completed generation")
         }
     }
 

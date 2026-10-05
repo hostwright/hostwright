@@ -448,12 +448,13 @@ public enum AppleContainerInventoryParser {
             }
             return RuntimeInventoryEnvironmentEntry(name: name, value: value)
         }
+        let user = process.user.description
         return RuntimeInventoryInitConfiguration(
             executable: process.executable,
             arguments: process.arguments,
             environment: environment,
             workingDirectory: process.workingDirectory.isEmpty ? nil : process.workingDirectory,
-            user: process.user.description.isEmpty ? nil : process.user.description,
+            user: user.isEmpty ? nil : user,
             terminal: process.terminal
         )
     }

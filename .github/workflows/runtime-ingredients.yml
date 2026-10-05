@@ -4,17 +4,314 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      sdk_checkpoint_run:
+        description: Optional original run containing an authenticated SDK artifact or build checkpoint
+        required: false
+        type: string
+      sdk_checkpoint_attempt:
+        description: Original checkpoint producer attempt; required with sdk_checkpoint_run
+        required: false
+        type: string
 
 permissions: {}
 
 jobs:
-  runtime-build-ingredients:
-    name: Rebuild pinned kernel and vminit ingredients
-    if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' }}
+  source-built-swift-sdk:
+    name: Build and checkpoint the pinned static Swift SDK
+    if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.sdk_checkpoint_run == '' }}
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 120
+    timeout-minutes: 360
+    outputs:
+      artifact-name: ${{ steps.checkpoint.outputs.artifact-name }}
+      producer-attempt: ${{ steps.checkpoint.outputs.producer-attempt }}
     permissions:
       contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - name: Validate checkpoint input pairing
+        shell: bash
+        env:
+          REQUESTED_CHECKPOINT_ATTEMPT: ${{ inputs.sdk_checkpoint_attempt }}
+        run: test -z "$REQUESTED_CHECKPOINT_ATTEMPT"
+      - name: Check out the exact main commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Reclaim unused hosted .NET SDK storage
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$RUNNER_OS" = Linux
+          test "$RUNNER_ARCH" = ARM64
+          {
+            df -B1 /
+            if [[ -d /usr/share/dotnet ]]; then
+              sudo du -sk /usr/share/dotnet
+              sudo rm -rf -- /usr/share/dotnet
+            fi
+            df -B1 /
+          } | tee "$RUNNER_TEMP/runtime-disk-preflight.txt"
+      - name: Install pinned Swift SDK build prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes autoconf automake bison build-essential ca-certificates cmake curl file flex git gnupg libcurl4-openssl-dev libedit-dev libicu-dev libncurses-dev libsqlite3-dev libtool libxml2-dev ninja-build pkg-config python3-dev rsync strace tzdata unzip uuid-dev uuid-runtime xz-utils
+          test "$(uname -m)" = aarch64
+      - name: Install the exact signed Swift bootstrap toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          export SWIFTLY_HOME_DIR="$RUNNER_TEMP/swiftly"
+          export SWIFTLY_BIN_DIR="$RUNNER_TEMP/swiftly/bin"
+          mkdir -m 700 "$SWIFTLY_HOME_DIR"
+          bootstrap="$RUNNER_TEMP/swift-bootstrap"
+          mkdir -m 700 "$bootstrap"
+          cd "$bootstrap"
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            --output swiftly.tar.gz https://download.swift.org/swiftly/linux/swiftly-1.1.2-aarch64.tar.gz
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            --output swiftly.tar.gz.sig https://download.swift.org/swiftly/linux/swiftly-1.1.2-aarch64.tar.gz.sig
+          curl --fail --location --compressed --retry 3 --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            --output swift-signing-keys.asc https://www.swift.org/keys/all-keys.asc
+          export GNUPGHOME="$RUNNER_TEMP/swift-bootstrap-gnupg"
+          mkdir -m 700 "$GNUPGHOME"
+          gpg --batch --import swift-signing-keys.asc
+          gpg --batch --verify swiftly.tar.gz.sig swiftly.tar.gz
+          tar -xzf swiftly.tar.gz swiftly
+          ./swiftly init --assume-yes --no-modify-profile --quiet-shell-followup --skip-install
+          . "$SWIFTLY_HOME_DIR/env.sh"
+          swiftly install --assume-yes 6.3.0
+          swift_toolchain=$(swiftly use --print-location 2>"$RUNNER_TEMP/swiftly-use.stderr")
+          [[ -x "$swift_toolchain/usr/bin/swiftc" ]]
+          [[ "$("$swift_toolchain/usr/bin/swiftc" --version | head -1)" == "Swift version 6.3"* ]]
+          [[ "$(swift --version | head -1)" == "Swift version 6.3"* ]]
+          printf '%s\n' "$SWIFTLY_BIN_DIR" "$swift_toolchain/usr/bin" >> "$GITHUB_PATH"
+          printf 'SWIFTLY_HOME_DIR=%s\nSWIFTLY_BIN_DIR=%s\n' "$SWIFTLY_HOME_DIR" "$SWIFTLY_BIN_DIR" >> "$GITHUB_ENV"
+          printf '%s\n' "$swift_toolchain" > "$RUNNER_TEMP/swift-toolchain-location"
+      - name: Materialize the exact Swift source revisions
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo mkdir -p /workspace
+          sudo chown "$(id -u):$(id -g)" /workspace
+          python3 scripts/release/materialize-swift-sdk-sources.py --root /workspace/sources
+      - name: Build the source-pinned static Swift SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/release/build-static-swift-sdk.sh \
+            --root /workspace/sources --repo-root "$GITHUB_WORKSPACE" \
+            --build-dir /workspace/build \
+            --products-dir /workspace/products \
+            --records "$RUNNER_TEMP/swift-sdk-records"
+          cp /workspace/sources/source-revisions.json "$RUNNER_TEMP/swift-sdk-records/"
+          cp "$RUNNER_TEMP/runtime-disk-preflight.txt" "$RUNNER_TEMP/swift-sdk-records/"
+          cp "$RUNNER_TEMP/swift-bootstrap/swiftly.tar.gz" \
+            "$RUNNER_TEMP/swift-bootstrap/swiftly.tar.gz.sig" \
+            "$RUNNER_TEMP/swift-bootstrap/swift-signing-keys.asc" \
+            "$RUNNER_TEMP/swift-sdk-records/"
+          cp "$RUNNER_TEMP/swiftly-use.stderr" "$RUNNER_TEMP/swift-sdk-records/swiftly-use.stderr"
+          cp "$RUNNER_TEMP/swift-toolchain-location" "$RUNNER_TEMP/swift-sdk-records/swift-toolchain-location"
+          dpkg-query -W -f='${binary:Package}\t${Version}\n' \
+            > "$RUNNER_TEMP/swift-sdk-records/ubuntu-package-versions.tsv"
+          (cd "$RUNNER_TEMP/swift-sdk-records" && \
+            find . -type f ! -name checksums.sha256 -print0 | sort -z | xargs -0 sha256sum) \
+            > "$RUNNER_TEMP/swift-sdk-records/checksums.sha256"
+      - name: Capture the reusable SDK build checkpoint
+        id: checkpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/release/sdk-build-checkpoint.py create \
+            --sources /workspace/sources --build /workspace/build \
+            --records "$RUNNER_TEMP/swift-sdk-records" \
+            --trace "$RUNNER_TEMP/swift-sdk-records/build.trace" \
+            --trace-cwd "$(cat "$RUNNER_TEMP/swift-sdk-records/build-working-directory")" \
+            --repo-root "$GITHUB_WORKSPACE" \
+            --source-commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
+            --output "$RUNNER_TEMP/swift-sdk-checkpoint"
+          echo "artifact-name=runtime-swift-sdk-checkpoint-$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          echo "producer-attempt=$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+      - name: Attest the exact SDK build checkpoint
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/swift-sdk-checkpoint/checkpoint.json
+      - name: Retain the authenticated SDK build checkpoint
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.checkpoint.outputs.artifact-name }}
+          path: ${{ runner.temp }}/swift-sdk-checkpoint/
+          compression-level: 0
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: error
+      - name: Retain failed Swift SDK build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: runtime-swift-sdk-failure-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          compression-level: 1
+          path: |
+            ${{ runner.temp }}/swift-sdk-records/build.log
+            ${{ runner.temp }}/swift-sdk-records/build.trace
+            ${{ runner.temp }}/swift-sdk-records/build-environment.json
+            ${{ runner.temp }}/swift-sdk-records/build-started
+            ${{ runner.temp }}/swift-sdk-records/build-finished
+            ${{ runner.temp }}/swift-sdk-records/build-exit-status
+            ${{ runner.temp }}/swift-sdk-records/build-working-directory
+            ${{ runner.temp }}/swift-sdk-records/product-archives.txt
+            ${{ runner.temp }}/swift-sdk-records/toolchain-and-patches.txt
+            ${{ runner.temp }}/swift-sdk-records/source-revisions.json
+            ${{ runner.temp }}/swift-sdk-records/ubuntu-package-versions.tsv
+            ${{ runner.temp }}/swift-sdk-records/runtime-disk-preflight.txt
+            ${{ runner.temp }}/swift-sdk-records/swift-static-sdk.sha256
+            ${{ runner.temp }}/swift-sdk-records/checksums.sha256
+            ${{ runner.temp }}/swift-sdk-records/build-inputs/sdk-object-sources.json
+            ${{ runner.temp }}/runtime-disk-preflight.txt
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: warn
+
+  swift-sdk-evidence:
+    name: Resolve authenticated SDK evidence without recompiling
+    if: ${{ always() && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && (needs.source-built-swift-sdk.result == 'success' || (needs.source-built-swift-sdk.result == 'skipped' && inputs.sdk_checkpoint_run != '')) }}
+    needs: source-built-swift-sdk
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    outputs:
+      artifact-name: ${{ steps.sdk-artifact.outputs.artifact-name || steps.checkpoint.outputs.artifact-name }}
+      producer-attempt: ${{ steps.sdk-artifact.outputs.producer-attempt || steps.checkpoint.outputs.producer-attempt }}
+      source-commit: ${{ steps.sdk-artifact.outputs.source-commit || steps.checkpoint.outputs.source-commit }}
+      run-id: ${{ steps.sdk-artifact.outputs.run-id || steps.checkpoint.outputs.run-id }}
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - name: Check out the exact main commit and ancestry
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Resolve the immutable checkpoint producer
+        id: checkpoint
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REUSE_RUN: ${{ inputs.sdk_checkpoint_run }}
+          REUSE_ATTEMPT: ${{ inputs.sdk_checkpoint_attempt }}
+          BUILT_ATTEMPT: ${{ needs.source-built-swift-sdk.outputs.producer-attempt }}
+        run: |
+          set -euo pipefail
+          python3 scripts/release/resolve-sdk-checkpoint.py
+      - name: Verify the retained SDK compilation inputs
+        if: steps.checkpoint.outputs.artifact-kind == 'sdk'
+        shell: bash
+        env:
+          SDK_PRODUCER_COMMIT: ${{ steps.checkpoint.outputs.source-commit }}
+        run: |
+          set -euo pipefail
+          python3 scripts/release/verify-sdk-reuse.py \
+            --repo-root "$GITHUB_WORKSPACE" --producer-commit "$SDK_PRODUCER_COMMIT" \
+            --source-commit "$GITHUB_SHA" --output "$RUNNER_TEMP/sdk-reuse.json"
+      - name: Download the successful build job checkpoint
+        if: steps.checkpoint.outputs.artifact-kind == 'checkpoint'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ steps.checkpoint.outputs.artifact-name }}
+          run-id: ${{ steps.checkpoint.outputs.run-id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/swift-sdk-checkpoint
+      - name: Install evidence readers and reclaim unused SDK storage
+        if: steps.checkpoint.outputs.artifact-kind == 'checkpoint'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes git ninja-build python3
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$RUNNER_OS" = Linux
+          test "$RUNNER_ARCH" = ARM64
+          if [[ -d /usr/share/dotnet ]]; then sudo rm -rf /usr/share/dotnet; fi
+      - name: Authenticate and restore the original build inputs
+        if: steps.checkpoint.outputs.artifact-kind == 'checkpoint'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SDK_PRODUCER_RUN: ${{ steps.checkpoint.outputs.run-id }}
+          SDK_PRODUCER_ATTEMPT: ${{ steps.checkpoint.outputs.producer-attempt }}
+          SDK_PRODUCER_COMMIT: ${{ steps.checkpoint.outputs.source-commit }}
+        run: |
+          set -euo pipefail
+          python3 scripts/release/sdk-build-checkpoint.py restore \
+            --checkpoint "$RUNNER_TEMP/swift-sdk-checkpoint" \
+            --output "$RUNNER_TEMP/sdk-restored" --repo-root "$GITHUB_WORKSPACE" \
+            --source-commit "$GITHUB_SHA" --producer-commit "$SDK_PRODUCER_COMMIT" \
+            --run-id "$SDK_PRODUCER_RUN" --attempt "$SDK_PRODUCER_ATTEMPT"
+          test ! -e /workspace
+          sudo mv "$RUNNER_TEMP/sdk-restored" /workspace
+          cp "$RUNNER_TEMP/swift-sdk-checkpoint/checkpoint.json" /workspace/records/checkpoint-producer.json
+      - name: Collect and verify SDK source evidence without recompiling
+        if: steps.checkpoint.outputs.artifact-kind == 'checkpoint'
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/release/capture-static-swift-sdk-evidence.sh \
+            --root /workspace/sources --repo-root "$GITHUB_WORKSPACE" \
+            --build-dir /workspace/build --records /workspace/records \
+            --temporary-root /workspace/temporary
+      - name: Record this evidence producer
+        if: steps.checkpoint.outputs.artifact-kind == 'checkpoint'
+        id: sdk-artifact
+        shell: bash
+        run: |
+          echo "artifact-name=runtime-swift-sdk-$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          echo "producer-attempt=$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          echo "source-commit=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          echo "run-id=$GITHUB_RUN_ID" >> "$GITHUB_OUTPUT"
+      - name: Attest the source-built SDK and retained build records
+        if: steps.checkpoint.outputs.artifact-kind == 'checkpoint'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            /workspace/records/swift-static-sdk.tar.gz
+            /workspace/records/source-revisions.json
+            /workspace/records/build.trace
+            /workspace/records/build.log
+            /workspace/records/toolchain-and-patches.txt
+            /workspace/records/build-environment.json
+            /workspace/records/ubuntu-package-versions.tsv
+            /workspace/records/checksums.sha256
+      - name: Retain the signed SDK and build records
+        if: steps.checkpoint.outputs.artifact-kind == 'checkpoint'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.sdk-artifact.outputs.artifact-name }}
+          compression-level: 1
+          path: /workspace/records/
+          include-hidden-files: true
+          retention-days: 30
+          if-no-files-found: error
+
+  runtime-build-ingredients:
+    name: Rebuild pinned kernel and vminit ingredients
+    if: ${{ always() && needs.swift-sdk-evidence.result == 'success' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' }}
+    needs: swift-sdk-evidence
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    outputs:
+      artifact-name: ${{ steps.native-artifact.outputs.artifact-name }}
+      producer-attempt: ${{ steps.native-artifact.outputs.producer-attempt }}
+    permissions:
+      contents: read
+      actions: read
       id-token: write
       attestations: write
       artifact-metadata: write
@@ -22,21 +319,80 @@ jobs:
       - name: Check out the exact main commit
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          fetch-depth: 0
           persist-credentials: false
+      - name: Download the authenticated source-built Swift SDK
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.swift-sdk-evidence.outputs.artifact-name }}
+          run-id: ${{ needs.swift-sdk-evidence.outputs.run-id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/swift-sdk-records
+      - name: Verify the source-built SDK attestation
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SDK_PRODUCER_ATTEMPT: ${{ needs.swift-sdk-evidence.outputs.producer-attempt }}
+          SDK_PRODUCER_COMMIT: ${{ needs.swift-sdk-evidence.outputs.source-commit }}
+          SDK_PRODUCER_RUN: ${{ needs.swift-sdk-evidence.outputs.run-id }}
+        run: |
+          set -euo pipefail
+          for subject in swift-static-sdk.tar.gz checksums.sha256; do
+            python3 scripts/release/authenticate-runtime-subject.py \
+              --file "$RUNNER_TEMP/swift-sdk-records/$subject" \
+              --source-commit "$SDK_PRODUCER_COMMIT" --run-id "$SDK_PRODUCER_RUN" --attempt "$SDK_PRODUCER_ATTEMPT"
+          done
+          (cd "$RUNNER_TEMP/swift-sdk-records" && sha256sum --check checksums.sha256)
+          python3 scripts/release/verify-sdk-reuse.py \
+            --repo-root "$GITHUB_WORKSPACE" --producer-commit "$SDK_PRODUCER_COMMIT" \
+            --source-commit "$GITHUB_SHA" --records "$RUNNER_TEMP/swift-sdk-records" \
+            --output "$RUNNER_TEMP/sdk-reuse.json"
+          python3 - "$RUNNER_TEMP/sdk-producer.json" <<'PYSDK'
+          import json, os, sys
+          with open(sys.argv[1], "x") as stream:
+              json.dump({"commit": os.environ["SDK_PRODUCER_COMMIT"],
+                         "runID": int(os.environ["SDK_PRODUCER_RUN"]),
+                         "attempt": int(os.environ["SDK_PRODUCER_ATTEMPT"])}, stream, sort_keys=True)
+          PYSDK
       - name: Verify complete source capture
         run: |
           python3 scripts/release/test-capture-runtime-source.py
           python3 scripts/release/test-capture-package-sources.py
           python3 scripts/release/test-runtime-provenance.py
+      - name: Reclaim unused hosted .NET SDK storage
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$RUNNER_OS" = Linux
+          test "$RUNNER_ARCH" = ARM64
+          {
+            df -B1 /
+            if [[ -d /usr/share/dotnet ]]; then
+              sudo du -sk /usr/share/dotnet
+              sudo rm -rf -- /usr/share/dotnet
+            fi
+            df -B1 /
+          } | tee "$RUNNER_TEMP/runtime-disk-preflight.txt"
       - name: Install and record build prerequisites
         shell: bash
         run: |
           set -euo pipefail
+          sudo mkdir -p /workspace
+          sudo chown "$(id -u):$(id -g)" /workspace
           sudo apt-get update
           sudo apt-get install --yes \
             bc bison clang cpio dwarves flex gcc gcc-aarch64-linux-gnu git gpg jq libcurl4-openssl-dev libelf-dev libssl-dev \
-            lld make pkg-config rsync xz-utils
+            lld make pkg-config rsync strace xz-utils
           test "$(uname -m)" = aarch64
+      - name: Recover retained SDK source evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/release/recover-sdk-object-sources.py \
+            --records "$RUNNER_TEMP/swift-sdk-records" \
+            --output "$RUNNER_TEMP/swift-sdk-records/build-inputs/sdk-object-sources.recovered.json" \
+            --work-dir "$RUNNER_TEMP/sdk-source-recovery-work"
       - name: Set up the pinned Go toolchain
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -75,8 +431,11 @@ jobs:
           ./swiftly init --assume-yes --no-modify-profile --quiet-shell-followup --skip-install
           . "$SWIFTLY_HOME_DIR/env.sh"
           swiftly install --assume-yes 6.3.0
+          swift_toolchain=$(swiftly use --print-location)
+          [[ -x "$swift_toolchain/usr/bin/swiftc" ]]
+          [[ "$("$swift_toolchain/usr/bin/swiftc" --version | head -1)" == "Swift version 6.3"* ]]
           [[ "$(swift --version | head -1)" == "Swift version 6.3"* ]]
-          printf '%s\n' "$SWIFTLY_BIN_DIR" >> "$GITHUB_PATH"
+          printf '%s\n' "$SWIFTLY_BIN_DIR" "$swift_toolchain/usr/bin" >> "$GITHUB_PATH"
           printf 'SWIFTLY_HOME_DIR=%s\nSWIFTLY_BIN_DIR=%s\n' "$SWIFTLY_HOME_DIR" "$SWIFTLY_BIN_DIR" >> "$GITHUB_ENV"
       - name: Retain authenticated kernel inputs
         shell: bash
@@ -102,8 +461,20 @@ jobs:
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
           [[ "$(swift --version | head -1)" == "Swift version 6.3"* ]]
           scripts/release/build-runtime-ingredients.sh \
+            --work-dir /workspace/runtime-build \
             --kernel-inputs "$RUNNER_TEMP/kernel-signature-inputs" \
+            --swift-sdk "$RUNNER_TEMP/swift-sdk-records/swift-static-sdk.tar.gz" \
+            --swift-sdk-sha256 "$(awk '{print $1}' "$RUNNER_TEMP/swift-sdk-records/swift-static-sdk.sha256")" \
+            --sdk-object-sources "$RUNNER_TEMP/swift-sdk-records/build-inputs/sdk-object-sources.recovered.json" \
+            --sdk-source-map-root "$RUNNER_TEMP/swift-sdk-records/build-inputs" \
             --output "$RUNNER_TEMP/runtime-build-ingredients"
+          cp "$RUNNER_TEMP/runtime-disk-preflight.txt" "$RUNNER_TEMP/runtime-build-ingredients/evidence/"
+          cp "$RUNNER_TEMP/sdk-reuse.json" "$RUNNER_TEMP/sdk-producer.json" \
+            "$RUNNER_TEMP/runtime-build-ingredients/evidence/"
+          if [[ -f "$RUNNER_TEMP/swift-sdk-records/build-inputs/sdk-source-recovery/recovery.json" ]]; then
+            cp "$RUNNER_TEMP/swift-sdk-records/build-inputs/sdk-source-recovery/recovery.json" \
+              "$RUNNER_TEMP/runtime-build-ingredients/evidence/sdk-source-recovery.json"
+          fi
           mkdir -m 700 "$RUNNER_TEMP/runtime-build-ingredients/evidence/swift-bootstrap"
           cp "$RUNNER_TEMP/swift-bootstrap/swiftly.tar.gz" \
              "$RUNNER_TEMP/swift-bootstrap/swiftly.tar.gz.sig" \
@@ -111,29 +482,124 @@ jobs:
              "$RUNNER_TEMP/runtime-build-ingredients/evidence/swift-bootstrap/"
           dpkg-query -W -f='${binary:Package}\t${Version}\n' \
             > "$RUNNER_TEMP/runtime-build-ingredients/evidence/ubuntu-package-versions.tsv"
+          (cd "$RUNNER_TEMP/runtime-build-ingredients" && \
+            find payloads evidence -type f -print0 | sort -z | xargs -0 sha256sum) \
+            > "$RUNNER_TEMP/runtime-build-ingredients/checksums.sha256"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
+      - name: Prepare reviewed source closure and native producer fragment
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/release/test-capture-native-source-map.py
+          python3 scripts/release/test-prepare-reviewed-native-sources.py
+          python3 scripts/release/test-prepare-native-runtime-provenance.py
+          python3 scripts/release/prepare-reviewed-native-sources.py \
+            --sdk-inputs "$RUNNER_TEMP/swift-sdk-records/build-inputs" \
+            --ingredients "$RUNNER_TEMP/runtime-build-ingredients" \
+            --source-map "$RUNNER_TEMP/runtime-build-ingredients/evidence/source-map.json" \
+            --source-map-root "$RUNNER_TEMP/runtime-build-ingredients/evidence/source-map" \
+            --native-patches "$RUNNER_TEMP/runtime-build-ingredients/evidence/native-patches.json" \
+            --output "$RUNNER_TEMP/runtime-native-source-projects"
+          kernel_project="$(python3 -c 'import json; print(json.load(open("scripts/release/runtime-native-source-licenses.json"))["kernel"]["identity"])')"
+          python3 scripts/release/prepare-native-runtime-provenance.py \
+            --ingredients "$RUNNER_TEMP/runtime-build-ingredients" \
+            --source-projects "$RUNNER_TEMP/runtime-native-source-projects" \
+            --source-map "$RUNNER_TEMP/runtime-build-ingredients/evidence/source-map.json" \
+            --source-map-root "$RUNNER_TEMP/runtime-build-ingredients/evidence/source-map" \
+            --source-commit "$GITHUB_SHA" --kernel-project "$kernel_project" \
+            --output "$RUNNER_TEMP/runtime-native-fragment"
+          mv "$RUNNER_TEMP/runtime-native-fragment" "$RUNNER_TEMP/runtime-build-ingredients/runtime-native-fragment"
+          (cd "$RUNNER_TEMP/runtime-build-ingredients" && \
+            find payloads evidence runtime-native-fragment -type f -print0 | sort -z | xargs -0 sha256sum) \
+            > "$RUNNER_TEMP/runtime-build-ingredients/checksums.sha256"
+      - name: Attest the prepared native producer fragment
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            ${{ runner.temp }}/runtime-build-ingredients/runtime-native-fragment/native-provenance.json
+            ${{ runner.temp }}/runtime-build-ingredients/evidence/source-map.json
       - name: Attest rebuilt ingredients and retained evidence
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: |
             ${{ runner.temp }}/runtime-build-ingredients/payloads/**
-            ${{ runner.temp }}/runtime-build-ingredients/evidence/**
+            ${{ runner.temp }}/runtime-build-ingredients/checksums.sha256
+      - name: Record the successful artifact producer
+        id: native-artifact
+        shell: bash
+        run: |
+          echo "artifact-name=runtime-build-ingredients-$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          echo "producer-attempt=$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
       - name: Retain rebuilt ingredients for the reviewed pin update
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: runtime-build-ingredients-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            ${{ runner.temp }}/runtime-build-ingredients/payloads/
-            ${{ runner.temp }}/runtime-build-ingredients/evidence/
-            ${{ runner.temp }}/runtime-build-ingredients/checksums.sha256
+          name: ${{ steps.native-artifact.outputs.artifact-name }}
+          include-hidden-files: true
+          path: ${{ runner.temp }}/runtime-build-ingredients/
           retention-days: 30
           if-no-files-found: error
+      - name: Retain failed native build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: runtime-build-ingredients-failure-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            /workspace/runtime-build/evidence/*.log
+            /workspace/runtime-build/evidence/*.trace
+            /workspace/runtime-build/evidence/*.map
+            /workspace/runtime-build/evidence/*.json
+            /workspace/runtime-build/evidence/*.config
+            /workspace/runtime-build/evidence/*.txt
+            /workspace/runtime-build/evidence/*.tsv
+            /workspace/runtime-build/evidence/vminit-link-inputs-*.tar.gz
+            /workspace/runtime-build/evidence/source-map/**
+            /workspace/runtime-build/evidence/native-source-map-first/**
+            /workspace/runtime-build/evidence/native-source-map-second/**
+            /workspace/runtime-build/evidence/linker-invocations-first/**
+            /workspace/runtime-build/evidence/linker-invocations-second/**
+            /workspace/runtime-build/evidence/rebuilds/**
+            /workspace/runtime-build/kernel-*.Image
+            /workspace/runtime-build/vminitd-first
+            /workspace/runtime-build/vminitd-second
+            /workspace/runtime-build/vmexec-first
+            /workspace/runtime-build/vmexec-second
+            /workspace/runtime-build/payloads/vmlinux-*
+            /workspace/runtime-build/payloads/vminitd
+            /workspace/runtime-build/payloads/vmexec
+            ${{ runner.temp }}/runtime-build-ingredients/evidence/*.log
+            ${{ runner.temp }}/runtime-build-ingredients/evidence/*.trace
+            ${{ runner.temp }}/runtime-build-ingredients/evidence/*.map
+            ${{ runner.temp }}/runtime-build-ingredients/evidence/*.json
+            ${{ runner.temp }}/runtime-build-ingredients/evidence/*.config
+            ${{ runner.temp }}/runtime-build-ingredients/evidence/*.txt
+            ${{ runner.temp }}/runtime-build-ingredients/evidence/*.tsv
+            ${{ runner.temp }}/runtime-build-ingredients/evidence/vminit-link-inputs-*.tar.gz
+            ${{ runner.temp }}/runtime-build-ingredients/evidence/source-map/**
+            ${{ runner.temp }}/runtime-build-ingredients/evidence/native-source-map-first/**
+            ${{ runner.temp }}/runtime-build-ingredients/evidence/native-source-map-second/**
+            ${{ runner.temp }}/runtime-build-ingredients/evidence/linker-invocations-first/**
+            ${{ runner.temp }}/runtime-build-ingredients/evidence/linker-invocations-second/**
+            ${{ runner.temp }}/runtime-build-ingredients/evidence/rebuilds/**
+            ${{ runner.temp }}/runtime-build-ingredients/kernel-*.Image
+            ${{ runner.temp }}/runtime-build-ingredients/vminitd-first
+            ${{ runner.temp }}/runtime-build-ingredients/vminitd-second
+            ${{ runner.temp }}/runtime-build-ingredients/vmexec-first
+            ${{ runner.temp }}/runtime-build-ingredients/vmexec-second
+            ${{ runner.temp }}/runtime-build-ingredients/payloads/vmlinux-*
+            ${{ runner.temp }}/runtime-build-ingredients/payloads/vminitd
+            ${{ runner.temp }}/runtime-build-ingredients/payloads/vmexec
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: warn
 
   guest-loader:
     name: Build and attest the guest loader
     if: ${{ github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
+    outputs:
+      artifact-name: ${{ steps.loader-artifact.outputs.artifact-name }}
+      producer-attempt: ${{ steps.loader-artifact.outputs.producer-attempt }}
     permissions:
       contents: read
       id-token: write
@@ -144,11 +610,30 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      - name: Set up the locked Go toolchain
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: Guest/HostwrightNetfilter/go.mod
-          cache-dependency-path: Guest/HostwrightNetfilter/go.sum
+      - name: Prepare the pinned Go toolchain and complete sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes strace
+          mkdir -m 700 "$RUNNER_TEMP/runtime-ingredients"
+          python3 scripts/release/test-capture-go-runtime-sources.py
+          python3 scripts/release/capture-go-runtime-sources.py \
+            --fetch --repositories "$RUNNER_TEMP/go-source-repositories" \
+            --source-root "$GITHUB_WORKSPACE" --source-commit "$GITHUB_SHA" \
+            --output "$RUNNER_TEMP/runtime-ingredients/source-projects"
+          pins=scripts/release/runtime-go-sources.json
+          archive_url="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["go"]["archiveURL"])' "$pins")"
+          archive_sha="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["go"]["archiveSHA256"])' "$pins")"
+          source_commit="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["go"]["commit"])' "$pins")"
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            --output "$RUNNER_TEMP/go-linux-arm64.tar.gz" "$archive_url"
+          python3 scripts/release/capture-go-build.py prepare \
+            --repository "$RUNNER_TEMP/go-source-repositories/go-runtime.git" \
+            --commit "$source_commit" --toolchain-archive "$RUNNER_TEMP/go-linux-arm64.tar.gz" \
+            --toolchain-sha256 "$archive_sha" --output "$RUNNER_TEMP/go-source-toolchain"
+          cp "$RUNNER_TEMP/go-source-toolchain/tool-overlay.json" "$RUNNER_TEMP/runtime-ingredients/"
+          printf '%s\n' "$RUNNER_TEMP/go-source-toolchain/toolchain/bin" >> "$GITHUB_PATH"
       - name: Build, test and retain actual loader inputs
         shell: bash
         run: |
@@ -156,18 +641,17 @@ jobs:
           test "$GITHUB_REPOSITORY" = hostwright/hostwright
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
-          mkdir -p "$RUNNER_TEMP/runtime-ingredients"
-          python3 scripts/release/capture-runtime-source.py \
-            --repository "$GITHUB_WORKSPACE" --commit "$GITHUB_SHA" \
-            --output "$RUNNER_TEMP/runtime-ingredients/source-tree"
+          export GO_CAPTURE_TEST_GO="$RUNNER_TEMP/go-source-toolchain/toolchain/bin/go"
+          python3 scripts/release/test-capture-go-build.py
           cd Guest/HostwrightNetfilter
           test -z "$(gofmt -l .)"
           GOTOOLCHAIN=local go test -mod=readonly ./...
           for build in first second; do
-            GOTOOLCHAIN=local GOOS=linux GOARCH=arm64 CGO_ENABLED=0 \
-              go build -mod=readonly -trimpath -buildvcs=false \
-                -ldflags='-buildid= -s -w' \
-                -o "$RUNNER_TEMP/runtime-ingredients/hostwright-netfilter-$build" .
+            python3 "$GITHUB_WORKSPACE/scripts/release/capture-go-build.py" build \
+              --go "$GO_CAPTURE_TEST_GO" --source "$PWD" --jobs 1 \
+              --output "$RUNNER_TEMP/runtime-ingredients/capture-$build"
+            cp "$RUNNER_TEMP/runtime-ingredients/capture-$build/payload" \
+              "$RUNNER_TEMP/runtime-ingredients/hostwright-netfilter-$build"
           done
           cmp "$RUNNER_TEMP/runtime-ingredients/hostwright-netfilter-first" \
             "$RUNNER_TEMP/runtime-ingredients/hostwright-netfilter-second"
@@ -179,6 +663,12 @@ jobs:
             > "$RUNNER_TEMP/runtime-ingredients/go-environment.json"
           sha256sum "$RUNNER_TEMP/runtime-ingredients/hostwright-netfilter-first" \
             > "$RUNNER_TEMP/runtime-ingredients/hostwright-netfilter.sha256"
+          python3 "$GITHUB_WORKSPACE/scripts/release/prepare-go-runtime-provenance.py" \
+            --root "$RUNNER_TEMP/runtime-ingredients" --source-commit "$GITHUB_SHA"
+          tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
+            -czf "$RUNNER_TEMP/runtime-ingredients/loader-build-inputs.tar.gz" \
+            -C "$RUNNER_TEMP/runtime-ingredients" \
+            capture-first capture-second source-projects tool-overlay.json loader-evidence loader-provenance.json native-files
           test -z "$(git -C ../.. status --porcelain=v1 --untracked-files=all)"
       - name: Attest the built loader and its retained build inputs
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
@@ -189,11 +679,117 @@ jobs:
             ${{ runner.temp }}/runtime-ingredients/hostwright-netfilter-buildinfo.txt
             ${{ runner.temp }}/runtime-ingredients/go-environment.json
             ${{ runner.temp }}/runtime-ingredients/hostwright-netfilter.sha256
-            ${{ runner.temp }}/runtime-ingredients/source-tree/**
+            ${{ runner.temp }}/runtime-ingredients/loader-build-inputs.tar.gz
+      - name: Record the successful artifact producer
+        id: loader-artifact
+        shell: bash
+        run: |
+          echo "artifact-name=runtime-guest-loader-$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          echo "producer-attempt=$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
       - name: Retain the attested loader and build inputs
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: runtime-guest-loader-${{ github.sha }}
-          path: ${{ runner.temp }}/runtime-ingredients/
+          name: ${{ steps.loader-artifact.outputs.artifact-name }}
+          path: |
+            ${{ runner.temp }}/runtime-ingredients/hostwright-netfilter-*
+            ${{ runner.temp }}/runtime-ingredients/hostwright-netfilter.sha256
+            ${{ runner.temp }}/runtime-ingredients/go-environment.json
+            ${{ runner.temp }}/runtime-ingredients/loader-build-inputs.tar.gz
+          retention-days: 30
+          if-no-files-found: error
+
+  runtime-provenance:
+    name: Assemble and attest the authenticated runtime provenance bundle
+    if: ${{ always() && needs.runtime-build-ingredients.result == 'success' && needs.guest-loader.result == 'success' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' }}
+    needs: [runtime-build-ingredients, guest-loader]
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - name: Check out the exact main commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Download the successful native producer fragment
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.runtime-build-ingredients.outputs.artifact-name }}
+          path: ${{ runner.temp }}/runtime-inputs
+      - name: Download the successful loader producer fragment
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.guest-loader.outputs.artifact-name }}
+          path: ${{ runner.temp }}/runtime-loader
+      - name: Verify producer attestations and retained build records
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NATIVE_PRODUCER_ATTEMPT: ${{ needs.runtime-build-ingredients.outputs.producer-attempt }}
+          LOADER_PRODUCER_ATTEMPT: ${{ needs.guest-loader.outputs.producer-attempt }}
+        run: |
+          set -euo pipefail
+          native="$RUNNER_TEMP/runtime-inputs"
+          for subject in "$native/checksums.sha256" "$native/runtime-native-fragment/native-provenance.json" "$native/evidence/source-map.json"; do
+            python3 scripts/release/authenticate-runtime-subject.py \
+              --file "$subject" --source-commit "$GITHUB_SHA" \
+              --run-id "$GITHUB_RUN_ID" --attempt "$NATIVE_PRODUCER_ATTEMPT"
+          done
+          (cd "$native" && sha256sum --check checksums.sha256)
+          for subject in loader-build-inputs.tar.gz hostwright-netfilter-first; do
+            python3 scripts/release/authenticate-runtime-subject.py \
+              --file "$RUNNER_TEMP/runtime-loader/$subject" --source-commit "$GITHUB_SHA" \
+              --run-id "$GITHUB_RUN_ID" --attempt "$LOADER_PRODUCER_ATTEMPT"
+          done
+          mkdir -m 700 "$RUNNER_TEMP/runtime-loader-authenticated"
+          tar --no-same-owner -xzf "$RUNNER_TEMP/runtime-loader/loader-build-inputs.tar.gz" \
+            -C "$RUNNER_TEMP/runtime-loader-authenticated"
+      - name: Prepare and verify the combined runtime provenance source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/release/test-prepare-runtime-provenance.py
+          python3 scripts/release/test-assemble-runtime-provenance.py
+          python3 scripts/release/test-prepare-runtime-attestation-subjects.py
+          native="$RUNNER_TEMP/runtime-inputs/runtime-native-fragment"
+          python3 scripts/release/prepare-runtime-provenance.py \
+            --native-root "$native" --loader-root "$RUNNER_TEMP/runtime-loader-authenticated" \
+            --source-commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
+            --source-root "$GITHUB_WORKSPACE" \
+            --output "$RUNNER_TEMP/runtime-prepared"
+          mkdir -m 700 "$RUNNER_TEMP/runtime-final"
+          python3 scripts/release/assemble-runtime-provenance.py \
+            --input-root "$RUNNER_TEMP/runtime-prepared" \
+            --output "$RUNNER_TEMP/runtime-final/runtime-provenance.tar.gz" \
+            --version "$(python3 -c 'import json; print(json.load(open("contracts/v0.0.2/versions.json"))["productVersion"])')" \
+            --source-root "$GITHUB_WORKSPACE" \
+            --kernel-signature-inputs "$RUNNER_TEMP/runtime-inputs/evidence/kernel-inputs"
+          python3 scripts/release/prepare-runtime-attestation-subjects.py \
+            --archive "$RUNNER_TEMP/runtime-final/runtime-provenance.tar.gz" \
+            --output "$RUNNER_TEMP/runtime-attestation-subjects" --source-commit "$GITHUB_SHA"
+      - name: Attest the exact runtime manifest and every payload
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            ${{ runner.temp }}/runtime-attestation-subjects/runtime-provenance.json
+            ${{ runner.temp }}/runtime-attestation-subjects/payloads/*
+      - name: Authenticate the final bundle against this producer run
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 scripts/release/verify-runtime-provenance.py \
+            --source-archive "$RUNNER_TEMP/runtime-final/runtime-provenance.tar.gz" \
+            --source-commit "$GITHUB_SHA" \
+            --expected-archive-sha256 "$(sha256sum "$RUNNER_TEMP/runtime-final/runtime-provenance.tar.gz" | awk '{print $1}')"
+      - name: Retain the authenticated runtime provenance archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: runtime-provenance-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/runtime-final/runtime-provenance.tar.gz
           retention-days: 30
           if-no-files-found: error

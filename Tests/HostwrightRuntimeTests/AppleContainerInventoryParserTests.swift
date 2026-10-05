@@ -171,6 +171,83 @@ final class AppleContainerInventoryParserTests: XCTestCase {
         }
     }
 
+    func testEmptyRawUserMeansDefaultUserAndMalformedRawUserIsRejected() throws {
+        func replacingUser(in json: String, with user: [String: Any]) throws -> String {
+            var containers = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: Data(json.utf8)) as? [[String: Any]]
+            )
+            var container = try XCTUnwrap(containers.first)
+            var configuration = try XCTUnwrap(
+                container["configuration"] as? [String: Any]
+            )
+            var process = try XCTUnwrap(configuration["initProcess"] as? [String: Any])
+            process["user"] = user
+            process["workingDirectory"] = ""
+            configuration["initProcess"] = process
+            container["configuration"] = configuration
+            containers[0] = container
+            let data = try JSONSerialization.data(
+                withJSONObject: containers,
+                options: [.sortedKeys]
+            )
+            return try XCTUnwrap(String(data: data, encoding: .utf8))
+        }
+
+        for version in ["1.0.0", "1.1.0"] {
+            let valid = try fixture("apple-container-\(version)-inventory-containers.json")
+            let defaultUser = try replacingUser(
+                in: valid,
+                with: ["raw": ["userString": ""]]
+            )
+
+            let inventory = try AppleContainerInventoryParser.parse(
+                outputs: try outputs(version: version, containers: defaultUser)
+            )
+            let managed = try XCTUnwrap(
+                inventory.containers.first { $0.runtimeID == managedContainerID }
+            )
+            XCTAssertNil(managed.initConfiguration.user)
+            XCTAssertNil(managed.initConfiguration.workingDirectory)
+
+            let malformedUser = try replacingUser(
+                in: valid,
+                with: ["raw": ["userString": "\n"]]
+            )
+            XCTAssertThrowsError(
+                try AppleContainerInventoryParser.parse(
+                    outputs: try outputs(version: version, containers: malformedUser)
+                )
+            )
+
+            var malformedWorkingDirectory = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: Data(defaultUser.utf8)) as? [[String: Any]]
+            )
+            var malformedContainer = try XCTUnwrap(malformedWorkingDirectory.first)
+            var malformedConfiguration = try XCTUnwrap(
+                malformedContainer["configuration"] as? [String: Any]
+            )
+            var malformedProcess = try XCTUnwrap(
+                malformedConfiguration["initProcess"] as? [String: Any]
+            )
+            malformedProcess["workingDirectory"] = "\n"
+            malformedConfiguration["initProcess"] = malformedProcess
+            malformedContainer["configuration"] = malformedConfiguration
+            malformedWorkingDirectory[0] = malformedContainer
+            let malformedDirectoryData = try JSONSerialization.data(
+                withJSONObject: malformedWorkingDirectory,
+                options: [.sortedKeys]
+            )
+            let malformedDirectory = try XCTUnwrap(
+                String(data: malformedDirectoryData, encoding: .utf8)
+            )
+            XCTAssertThrowsError(
+                try AppleContainerInventoryParser.parse(
+                    outputs: try outputs(version: version, containers: malformedDirectory)
+                )
+            )
+        }
+    }
+
     func testRejectsPartialOrConflictingOwnershipWithoutNameFallback() throws {
         let valid = try fixture("apple-container-1.1.0-inventory-containers.json")
         let mutations = [

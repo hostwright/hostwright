@@ -80,7 +80,136 @@ def fixture(rootfs_layer=None):
   kernel=dict(project='compiled-project',payloadPath=kernel,outputSHA256=v.digest(arm64_image()),config=add('proof/kernel.config',b'CONFIG_ARM64=y\n'),compiler=tools[0]['executable'],commands=add('proof/kernel.argv',v.canonical(['/toolchains/clang','-o','vmlinux','main.c'])),patches=[]))
  return manifest,runtime,payloads,files
 
+def compiler_inputs_fixture(manifest,files):
+ record=manifest['oci']['links'][0]['selectedInputs'][0]
+ unit=record['sourceFiles'][0]
+ header_source=dict(project=unit['project'],path='NOTICE',sha256=v.digest(b'Fixture notice text\n'))
+ def add(name,data):
+  files['proof/'+name]=data
+  return dict(path=name,sha256=v.digest(data),sizeBytes=len(data))
+ evidence=add('headers/main.d',b'main.o: /source/main.c /build/copied.h /build/empty.h\n')
+ headers=[]
+ for name,data,extra in [('copied.h',b'Fixture notice text\n',dict(kind='copied-header',matchingSources=[header_source])),
+                         ('empty.h',b'',dict(kind='empty-header'))]:
+  headers.append(dict(originalPath='/build/'+name,file=add('headers/'+name,data),
+   compilerArguments=['clang','-c','/source/main.c','-o','main.o'],cwd='/build',evidence=dict(path='/build/main.d'),
+   retainedEvidence=[dict(originalPath='/build/main.d',file=evidence)],**extra))
+ document=dict(objectSHA256=record['objectSHA256'],sourceFiles=[unit,header_source],translationUnits=[unit],generatedHeaders=headers)
+ raw=v.canonical(document);files['proof/compiler-inputs.json']=raw
+ record['compilerInputs']=dict(path='proof/compiler-inputs.json',sha256=v.digest(raw),sizeBytes=len(raw))
+ return record,document
+
 class RuntimeProvenanceTests(unittest.TestCase):
+ def test_outer_source_archive_inflates_once_for_out_of_order_member_reads(self):
+  compressed=tar({'first':b'one','middle':b'two','last':b'three'})
+  with tempfile.TemporaryDirectory() as directory:
+   path=pathlib.Path(directory)/'runtime.tar.gz';path.write_bytes(compressed)
+   real_open=v.gzip.open;reads=[]
+   class SequentialReader:
+    def __init__(self,archive_path,mode):self.reader=real_open(archive_path,mode);self.expanded=0;self.seeks=0
+    def __enter__(self):return self
+    def __exit__(self,*args):return self.reader.__exit__(*args)
+    def read(self,size=-1):
+     data=self.reader.read(size);self.expanded+=len(data);reads.append(len(data));return data
+    def seek(self,*args):self.seeks+=1;raise AssertionError('gzip input must not be rewound')
+   with mock.patch.object(v.gzip,'open',side_effect=SequentialReader) as opened:
+    with v.open_source_archive(path) as archive:
+     members={member.name:member for member in archive.getmembers()}
+     self.assertEqual(archive.extractfile(members['last']).read(),b'three')
+     self.assertEqual(archive.extractfile(members['first']).read(),b'one')
+     self.assertEqual(archive.extractfile(members['middle']).read(),b'two')
+   self.assertEqual(opened.call_count,1)
+   self.assertEqual(sum(reads),len(gzip.decompress(compressed)))
+
+ def test_outer_source_archive_enforces_expanded_cap_and_closes_spool_on_all_paths(self):
+  compressed=tar({'member':b'expanded'})
+  real_temporary_file=v.tempfile.TemporaryFile;opened=[]
+  class TrackedFile:
+   def __init__(self):self.file=real_temporary_file(mode='w+b');self.closed=False
+   def __getattr__(self,name):return getattr(self.file,name)
+   def __enter__(self):return self
+   def __exit__(self,*args):self.close()
+   def close(self):self.closed=True;self.file.close()
+  def tracked_file(*args,**kwargs):
+   value=TrackedFile();opened.append(value);return value
+  with tempfile.TemporaryDirectory() as directory:
+   path=pathlib.Path(directory)/'runtime.tar.gz';path.write_bytes(compressed)
+   with mock.patch.object(v.tempfile,'TemporaryFile',side_effect=tracked_file):
+    with v.open_source_archive(path) as archive:self.assertEqual(archive.getnames(),['member'])
+    with self.assertRaisesRegex(RuntimeError,'consumer failed'):
+     with v.open_source_archive(path):raise RuntimeError('consumer failed')
+    with mock.patch.object(v,'MAX_SOURCE_ARCHIVE',1):
+     with self.assertRaisesRegex(ValueError,'expanded runtime source archive exceeds limit'):
+      with v.open_source_archive(path):pass
+    path.write_bytes(compressed[:-4])
+    with self.assertRaises((EOFError,gzip.BadGzipFile)):
+     with v.open_source_archive(path):pass
+  self.assertEqual(len(opened),4)
+  self.assertTrue(all(value.closed for value in opened))
+
+ def test_vendored_sdk_source_alias_requires_exact_upstream_candidate(self):
+  cases=(('swift-sdk/bzip2','blocksort.c','Utilities/cmbzip2/blocksort.c'),
+         ('swift-sdk/curl','include/curl/header.h','Utilities/cmcurl/include/curl/header.h'),
+         ('swift-sdk/curl','include/curl/options.h','Utilities/cmcurl/include/curl/options.h'))
+  for project,path,vendored_path in cases:
+   with self.subTest(path=path):
+    digest=v.digest(b'vendored '+path.encode())
+    upstream=dict(project=project,path=path,sha256=digest)
+    vendored=dict(project='swift-sdk/swift-project/cmake',path=vendored_path,sha256=digest)
+    document=dict(objectSHA256='a'*64,sourceFiles=[upstream,vendored],translationUnits=[vendored])
+    raw=v.canonical(document);files={'proof/inputs.json':raw}
+    record=dict(objectSHA256='a'*64,sourceFiles=[upstream,vendored],
+                compilerInputs=dict(path='proof/inputs.json',sha256=v.digest(raw),sizeBytes=len(raw)))
+    self.assertEqual(v.native_source_files(record,files.__getitem__),[upstream])
+    document['sourceFiles']=[vendored];record['sourceFiles']=[vendored]
+    raw=v.canonical(document);files['proof/inputs.json']=raw
+    record['compilerInputs'].update(sha256=v.digest(raw),sizeBytes=len(raw))
+    with self.assertRaisesRegex(ValueError,'source alias lacks exact pinned upstream match'):
+     v.native_source_files(record,files.__getitem__)
+
+ def test_compact_compiler_inputs_preserve_full_source_and_header_checks(self):
+  manifest,runtime,payloads,files=fixture();record,document=compiler_inputs_fixture(manifest,files)
+  self.assertEqual(v.native_source_files(record,files.__getitem__),document['sourceFiles'])
+  v.verify(v.canonical(manifest),runtime,payloads,files.__getitem__,manifest['sourceCommit'],require_authentication=False)
+  document['translationUnits']=list(document['sourceFiles'])
+  data=v.canonical(document);files[record['compilerInputs']['path']]=data
+  record['compilerInputs'].update(sha256=v.digest(data),sizeBytes=len(data))
+  self.assertEqual(len(record['sourceFiles']),1)
+  v.verify(v.canonical(manifest),runtime,payloads,files.__getitem__,manifest['sourceCommit'],require_authentication=False)
+ def test_compact_compiler_inputs_reject_incomplete_or_false_source_coverage(self):
+  for change,message in [('object','compiler input object mismatch'),('unit','not verified sources'),
+                          ('project','project coverage mismatch'),('representative','translation-unit representative'),
+                          ('multiple','one representative'),('leaf','selected source attribution mismatch')]:
+   with self.subTest(change=change):
+    manifest,runtime,payloads,files=fixture();record,document=compiler_inputs_fixture(manifest,files)
+    if change=='object':document['objectSHA256']='f'*64
+    elif change=='unit':document['translationUnits'][0]=dict(document['translationUnits'][0],path='missing.c')
+    elif change=='project':document['sourceFiles'].append(dict(document['sourceFiles'][0],project='missing-project'))
+    elif change=='representative':record['sourceFiles']=[document['sourceFiles'][1]]
+    elif change=='multiple':record['sourceFiles']=list(document['sourceFiles'])
+    elif change=='leaf':
+     document['sourceFiles'][1]=dict(document['sourceFiles'][1],sha256='f'*64)
+     document['generatedHeaders']=[]
+    raw=v.canonical(document);files[record['compilerInputs']['path']]=raw
+    record['compilerInputs'].update(sha256=v.digest(raw),sizeBytes=len(raw))
+    with self.assertRaisesRegex(ValueError,message):
+     v.verify(v.canonical(manifest),runtime,payloads,files.__getitem__,manifest['sourceCommit'],require_authentication=False)
+ def test_compiler_input_sidecars_reject_tampering_escape_and_oversize(self):
+  for change,message in [('sidecar','evidence bytes mismatch'),('header','evidence bytes mismatch'),
+                          ('evidence','evidence bytes mismatch'),('escape','unsafe provenance path'),
+                          ('oversize','oversized provenance metadata')]:
+   with self.subTest(change=change):
+    manifest,runtime,payloads,files=fixture();record,document=compiler_inputs_fixture(manifest,files)
+    if change in ('sidecar','header','evidence'):
+     name={'sidecar':'proof/compiler-inputs.json','header':'proof/headers/copied.h','evidence':'proof/headers/main.d'}[change]
+     files[name]+=b'changed'
+    else:
+     if change=='escape':document['generatedHeaders'][0]['file']['path']='../outside.h'
+     raw=v.canonical(document) if change=='escape' else b'{}'+b' '*v.MAX_METADATA
+     files[record['compilerInputs']['path']]=raw
+     record['compilerInputs'].update(sha256=v.digest(raw),sizeBytes=len(raw))
+    with self.assertRaisesRegex(ValueError,message):
+     v.verify(v.canonical(manifest),runtime,payloads,files.__getitem__,manifest['sourceCommit'],require_authentication=False)
  def test_submodule_projects_are_independently_verified_by_full_validator(self):
   manifest,runtime,payloads,files=fixture()
   parent=manifest['sourceProjects'][0];child=copy.deepcopy(parent);child['identity']='child-project'
@@ -236,7 +365,13 @@ class RuntimeProvenanceTests(unittest.TestCase):
    with self.subTest(offset=offset),self.assertRaises(ValueError):v.arm64_image(payload)
  def test_static_sdk_spdx_identifiers_require_exact_known_values(self):
   self.assertEqual(v.spdx('0BSD AND bzip2-1.0.6'),'0BSD AND bzip2-1.0.6')
-  for expression in ('0bsd','bzip2-1.0.5','LicenseRef-bzip2'):
+  self.assertEqual(v.spdx('curl AND MIT'),'curl AND MIT')
+  self.assertEqual(v.spdx('MIT AND SunPro'),'MIT AND SunPro')
+  self.assertEqual(v.spdx('MIT AND bcrypt-Solar-Designer'),'MIT AND bcrypt-Solar-Designer')
+  self.assertEqual(v.spdx('Unicode-3.0 AND NAIST-2003'),'Unicode-3.0 AND NAIST-2003')
+  self.assertEqual(v.spdx('Unicode-3.0 AND LicenseRef-Adam-Costello-Punycode'),
+                   'Unicode-3.0 AND LicenseRef-Adam-Costello-Punycode')
+  for expression in ('0bsd','bzip2-1.0.5','LicenseRef-bzip2','LicenseRef-Unknown'):
    with self.subTest(expression=expression),self.assertRaisesRegex(ValueError,'unsupported SPDX identifier'):
     v.spdx(expression)
  def test_authenticated_seam_accepts_actual_byte_bindings_without_receipt_verification_flags(self):
@@ -299,22 +434,33 @@ class RuntimeProvenanceTests(unittest.TestCase):
     old=cert[field];cert[field]=value
     with self.assertRaisesRegex(ValueError,'wrong authenticated runtime'):v.authenticate(pathlib.Path(__file__),producer,'a'*40)
     cert[field]=old
- def test_go_loader_reads_actual_inline_module_info_and_rejects_invented_module(self):
-  manifest,runtime,payloads,files=fixture();project=manifest['sourceProjects'][0]
-  info=b'0'*16+b'mod\texample.invalid/fixture\tv1.0.0\th1:fixture\n'+b'0'*16
+ def test_go_build_info_normalizes_main_module_and_requires_dependency_checksums(self):
   def string(data):
    self.assertLess(len(data),128);return bytes([len(data)])+data
   header=bytearray(32);header[:14]=b'\xff Go buildinf:';header[14]=8;header[15]=2
-  output=elf()+b'0'*8+bytes(header)+string(b'go1.26.5')+string(info)
-  loader=dict(format='go-buildinfo-v1',path=manifest['loader']['path'],outputSHA256=v.digest(output),project=project['identity'],goRuntimeProject=project['identity'],goVersion='go1.26.5',
-   modules=[dict(project=project['identity'],revision=project['commit'],buildInfo=['example.invalid/fixture','v1.0.0','h1:fixture'])],moduleRevisions={project['identity']:project['commit']},packageTrace=dict(path='proof/package-trace',sha256='',sizeBytes=0),sourceFiles=manifest['loader']['selectedInputs'][0]['sourceFiles'],commands=manifest['loader']['commands'],compiler=manifest['kernel']['compiler'])
-  pkg=b'go object linux arm64 go1.26.5\n';pkg_header=b'__.PKGDEF/      '+b'0           '+b'0     '+b'0     '+b'644     '+str(len(pkg)).encode().ljust(10)+b'`\n';pkg_archive=b'!<arch>\n'+pkg_header+pkg+(b'\n' if len(pkg)%2 else b'');files['proof/go-package.a']=pkg_archive
-  trace=v.canonical([dict(project=project['identity'],archive=dict(path='proof/go-package.a',sha256=v.digest(pkg_archive),sizeBytes=len(pkg_archive)),sourceFiles=loader['sourceFiles'])]);files['proof/package-trace']=trace;loader['packageTrace'].update(sha256=v.digest(trace),sizeBytes=len(trace))
-  tools=v.toolchain(manifest,files.__getitem__)
-  with mock.patch.object(v,'authenticate'):
-   v.go_loader(loader,output,{project['identity']:v.source_project(project,files.__getitem__)},files.__getitem__,tools)
-   loader['modules'][0]['buildInfo'][1]='v2.0.0'
-   with self.assertRaisesRegex(ValueError,'module coverage'):v.go_loader(loader,output,{project['identity']:v.source_project(project,files.__getitem__)},files.__getitem__,tools)
+  def output(line):return elf()+b'0'*8+bytes(header)+string(b'go1.26.5')+string(b'0'*16+line+b'0'*16)
+  self.assertEqual(v.go_build_info(output(b'mod\texample.invalid/main\t(devel)\t\n')),
+                   ('go1.26.5',[['example.invalid/main','(devel)']]))
+  for line in (b'dep\texample.invalid/module\tv1.0.0\t\n',b'dep\texample.invalid/module\tv1.0.0\n'):
+   with self.assertRaisesRegex(ValueError,'missing Go dependency checksum'):v.go_build_info(output(line))
+ def test_go_build_settings_are_extracted_exactly_and_ambiguous_values_rejected(self):
+  def string(data):
+   self.assertLess(len(data),128);return bytes([len(data)])+data
+  header=bytearray(32);header[:14]=b'\xff Go buildinf:';header[14]=8;header[15]=2
+  def output(lines):return elf()+b'0'*8+bytes(header)+string(b'go1.26.5')+string(b'0'*16+lines+b'0'*16)
+  self.assertEqual(v.go_build_settings(output(
+   b'build\t-gcflags=all=-buildid=\nbuild\tGOARCH=arm64\nbuild\tCGO_ENABLED=0\n')),
+   {'-gcflags':'all=-buildid=','GOARCH':'arm64','CGO_ENABLED':'0'})
+  for lines, message in ((b'build\tGOARCH=arm64\nbuild\tGOARCH=arm64\n','duplicate'),
+                         (b'build\tGOARCH\n','invalid')):
+   with self.assertRaisesRegex(ValueError,message):v.go_build_settings(output(lines))
+ def test_go_and_native_archive_padding_are_not_interchangeable(self):
+  header=b'odd.o/          '+b'0           '+b'0     '+b'0     '+b'644     '+b'1         '+b'`\n'
+  for padding in (b'\0',b'\n'):
+   archive=b'!<arch>\n'+header+b'x'+padding
+   self.assertEqual(v.archive_members(archive,padding=padding),{'odd.o':b'x'})
+   with self.assertRaisesRegex(ValueError,'archive padding'):
+    v.archive_members(archive,padding=b'\n' if padding==b'\0' else b'\0')
  def test_empty_authenticated_toolchain_argv_and_kernel_inputs_never_qualify(self):
   for change in ('toolchain','executable','argv','kernel-config','kernel-compiler','kernel-commands','map','response'):
    manifest,runtime,payloads,files=fixture()
@@ -363,4 +509,16 @@ class RuntimeProvenanceTests(unittest.TestCase):
     record=next(r for r in manifest['payloads'] if r['path']==p);record.update(sha256=v.digest(payloads[p]),sizeBytes=len(payloads[p]))
    with self.subTest(change=change),mock.patch.object(v,'authenticate'):
     with self.assertRaisesRegex(ValueError,'duplicate OCI|schema/media'):v.verify(v.canonical(manifest),runtime,payloads,files.__getitem__,manifest['sourceCommit'])
+class GoGeneratedSourceTests(unittest.TestCase):
+ def test_pinned_go_distribution_generated_version_file_is_explicit(self):
+  source=v.generated_go_source('go-runtime','src/internal/runtime/sys/zversion.go',
+   'f69c03727973664529c2e6fa2d2c53b2d3440c887938d0d9b22254f7984052f2','go1.26.5')
+  self.assertEqual(source,{'generator':'go tool dist','goVersion':'go1.26.5'})
+  for project,path,digest,version in (
+   ('go-runtime','src/internal/runtime/sys/zversion.go','0'*64,'go1.26.5'),
+   ('go-runtime','src/other/generated.go','f69c03727973664529c2e6fa2d2c53b2d3440c887938d0d9b22254f7984052f2','go1.26.5'),
+   ('go-runtime','src/internal/runtime/sys/zversion.go','f69c03727973664529c2e6fa2d2c53b2d3440c887938d0d9b22254f7984052f2','go1.26.6')):
+   with self.subTest(path=path,digest=digest,version=version),self.assertRaisesRegex(ValueError,'unsupported generated Go source'):
+    v.generated_go_source(project,path,digest,version)
+
 if __name__=='__main__':unittest.main()

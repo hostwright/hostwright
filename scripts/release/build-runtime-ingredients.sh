@@ -3,30 +3,50 @@ set -euo pipefail
 umask 077
 readonly source_capture="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/capture-runtime-source.py"
 readonly package_capture="$(dirname -- "$source_capture")/capture-package-sources.py"
+readonly native_capture="$(dirname -- "$source_capture")/capture-native-runtime-build.py"
+readonly native_source_map="$(dirname -- "$source_capture")/capture-native-source-map.py"
+readonly linux_capture="$(dirname -- "$source_capture")/capture-linux-runtime-source.py"
+readonly patch_capture="$(dirname -- "$source_capture")/capture-native-patches.py"
 
 readonly containerization_commit=44bec8b9933bc491d0cbf44abac90a1f6aaebf6b
 readonly kata_commit=660e3bb6535b141c84430acb25b159857278d596
 readonly kernel_version=6.18.15
+readonly kernel_commit=df0dc1b06fb6b6461f9838694bf84079eca7562a
 readonly kernel_config_version=186
 readonly kernel_source_sha=7c716216c3c4134ed0de69195701e677577bbcdd3979f331c182acd06bf2f170
-readonly swift_sdk_sha=d2078b69bdeb5c31202c10e9d8a11d6f66f82938b51a4b75f032ccb35c4c286c
 readonly build_time=2026-01-01T00:00:00Z
 
 die() { printf '%s\n' "$1" >&2; exit "${2:-70}"; }
-usage() { die "usage: build-runtime-ingredients.sh --output ABSOLUTE_DIR --kernel-inputs ABSOLUTE_DIR" 64; }
+usage() { die "usage: build-runtime-ingredients.sh --output ABSOLUTE_DIR --work-dir ABSOLUTE_DIR --kernel-inputs ABSOLUTE_DIR --swift-sdk ABSOLUTE_FILE --swift-sdk-sha256 SHA256 --sdk-object-sources ABSOLUTE_FILE --sdk-source-map-root ABSOLUTE_DIR [--sdk-source-captures ABSOLUTE_DIR]" 64; }
+trap 'status=$?; printf "runtime ingredient producer failed at line %s: %s (status %s)\\n" "$LINENO" "$BASH_COMMAND" "$status" >&2' ERR
 
-output= kernel_inputs=
+output= workdir= kernel_inputs= swift_sdk= swift_sdk_sha= sdk_object_sources= sdk_source_map_root= sdk_source_captures=
 while (( $# )); do
   case "$1" in
     --output) (( $# >= 2 )) || usage; output=$2; shift 2 ;;
+    --work-dir) (( $# >= 2 )) || usage; workdir=$2; shift 2 ;;
     --kernel-inputs) (( $# >= 2 )) || usage; kernel_inputs=$2; shift 2 ;;
+    --swift-sdk) (( $# >= 2 )) || usage; swift_sdk=$2; shift 2 ;;
+    --swift-sdk-sha256) (( $# >= 2 )) || usage; swift_sdk_sha=$2; shift 2 ;;
+    --sdk-object-sources) (( $# >= 2 )) || usage; sdk_object_sources=$2; shift 2 ;;
+    --sdk-source-map-root) (( $# >= 2 )) || usage; sdk_source_map_root=$2; shift 2 ;;
+    --sdk-source-captures) (( $# >= 2 )) || usage; sdk_source_captures=$2; shift 2 ;;
     *) usage ;;
   esac
 done
-[[ "$output" == /* && "$kernel_inputs" == /* ]] || usage
-[[ ! -e "$output" && ! -L "$output" ]] || die "runtime ingredient output already exists"
+[[ "$output" == /* && "$workdir" == /* && "$kernel_inputs" == /* && "$swift_sdk" == /* && "$sdk_object_sources" == /* && "$sdk_source_map_root" == /* && "$swift_sdk_sha" =~ ^[a-f0-9]{64}$ ]] || usage
+if [[ -z "$sdk_source_captures" ]]; then
+  sdk_source_captures="$sdk_source_map_root/source-trees"
+fi
+[[ "$sdk_source_captures" == /* ]] || usage
+[[ ! -e "$output" && ! -L "$output" && ! -e "$workdir" && ! -L "$workdir" ]] || die "runtime ingredient output or work directory already exists"
+[[ -f "$swift_sdk" && ! -L "$swift_sdk" ]] || die "missing regular source-built Swift SDK archive"
+[[ -f "$sdk_object_sources" && ! -L "$sdk_object_sources" && -d "$sdk_source_map_root" && ! -L "$sdk_source_map_root" \
+   && -d "$sdk_source_captures" && ! -L "$sdk_source_captures" ]] \
+  || die "missing authenticated Swift SDK object-source mapping"
+[[ "$(sha256sum "$swift_sdk" | awk '{print $1}')" == "$swift_sdk_sha" ]] || die "Swift SDK archive digest mismatch"
 [[ "$(uname -s)" == Linux && "$(uname -m)" == aarch64 ]] || die "runtime ingredients require Linux arm64" 69
-for tool in aarch64-linux-gnu-gcc bison clang flex gcc git jq ld.lld make python3 sha256sum swift swiftly yq; do command -v "$tool" >/dev/null || die "missing producer tool: $tool" 69; done
+for tool in aarch64-linux-gnu-gcc bison clang flex gcc git jq ld.lld make python3 sha256sum strace swift swiftly yq; do command -v "$tool" >/dev/null || die "missing producer tool: $tool" 69; done
 [[ "$(swift --version | head -1)" == *"Swift version 6.3"* ]] || die "runtime ingredients require Swift 6.3" 69
 
 # Swiftly stores toolchains separately from its configuration directory.
@@ -37,6 +57,9 @@ swift_bin="$swift_toolchain/usr/bin/swift"
 swiftc_bin="$swift_toolchain/usr/bin/swiftc"
 swift_real=$(readlink -f "$swift_bin")
 swiftc_real=$(readlink -f "$swiftc_bin")
+native_linker="$swift_toolchain/usr/bin/ld.lld"
+[[ -x "$native_linker" && "$(readlink -f "$native_linker")" == "$swift_toolchain/"* ]] \
+  || die "LLD resolves outside the verified Swift toolchain"
 for real in "$swift_real" "$swiftc_real"; do
   [[ "$real" == "$swift_toolchain/"* && -f "$real" && -x "$real" ]] \
     || die "Swift entrypoint resolves outside the verified toolchain"
@@ -50,16 +73,23 @@ done
 
 parent=$(dirname "$output")
 [[ -d "$parent" && ! -L "$parent" ]] || die "runtime ingredient output parent is unsafe"
-work=$(mktemp -d "$parent/.runtime-ingredients.XXXXXXXX")
+work_parent=$(dirname "$workdir")
+[[ -d "$work_parent" && ! -L "$work_parent" && "$workdir" != "$output" \
+   && "$output" != "$workdir/"* && "$workdir" != "$output/"* ]] \
+  || die "runtime ingredient work directory is unsafe or overlaps output"
+work=$workdir
+mkdir -m 700 "$work"
 cleanup() {
   status=$?
   trap - EXIT
   if [[ -d "$work" && ! -L "$work" ]]; then
     if (( status != 0 )); then
+      printf 'runtime ingredient work retained for diagnosis: %s\n' "$work" >&2
       for log in "$work"/evidence/*.log; do
         [[ -f "$log" && ! -L "$log" ]] || continue
         tail -n 80 "$log" >&2
       done
+      exit "$status"
     fi
     find "$work" -depth -delete
   fi
@@ -71,6 +101,12 @@ mkdir -m 700 "$work/evidence/source-trees"
 
 python3 scripts/release/verify-kernel-source-signature.py \
   --inputs "$kernel_inputs" --output "$work/evidence/kernel-source-signature.json"
+git clone --depth 1 --single-branch --branch "v$kernel_version" \
+  https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git "$work/sources/linux"
+test "$(git -C "$work/sources/linux" rev-parse HEAD)" = "$kernel_commit"
+python3 "$linux_capture" --repository "$work/sources/linux" \
+  --source-archive "$kernel_inputs/linux-$kernel_version.tar.xz" \
+  --output "$work/evidence/source-trees/linux"
 
 git clone --filter=blob:none https://github.com/kata-containers/kata-containers.git "$work/sources/kata"
 git -C "$work/sources/kata" checkout --detach "$kata_commit"
@@ -80,6 +116,8 @@ git -C "$work/sources/kata" archive --format=tar "$kata_commit" | gzip -n > "$wo
 python3 "$source_capture" --repository "$work/sources/kata" --commit "$kata_commit" \
   --output "$work/evidence/source-trees/kata"
 
+export RUSTC=/bin/false PAHOLE=/dev/null
+export MAKEFLAGS="${MAKEFLAGS:+$MAKEFLAGS }RUSTC=/bin/false PAHOLE=/dev/null"
 export KBUILD_BUILD_TIMESTAMP="$build_time" KBUILD_BUILD_USER=hostwright KBUILD_BUILD_HOST=github-arm64
 export KBUILD_BUILD_VERSION=1 SOURCE_DATE_EPOCH=1767225600
 export KCFLAGS="-fdebug-prefix-map=$work=/hostwright-runtime-build" KAFLAGS="-fdebug-prefix-map=$work=/hostwright-runtime-build"
@@ -93,14 +131,25 @@ for pass in first second; do
   cp -a "$work/sources/kata" "$root/kata"
   (
     cd "$root/kata/tools/packaging/kernel"
-    bash -x ./build-kernel.sh -a aarch64 -v "$kernel_version" -u "file://$kernel_inputs/" -f setup
+    bash -x ./build-kernel.sh -a aarch64 -v "$kernel_version" -u "file://$kernel_inputs/" -f setup \
+      >"$work/evidence/kernel-$pass.setup.log" 2>&1
     test -d "kata-linux-$kernel_version-$kernel_config_version"
+    python3 "$patch_capture" --repository "$work/sources/linux" \
+      --source-capture "$work/evidence/source-trees/linux" \
+      --tree "$PWD/kata-linux-$kernel_version-$kernel_config_version" --root "$work/evidence" --project linux \
+      --kernel-setup-log "$work/evidence/kernel-$pass.setup.log" --kernel-patches-dir "$PWD/patches/6.18.x" \
+      --output "$work/evidence/native-patches-linux-$pass.json"
     cp "kata-linux-$kernel_version-$kernel_config_version/.config" "$work/evidence/kernel-$pass.config"
     bash -x ./build-kernel.sh -a aarch64 -v "$kernel_version" build
     cp "kata-linux-$kernel_version-$kernel_config_version/arch/arm64/boot/Image" "$work/kernel-$pass.Image"
+    python3 "$native_capture" retain-build --kind kernel --root "$work/evidence" \
+      --tree "$PWD/kata-linux-$kernel_version-$kernel_config_version" \
+      --metadata "$work/evidence/native-kernel-$pass.json"
   ) >"$work/evidence/kernel-$pass.log" 2>&1
 done
 cmp "$work/kernel-first.Image" "$work/kernel-second.Image"
+mkdir -m 700 "$work/evidence/rebuilds"
+cp "$work/kernel-first.Image" "$work/kernel-second.Image" "$work/evidence/rebuilds/"
 install -m 0644 "$work/kernel-first.Image" "$work/payloads/vmlinux-$kernel_version-$kernel_config_version"
 
 git clone --filter=blob:none https://github.com/apple/containerization.git "$work/sources/containerization"
@@ -109,11 +158,10 @@ test "$(git -C "$work/sources/containerization" rev-parse HEAD)" = "$containeriz
 git -C "$work/sources/containerization" archive --format=tar "$containerization_commit" | gzip -n > "$work/evidence/containerization-source.tar.gz"
 python3 "$source_capture" --repository "$work/sources/containerization" --commit "$containerization_commit" \
   --output "$work/evidence/source-trees/containerization"
-curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' --tlsv1.2 \
-  --output "$work/swift-static-sdk.tar.gz" \
-  https://download.swift.org/swift-6.3-release/static-sdk/swift-6.3-RELEASE/swift-6.3-RELEASE_static-linux-0.1.0.artifactbundle.tar.gz
+cp "$swift_sdk" "$work/swift-static-sdk.tar.gz"
 printf '%s  %s\n' "$swift_sdk_sha" "$work/swift-static-sdk.tar.gz" | sha256sum --check --status
-swift sdk install "$work/swift-static-sdk.tar.gz" --checksum "$swift_sdk_sha"
+swift_sdks="$work/swift-sdks"
+swift sdk install "$work/swift-static-sdk.tar.gz" --checksum "$swift_sdk_sha" --swift-sdks-path "$swift_sdks"
 mv "$work/swift-static-sdk.tar.gz" "$work/evidence/swift-static-sdk.tar.gz"
 mkdir -m 700 "$work/evidence/kernel-inputs"
 cp "$kernel_inputs/linux-6.18.15.tar.xz" "$kernel_inputs/linux-6.18.15.tar.sign" \
@@ -131,32 +179,79 @@ for pass in first second; do
   git -C "$tree" checkout --detach "$containerization_commit"
   git -C "$tree" apply --check "$work/evidence/containerization-guest-security.patch"
   git -C "$tree" apply "$work/evidence/containerization-guest-security.patch"
+  python3 "$patch_capture" --repository "$work/sources/containerization" \
+    --source-capture "$work/evidence/source-trees/containerization" --tree "$tree" \
+    --root "$work/evidence" --project containerization --patch "$work/evidence/containerization-guest-security.patch" \
+    --output "$work/evidence/native-patches-containerization-$pass.json"
+  mkdir -m 700 "$work/evidence/linker-invocations-$pass"
+  native_linker_wrapper="$work/native-linker"
+  printf '#!/usr/bin/env bash\nexec python3 %q linker --root %q --executable %q --metadata-dir %q -- "$@"\n' \
+    "$native_capture" "$work/evidence" "$native_linker" "$work/evidence/linker-invocations-$pass" > "$native_linker_wrapper"
+  chmod 0755 "$native_linker_wrapper"
   (
     cd "$tree/vminitd"
     # Header timestamps otherwise change Clang module signatures and Swift object hashes.
-    swift build -v -c release --swift-sdk aarch64-swift-linux-musl --disable-automatic-resolution \
+    strace -f -qq -yy -s 65535 -e trace=execve,mmap -o "$work/evidence/vminitd-$pass.exec.trace" -- \
+      "$swift_bin" build -v -c release --swift-sdk aarch64-swift-linux-musl --disable-automatic-resolution \
+      --swift-sdks-path "$swift_sdks" \
+      -Xswiftc "-use-ld=$native_linker_wrapper" \
       -Xcc -Xclang -Xcc -fno-pch-timestamp \
       --product vminitd -Xlinker -s -Xlinker -Map="$work/evidence/vminitd-$pass.map"
-    swift build -v -c release --swift-sdk aarch64-swift-linux-musl --disable-automatic-resolution \
+    strace -f -qq -yy -s 65535 -e trace=execve,mmap -o "$work/evidence/vmexec-$pass.exec.trace" -- \
+      "$swift_bin" build -v -c release --swift-sdk aarch64-swift-linux-musl --disable-automatic-resolution \
+      --swift-sdks-path "$swift_sdks" \
+      -Xswiftc "-use-ld=$native_linker_wrapper" \
       -Xcc -Xclang -Xcc -fno-pch-timestamp \
       --product vmexec -Xlinker -s -Xlinker -Map="$work/evidence/vmexec-$pass.map"
-    bin=$(swift build -c release --swift-sdk aarch64-swift-linux-musl --disable-automatic-resolution --show-bin-path)
+    bin=$(swift build -c release --swift-sdk aarch64-swift-linux-musl --disable-automatic-resolution \
+      --swift-sdks-path "$swift_sdks" --show-bin-path)
     cp "$bin/vminitd" "$work/vminitd-$pass"
     cp "$bin/vmexec" "$work/vmexec-$pass"
-    find .build -type f \( -name '*.a' -o -name '*.o' -o -name '*.resp' -o -name '*.rsp' \
-      -o -name '*.LinkFileList' -o -name '*.autolink' -o -name sources \
-      -o -name output-file-map.json -o -name description.json -o -name release.yaml \) -print0 \
-      | sort -z | tar --null -T - --sort=name --mtime=@1767225600 --owner=0 --group=0 --numeric-owner -cf - \
-      | gzip -n > "$work/evidence/vminit-link-inputs-$pass.tar.gz"
     if [[ "$pass" == first ]]; then
       cp Package.resolved "$work/evidence/vminit-Package.resolved"
       python3 "$package_capture" --lockfile Package.resolved --checkouts .build/checkouts \
         --output "$work/evidence/source-trees/vminit-packages"
     fi
+    python3 "$native_capture" retain-build --kind swift --root "$work/evidence" --tree "$PWD" \
+      --trace "$work/evidence/vminitd-$pass.exec.trace" --trace "$work/evidence/vmexec-$pass.exec.trace" \
+      --map "$work/evidence/vminitd-$pass.map" --map "$work/evidence/vmexec-$pass.map" \
+      --link-invocations "$work/evidence/linker-invocations-$pass" \
+      --metadata "$work/evidence/native-swift-$pass.json"
+    mkdir -m 700 "$work/evidence/native-source-map-$pass"
+    python3 "$native_source_map" \
+      --tree "$PWD" --source-captures "$work/evidence/source-trees" \
+      --sdk-object-sources "$sdk_object_sources" --sdk-source-map-root "$sdk_source_map_root" \
+      --sdk-source-captures "$sdk_source_captures" \
+      --native-capture "$work/evidence/native-swift-$pass.json" \
+      --output "$work/evidence/native-source-map-$pass/source-map.json"
+    find .build -type f \( -name '*.a' -o -name '*.o' -o -name '*.resp' -o -name '*.rsp' \
+      -o -name '*.LinkFileList' -o -name '*.autolink' -o -name sources \
+      -o -name '*.d' -o -name compile_commands.json -o -name output-file-map.json \
+      -o -name description.json -o -name release.yaml \) -print0 \
+      | sort -z | tar --null -T - --sort=name --mtime=@1767225600 --owner=0 --group=0 --numeric-owner -cf - \
+      | gzip -n > "$work/evidence/vminit-link-inputs-$pass.tar.gz"
   ) >"$work/evidence/vminit-$pass.log" 2>&1
 done
 cmp "$work/vminitd-first" "$work/vminitd-second"
 cmp "$work/vmexec-first" "$work/vmexec-second"
+diff -r "$work/evidence/native-source-map-first" "$work/evidence/native-source-map-second"
+find "$work/evidence/native-source-map-second" -depth -delete
+mv "$work/evidence/native-source-map-first" "$work/evidence/source-map"
+mv "$work/evidence/source-map/source-map.json" "$work/evidence/source-map.json"
+python3 - "$work/evidence" <<'PY'
+import json, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+ledger = {}
+for project in ('linux', 'containerization'):
+    first = json.loads((root / ('native-patches-' + project + '-first.json')).read_bytes())
+    second = json.loads((root / ('native-patches-' + project + '-second.json')).read_bytes())
+    if first != second or set(first) != {project}:
+        raise SystemExit('native applied patches differ between builds: ' + project)
+    ledger.update(first)
+with (root / 'native-patches.json').open('x') as stream:
+    json.dump(ledger, stream, sort_keys=True, separators=(',', ':')); stream.write('\n')
+PY
+cp "$work/vminitd-first" "$work/vminitd-second" "$work/vmexec-first" "$work/vmexec-second" "$work/evidence/rebuilds/"
 install -m 0755 "$work/vminitd-first" "$work/payloads/vminitd"
 install -m 0755 "$work/vmexec-first" "$work/payloads/vmexec"
 
@@ -187,7 +282,8 @@ aarch64-linux-gnu-gcc --version > "$work/evidence/aarch64-linux-gnu-gcc.version"
 python3 - "$work/evidence/build-environment.json" <<'PY'
 import json, os, platform, sys
 allowed = ['BUILD_TIME','GIT_COMMIT','GIT_TAG','KBUILD_BUILD_HOST','KBUILD_BUILD_TIMESTAMP',
-           'KBUILD_BUILD_USER','KBUILD_BUILD_VERSION','KCFLAGS','KAFLAGS','SOURCE_DATE_EPOCH','SWIFTLY_HOME_DIR']
+           'KBUILD_BUILD_USER','KBUILD_BUILD_VERSION','KCFLAGS','KAFLAGS','MAKEFLAGS','PAHOLE','RUSTC',
+           'SOURCE_DATE_EPOCH','SWIFTLY_HOME_DIR']
 value = {'environment': {name: os.environ[name] for name in allowed if name in os.environ},
          'machine': platform.machine(), 'system': platform.system(), 'release': platform.release()}
 with open(sys.argv[1], 'x', encoding='utf-8') as stream:

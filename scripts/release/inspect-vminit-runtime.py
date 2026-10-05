@@ -24,10 +24,35 @@ with tarfile.open(archive,'r:gz') as t:
    if match and re.search(rb'copyright|permission|licensed|redistribution|SPDX-License',match[0],re.I):headers.append(dict(path=m.name,sha256=hashlib.sha256(match[0]).hexdigest(),text=match[0].decode(errors='replace')))
 (base/'target-runtime-inventory.json').write_text(json.dumps(dict(kind='hostwright.swift-sdk-runtime-inspection.v1',sdkArchiveSHA256='d2078b69bdeb5c31202c10e9d8a11d6f66f82938b51a4b75f032ccb35c4c286c',runtimeArchives=runtime,metadata=metadata,standaloneLicenseFiles=standalone_licenses,scope='Candidate SDK runtime inputs; actual published OCI link/source provenance not established.'),indent=2)+'\n');(base/'target-header-attribution.json').write_text(json.dumps(headers,sort_keys=True,separators=(',',':'))+'\n');print(json.dumps(dict(runtimeArchives=len(runtime),metadata=metadata,headerNotices=len(headers)),indent=2))
 
-layer=args.oci_layout/'blobs/sha256/e3b2b9d347c2e5834d9fe5b4d615f5c0632c485d785e64f5c6b4c9b179ac168f'
-if layer.is_symlink() or not layer.is_file():raise ValueError('unsafe OCI layer')
-with layer.open('rb') as stream:layer_sha=hashlib.file_digest(stream,'sha256').hexdigest()
-if layer_sha!=layer.name:raise ValueError('OCI layer digest mismatch')
+layout=args.oci_layout
+if layout.is_symlink() or not layout.is_dir():raise ValueError('unsafe OCI layout')
+layout_data=(layout/'oci-layout').read_bytes()
+if json.loads(layout_data)!=dict(imageLayoutVersion='1.0.0'):raise ValueError('invalid OCI layout metadata')
+index_data=(layout/'index.json').read_bytes();index=json.loads(index_data)
+if index.get('schemaVersion')!=2 or index.get('mediaType')!='application/vnd.oci.image.index.v1+json':raise ValueError('invalid OCI index')
+descriptors=index.get('manifests')
+if not isinstance(descriptors,list) or len(descriptors)!=1:raise ValueError('expected one direct image manifest')
+descriptor=descriptors[0]
+if descriptor.get('mediaType')!='application/vnd.oci.image.manifest.v1+json' or descriptor.get('annotations') is not None:raise ValueError('OCI index must point directly to an unannotated image manifest')
+manifest_digest=descriptor.get('digest','').removeprefix('sha256:')
+if not re.fullmatch(r'[a-f0-9]{64}',manifest_digest):raise ValueError('invalid direct manifest digest')
+manifest=layout/'blobs/sha256'/manifest_digest
+manifest_data=manifest.read_bytes()
+if manifest.is_symlink() or len(manifest_data)!=descriptor.get('size') or hashlib.sha256(manifest_data).hexdigest()!=manifest_digest:raise ValueError('direct OCI manifest digest or size mismatch')
+manifest_json=json.loads(manifest_data)
+if manifest_json.get('schemaVersion')!=2 or manifest_json.get('mediaType')!='application/vnd.oci.image.manifest.v1+json':raise ValueError('invalid direct OCI image manifest')
+configuration=manifest_json.get('config',{});layers=manifest_json.get('layers')
+if configuration.get('mediaType')!='application/vnd.oci.image.config.v1+json' or not isinstance(layers,list) or len(layers)!=1:raise ValueError('unexpected direct OCI manifest contents')
+config_digest=configuration.get('digest','').removeprefix('sha256:')
+if not re.fullmatch(r'[a-f0-9]{64}',config_digest):raise ValueError('invalid OCI configuration digest')
+config_path=layout/'blobs/sha256'/config_digest;config_data=config_path.read_bytes()
+if config_path.is_symlink() or len(config_data)!=configuration.get('size') or hashlib.sha256(config_data).hexdigest()!=config_digest:raise ValueError('OCI configuration digest or size mismatch')
+layer_descriptor=layers[0]
+if layer_descriptor.get('mediaType')!='application/vnd.oci.image.layer.v1.tar+gzip':raise ValueError('unsupported OCI layer media type')
+layer_digest=layer_descriptor.get('digest','').removeprefix('sha256:')
+if not re.fullmatch(r'[a-f0-9]{64}',layer_digest):raise ValueError('invalid OCI layer digest')
+layer=layout/'blobs/sha256'/layer_digest;layer_data=layer.read_bytes()
+if layer.is_symlink() or len(layer_data)!=layer_descriptor.get('size') or hashlib.sha256(layer_data).hexdigest()!=layer_digest:raise ValueError('OCI layer digest or size mismatch')
 expected={'sbin/vminitd':'b959125d64bdfb698184687d3c0bb3088bcc4a3b1cf2db418e292b7889550a17','sbin/vmexec':'e30b5e74c1af4bdfce229d4769e6b8b4308921419df611a492df74a9724109b0'}
 elves=[]
 with tarfile.open(layer,'r:gz') as archive:
@@ -41,5 +66,5 @@ with tarfile.open(layer,'r:gz') as archive:
   command=[args.llvm_readelf,'--file-header','--program-headers','--notes','--string-dump=.comment',str(target)]
   result=subprocess.run(command,check=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE);text=result.stdout.decode();(base/(path.rsplit('/',1)[-1]+'-elf.txt')).write_bytes(result.stdout)
   elves.append(dict(path=path,sha256=digest,sizeBytes=len(data),commentStrings=sorted(set(re.findall(r'(?:Apple )?clang version[^\n]+|Linker: LLD[^\n]+',text))),buildID=re.findall(r'Build ID: ([a-f0-9]+)',text),hasInterpreter='INTERP' in text,hasDynamicSegment='DYNAMIC' in text))
-(base/'actual-oci-elf-inventory.json').write_text(json.dumps(dict(kind='hostwright.vminit-actual-elf-inspection.v1',layerSHA256=layer_sha,elves=elves,status='inspected-not-link-provenance-qualified',limitations=['Stripped ELFs do not establish complete linked component/source inventory.','Matching LLVM comment is consistency evidence; it does not authenticate the SDK/source used by the OCI builder.']),indent=2)+'\n')
-print(json.dumps(dict(directory=str(base),sdkSHA256=archive_sha,actualELFs=elves),sort_keys=True))
+(base/'actual-oci-elf-inventory.json').write_text(json.dumps(dict(kind='hostwright.vminit-actual-elf-inspection.v1',indexJSONSHA256=hashlib.sha256(index_data).hexdigest(),manifestSHA256=manifest_digest,configurationSHA256=config_digest,layerSHA256=layer_digest,elves=elves,status='inspected-not-link-provenance-qualified',limitations=['Stripped ELFs do not establish complete linked component/source inventory.','Matching LLVM comment is consistency evidence; it does not authenticate the SDK/source used by the OCI builder.']),indent=2)+'\n')
+print(json.dumps(dict(directory=str(base),sdkSHA256=archive_sha,indexJSONSHA256=hashlib.sha256(index_data).hexdigest(),manifestSHA256=manifest_digest,configurationSHA256=config_digest,layerSHA256=layer_digest,actualELFs=elves),sort_keys=True))

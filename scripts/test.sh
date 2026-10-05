@@ -35,6 +35,7 @@ run_cheap_checks() {
   python3 scripts/release/test-staged-release.py
   python3 scripts/release/test-assemble-qualification.py
   python3 scripts/release/test-swift-test-results.py
+  python3 scripts/release/test_qualify_vendor_tap.py
   python3 scripts/roadmap-governance.py validate
   python3 scripts/roadmap-governance.py self-test
   python3 scripts/render-roadmap-index.py check

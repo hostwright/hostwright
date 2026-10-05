@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import textwrap
 import unittest
 
 SCRIPT = Path(__file__).with_name('qualify-vendor-tap.sh')
@@ -181,6 +182,28 @@ class VendorTapContracts(unittest.TestCase):
         self.assertEqual(file.read_text(),'preserve');file.unlink()
         directory.chmod(0o755);self.assertNotEqual(cleanup().returncode,0);self.assertTrue(directory.exists());directory.chmod(0o700)
         self.assertEqual(cleanup().returncode,0);self.assertFalse(directory.exists());self.assertEqual(cleanup().returncode,0)
+
+    def test_workflow_retains_exact_inventory_and_rejects_digest_or_stale_root(self):
+        self.receipts();workflow=SCRIPT.parents[2]/'.github/workflows/vendor-tap-qualification.yml'
+        source=workflow.read_text();code=textwrap.dedent(source.split("python3 - <<'PYTHON'\n",1)[1].split("          PYTHON",1)[0])
+        run_id=str(int(hashlib.sha256(str(self.root).encode()).hexdigest()[:15],16));attempt='1'
+        destination=Path.home()/('.hostwright-vendor-tap-inputs-'+run_id+'-'+attempt)
+        def cleanup():
+            if destination.exists():
+                (destination/'inventory.json').unlink(missing_ok=True);destination.rmdir()
+        self.addCleanup(cleanup)
+        env=self.env|{'INVENTORY_JSON':self.inventory_path.read_text(),'GITHUB_RUN_ID':run_id,'GITHUB_RUN_ATTEMPT':attempt,'GITHUB_ENV':str(self.root/'github-env')}
+        def run():return subprocess.run(['python3','-c',code],env=env,capture_output=True,text=True,timeout=10)
+        env['HOSTWRIGHT_ARTIFACT_INVENTORY_SHA256']='e'*64
+        self.assertNotEqual(run().returncode,0);self.assertFalse(destination.exists());self.assertFalse((self.root/'github-env').exists())
+        env['HOSTWRIGHT_ARTIFACT_INVENTORY_SHA256']=sha(self.inventory_path)
+        result=run();self.assertEqual(result.returncode,0,result.stderr)
+        file=destination/'inventory.json';self.assertEqual(file.read_bytes(),self.inventory_path.read_bytes());self.assertEqual(file.stat().st_mode&0o777,0o600)
+        self.assertEqual((self.root/'github-env').read_text(),'HOSTWRIGHT_ARTIFACT_INVENTORY='+str(file)+'\n')
+        self.assertNotEqual(run().returncode,0);self.assertEqual(file.read_bytes(),self.inventory_path.read_bytes())
+        for field in ['HOSTWRIGHT_BASELINE_VERSION','HOSTWRIGHT_CANDIDATE_VERSION','HOSTWRIGHT_BASELINE_TAG','HOSTWRIGHT_CANDIDATE_TAG','HOSTWRIGHT_ARTIFACT_INVENTORY_SHA256']:
+            self.assertEqual(source.count('      '+field+':'),2,field)
+        self.assertEqual(source.count('- name: Retain the exact private artifact input inventory'),2)
 
     def test_current_service_checks_follow_bootstrap_and_matching_daemon_start(self):
         source=SCRIPT.read_text();prepare=source.split('\nprepare() {',1)[1].split('\nresume() {',1)[0]

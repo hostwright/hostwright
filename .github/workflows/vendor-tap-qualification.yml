@@ -12,19 +12,37 @@ on:
           - resume
           - cleanup
       baseline_release_commit:
-        description: Exact reviewed main ancestor for v0.0.2-dev.11
+        description: Exact reviewed main ancestor for the baseline release
         required: true
         type: string
       candidate_release_commit:
-        description: Exact reviewed main ancestor for v0.0.2-dev.12
+        description: Exact reviewed main ancestor for the candidate release
         required: true
         type: string
       baseline_tap_commit:
-        description: Exact reviewed tap commit containing the dev.11 formula
+        description: Exact reviewed tap commit containing the baseline formula
         required: true
         type: string
       candidate_tap_commit:
-        description: Exact reviewed tap commit containing the dev.12 formula
+        description: Exact reviewed tap commit containing the candidate formula
+        required: true
+        type: string
+      baseline_version:
+        description: Exact baseline product version
+        required: true
+        default: 0.0.2-dev.11
+        type: string
+      candidate_version:
+        description: Exact candidate or final product version
+        required: true
+        default: 0.0.2-dev.12
+        type: string
+      artifact_inventory:
+        description: Complete hostwright.vendor-tap-inputs.v1 JSON inventory of verified public bytes
+        required: true
+        type: string
+      artifact_inventory_sha256:
+        description: SHA256 of the exact UTF-8 inventory input without an added newline
         required: true
         type: string
 
@@ -47,6 +65,11 @@ jobs:
       HOSTWRIGHT_CANDIDATE_RELEASE_COMMIT: ${{ inputs.candidate_release_commit }}
       HOSTWRIGHT_BASELINE_TAP_COMMIT: ${{ inputs.baseline_tap_commit }}
       HOSTWRIGHT_CANDIDATE_TAP_COMMIT: ${{ inputs.candidate_tap_commit }}
+      HOSTWRIGHT_BASELINE_VERSION: ${{ inputs.baseline_version }}
+      HOSTWRIGHT_CANDIDATE_VERSION: ${{ inputs.candidate_version }}
+      HOSTWRIGHT_BASELINE_TAG: ${{ format('v{0}', inputs.baseline_version) }}
+      HOSTWRIGHT_CANDIDATE_TAG: ${{ format('v{0}', inputs.candidate_version) }}
+      HOSTWRIGHT_ARTIFACT_INVENTORY_SHA256: ${{ inputs.artifact_inventory_sha256 }}
     steps:
       - name: Check out the exact candidate commit
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -54,6 +77,27 @@ jobs:
           ref: ${{ inputs.candidate_release_commit }}
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Retain the exact private artifact input inventory
+        shell: bash
+        env:
+          INVENTORY_JSON: ${{ inputs.artifact_inventory }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PYTHON'
+          import hashlib,os,re
+          from pathlib import Path
+          raw=os.environ['INVENTORY_JSON'].encode('utf-8')
+          expected=os.environ['HOSTWRIGHT_ARTIFACT_INVENTORY_SHA256']
+          if not re.fullmatch('[a-f0-9]{64}',expected) or not raw or len(raw)>8388608 or hashlib.sha256(raw).hexdigest()!=expected:
+              raise SystemExit('Exact artifact inventory digest/size mismatch')
+          root=Path.home()/('.hostwright-vendor-tap-inputs-'+os.environ['GITHUB_RUN_ID']+'-'+os.environ['GITHUB_RUN_ATTEMPT'])
+          root.mkdir(mode=0o700)
+          path=root/'inventory.json'
+          fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+          with os.fdopen(fd,'wb') as stream:stream.write(raw)
+          with open(os.environ['GITHUB_ENV'],'a') as stream:stream.write('HOSTWRIGHT_ARTIFACT_INVENTORY='+str(path)+'\n')
+          PYTHON
 
       - name: Require reviewed main ancestors and exact pair contract
         shell: bash
@@ -81,6 +125,11 @@ jobs:
       HOSTWRIGHT_CANDIDATE_RELEASE_COMMIT: ${{ inputs.candidate_release_commit }}
       HOSTWRIGHT_BASELINE_TAP_COMMIT: ${{ inputs.baseline_tap_commit }}
       HOSTWRIGHT_CANDIDATE_TAP_COMMIT: ${{ inputs.candidate_tap_commit }}
+      HOSTWRIGHT_BASELINE_VERSION: ${{ inputs.baseline_version }}
+      HOSTWRIGHT_CANDIDATE_VERSION: ${{ inputs.candidate_version }}
+      HOSTWRIGHT_BASELINE_TAG: ${{ format('v{0}', inputs.baseline_version) }}
+      HOSTWRIGHT_CANDIDATE_TAG: ${{ format('v{0}', inputs.candidate_version) }}
+      HOSTWRIGHT_ARTIFACT_INVENTORY_SHA256: ${{ inputs.artifact_inventory_sha256 }}
       RELEASE_TEAM_ID: ${{ vars.RELEASE_TEAM_ID }}
     steps:
       - name: Check out reviewed qualification code
@@ -89,6 +138,27 @@ jobs:
           ref: ${{ inputs.candidate_release_commit }}
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Retain the exact private artifact input inventory
+        shell: bash
+        env:
+          INVENTORY_JSON: ${{ inputs.artifact_inventory }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PYTHON'
+          import hashlib,os,re
+          from pathlib import Path
+          raw=os.environ['INVENTORY_JSON'].encode('utf-8')
+          expected=os.environ['HOSTWRIGHT_ARTIFACT_INVENTORY_SHA256']
+          if not re.fullmatch('[a-f0-9]{64}',expected) or not raw or len(raw)>8388608 or hashlib.sha256(raw).hexdigest()!=expected:
+              raise SystemExit('Exact artifact inventory digest/size mismatch')
+          root=Path.home()/('.hostwright-vendor-tap-inputs-'+os.environ['GITHUB_RUN_ID']+'-'+os.environ['GITHUB_RUN_ATTEMPT'])
+          root.mkdir(mode=0o700)
+          path=root/'inventory.json'
+          fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+          with os.fdopen(fd,'wb') as stream:stream.write(raw)
+          with open(os.environ['GITHUB_ENV'],'a') as stream:stream.write('HOSTWRIGHT_ARTIFACT_INVENTORY='+str(path)+'\n')
+          PYTHON
 
       - name: Run the selected qualification stage
         shell: bash
@@ -114,6 +184,7 @@ jobs:
             ~/.hostwright-phase02-vendor-tap/evidence.log
             ~/.hostwright-phase02-vendor-tap/*.json
             ~/.hostwright-phase02-vendor-tap/*.plist
+            ~/.hostwright-vendor-tap-inputs-${{ github.run_id }}-${{ github.run_attempt }}/inventory.json
           if-no-files-found: error
           include-hidden-files: true
           retention-days: 90

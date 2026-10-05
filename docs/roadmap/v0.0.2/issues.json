@@ -5860,7 +5860,7 @@
       "child": 10,
       "parent": 283,
       "title": "P15-C10: Document local release support and incident recovery",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/280",
       "labels": [
         "area:ci",
@@ -5890,7 +5890,7 @@
         "local-integration",
         "security-assessment"
       ],
-      "stateReason": null
+      "stateReason": "completed"
     },
     {
       "marker": "P15-C11",

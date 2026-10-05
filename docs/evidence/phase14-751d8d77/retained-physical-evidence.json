@@ -1,0 +1,106 @@
+{
+  "sourceCommit": "994cf93c9e73308a73b5b396134c69407c49b215",
+  "sourceTree": "b8ea6ba82d6f0a3cf000504d8e4ef153a6591409",
+  "signingRun": 37223598413,
+  "signingAttempt": 1,
+  "physicalCycles": 10,
+  "physicalActions": 40,
+  "actualNativeWaitExitCode": 0,
+  "GUIChecks": [
+    {
+      "id": "manifest-selection",
+      "status": "passed"
+    },
+    {
+      "id": "authenticated-connection",
+      "status": "passed"
+    },
+    {
+      "id": "reviewed-up",
+      "status": "passed"
+    },
+    {
+      "id": "reviewed-restart",
+      "status": "passed"
+    },
+    {
+      "id": "reviewed-down",
+      "status": "passed"
+    },
+    {
+      "id": "cancel-plan",
+      "status": "passed"
+    },
+    {
+      "id": "service-status",
+      "status": "passed"
+    },
+    {
+      "id": "logs",
+      "status": "passed"
+    },
+    {
+      "id": "events",
+      "status": "passed"
+    },
+    {
+      "id": "disconnect-reconnect",
+      "status": "passed"
+    },
+    {
+      "id": "menu-health",
+      "status": "passed"
+    },
+    {
+      "id": "window-reopen",
+      "status": "passed"
+    },
+    {
+      "id": "keyboard",
+      "status": "passed"
+    },
+    {
+      "id": "narrow-window",
+      "status": "passed"
+    },
+    {
+      "id": "voiceover",
+      "status": "passed"
+    }
+  ],
+  "GUIQualificationPassed": true,
+  "physicalCleanupPassed": true,
+  "userStatePreserved": true,
+  "exactResourceIdentifiers": [
+    "hostwright-v2-phase14-web-eaaf253623d82e90fb6c33d8b6ba4ab2"
+  ],
+  "retainedRawInputs": [
+    {
+      "fileName": "result.json",
+      "sha256": "26e5a1d2e990fe0c63c9f93e2ad15a4cd2d9bbe25cfc1c57eb4e3a6f42528310",
+      "sizeBytes": 2899
+    },
+    {
+      "fileName": "gui-checks.json",
+      "sha256": "a78a9c540163e7d20056d773dce49d9482c3a656a50c659ac4a02a21269c3f96",
+      "sizeBytes": 27243
+    },
+    {
+      "fileName": "result.json",
+      "sha256": "b6caa7902dcfbf876a0e19444109765d3a6b5b6e47551b04360cf86b7573cb3f",
+      "sizeBytes": 750
+    }
+  ],
+  "appNormalQuit": {
+    "fileName": "gui-normal-quit-process-result.json",
+    "sha256": "6d88625da137d9c7be92612ae3db27bef50b4bdc98935fe5cf75d0fd9ccf2fb3",
+    "sizeBytes": 131
+  },
+  "hostRestoration": {
+    "fileName": "gui-host-restoration.json",
+    "sha256": "ad0e88e4528f5b6cb8d1c5ae3c17b19967e15ff387654bc6ba5082ff4c5df67c",
+    "sizeBytes": 902
+  },
+  "reuseDecision": "ADR 0015 Phase14 amendment 2026-10-05",
+  "current751DeviceExecutionClaimed": false
+}

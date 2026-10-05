@@ -1,0 +1,652 @@
+{
+  "sourceCommit": "751d8d771bf1e74a01e30b30c22c5f6843d4b70d",
+  "sourceTree": "a8a58a5045718f0bb9691bfca1fd479b39e7afa2",
+  "signingRun": 37281269383,
+  "attempt": 1,
+  "XCTest": {
+    "executed": 3469,
+    "failed": 0,
+    "passed": 3459,
+    "skipped": 10
+  },
+  "SwiftTesting": {
+    "failures": 0,
+    "reportedSeconds": "0.289",
+    "suites": 6,
+    "tests": 61
+  },
+  "selected73": {
+    "cases": [
+      {
+        "class": "HostwrightDistributionTests.DistributionContainerizationAssetSecurityTests",
+        "rawLine": 8216,
+        "reportedSeconds": "0.007",
+        "status": "passed",
+        "test": "testLoadRejectsModifiedGuestLoaderEvenWhenELFShapeIsValid"
+      },
+      {
+        "class": "HostwrightDistributionTests.DistributionContainerizationAssetSecurityTests",
+        "rawLine": 8218,
+        "reportedSeconds": "0.001",
+        "status": "passed",
+        "test": "testLoadRejectsNonPrivateRootAndIntermediateDirectory"
+      },
+      {
+        "class": "HostwrightDistributionTests.DistributionContainerizationAssetSecurityTests",
+        "rawLine": 8220,
+        "reportedSeconds": "0.001",
+        "status": "passed",
+        "test": "testLoadRejectsSymlinkedIntermediateDirectory"
+      },
+      {
+        "class": "HostwrightDistributionTests.DistributionContainerizationAssetSecurityTests",
+        "rawLine": 8222,
+        "reportedSeconds": "0.002",
+        "status": "passed",
+        "test": "testLoadRejectsWritableAssetFile"
+      },
+      {
+        "class": "HostwrightDistributionTests.DistributionContainerizationAssetSecurityTests",
+        "rawLine": 8224,
+        "reportedSeconds": "0.000",
+        "status": "passed",
+        "test": "testValidatedCopyRejectsInPlaceMutation"
+      },
+      {
+        "class": "HostwrightDistributionTests.DistributionContainerizationAssetSecurityTests",
+        "rawLine": 8226,
+        "reportedSeconds": "0.000",
+        "status": "passed",
+        "test": "testValidatedCopyRejectsParentDirectoryDrift"
+      },
+      {
+        "class": "HostwrightDistributionTests.DistributionContainerizationAssetSecurityTests",
+        "rawLine": 8228,
+        "reportedSeconds": "0.000",
+        "status": "passed",
+        "test": "testValidatedCopyRejectsPathReplacement"
+      },
+      {
+        "class": "HostwrightDistributionTests.DistributionContainerizationAssetSecurityTests",
+        "rawLine": 8230,
+        "reportedSeconds": "0.001",
+        "status": "passed",
+        "test": "testValidatedCopyStreamsTheBoundFileWithExactMode"
+      },
+      {
+        "class": "HostwrightDistributionTests.DistributionLifecycleModelsTests",
+        "rawLine": 8359,
+        "reportedSeconds": "0.002",
+        "status": "passed",
+        "test": "testLifecycleContractsAllowBoundManagedServiceStatesAndRejectUnboundCheckpoints"
+      },
+      {
+        "class": "HostwrightDistributionTests.DistributionLifecycleModelsTests",
+        "rawLine": 8361,
+        "reportedSeconds": "0.002",
+        "status": "passed",
+        "test": "testLifecycleJournalAndStatusArePathBoundCanonicalContracts"
+      },
+      {
+        "class": "HostwrightDistributionTests.DistributionLifecycleModelsTests",
+        "rawLine": 8363,
+        "reportedSeconds": "0.002",
+        "status": "passed",
+        "test": "testLifecycleJournalRejectsInvalidOperationShapeAndUnverifiedRollback"
+      },
+      {
+        "class": "HostwrightDistributionTests.DistributionModelsTests",
+        "rawLine": 8368,
+        "reportedSeconds": "0.000",
+        "status": "passed",
+        "test": "testArtifactSchemaOnePreservesPublishedPhaseTwoLayout"
+      },
+      {
+        "class": "HostwrightDistributionTests.DistributionModelsTests",
+        "rawLine": 8370,
+        "reportedSeconds": "0.000",
+        "status": "passed",
+        "test": "testArtifactSchemaTwoPreservesPreDesktopReleaseLayout"
+      },
+      {
+        "class": "HostwrightDistributionTests.DistributionModelsTests",
+        "rawLine": 8372,
+        "reportedSeconds": "0.001",
+        "status": "passed",
+        "test": "testDistributionJSONRejectsUnknownAndNoncanonicalFields"
+      },
+      {
+        "class": "HostwrightDistributionTests.DistributionModelsTests",
+        "rawLine": 8374,
+        "reportedSeconds": "0.001",
+        "status": "passed",
+        "test": "testGeneratedVersionPairsPreserveStrictTransitionProperties"
+      },
+      {
+        "class": "HostwrightDistributionTests.DistributionModelsTests",
+        "rawLine": 8376,
+        "reportedSeconds": "0.002",
+        "status": "passed",
+        "test": "testInstallationStatusAcceptsPublishedDev12NestedSchemaTwoManifest"
+      },
+      {
+        "class": "HostwrightDistributionTests.DistributionModelsTests",
+        "rawLine": 8378,
+        "reportedSeconds": "0.000",
+        "status": "passed",
+        "test": "testInstallManifestAcceptsActualPublishedDev12SchemaTwo"
+      },
+      {
+        "class": "HostwrightDistributionTests.DistributionModelsTests",
+        "rawLine": 8380,
+        "reportedSeconds": "0.001",
+        "status": "passed",
+        "test": "testInstallManifestPreservesPriorShippedLayoutAndEmitsCurrentLayout"
+      },
+      {
+        "class": "HostwrightDistributionTests.DistributionModelsTests",
+        "rawLine": 8382,
+        "reportedSeconds": "0.001",
+        "status": "passed",
+        "test": "testManifestRequiresExactSafePayloadLayout"
+      },
+      {
+        "class": "HostwrightDistributionTests.DistributionModelsTests",
+        "rawLine": 8384,
+        "reportedSeconds": "0.000",
+        "status": "passed",
+        "test": "testPathPolicyRejectsAbsoluteTraversalControlAndNestedFileNames"
+      },
+      {
+        "class": "HostwrightDistributionTests.DistributionModelsTests",
+        "rawLine": 8386,
+        "reportedSeconds": "0.000",
+        "status": "passed",
+        "test": "testPostCommitCleanupReportsPendingWithoutTurningCommittedMutationIntoFailure"
+      },
+      {
+        "class": "HostwrightDistributionTests.DistributionModelsTests",
+        "rawLine": 8388,
+        "reportedSeconds": "0.001",
+        "status": "passed",
+        "test": "testPublishedDev12InstallManifestRejectsModifiedLayoutsAndMetadata"
+      },
+      {
+        "class": "HostwrightDistributionTests.DistributionModelsTests",
+        "rawLine": 8390,
+        "reportedSeconds": "0.000",
+        "status": "passed",
+        "test": "testSemanticVersionOrderingAndLifecycleTransitionPolicyFailClosed"
+      },
+      {
+        "class": "HostwrightDistributionTests.DistributionModelsTests",
+        "rawLine": 8392,
+        "reportedSeconds": "0.002",
+        "status": "passed",
+        "test": "testSPDXAndProvenanceMustBindExactArchiveAndSource"
+      },
+      {
+        "class": "HostwrightDistributionTests.DistributionModelsTests",
+        "rawLine": 8394,
+        "reportedSeconds": "0.000",
+        "status": "passed",
+        "test": "testSupportedPackageExcludesDeferredServiceExecutables"
+      },
+      {
+        "class": "HostwrightDistributionTests.DistributionPackageLifecycleTests",
+        "rawLine": 8399,
+        "reportedSeconds": "0.000",
+        "status": "passed",
+        "test": "testDesktopBuildVersionsUseThreeComponentsAndPreserveChannelOrder"
+      },
+      {
+        "class": "HostwrightDistributionTests.DistributionPackageLifecycleTests",
+        "rawLine": 8401,
+        "reportedSeconds": "0.001",
+        "status": "passed",
+        "test": "testPackageOriginIsAdditiveAndBindsCurrentPayloadToNewestReceipt"
+      },
+      {
+        "class": "HostwrightDistributionTests.DistributionPackageLifecycleTests",
+        "rawLine": 8403,
+        "reportedSeconds": "0.000",
+        "status": "passed",
+        "test": "testPackageOriginRejectsInstalledPayloadVersionMismatch"
+      },
+      {
+        "class": "HostwrightDistributionTests.DistributionPackageLifecycleTests",
+        "rawLine": 8405,
+        "reportedSeconds": "0.001",
+        "status": "passed",
+        "test": "testPackageReceiptParserRequiresExactIdentifierVersionAndRootLocation"
+      },
+      {
+        "class": "HostwrightDistributionTests.DistributionPackageLifecycleTests",
+        "rawLine": 8407,
+        "reportedSeconds": "0.000",
+        "status": "passed",
+        "test": "testPostinstallEntrypointUsesOnlyLockedPackageLifecycleArguments"
+      },
+      {
+        "class": "HostwrightDistributionTests.DistributionPackageLifecycleTests",
+        "rawLine": 8409,
+        "reportedSeconds": "0.000",
+        "status": "passed",
+        "test": "testPreinstallEntrypointUsesArchivedCompanionAndLockedReadOnlyArguments"
+      },
+      {
+        "class": "HostwrightDistributionTests.DistributionPackageLifecycleTests",
+        "rawLine": 8411,
+        "reportedSeconds": "0.000",
+        "status": "passed",
+        "test": "testQualificationVersionsMapMonotonicallyToApplePackageVersions"
+      },
+      {
+        "class": "HostwrightDistributionTests.DistributionPackageLifecycleTests",
+        "rawLine": 8413,
+        "reportedSeconds": "0.000",
+        "status": "passed",
+        "test": "testReleaseCandidateAndStablePackageVersionsFollowPublishedDevelopmentReceipts"
+      },
+      {
+        "class": "HostwrightDistributionTests.DistributionPackageLifecycleTests",
+        "rawLine": 8415,
+        "reportedSeconds": "0.000",
+        "status": "passed",
+        "test": "testReleasePackageChannelsRejectAmbiguousOrOutOfRangeIdentifiers"
+      },
+      {
+        "class": "HostwrightDistributionTests.TrustedReleaseTests",
+        "rawLine": 14478,
+        "reportedSeconds": "0.001",
+        "status": "passed",
+        "test": "testArchiveNotaryTicketsAcceptRecordedDesktopBundleAndExecutable"
+      },
+      {
+        "class": "HostwrightDistributionTests.TrustedReleaseTests",
+        "rawLine": 14480,
+        "reportedSeconds": "0.001",
+        "status": "passed",
+        "test": "testArchiveNotaryTicketsBindBundleToFinalDesktopExecutableHash"
+      },
+      {
+        "class": "HostwrightDistributionTests.TrustedReleaseTests",
+        "rawLine": 14482,
+        "reportedSeconds": "0.002",
+        "status": "passed",
+        "test": "testArchiveNotaryTicketsRejectChangedRecordedDesktopInventory"
+      },
+      {
+        "class": "HostwrightDistributionTests.TrustedReleaseTests",
+        "rawLine": 14484,
+        "reportedSeconds": "0.000",
+        "status": "passed",
+        "test": "testArchiveNotaryTicketsRequireEverySignedExecutableHash"
+      },
+      {
+        "class": "HostwrightDistributionTests.TrustedReleaseTests",
+        "rawLine": 14486,
+        "reportedSeconds": "0.000",
+        "status": "passed",
+        "test": "testCleanBuildArgumentsUseOneDeterministicReleaseContract"
+      },
+      {
+        "class": "HostwrightDistributionTests.TrustedReleaseTests",
+        "rawLine": 14488,
+        "reportedSeconds": "0.000",
+        "status": "passed",
+        "test": "testCleanBuildCommandEvidenceRecordsExactDeterministicInvocation"
+      },
+      {
+        "class": "HostwrightDistributionTests.TrustedReleaseTests",
+        "rawLine": 14490,
+        "reportedSeconds": "0.001",
+        "status": "passed",
+        "test": "testCleanBuildDependencyInventoryUsesParsedSwiftPMGraph"
+      },
+      {
+        "class": "HostwrightDistributionTests.TrustedReleaseTests",
+        "rawLine": 14492,
+        "reportedSeconds": "0.001",
+        "status": "passed",
+        "test": "testCleanBuildInventoryRequiresQualifiedSecurityRevisions"
+      },
+      {
+        "class": "HostwrightDistributionTests.TrustedReleaseTests",
+        "rawLine": 14494,
+        "reportedSeconds": "0.001",
+        "status": "passed",
+        "test": "testCMSDecoderAuthenticatesPublicDetachedFixtureAndReadsActualSubjectKeyIdentifier"
+      },
+      {
+        "class": "HostwrightDistributionTests.TrustedReleaseTests",
+        "rawLine": 14496,
+        "reportedSeconds": "0.000",
+        "status": "passed",
+        "test": "testCMSDecoderRejectsEmbeddedContentForMatchingAndDifferentDetachedInput"
+      },
+      {
+        "class": "HostwrightDistributionTests.TrustedReleaseTests",
+        "rawLine": 14498,
+        "reportedSeconds": "0.000",
+        "status": "passed",
+        "test": "testCMSDecoderRejectsEmptyEmbeddedContentWithNonemptyDetachedInput"
+      },
+      {
+        "class": "HostwrightDistributionTests.TrustedReleaseTests",
+        "rawLine": 14500,
+        "reportedSeconds": "0.000",
+        "status": "passed",
+        "test": "testCMSDecoderRejectsTamperedDetachedContentDespiteUnchangedSignerCertificate"
+      },
+      {
+        "class": "HostwrightDistributionTests.TrustedReleaseTests",
+        "rawLine": 14502,
+        "reportedSeconds": "0.001",
+        "status": "passed",
+        "test": "testCMSSignerInspectorRejectsMalformedAndEmptyInputs"
+      },
+      {
+        "class": "HostwrightDistributionTests.TrustedReleaseTests",
+        "rawLine": 14504,
+        "reportedSeconds": "0.000",
+        "status": "passed",
+        "test": "testCMSSigningCertificateRejectsMissingAndAmbiguousIdentifiers"
+      },
+      {
+        "class": "HostwrightDistributionTests.TrustedReleaseTests",
+        "rawLine": 14506,
+        "reportedSeconds": "0.000",
+        "status": "passed",
+        "test": "testCMSSigningCertificateRequiresExactFingerprintAndCommonName"
+      },
+      {
+        "class": "HostwrightDistributionTests.TrustedReleaseTests",
+        "rawLine": 14508,
+        "reportedSeconds": "0.000",
+        "status": "passed",
+        "test": "testContainerizationHelperSigningUsesOnlyVirtualizationEntitlement"
+      },
+      {
+        "class": "HostwrightDistributionTests.TrustedReleaseTests",
+        "rawLine": 14510,
+        "reportedSeconds": "0.001",
+        "status": "passed",
+        "test": "testCurrentSchemaRejectsEmptyDependencyInventory"
+      },
+      {
+        "class": "HostwrightDistributionTests.TrustedReleaseTests",
+        "rawLine": 14512,
+        "reportedSeconds": "0.001",
+        "status": "passed",
+        "test": "testDeveloperIDParserSelectsOnlyExactApplicationAndInstallerIdentities"
+      },
+      {
+        "class": "HostwrightDistributionTests.TrustedReleaseTests",
+        "rawLine": 14514,
+        "reportedSeconds": "0.000",
+        "status": "passed",
+        "test": "testDistributionHashHonorsPreCancellation"
+      },
+      {
+        "class": "HostwrightDistributionTests.TrustedReleaseTests",
+        "rawLine": 14516,
+        "reportedSeconds": "0.272",
+        "status": "passed",
+        "test": "testDistributionRunnerRestrictsDeterministicSwiftEnvironment"
+      },
+      {
+        "class": "HostwrightDistributionTests.TrustedReleaseTests",
+        "rawLine": 14518,
+        "reportedSeconds": "0.002",
+        "status": "passed",
+        "test": "testHomebrewFormulaUsesImmutableArtifactAndCompleteInstalledSurface"
+      },
+      {
+        "class": "HostwrightDistributionTests.TrustedReleaseTests",
+        "rawLine": 14520,
+        "reportedSeconds": "0.000",
+        "status": "passed",
+        "test": "testNotarytoolLogParserRejectsIncompleteOrMismatchedArchiveTickets"
+      },
+      {
+        "class": "HostwrightDistributionTests.TrustedReleaseTests",
+        "rawLine": 14522,
+        "reportedSeconds": "0.000",
+        "status": "passed",
+        "test": "testNotarytoolLogParserRequiresExactArchiveTicketContents"
+      },
+      {
+        "class": "HostwrightDistributionTests.TrustedReleaseTests",
+        "rawLine": 14524,
+        "reportedSeconds": "0.000",
+        "status": "passed",
+        "test": "testNotarytoolParserRequiresAcceptedUUIDBoundJSON"
+      },
+      {
+        "class": "HostwrightDistributionTests.TrustedReleaseTests",
+        "rawLine": 14526,
+        "reportedSeconds": "0.001",
+        "status": "passed",
+        "test": "testPackageComponentPolicyPreservesPublishedSchemaTwoDesktopCompatibility"
+      },
+      {
+        "class": "HostwrightDistributionTests.TrustedReleaseTests",
+        "rawLine": 14528,
+        "reportedSeconds": "0.183",
+        "status": "passed",
+        "test": "testPackageComponentPolicyProducesExactNonrelocatingPkgbuildMetadata"
+      },
+      {
+        "class": "HostwrightDistributionTests.TrustedReleaseTests",
+        "rawLine": 14530,
+        "reportedSeconds": "0.002",
+        "status": "passed",
+        "test": "testPackageComponentPolicyRejectsSkippedOrInexactBundleMetadata"
+      },
+      {
+        "class": "HostwrightDistributionTests.TrustedReleaseTests",
+        "rawLine": 14532,
+        "reportedSeconds": "0.001",
+        "status": "passed",
+        "test": "testPreCancelledTrustedReleaseCreatesNoOutputAndReadsNoIdentity"
+      },
+      {
+        "class": "HostwrightDistributionTests.TrustedReleaseTests",
+        "rawLine": 14534,
+        "reportedSeconds": "0.001",
+        "status": "passed",
+        "test": "testPublishedPhaseTwoReleaseSchemaRemainsVerifiable"
+      },
+      {
+        "class": "HostwrightDistributionTests.TrustedReleaseTests",
+        "rawLine": 14536,
+        "reportedSeconds": "0.001",
+        "status": "passed",
+        "test": "testPublishedSchemaOneEmptyDependencyInventoryRemainsVerifiable"
+      },
+      {
+        "class": "HostwrightDistributionTests.TrustedReleaseTests",
+        "rawLine": 14538,
+        "reportedSeconds": "3.355",
+        "status": "passed",
+        "test": "testRenderedHomebrewFormulaPassesRealRubyAndHomebrewStyle"
+      },
+      {
+        "class": "HostwrightDistributionTests.TrustedReleaseTests",
+        "rawLine": 14540,
+        "reportedSeconds": "0.000",
+        "status": "passed",
+        "test": "testReproducibilityMismatchNamesSortedDifferingPayloadPaths"
+      },
+      {
+        "class": "HostwrightDistributionTests.TrustedReleaseTests",
+        "rawLine": 14542,
+        "reportedSeconds": "0.000",
+        "status": "passed",
+        "test": "testRevisionOnlyProvenanceKeepsExactCommitAndRejectsMissingOrDuplicateIdentity"
+      },
+      {
+        "class": "HostwrightDistributionTests.TrustedReleaseTests",
+        "rawLine": 14544,
+        "reportedSeconds": "0.011",
+        "status": "passed",
+        "test": "testStructuredReleaseOutputsAndRetentionPolicyAreStable"
+      },
+      {
+        "class": "HostwrightDistributionTests.TrustedReleaseTests",
+        "rawLine": 14546,
+        "reportedSeconds": "0.004",
+        "status": "passed",
+        "test": "testTrustedManifestAndProvenanceBindEveryPublishedArtifact"
+      },
+      {
+        "class": "HostwrightDistributionTests.TrustedReleaseTests",
+        "rawLine": 14548,
+        "reportedSeconds": "0.000",
+        "status": "passed",
+        "test": "testTrustedReleaseRequestRejectsSecretsAndMutableIdentifiersBeforeIO"
+      },
+      {
+        "class": "HostwrightDistributionTests.TrustedReleaseTests",
+        "rawLine": 14550,
+        "reportedSeconds": "0.000",
+        "status": "passed",
+        "test": "testTrustedReleaseRequiresMatchingActualToolVersionsFromBothCleanBuilds"
+      },
+      {
+        "class": "HostwrightDistributionTests.TrustedReleaseTests",
+        "rawLine": 14552,
+        "reportedSeconds": "0.001",
+        "status": "passed",
+        "test": "testTrustedSPDXInventoriesArchiveAndPackageWithLicense"
+      },
+      {
+        "class": "HostwrightDistributionTests.TrustedReleaseTests",
+        "rawLine": 14554,
+        "reportedSeconds": "0.005",
+        "status": "passed",
+        "test": "testVerifierRejectsUntrustedTeamAndMissingReleaseInventory"
+      }
+    ],
+    "executed": 73,
+    "failed": 0,
+    "passed": 73,
+    "skipped": 0,
+    "sourceMethods": {
+      "path": "/Users/dev/.codex/phase14-checkpoint-20260928/actual-source-support-751d8d77/source-methods.json",
+      "sha256": "a215ac785509843b953e6b0316c2fc17abd0d5787b45af8ff8f4d5f9f40295fc",
+      "sizeBytes": 9542
+    }
+  },
+  "regressionDisclosures": 439,
+  "logicalDistributionStages": 13,
+  "logicalDistributionStagesPassed": 13,
+  "sourceRawWorkflowLog": {
+    "sha256": "2557f82fec01e6eb7f0f0410224c09be14593621fc304475b5aa9d08478c9247",
+    "sizeBytes": 3115462
+  },
+  "independentReadbackSHA256": "846ad495f5822224158a87beda88c9e0e8a08d91819c90f5606b398b142dc5a9",
+  "reproducibility": {
+    "allNineBinaryHashesEqual": true,
+    "differingByteCount": 16,
+    "finalUnsignedShippedPayloadEquality": "Actual source-reproducibility stage passed; Builder requires equality before signing. Intermediate object variance unresolved, disclosed for Phase15#275.",
+    "firstDifferingByteOffsetsZeroBased": [
+      23680,
+      23681,
+      23682,
+      23683,
+      23684,
+      23685,
+      23686,
+      23687,
+      23688,
+      23689,
+      23690,
+      23691,
+      23692,
+      23693,
+      23694,
+      23695
+    ],
+    "retainedRegularFilesRehashed": 286,
+    "workerObjectCountPerGeneration": 131,
+    "workerObjectDifferences": [
+      {
+        "generation1": {
+          "sha256": "9bc6cc7b554ee365c877a2a344a5fd09ec9d65f0fa51930b90be045905afac85",
+          "sizeBytes": 105064
+        },
+        "generation2": {
+          "sha256": "321996a4f42626221c88976f2622ff7336086eb01ff7d728c9dd2e4824c25eed",
+          "sizeBytes": 105064
+        },
+        "object": "SystemPackage.build/SystemString.swift.o"
+      }
+    ],
+    "workerObjectsEqual": false
+  },
+  "producerRerun": false,
+  "disclosedOptionalSkips": [
+    {
+      "class": "HostwrightRuntimeTests.LifecycleGate05LiveTests",
+      "reason": "Set HOSTWRIGHT_PHASE04_LIVE=1 on the explicit Phase 04 live cell.",
+      "resultRawLine": 9887,
+      "test": "testAppleCLIConfirmedCreateAndDeleteThroughSecureBoundary"
+    },
+    {
+      "class": "HostwrightContainerizationHelperTests.Phase07ContainerizationNetworkLiveTests",
+      "reason": "Enable only the explicit Phase 07 Gate 1 or Gate 12 Containerization cell.",
+      "resultRawLine": 11565,
+      "test": "testRealContainerizationNetworksIsolateAndDualAttachmentConnects"
+    },
+    {
+      "class": "HostwrightNetworkHelperTests.Phase07LANExposureLiveTests",
+      "reason": "Set HOSTWRIGHT_PHASE07_GATE08_LAN_LIVE=1 only for the attended Tahoe LAN evidence lane.",
+      "resultRawLine": 11571,
+      "test": "testExplicitLANPolicyServesTahoeVMAndFailsClosed"
+    },
+    {
+      "class": "HostwrightRuntimeTests.Phase07LocalNetworkForwardingLiveTests",
+      "reason": "Set HOSTWRIGHT_PHASE07_GATE15_LIVE=1 only after explicitly granting Local Network permission.",
+      "resultRawLine": 11577,
+      "test": "testAuthorizedLocalhostForwardingSurvivesCancellationRestartAndConflict"
+    },
+    {
+      "class": "HostwrightRuntimeTests.Phase07LocalNetworkForwardingLiveTests",
+      "reason": "Set HOSTWRIGHT_PHASE07_GATE15_DENIED_LIVE=1 only on the explicit denied-permission live cell.",
+      "resultRawLine": 11580,
+      "test": "testDeniedLocalNetworkPermissionFailsClosedAndCleansUpExactly"
+    },
+    {
+      "class": "HostwrightRuntimeTests.Phase07NetworkGate01LiveTests",
+      "reason": "Set HOSTWRIGHT_PHASE07_GATE01_LIVE=1 on the explicit Phase 07 Gate 1 live cell.",
+      "resultRawLine": 11586,
+      "test": "testAppleCLIProjectNetworksIsolateAndExplicitDualAttachmentConnects"
+    },
+    {
+      "class": "HostwrightSchedulerTests.Phase10SchedulerQualificationTests",
+      "reason": "Set HOSTWRIGHT_PHASE10_SCHEDULER_QUAL_PERFORMANCE=1 to run the 1,000-workload x 100-node performance cell.",
+      "resultRawLine": 11740,
+      "test": "testPhase10SchedulerQualificationPerformanceCell"
+    },
+    {
+      "class": "HostwrightRegistryTests.RegistryAuthenticationTests",
+      "reason": "Set HOSTWRIGHT_LIVE_REGISTRY=1 for the explicit TLS/token-service cell.",
+      "resultRawLine": 12260,
+      "test": "testLiveDockerHubBearerScopeWhenExplicitlyEnabled"
+    },
+    {
+      "class": "HostwrightNetworkHelperTests.ServiceTunnelTahoeVMHarnessTests",
+      "reason": "Set HOSTWRIGHT_GATE13_TAHOE_VM=1 only for the attended existing-VM evidence lane.",
+      "resultRawLine": 13757,
+      "test": "testExistingTahoeVMEchoesAuthenticatedFrame"
+    },
+    {
+      "class": "HostwrightNetworkHelperTests.ServiceTunnelTahoeVMHarnessTests",
+      "reason": "Set HOSTWRIGHT_GATE13_HELPER_CONFIGURATION for the attended canonical-frame check.",
+      "resultRawLine": 13760,
+      "test": "testQualificationConfigurationUsesCanonicalHelperFrame"
+    }
+  ]
+}

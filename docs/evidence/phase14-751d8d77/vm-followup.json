@@ -1,0 +1,36 @@
+{
+  "historicalSourceCommit": "994cf93c9e73308a73b5b396134c69407c49b215",
+  "historicalRuntimeRun": 37212200395,
+  "historicalSigningRun": 37223598413,
+  "historicalCompletedLogicalCases": 4,
+  "totalLogicalCases": 9,
+  "historicalCompletedCases": [
+    "clean-install",
+    "clean-after-reboot with state recovery",
+    "clean-final-cleanup with observer recovery",
+    "fail-closed refusals"
+  ],
+  "historicalOriginalFailuresPreserved": [
+    "post-reboot wrapper64 before genuine state recovery",
+    "cleanup wrapper1 from cross-reboot device identifier before corrected observer",
+    "upgrade/rollback owner-receipt mismatch72; #363 repair not yet signed-VM-qualified"
+  ],
+  "currentSourceCommit": "751d8d771bf1e74a01e30b30c22c5f6843d4b70d",
+  "currentVMCompletedCases": 0,
+  "remainingRoutes": [
+    "upgrade",
+    "rollback",
+    "re-upgrade",
+    "repair",
+    "package-uninstall"
+  ],
+  "primaryFollowupIssue": 278,
+  "phase15Epic": 283,
+  "supportingIssues": [
+    277,
+    281
+  ],
+  "currentVMQualificationPassed": false,
+  "finalReleasePromotionBlocked": true,
+  "privateRetentionNoteSHA256": "60231f33ae5d4f4ebfc7340476f29cd908cbaf822227a3b24827437e4a302e4a"
+}

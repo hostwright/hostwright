@@ -1,0 +1,186 @@
+{
+  "sourceCommit": "751d8d771bf1e74a01e30b30c22c5f6843d4b70d",
+  "sourceTree": "a8a58a5045718f0bb9691bfca1fd479b39e7afa2",
+  "version": "0.0.2-rc.2",
+  "runtimeRun": 37265139394,
+  "runtimeAttempt": 1,
+  "runtimeRunURL": "https://github.com/hostwright/hostwright/actions/runs/37265139394",
+  "signingRun": 37281269383,
+  "signingAttempt": 1,
+  "signingRunURL": "https://github.com/hostwright/hostwright/actions/runs/37281269383",
+  "actualControllerOuterExitCode": 0,
+  "actualChildren": {
+    "renderer": {
+      "pid": 21731,
+      "actualExitCode": 0
+    },
+    "signing-watch": {
+      "pid": 21741,
+      "actualExitCode": 0
+    },
+    "validation-jobs": {
+      "pid": 21760,
+      "actualExitCode": 0
+    },
+    "pending-deployments-0": {
+      "pid": 21765,
+      "actualExitCode": 0
+    },
+    "environment-approval": {
+      "pid": 21772,
+      "actualExitCode": 0
+    },
+    "approval-pending-readback-0": {
+      "pid": 21776,
+      "actualExitCode": 0
+    },
+    "runner": {
+      "pid": 21783,
+      "actualExitCode": 0
+    },
+    "pair-observer": {
+      "pid": 22171,
+      "actualExitCode": 0
+    },
+    "regression-jobs": {
+      "pid": 55411,
+      "actualExitCode": 0
+    },
+    "post-regression-environment": {
+      "pid": 55416,
+      "actualExitCode": 0
+    },
+    "pair-comparison": {
+      "pid": 73353,
+      "actualExitCode": 0
+    },
+    "retainer": {
+      "pid": 74763,
+      "actualExitCode": 0
+    }
+  },
+  "authenticatedSubjects": 7,
+  "inventorySHA256": "68c8b4d92325cb1cc58f736c7c2d3b2ef2251badab8def042bb8853094f36e2a",
+  "archive": {
+    "fileName": "hostwright-0.0.2-rc.2-macos-arm64-751d8d771bf1.zip",
+    "sha256": "dd154267965b73216ed743ac89837d3ed53f5387f719d3936c103641d413e3d8",
+    "sizeBytes": 186690986
+  },
+  "package": {
+    "fileName": "hostwright-0.0.2-rc.2-macos-arm64-751d8d771bf1.pkg",
+    "sha256": "f0e2bdc6d9dc55dc5848da66998b2604ca6f51814bb7df32bc0a35923282bf0c",
+    "sizeBytes": 196088590
+  },
+  "correspondingSource": {
+    "archive": {
+      "fileName": "hostwright-0.0.2-rc.2-751d8d771bf1-corresponding-source.tar.gz",
+      "sha256": "517c2108992ff7237387c2b7a9a2d4140a1219e7bad6ff606838eb3f3b3e21be",
+      "sizeBytes": 1673033136
+    },
+    "checksums": {
+      "fileName": "SOURCE_SHA256SUMS",
+      "sha256": "7376d9c73cba223c5194f9efda8109baf602a82d3d85238ef1dc9a586284b551"
+    },
+    "kind": "hostwright.corresponding-source-stage.v1",
+    "manifest": {
+      "fileName": "source-manifest.json",
+      "sha256": "c82ee286ae4bd7818c437b462ea83975157f6e0ebe72f192dbb615e04b64e326",
+      "sizeBytes": 2866390
+    },
+    "sourceCommit": "751d8d771bf1e74a01e30b30c22c5f6843d4b70d",
+    "sourceManifestKind": "hostwright.corresponding-source.new-runtime.v1",
+    "sourceManifestSchemaVersion": 1,
+    "version": "0.0.2-rc.2"
+  },
+  "trustedVerificationCommandCount": 33,
+  "trustedVerificationStatus": "passed",
+  "signedVerifierSHA256": "ef835724bdf13a8150e0cc84455c542014214e62f2efe4181395944545b51c8b",
+  "signerTeamIdentifier": "993YC3JY4Q",
+  "cleanup": {
+    "exactResourceIdentifiers": [
+      "/var/folders/jt/494kvbz95495w99y4kmwd2040000gn/T/hostwright-dist-release-verify-C8D0AC88-B5B2-4B89-AEC7-9A21B45D0E4E"
+    ],
+    "message": "The exact private trusted-release verification root was removed.",
+    "status": "succeeded"
+  },
+  "environment": [
+    {
+      "command": [
+        "/usr/bin/sw_vers"
+      ],
+      "exitCode": 0,
+      "stdout": "ProductName:\t\tmacOS\nProductVersion:\t\t26.6.2\nBuildVersion:\t\t25G83\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/usr/sbin/sysctl",
+        "hw.model",
+        "hw.memsize",
+        "hw.ncpu",
+        "kern.boottime"
+      ],
+      "exitCode": 0,
+      "stdout": "hw.model: Mac16,8\nhw.memsize: 25769803776\nhw.ncpu: 12\nkern.boottime: { sec = 1789484195, usec = 132751 } Tue Sep 15 10:56:35 2026\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/usr/bin/uname",
+        "-m"
+      ],
+      "exitCode": 0,
+      "stdout": "arm64\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/usr/bin/xcrun",
+        "swift",
+        "--version"
+      ],
+      "exitCode": 0,
+      "stdout": "Apple Swift version 6.3.3 (swiftlang-6.3.3.1.3 clang-2100.1.1.101)\nTarget: arm64-apple-macosx26.0\n",
+      "stderr": "swift-driver version: 1.148.6 "
+    },
+    {
+      "command": [
+        "/usr/bin/xcodebuild",
+        "-version"
+      ],
+      "exitCode": 0,
+      "stdout": "Xcode 26.6\nBuild version 17F113\n",
+      "stderr": ""
+    }
+  ],
+  "retainedRawInputs": [
+    {
+      "fileName": "authentication.json",
+      "sha256": "ad12bfa0a140fc8bb35ceed89e81620741e445d77a9beaa109100876ed4748b9",
+      "sizeBytes": 3348
+    },
+    {
+      "fileName": "trusted-release-verification.json",
+      "sha256": "0eca7fa4c8ba173ce67f7198e93d6a143d00c260d2de7920af8ad5364abae1e6",
+      "sizeBytes": 1605
+    },
+    {
+      "fileName": "result.json",
+      "sha256": "577a163fbeebc95d1af605aa6086617c0a6fab8fac3883dfaf45cd6b3a40bda0",
+      "sizeBytes": 39068
+    },
+    {
+      "fileName": "controller-actual-outer-wait.json",
+      "sha256": "a03b4bda7350d0780eae86de3ab592c33d71824b2b53033b6a87e9ec75e2b1cc",
+      "sizeBytes": 245
+    },
+    {
+      "fileName": "regression-host-environment-37281269383-attempt1.json",
+      "sha256": "bb4ed96515ac1d8cf993c3fa39fa35b34031cb9cd9c6e8b303c56c9da32ecfb8",
+      "sizeBytes": 3844
+    }
+  ],
+  "GAReleased": false,
+  "tagPublished": false,
+  "completeCurrentVMQualification": false
+}

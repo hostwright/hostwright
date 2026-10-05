@@ -26,6 +26,11 @@ readonly -a package_owned_paths=(
   "$package_prefix/bin/hostwright-control"
   "$package_prefix/bin/hostwright-dist"
   "$package_prefix/bin/hostwrightd"
+  "$package_prefix/bin/hostwright-containerization-helper"
+  "$package_prefix/bin/hostwright-network-helper"
+  "$package_prefix/bin/hostwright-network-provider-worker"
+  "$package_prefix/bin/hostwright-storage-helper"
+  "$package_prefix/libexec/hostwright"
   "$package_prefix/share/hostwright"
   "$package_prefix/share/hostwright/examples"
   "$package_prefix/share/hostwright/examples/hostwright.yaml"
@@ -161,8 +166,9 @@ try:
         names=['hostwright','hostwright-control','hostwright-dist','hostwrightd']
         if v not in ('0.0.2-dev.11','0.0.2-dev.12'):
             names+=['hostwright-containerization-helper','hostwright-network-helper','hostwright-network-provider-worker','hostwright-storage-helper']
+            require({'libexec/hostwright/Hostwright.app/Contents/MacOS/hostwright-desktop','libexec/hostwright/Hostwright.app/Contents/Info.plist','libexec/hostwright/Hostwright.app/Contents/_CodeSignature/CodeResources'}<=files.keys(),'Missing complete signed desktop payload inventory')
         require({'bin/'+name for name in names}<=files.keys(),'Missing required executable payload inventory')
-    if mode in ('formula','archive','package','installed','recovery'):
+    if mode in ('formula','archive','package','installed','installed-tap','recovery'):
         tested_version=extra[0]
         require(tested_version in (bv,cv),'Unexpected tested artifact version')
         item=receipt['baseline' if tested_version==bv else 'candidate']
@@ -176,10 +182,11 @@ try:
             require(manifest['archive']==item['archive'] and manifest['package']==item['package'] and payload(manifest['payloadFiles'])==payload(item['payloadFiles']),'Release manifest omits or changes full artifact receipt inventory')
             require(file_hash(Path(extra[2]).resolve())==item['package']['sha256'],'Installer package exact-byte binding mismatch')
         if mode=='recovery':require(file_hash(Path(extra[1]).resolve())==payload(item['payloadFiles'])['bin/hostwright-dist'],'Recovery executable exact-byte binding mismatch')
-        if mode=='installed':
+        if mode in ('installed','installed-tap'):
             prefix=Path(extra[1]).resolve()
             for relative,expected in payload(item['payloadFiles']).items():
-                path=prefix/relative
+                installed_relative='share/hostwright/hostwright.yaml' if mode=='installed-tap' and relative=='share/hostwright/examples/hostwright.yaml' else relative
+                path=prefix/installed_relative
                 require(path.resolve()==path and prefix in path.parents,'Installed payload escapes exact prefix')
                 require(file_hash(path)==expected,'Installed payload exact-byte binding mismatch: '+relative)
     elif mode=='summary':
@@ -417,19 +424,104 @@ checkout_formula() {
   gh attestation verify "$formula" --repo hostwright/hostwright >/dev/null
 }
 
-verify_installed() {
+verify_installation_payload() {
   local version="$1"
   local label="$2"
-  local prefix executable doctor_status readiness cache
+  local prefix executable expected cache
+  local -a names=(hostwright hostwright-control hostwright-dist hostwrightd)
+  if [[ "$version" != 0.0.2-dev.11 && "$version" != 0.0.2-dev.12 ]]; then
+    names+=(hostwright-containerization-helper hostwright-network-helper hostwright-network-provider-worker hostwright-storage-helper)
+  fi
   prefix="$(brew --prefix "$formula_reference")"
-  for executable in hostwright hostwright-control hostwright-dist hostwrightd; do
-    [[ "$("$prefix/bin/$executable" --version)" == "$version" ]] \
+  for executable in "${names[@]}"; do
+    expected="$version"
+    case "$executable" in
+      hostwright-network-helper) expected=network-helper-protocol-v1 ;;
+      hostwright-network-provider-worker) expected=network-provider-spi-v1 ;;
+      hostwright-storage-helper) expected=1.0.0 ;;
+    esac
+    [[ "$("$prefix/bin/$executable" --version)" == "$expected" ]] \
       || die "$executable does not report $version." 70
     /usr/bin/codesign --verify --strict --verbose=2 "$prefix/bin/$executable"
     /usr/bin/codesign --verify --verbose=2 -R=notarized --check-notarization \
       "$prefix/bin/$executable"
   done
-  "$prefix/bin/hostwright" capabilities --json > "$HOSTWRIGHT_QUALIFICATION_ROOT/$label-capabilities.json"
+  if [[ "$version" != 0.0.2-dev.11 && "$version" != 0.0.2-dev.12 ]]; then
+    /usr/bin/codesign --verify --strict --verbose=2 "$prefix/libexec/hostwright/Hostwright.app"
+    /usr/bin/codesign --verify --verbose=2 -R=notarized --check-notarization "$prefix/libexec/hostwright/Hostwright.app"
+  fi
+  cache="$(brew --cache "$formula_reference")"
+  [[ -f "$cache" && ! -L "$cache" ]] || die "The exact Homebrew archive cache is unavailable." 70
+  inventory_check archive "$version" "$cache"
+  inventory_check installed-tap "$version" "$prefix"
+  record "$label-installed version=$version archiveSHA256=$(/usr/bin/shasum -a 256 "$cache" | awk '{ print $1 }')"
+  gh attestation verify "$cache" --repo hostwright/hostwright >/dev/null
+}
+
+replace_qualification_config() {
+  python3 - "$@" <<'PYTHON'
+import hashlib,os,stat,sys
+from pathlib import Path
+target,expected,source,candidate_digest=sys.argv[1:]
+def read(path,digest,owned):
+    path=Path(path)
+    if not path.is_absolute() or path.resolve()!=path:
+        raise ValueError('Noncanonical qualification config path')
+    fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW)
+    try:
+        before=os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink!=1 or before.st_size>8388608:
+            raise ValueError('Unsafe qualification config file')
+        if owned and (before.st_uid!=os.getuid() or stat.S_IMODE(before.st_mode)!=0o600):
+            raise ValueError('Qualification config ownership changed')
+        with os.fdopen(os.dup(fd),'rb') as stream: data=stream.read()
+        identity=lambda info:(info.st_dev,info.st_ino,info.st_size,info.st_mtime_ns,info.st_ctime_ns)
+        if identity(before)!=identity(os.fstat(fd)) or identity(before)!=identity(path.lstat()) or hashlib.sha256(data).hexdigest()!=digest:
+            raise ValueError('Qualification config changed')
+        return data,before
+    finally: os.close(fd)
+try:
+    _,identity=read(target,expected,True)
+    if Path(source).is_symlink():raise ValueError('Symlink qualification config source')
+    candidate,_=read(str(Path(source).resolve()),candidate_digest,False)
+    path=Path(target);temporary=path.with_name(path.name+'.qualification-next')
+    fd=os.open(temporary,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+    with os.fdopen(fd,'wb') as stream:
+        stream.write(candidate);stream.flush();os.fsync(stream.fileno())
+    _,current=read(target,expected,True)
+    if (identity.st_dev,identity.st_ino)!=(current.st_dev,current.st_ino):
+        raise ValueError('Qualification config identity changed')
+    os.replace(temporary,path)
+    fd=os.open(path.parent,os.O_RDONLY)
+    try:os.fsync(fd)
+    finally:os.close(fd)
+except (ValueError,OSError) as error:
+    print('Qualification config replacement refused: '+str(error),file=sys.stderr);sys.exit(70)
+PYTHON
+}
+
+bootstrap_installed_identities() {
+  local version="$1" prefix
+  if [[ "$version" != 0.0.2-dev.11 && "$version" != 0.0.2-dev.12 ]]; then
+    prefix="$(brew --prefix "$formula_reference")"
+    "$prefix/bin/hostwright" daemon bootstrap-identities --output json \
+      > "$HOSTWRIGHT_QUALIFICATION_ROOT/$version-bootstrap-identities.json"
+  fi
+}
+
+verify_installed() {
+  local version="$1" label="$2" prefix doctor_status readiness attempt available=false
+  verify_installation_payload "$version" "$label"
+  prefix="$(brew --prefix "$formula_reference")"
+  for attempt in {1..30}; do
+    if "$prefix/bin/hostwright" capabilities --json > "$HOSTWRIGHT_QUALIFICATION_ROOT/$label-capabilities.json"; then
+      available=true
+      break
+    fi
+    sleep 1
+  done
+  [[ "$available" == true ]] \
+    || die "Authenticated capabilities did not become available." 70
   [[ "$(plutil -extract productVersion raw "$HOSTWRIGHT_QUALIFICATION_ROOT/$label-capabilities.json")" == "$version" ]] \
     || die "Capability output does not match $version." 70
   doctor_status=0
@@ -439,12 +531,7 @@ verify_installed() {
   readiness="$(plutil -extract readiness raw "$HOSTWRIGHT_QUALIFICATION_ROOT/$label-doctor.json")"
   [[ "$readiness" =~ ^(ready|degraded|blocked|unsupported|externally-constrained)$ ]] \
     || die "Doctor returned an unknown readiness state." 70
-  cache="$(brew --cache "$formula_reference")"
-  [[ -f "$cache" && ! -L "$cache" ]] || die "The exact Homebrew archive cache is unavailable." 70
-  inventory_check archive "$version" "$cache"
-  inventory_check installed "$version" "$prefix"
-  record "$label-installed version=$version archiveSHA256=$(/usr/bin/shasum -a 256 "$cache" | awk '{ print $1 }')"
-  gh attestation verify "$cache" --repo hostwright/hostwright >/dev/null
+  record "$label-authenticated-control-api-passed version=$version doctorExit=$doctor_status readiness=$readiness"
 }
 
 wait_for_service() {
@@ -469,6 +556,24 @@ remove_owned_file() {
     || die "Refusing to remove an ambiguous qualification-owned file: $path" 70
   rm -f "$path"
 }
+
+remove_owned_config_directory() {
+  python3 - "$1" <<'PYTHON'
+import os,stat,sys
+from pathlib import Path
+path=Path(sys.argv[1])
+try:
+    info=path.lstat()
+except FileNotFoundError:sys.exit(0)
+try:
+    if not path.is_absolute() or path.resolve()!=path or not stat.S_ISDIR(info.st_mode) or info.st_uid!=os.getuid() or stat.S_IMODE(info.st_mode)!=0o700:
+        raise ValueError('Qualification config directory ownership changed; preserving it')
+    os.rmdir(path)
+except (ValueError,OSError) as error:
+    print('Qualification config cleanup incomplete: '+str(error),file=sys.stderr);sys.exit(70)
+PYTHON
+}
+
 
 validate_qualification_install() {
   local inventory formula version
@@ -639,6 +744,8 @@ verify_package_state() {
 package_snapshot_digest() {
   local work="$1"
   local distribution="$package_prefix/bin/hostwright-dist"
+  inventory_check installed "$candidate_version" "$package_prefix"
+  inventory_check installed "$candidate_version" "$package_staging_root"
   local -a staged_paths=(
     "$package_staging_root/manifest.json"
     "$package_staging_root/bin/hostwright"
@@ -863,7 +970,7 @@ prepare() {
   checkout_formula "$tap_repository" "$HOSTWRIGHT_BASELINE_TAP_COMMIT" \
     "$baseline_version" "$baseline_tag" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT"
   brew install "$formula_reference"
-  verify_installed "$baseline_version" baseline
+  verify_installation_payload "$baseline_version" baseline
   [[ ! -e "$config_dir" && ! -e "$log_path" && ! -e "$error_log_path" ]] \
     || die "The formula changed config or logs before service configuration." 70
   config_source="$(brew --prefix "$formula_reference")/share/hostwright/hostwright.yaml"
@@ -874,8 +981,12 @@ prepare() {
   install -m 600 "$config_source" "$config_path"
   [[ "$(shasum -a 256 "$config_path" | awk '{ print $1 }')" == "$config_digest" ]] \
     || die "Qualification config copy did not preserve the intended bytes." 70
+  install -m 600 "$config_path" "$HOSTWRIGHT_QUALIFICATION_ROOT/baseline-config.yaml"
+  bootstrap_installed_identities "$baseline_version"
   brew services start "$formula_reference"
   wait_for_service
+  verify_installed "$baseline_version" baseline
+  brew test "$formula_reference"
   write_state reboot-required "$boot" "$config_path" "$config_digest"
   record "baseline-installed-service-running-reboot-required"
   printf 'Baseline qualification passed. Reboot the disposable Mac, then dispatch resume.\n'
@@ -901,18 +1012,31 @@ resume() {
   tap_repository="$(ensure_tap_checkout present)"
   checkout_formula "$tap_repository" "$HOSTWRIGHT_BASELINE_TAP_COMMIT" \
     "$baseline_version" "$baseline_tag" "$HOSTWRIGHT_BASELINE_RELEASE_COMMIT"
-  verify_installed "$baseline_version" post-reboot-baseline
   wait_for_service
+  verify_installed "$baseline_version" post-reboot-baseline
   brew services restart "$formula_reference"
   wait_for_service
   record "reboot-and-baseline-service-restart-passed"
 
   checkout_formula "$tap_repository" "$HOSTWRIGHT_CANDIDATE_TAP_COMMIT" \
     "$candidate_version" "$candidate_tag" "$HOSTWRIGHT_CANDIDATE_RELEASE_COMMIT"
+  brew services stop "$formula_reference"
   brew upgrade "$formula_reference"
-  verify_installed "$candidate_version" candidate
-  brew services restart "$formula_reference"
+  verify_installation_payload "$candidate_version" candidate
+  local candidate_config candidate_config_digest
+  candidate_config="$(brew --prefix "$formula_reference")/share/hostwright/hostwright.yaml"
+  candidate_config_digest="$(shasum -a 256 "$candidate_config" | awk '{ print $1 }')"
+  if [[ "$candidate_config_digest" != "$config_digest" ]]; then
+    replace_qualification_config "$config_path" "$config_digest" "$candidate_config" "$candidate_config_digest"
+    config_digest="$candidate_config_digest"
+    write_state reboot-required "$prior_boot" "$config_path" "$config_digest"
+    record "qualification-config-upgraded baseline-preserved=$HOSTWRIGHT_QUALIFICATION_ROOT/baseline-config.yaml candidateSHA256=$config_digest"
+  fi
+  bootstrap_installed_identities "$candidate_version"
+  brew services start "$formula_reference"
   wait_for_service
+  verify_installed "$candidate_version" candidate
+  brew test "$formula_reference"
   record "brew-upgrade-and-service-restart-passed baseline=$baseline_version candidate=$candidate_version"
 
   brew services stop "$formula_reference"
@@ -929,7 +1053,7 @@ resume() {
   remove_owned_file "$config_path"
   remove_owned_file "$log_path"
   remove_owned_file "$error_log_path"
-  rmdir "$(dirname "$config_path")" 2>/dev/null || true
+  remove_owned_config_directory "$(dirname "$config_path")"
   brew untap "$tap_name"
   record "uninstall-preservation-and-exact-qualification-cleanup-passed"
   rm -f "$state_file"
@@ -971,7 +1095,7 @@ cleanup_failed_run() {
     if [[ -e "$config_path" ]]; then
       remove_owned_file "$config_path"
     fi
-    rmdir "$(dirname "$config_path")" 2>/dev/null || true
+    remove_owned_config_directory "$(dirname "$config_path")"
   fi
   remove_owned_file "$brew_prefix/var/log/hostwrightd.log"
   remove_owned_file "$brew_prefix/var/log/hostwrightd.error.log"

@@ -981,10 +981,22 @@ final class TrustedReleaseTests: XCTestCase {
         ))
         XCTAssertTrue(formula.contains("assert_equal \"1.0.0\", storage_helper_version"))
         XCTAssertTrue(formula.contains("pkgshare.install \"share/hostwright/containerization\""))
+        XCTAssertTrue(formula.contains("libexec.install \"libexec/hostwright\""))
+        XCTAssertTrue(formula.contains("assert_path_exists libexec/\"hostwright/Hostwright.app/Contents/MacOS/hostwright-desktop\""))
         XCTAssertTrue(formula.contains("service do"))
         XCTAssertTrue(formula.contains("depends_on arch: :arm64"))
         XCTAssertTrue(formula.contains("depends_on macos: :tahoe"))
         XCTAssertTrue(formula.contains("codesign"))
+        let testStart = try XCTUnwrap(formula.range(of: "  test do\n"))
+        let testBody = String(formula[testStart.upperBound...])
+        let commands = testBody.components(separatedBy: "shell_output(\"").dropFirst().map {
+            $0.components(separatedBy: "\"").first ?? ""
+        }
+        XCTAssertEqual(commands.count, 8)
+        XCTAssertTrue(commands.allSatisfy { $0.hasSuffix(" --version") },
+                      "Homebrew test must execute without a configured daemon or Control API.")
+        XCTAssertTrue(formula.contains("reviewed Manifest v3 file"))
+        XCTAssertTrue(formula.contains("#{opt_bin}/hostwright daemon bootstrap-identities"))
 
         let rejected = [
             url.replacingOccurrences(of: "https://", with: "http://"),

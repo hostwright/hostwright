@@ -2,7 +2,7 @@
 
 Hostwright manages Apple container workloads on one Apple silicon Mac. Declare services in a YAML manifest, review a plan, and confirm it through the CLI or native desktop app. Hostwright tracks resource ownership and operations in a local SQLite database.
 
-**Status:** `0.0.2-rc.4` candidate preparation. The `v0.0.2` release is still undergoing qualification; no supported RC or GA channel has been published.
+**Status:** `0.0.2-rc.5` candidate preparation. The `v0.0.2` release is still undergoing qualification; no supported RC or GA channel has been published.
 
 ## Requirements
 

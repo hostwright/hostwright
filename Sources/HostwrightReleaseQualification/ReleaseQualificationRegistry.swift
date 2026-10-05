@@ -1367,6 +1367,9 @@ public struct ReleaseQualificationLocalLaneRunner: Sendable {
         var objectSizes: [String: Int] = [:]
         var totalBytes = 0
         for entry in entries {
+            guard entry.size <= ReleaseQualificationLimits.maximumSourceFileBytes else {
+                throw ReleaseQualificationContractError.oversizedInput
+            }
             totalBytes += entry.size
             guard totalBytes <= ReleaseQualificationLimits.maximumSourceScanBytes else {
                 throw ReleaseQualificationContractError.oversizedInput
@@ -1646,7 +1649,7 @@ public struct ReleaseQualificationLocalLaneRunner: Sendable {
             switch (fields[0], fields[1]) {
             case ("100644", "blob"), ("100755", "blob"):
                 guard let size = Int(fields[3]),
-                      (0...ReleaseQualificationLimits.maximumSourceFileBytes).contains(size) else {
+                      size >= 0 else {
                     throw ReleaseQualificationContractError.tamperedEvidence
                 }
                 regularEntries.append(
@@ -1658,7 +1661,7 @@ public struct ReleaseQualificationLocalLaneRunner: Sendable {
                 )
             case ("120000", "blob"):
                 guard let size = Int(fields[3]),
-                      (0...ReleaseQualificationLimits.maximumSourceFileBytes).contains(size) else {
+                      size >= 0 else {
                     throw ReleaseQualificationContractError.tamperedEvidence
                 }
                 nonRegularPaths.append(path)

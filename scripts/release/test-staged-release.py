@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import copy
 from unittest import mock
 import importlib.util
 import json
@@ -25,6 +26,20 @@ def source_fixture(root,commit='a'*40,version='0.0.2'):
 
 accept_spec=importlib.util.spec_from_file_location('acceptance',pathlib.Path(__file__).with_name('accept-qualification.py'))
 acceptance=importlib.util.module_from_spec(accept_spec);accept_spec.loader.exec_module(acceptance)
+
+def gate_fixture(name, raw_hash, inventory_hash, source_binding):
+    return dict(sourceCommit='a'*40, version='0.0.2', status='passed', executionMode='real',
+                sourceCleanBefore=True, sourceCleanAfter=True, blockers=[], failures=[],
+                attachments={'raw.log':raw_hash}, cleanupStatus='passed', unresolvedP0P1=0,
+                conformancePassed=True, completedCycles=10, elapsedSeconds=1800,
+                fullSuiteLanes=['address','thread'], inventorySHA256=inventory_hash,
+                reviewer='reviewer', reviewKind='independent-agent', reportSHA256=raw_hash,
+                passedOperations=sorted(acceptance.RECOVERY_OPERATIONS if name == 'local-backup-recovery' else acceptance.VM_OPERATIONS),
+                passedQuickstarts=['cli','compose','desktop'], passedWebsiteChecks=sorted(acceptance.WEBSITE_CHECKS),
+                websiteCommit='c'*40, websiteSourceClean=True, correspondingSource=source_binding,
+                runtimeSourceLicenseStatus='qualified', independentlyVerifiedKernelSignature=True,
+                targets=[dict(target=t,elapsedSeconds=300,status='passed') for t in
+                         ['manifest-v3','compose-import','control-stream-v2.1','containerization-helper-v1','apple-container-json','release-qualification-json']])
 
 class StagingTests(unittest.TestCase):
     def test_retention_copies_only_exact_complete_export(self):
@@ -97,12 +112,7 @@ class StagingTests(unittest.TestCase):
             inventory_hash = stage.digest(bundle / 'stage-inventory.json')
             (evidence / 'raw.log').write_text('actual raw evidence fixture')
             for name in stage.REQUIRED_GATES:
-                gate = dict(sourceCommit='a'*40, version='0.0.2', status='passed', sourceCleanBefore=True, sourceCleanAfter=True,
-                            attachments={'raw.log':stage.digest(evidence/'raw.log')}, conformancePassed=True, completedCycles=10,
-                            elapsedSeconds=1800, fullSuiteLanes=['address','thread'], inventorySHA256=inventory_hash, reviewer='reviewer', reviewKind='independent-agent', reportSHA256=stage.digest(evidence/'raw.log'),
-                            passedOperations=['archive-install','pkg-install','reboot','upgrade-dev.11','upgrade-dev.12','interrupted-upgrade','downgrade-refusal','authorized-rollback','repair','uninstall'],
-                            correspondingSource=source_binding,runtimeSourceLicenseStatus='qualified',independentlyVerifiedKernelSignature=True,
-                            targets=[dict(target=t,elapsedSeconds=300,status='passed') for t in ['manifest-v3','compose-import','control-stream-v2.1','containerization-helper-v1','apple-container-json','release-qualification-json']])
+                gate = gate_fixture(name, stage.digest(evidence/'raw.log'), inventory_hash, source_binding)
                 (evidence / (name+'.json')).write_text(json.dumps(gate))
             command = [sys.executable,str(pathlib.Path(__file__).with_name('accept-qualification.py')),'--commit','a'*40,'--version','0.0.2','--run','123','--attempt','1','--reviewer','reviewer','--review-sha256',stage.digest(evidence/'raw.log'),'--producer','producer','--acceptance-run','456','--stage',str(bundle),'--evidence',str(evidence),'--output',str(root/'receipt.json')]
             def run_acceptance():
@@ -123,7 +133,7 @@ class StagingTests(unittest.TestCase):
             gate['targets'][0]['elapsedSeconds']=300; gate['version']='0.0.2-rc.1'; gate_path.write_text(json.dumps(gate))
             self.assertNotEqual(run_acceptance(),0)
             gate['version']='0.0.2'; gate_path.write_text(json.dumps(gate))
-            for lane in ('installed-lifecycle-vm', 'single-host-soak', 'desktop-accessibility', 'compose-execution', 'signed-notarized-artifacts', 'dependency-security', 'license-policy-sbom'):
+            for lane in ('installed-lifecycle-vm', 'single-host-soak', 'desktop-accessibility', 'compose-execution', 'signed-notarized-artifacts', 'dependency-security', 'license-policy-sbom', 'local-backup-recovery', 'public-education'):
                 if lane not in stage.REQUIRED_GATES: continue
                 lane_path=evidence/(lane+'.json'); original=json.loads(lane_path.read_text()); changed=dict(original); changed['inventorySHA256']='b'*64; lane_path.write_text(json.dumps(changed))
                 self.assertNotEqual(run_acceptance(),0,lane)
@@ -143,5 +153,69 @@ class StagingTests(unittest.TestCase):
             review.write_text(json.dumps(original))
             (evidence/'raw.log').write_text('tampered')
             self.assertNotEqual(run_acceptance(),0)
+
+class QualificationGateTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = pathlib.Path(self.temporary.name)
+        (self.root / 'raw.log').write_text('command exit=0; actual observations retained')
+        self.raw_hash = stage.digest(self.root / 'raw.log')
+
+    def validate(self, name, gate):
+        acceptance.validate_gate(name, gate, self.root, 'a'*40, '0.0.2', 'b'*64,
+                                 {}, 'reviewer', self.raw_hash)
+
+    def gate(self, name):
+        return gate_fixture(name, self.raw_hash, 'b'*64, {})
+
+    def test_recovery_requires_every_real_outcome(self):
+        original = self.gate('local-backup-recovery')
+        self.validate('local-backup-recovery', original)
+        for outcome in acceptance.RECOVERY_OPERATIONS:
+            changed = copy.deepcopy(original); changed['passedOperations'].remove(outcome)
+            with self.subTest(outcome=outcome), self.assertRaises(ValueError):
+                self.validate('local-backup-recovery', changed)
+        for field, value in [('executionMode','fixture'), ('status','blocked'),
+                             ('sourceCleanBefore',False), ('sourceCleanAfter',False),
+                             ('blockers',['unavailable provider']), ('failures',['interrupted']),
+                             ('cleanupStatus','failed'), ('sourceCommit','c'*40),
+                             ('version','0.0.2-rc.2'), ('inventorySHA256','d'*64)]:
+            changed = dict(original); changed[field] = value
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                self.validate('local-backup-recovery', changed)
+        changed=copy.deepcopy(original); changed['passedOperations'].append(changed['passedOperations'][0])
+        with self.assertRaises(ValueError): self.validate('local-backup-recovery', changed)
+
+    def test_vm_requires_reupgrade_and_compensation_recovery(self):
+        original=self.gate('installed-lifecycle-vm')
+        self.validate('installed-lifecycle-vm', original)
+        for outcome in ('re-upgrade', 'compensation-recovery-repair'):
+            changed=copy.deepcopy(original); changed['passedOperations'].remove(outcome)
+            with self.subTest(outcome=outcome), self.assertRaises(ValueError):
+                self.validate('installed-lifecycle-vm', changed)
+
+    def test_education_requires_each_quickstart_and_both_website_packages(self):
+        original=self.gate('public-education')
+        self.validate('public-education', original)
+        for field in ('passedQuickstarts','passedWebsiteChecks'):
+            for outcome in original[field]:
+                changed=copy.deepcopy(original); changed[field].remove(outcome)
+                with self.subTest(outcome=outcome), self.assertRaises(ValueError):
+                    self.validate('public-education', changed)
+        for field, value in [('websiteCommit','0'*40), ('websiteCommit','main'), ('websiteSourceClean',False)]:
+            changed=dict(original); changed[field]=value
+            with self.subTest(field=field,value=value), self.assertRaises(ValueError):
+                self.validate('public-education', changed)
+
+    def test_numeric_shortcuts_and_json_nonfinite_are_rejected(self):
+        for name, field, values in [('single-host-soak','elapsedSeconds',[float('nan'),float('inf'),True,1799]),
+                                    ('provider-apple-container-1.1.0','completedCycles',[True,10.0,9])]:
+            for value in values:
+                gate=self.gate(name); gate[field]=value
+                with self.subTest(name=name,value=value), self.assertRaises(ValueError): self.validate(name,gate)
+        path=self.root/'nan.json'; path.write_text('{"elapsedSeconds":NaN}')
+        with self.assertRaises(ValueError): stage.load(path)
+
 
 if __name__ == '__main__': unittest.main()

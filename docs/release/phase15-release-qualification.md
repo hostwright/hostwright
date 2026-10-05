@@ -92,6 +92,11 @@ The deliberately small accepted SPDX expression set is `Apache-2.0`, `BSD-2-Clau
 
 ## Focused verification
 
+Final promotion additionally requires the real local backup/recovery and public
+education receipts and the complete signed VM matrix. The checked export assembler
+validates raw receipts without synthesizing results; see
+[release promotion](../reference/release-promotion.md#assemble-the-private-export).
+
 The narrow local check is:
 
 ```bash

@@ -1,8 +1,8 @@
 # Security And Safety Notes
 
-Hostwright `0.0.2-dev` is not production ready. The active release target is `v0.0.2`; security-sensitive features remain unsupported until their owning roadmap issue has clean security and runtime evidence.
+Hostwright `0.0.2-rc.3` is in candidate preparation. RC and final `v0.0.2` acceptance remain pending; earlier development evidence does not qualify these bytes.
 
-The v0.0.2 program turns earlier unsupported security-sensitive scope into explicit implementation work for trusted install, secrets, supply chain, storage, networking, tunnels, autonomous mutation, identity/RBAC/admission/audit, plugins, clusters, interoperability, GUI/MDM, and optional cloud control. The exact current state is emitted by `hostwright capabilities --json`; only the qualified networking, storage, lifecycle, and distribution subsets described there are supported on this development line.
+The accepted release scope is one Apple silicon Mac, explicit local workload lifecycle, CPU/memory admission, narrow Compose import, and the desktop console. Multi-Mac, Kubernetes, Docker-client compatibility, Homebrew-core, and team/MDM/cloud claims are deferred under [ADR 0015](../design/adr-0015-reduced-local-release.md). The exact implemented capabilities are emitted by `hostwright capabilities --json`; support requires passing conformance and release evidence for the declared provider/version cell.
 
 ## Runtime Boundary
 

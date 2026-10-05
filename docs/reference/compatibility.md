@@ -1,6 +1,6 @@
 # Compatibility
 
-The `0.0.2-dev` line implements the single-Mac scope in [ADR 0015](../design/adr-0015-reduced-local-release.md). Final `v0.0.2` qualification is pending. Historical development results do not establish support for new source or artifact versions.
+The `0.0.2-rc.3` candidate implements the single-Mac scope in [ADR 0015](../design/adr-0015-reduced-local-release.md). Final `v0.0.2` qualification is pending. Historical development results do not establish support for new source or artifact versions.
 
 ## Current Development Boundary
 

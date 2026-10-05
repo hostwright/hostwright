@@ -370,7 +370,7 @@
       "child": null,
       "parent": 284,
       "title": "Phase 10 \u2014 Local resource admission and scheduling",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/219",
       "labels": [
         "area:accelerator-research",
@@ -380,7 +380,7 @@
         "area:scheduler",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:epic",
         "type:implementation",
         "type:research",
@@ -404,7 +404,7 @@
         "live-runtime",
         "security-assessment"
       ],
-      "stateReason": null
+      "stateReason": "completed"
     },
     {
       "marker": "P11",
@@ -482,7 +482,7 @@
       "child": null,
       "parent": 284,
       "title": "Phase 13 \u2014 Narrow Compose conversion and execution",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/257",
       "labels": [
         "area:ci",
@@ -491,7 +491,7 @@
         "area:interoperability",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:docs",
         "type:epic",
         "type:implementation",
@@ -515,7 +515,7 @@
         "live-runtime",
         "security-assessment"
       ],
-      "stateReason": null
+      "stateReason": "completed"
     },
     {
       "marker": "P14",
@@ -535,14 +535,14 @@
         "area:multi-host",
         "risk:high",
         "roadmap:v0.0.2",
+        "status:verification",
         "type:docs",
         "type:epic",
         "type:implementation",
         "type:research",
         "type:roadmap",
         "type:security",
-        "type:testing",
-        "status:verification"
+        "type:testing"
       ],
       "assignees": [
         "d3v07"
@@ -580,7 +580,7 @@
         "area:release",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:in-progress",
         "type:docs",
         "type:epic",
         "type:implementation",
@@ -3507,7 +3507,7 @@
       "child": 1,
       "parent": 219,
       "title": "P10-C01: Qualify local resource admission and release",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/207",
       "labels": [
         "area:accelerator-research",
@@ -3517,7 +3517,7 @@
         "area:scheduler",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:research",
         "type:security",
@@ -3541,7 +3541,7 @@
         "security-assessment",
         "resilience-chaos"
       ],
-      "stateReason": null
+      "stateReason": "completed"
     },
     {
       "marker": "P10-C02",
@@ -3551,7 +3551,7 @@
       "child": 2,
       "parent": 219,
       "title": "P10-C02: Qualify single-host hard placement filters",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/208",
       "labels": [
         "area:accelerator-research",
@@ -3561,7 +3561,7 @@
         "area:scheduler",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:research",
         "type:security",
@@ -3583,7 +3583,7 @@
         "live-runtime",
         "security-assessment"
       ],
-      "stateReason": null
+      "stateReason": "completed"
     },
     {
       "marker": "P10-C03",
@@ -3593,7 +3593,7 @@
       "child": 3,
       "parent": 219,
       "title": "P10-C03: Qualify deterministic local resource packing",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/209",
       "labels": [
         "area:accelerator-research",
@@ -3603,7 +3603,7 @@
         "area:scheduler",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:research",
         "type:security",
@@ -3624,7 +3624,7 @@
         "local-integration",
         "hardware-benchmark"
       ],
-      "stateReason": null
+      "stateReason": "completed"
     },
     {
       "marker": "P10-C04",
@@ -3727,7 +3727,7 @@
       "child": 7,
       "parent": 219,
       "title": "P10-C07: Qualify stable local placement",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/213",
       "labels": [
         "area:accelerator-research",
@@ -3737,7 +3737,7 @@
         "area:scheduler",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:research",
         "type:security",
@@ -3759,7 +3759,7 @@
         "live-runtime",
         "resilience-chaos"
       ],
-      "stateReason": null
+      "stateReason": "completed"
     },
     {
       "marker": "P10-C08",
@@ -3769,7 +3769,7 @@
       "child": 8,
       "parent": 219,
       "title": "P10-C08: Expose local admission and rejection explanations",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/214",
       "labels": [
         "area:accelerator-research",
@@ -3779,7 +3779,7 @@
         "area:scheduler",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:research",
         "type:security",
@@ -3800,7 +3800,7 @@
         "local-integration",
         "security-assessment"
       ],
-      "stateReason": null
+      "stateReason": "completed"
     },
     {
       "marker": "P10-C09",
@@ -3810,7 +3810,7 @@
       "child": 9,
       "parent": 219,
       "title": "P10-C09: Qualify safe local pressure deferral",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/215",
       "labels": [
         "area:accelerator-research",
@@ -3820,7 +3820,7 @@
         "area:scheduler",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:implementation",
         "type:research",
         "type:security",
@@ -3842,7 +3842,7 @@
         "live-runtime",
         "resilience-chaos"
       ],
-      "stateReason": null
+      "stateReason": "completed"
     },
     {
       "marker": "P10-C10",
@@ -4833,7 +4833,7 @@
       "child": 3,
       "parent": 257,
       "title": "P13-C03: Ship the narrow Compose conversion and lifecycle workflow",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/250",
       "labels": [
         "area:ci",
@@ -4842,7 +4842,7 @@
         "area:interoperability",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:docs",
         "type:implementation",
         "type:security",
@@ -4865,7 +4865,7 @@
         "interop-conformance",
         "security-assessment"
       ],
-      "stateReason": null
+      "stateReason": "completed"
     },
     {
       "marker": "P13-C04",
@@ -5065,12 +5065,12 @@
         "area:multi-host",
         "risk:high",
         "roadmap:v0.0.2",
+        "status:verification",
         "type:docs",
         "type:implementation",
         "type:research",
         "type:security",
-        "type:testing",
-        "status:verification"
+        "type:testing"
       ],
       "assignees": [
         "d3v07"
@@ -5098,7 +5098,7 @@
       "child": 2,
       "parent": 270,
       "title": "P14-C02: Add reviewed desktop up, down and restart",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/259",
       "labels": [
         "area:ci",
@@ -5108,7 +5108,7 @@
         "area:multi-host",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:docs",
         "type:implementation",
         "type:research",
@@ -5132,7 +5132,7 @@
         "security-assessment",
         "ux-accessibility"
       ],
-      "stateReason": null
+      "stateReason": "completed"
     },
     {
       "marker": "P14-C03",
@@ -5142,7 +5142,7 @@
       "child": 3,
       "parent": 270,
       "title": "P14-C03: Show local services, health, logs and events",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/260",
       "labels": [
         "area:ci",
@@ -5152,7 +5152,7 @@
         "area:multi-host",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:docs",
         "type:implementation",
         "type:research",
@@ -5175,7 +5175,7 @@
         "live-runtime",
         "ux-accessibility"
       ],
-      "stateReason": null
+      "stateReason": "completed"
     },
     {
       "marker": "P14-C04",
@@ -5185,7 +5185,7 @@
       "child": 4,
       "parent": 270,
       "title": "P14-C04: Verify accessibility of the local desktop workflows",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/261",
       "labels": [
         "area:ci",
@@ -5195,7 +5195,7 @@
         "area:multi-host",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:docs",
         "type:implementation",
         "type:research",
@@ -5216,7 +5216,7 @@
         "local-integration",
         "ux-accessibility"
       ],
-      "stateReason": null
+      "stateReason": "completed"
     },
     {
       "marker": "P14-C05",
@@ -5236,12 +5236,12 @@
         "area:multi-host",
         "risk:high",
         "roadmap:v0.0.2",
+        "status:verification",
         "type:docs",
         "type:implementation",
         "type:research",
         "type:security",
-        "type:testing",
-        "status:verification"
+        "type:testing"
       ],
       "assignees": [
         "d3v07"
@@ -5573,7 +5573,7 @@
       "child": 3,
       "parent": 283,
       "title": "P15-C03: Run bounded fuzzing and retained corpus replay",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/273",
       "labels": [
         "area:ci",
@@ -5582,7 +5582,7 @@
         "area:release",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:docs",
         "type:implementation",
         "type:release",
@@ -5603,7 +5603,7 @@
         "unit-contract",
         "security-assessment"
       ],
-      "stateReason": null
+      "stateReason": "completed"
     },
     {
       "marker": "P15-C04",
@@ -5613,7 +5613,7 @@
       "child": 4,
       "parent": 283,
       "title": "P15-C04: Run supported local sanitizer lanes",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/274",
       "labels": [
         "area:ci",
@@ -5622,7 +5622,7 @@
         "area:release",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:docs",
         "type:implementation",
         "type:release",
@@ -5642,7 +5642,7 @@
         "local-integration",
         "security-assessment"
       ],
-      "stateReason": null
+      "stateReason": "completed"
     },
     {
       "marker": "P15-C05",
@@ -5694,7 +5694,7 @@
       "child": 6,
       "parent": 283,
       "title": "P15-C06: Measure bounded single-Mac performance and stability",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/276",
       "labels": [
         "area:ci",
@@ -5703,7 +5703,7 @@
         "area:release",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:docs",
         "type:implementation",
         "type:release",
@@ -5725,7 +5725,7 @@
         "hardware-benchmark",
         "resilience-chaos"
       ],
-      "stateReason": null
+      "stateReason": "completed"
     },
     {
       "marker": "P15-C07",
@@ -5869,7 +5869,7 @@
         "area:release",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:docs",
         "type:implementation",
         "type:release",

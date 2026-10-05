@@ -35,21 +35,67 @@ a release or determine that qualification passed.
 The acceptance dispatch downloads the exact stage run and an exact successful
 `retain-qualification-evidence.yml` main run's
 `hostwright-final-qualification-evidence` artifact. Each named gate JSON requires
-exact `sourceCommit`, final `version`, `status`, clean source before/after, and an
+exact `sourceCommit`, final `version`, `status: passed`, `executionMode: real`,
+empty `blockers` and `failures`, clean source before/after, and an
 `attachments` map of safe relative raw-evidence paths to SHA-256 digests. Required
 gates are source regression, documentation contracts, final signed/notarized
 artifacts, VM installation lifecycle, both full sanitizer suites, all six parser
 fuzz targets, dependencies/security, secrets, licenses/SBOM, independent review,
 desktop/accessibility, Compose execution, Apple container 1.0.0 and 1.1.0/Containerization SDK 0.35.0
-provider conformance and ten cycles each, and the 30-minute single-host soak.
+provider conformance and ten cycles each, the 30-minute single-host soak, local
+backup/recovery, and public education: eighteen required gates in total.
 See `scripts/release/accept-qualification.py` for exact gate keys and lane fields.
-Every provider, soak, VM, desktop, Compose, dependency/content and independent
+Every provider, soak, VM, desktop, Compose, recovery, public-education, dependency/content and independent
 review artifact gate binds the exact staged `inventorySHA256`. Independent review
 also identifies `reviewKind: independent-agent`, `reviewer` and `reportSHA256`,
-and retains the matching report in its attachments. VM lifecycle records all ten `passedOperations` (archive and package install, reboot, both baseline upgrades, interrupted upgrade, downgrade refusal, authorized rollback, repair, uninstall).
+and retains the matching report in its attachments, with `unresolvedP0P1: 0`.
+Resource gates require `cleanupStatus: passed`. VM lifecycle records all twelve
+`passedOperations`: `archive-install`, `pkg-install`, `reboot`, `upgrade-dev.11`,
+`upgrade-dev.12`, `interrupted-upgrade`, `downgrade-refusal`, `authorized-rollback`,
+`re-upgrade`, `compensation-recovery-repair`, `repair`, and `uninstall`.
 Provider receipts record `conformancePassed` and `completedCycles`; soak records
 `elapsedSeconds`; sanitizer receipts record `fullSuiteLanes`; fuzz records each
 of the six `targets` with actual `elapsedSeconds` and `status`.
+
+`local-backup-recovery` requires `passedOperations` containing exactly
+`state-backup-restore`, `workload-data-backup-restore`,
+`interrupted-lifecycle-recovery`, `daemon-restart-recovery`, `cancellation`,
+`stale-authority-refusal`, `exact-owned-cleanup`, and `unmanaged-preservation`.
+`public-education` requires `passedQuickstarts` containing exactly `cli`,
+`compose`, and `desktop`, the exact nonzero `websiteCommit`,
+`websiteSourceClean: true`, and `passedWebsiteChecks` containing exactly
+`root-typecheck`, `root-build`, `root-links`, `docs-typecheck`, `docs-build`, and
+`docs-links`. Run `npm ci`, `npm run check`, `npm run build`, and
+`npm run check:links` in both packages of the separate `hostwright.dev` repository.
+Planning example manifests or passing core links alone does not execute these
+quickstarts or check the website.
+
+### Assemble the private export
+
+Retain each actual lane's report and its raw attachments outside the clean source
+checkout. Attachment paths are relative to that report's directory. Create
+`qualification-inputs.json` there with `kind: hostwright.qualification-inputs.v1`
+and a `gates` map from every required gate key to its relative raw-report path.
+Reports must already contain their real source/version, clean-state observations,
+outcomes, and artifact bindings. The assembler validates the same contract as
+protected acceptance and independently verifies the corresponding-source archive;
+it supplies no missing pass flags or source claims.
+
+```bash
+python3 scripts/release/assemble-qualification.py \
+  --commit "$source_commit" --version "$release_version" \
+  --run "$stage_run" --attempt "$stage_attempt" \
+  --stage "$stage_bundle" --input-root "$raw_evidence" \
+  --reviewer "$reviewer" --review-sha256 "$review_sha256" \
+  --output "$private_export"
+```
+
+The new output directory contains the gate receipts, unchanged raw reports and
+attachments under `raw/`, and the complete hashed `evidence-inventory.json`.
+The command prints the inventory digest. Retain failed raw results separately;
+an incomplete export left by an I/O failure must not be submitted. Copy the
+complete export to the digest-named qualification-export directory before the
+protected retention dispatch. Assembly performs no acceptance or publication.
 
 Acceptance retains all reviewed raw evidence and produces an OIDC-attested
 aggregate with every gate receipt hash. `promote-release.yml` verifies the exact

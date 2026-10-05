@@ -165,6 +165,7 @@ else:
 clean()
 receipt = dict(kind='hostwright.phase15.' + a.mode + '.v2', schemaVersion=2, status='passed', sourceCommit=commit,
                sourceCleanBefore=True, sourceCleanAfter=True, version=version, inputs=inputs, lanes=lanes,
+               executionMode='real', blockers=[], failures=[],
                fullSuiteLanes=['address', 'thread'] if a.mode == 'sanitizers' else [],
                coverage=dict(instrumentation='edge,inline-8bit-counters,pc-table', statistics='logs/fuzz-<target>.log') if a.mode == 'fuzz' else None,
                crashArtifacts=tree(root / 'artifacts') if a.mode == 'fuzz' else {},

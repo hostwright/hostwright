@@ -1,6 +1,6 @@
 # Release process
 
-The active target is `v0.0.2`. Development builds remain on the `0.0.2-dev` line until candidate qualification. Immutable `v0.0.2-dev.11` and `v0.0.2-dev.12` prereleases supply upgrade baselines; they remain unsupported and are not promoted in place.
+The active target is `v0.0.2`. The current source prepares `0.0.2-rc.3`; candidate and final publication require exact-source qualification. Immutable `v0.0.2-dev.11` and `v0.0.2-dev.12` prereleases supply upgrade baselines; they remain unsupported and are not promoted in place.
 
 ## Tag Policy
 
@@ -9,7 +9,7 @@ Public releases and candidates use `v*` tags. Optional `phase-*` checkpoints hav
 ## Release Ladder
 
 1. Finish required implementation and prepare the qualification lanes on the development line.
-2. Qualify `v0.0.2-rc.1` against the intended GA scope. Fix defects and repeat affected checks on the corrected candidate.
+2. Qualify the next unused `v0.0.2-rc.*` candidate against the intended GA scope. Fix defects and repeat affected checks on the corrected candidate.
 3. After one complete RC qualification and independent artifact lifecycle verification, prepare the final `0.0.2` version change.
 4. Qualify the final-version bytes, obtain maintainer approval, and publish through protected promotion. Close release-artifact and parent issues after public-byte and installation verification.
 

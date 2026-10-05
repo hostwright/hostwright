@@ -765,7 +765,7 @@ public struct DistributionInstalledLifecycle: Sendable {
         }
     }
 
-    private func validatedPublicStateChallenge(
+    func validatedPublicStateChallenge(
         prefix: URL,
         cancellation: SecureSubprocessCancellation = SecureSubprocessCancellation(),
         allowedPendingOperation: String? = nil

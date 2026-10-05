@@ -241,6 +241,104 @@ final class DistributionDurableLifecycleTests: XCTestCase {
         }
     }
 
+    func testCompensationReceiptRecoveryAfterPriorReceiptPublication() throws {
+        try withCompensatedOwnerStateFixture { fixture in
+            let recorded = try DistributionJSON.decode(DistributionOwnerStateOperationJournal.self, from: fixture.journalURL)
+            XCTAssertNotEqual(fixture.receipt, fixture.descriptor.receipt)
+            XCTAssertEqual(fixture.trail.verify().health, .healthy)
+            XCTAssertEqual(try DistributionJSON.decode(DistributionOwnerStateReceipt.self,
+                from: URL(fileURLWithPath: fixture.receipt.receiptPath)), fixture.receipt)
+            XCTAssertTrue(try DistributionOwnerStateSessionService.requiresCompensationValidation(fixture.receipt,
+                start: DistributionOwnerStateSessionStart(descriptor: fixture.descriptor, recovering: true), ownerUID: geteuid()))
+            XCTAssertThrowsError(try DistributionOwnerStateSessionService.requiresCompensationValidation(fixture.receipt,
+                start: DistributionOwnerStateSessionStart(descriptor: fixture.descriptor, recovering: false), ownerUID: geteuid()))
+            XCTAssertFalse(try DistributionOwnerStateSessionService.requiresCompensationValidation(fixture.descriptor.receipt,
+                start: DistributionOwnerStateSessionStart(descriptor: fixture.descriptor, recovering: false), ownerUID: geteuid()))
+            XCTAssertNoThrow(try fixture.validate(journal: recorded))
+        }
+    }
+
+    func testCompensationReceiptRecoveryRejectsForgedReceiptFields() throws {
+        try withCompensatedOwnerStateFixture { fixture in
+            let changes: [([String], Any)] = [
+                (["schemaVersion"], 2),
+                (["receiptPath"], fixture.receipt.receiptPath + ".other"),
+                (["challenge", "prefix"], fixture.receipt.challenge.prefix + ".other"),
+                (["challenge", "installationID"], UUID().uuidString.lowercased()),
+                (["challenge", "generation"], fixture.descriptor.toGeneration),
+                (["challenge", "installedManifestSHA256"], String(repeating: "f", count: 64)),
+                (["binding", "ownerUID"], fixture.receipt.binding.ownerUID + 1),
+                (["binding", "databasePath"], fixture.receipt.binding.databasePath + ".other"),
+                (["preparedRevision", "databaseSHA256"], String(repeating: "f", count: 64))
+            ]
+            for (path, value) in changes {
+                var fields = try XCTUnwrap(JSONSerialization.jsonObject(with:
+                    DistributionJSON.encode(fixture.receipt)) as? [String: Any])
+                if path.count == 1 { fields[path[0]] = value }
+                else {
+                    var nested = try XCTUnwrap(fields[path[0]] as? [String: Any])
+                    nested[path[1]] = value
+                    fields[path[0]] = nested
+                }
+                let receipt = try JSONDecoder().decode(DistributionOwnerStateReceipt.self,
+                    from: JSONSerialization.data(withJSONObject: fields))
+                XCTAssertThrowsError(try fixture.validate(receipt: receipt), path.joined(separator: "."))
+            }
+        }
+    }
+
+    func testCompensationReceiptRecoveryRequiresExactCommittedOwnerJournal() throws {
+        try withCompensatedOwnerStateFixture { fixture in
+            let original = fixture.journal
+            for checkpoint in ["ready", "snapshotted", "migrated", "restored"] {
+                let journal = DistributionOwnerStateOperationJournal(schemaVersion: 1,
+                    descriptorSHA256: original.descriptorSHA256, descriptor: original.descriptor,
+                    snapshot: original.snapshot, checkpoint: checkpoint)
+                XCTAssertThrowsError(try fixture.validate(journal: journal), checkpoint)
+            }
+            let wrongDigest = DistributionOwnerStateOperationJournal(schemaVersion: 1,
+                descriptorSHA256: String(repeating: "f", count: 64), descriptor: original.descriptor,
+                snapshot: original.snapshot, checkpoint: "committed")
+            XCTAssertThrowsError(try fixture.validate(journal: wrongDigest))
+            let wrongSchema = DistributionOwnerStateOperationJournal(schemaVersion: 2,
+                descriptorSHA256: original.descriptorSHA256, descriptor: original.descriptor,
+                snapshot: original.snapshot, checkpoint: "committed")
+            XCTAssertThrowsError(try fixture.validate(journal: wrongSchema))
+            let descriptor = original.descriptor
+            let other = DistributionOwnerStateSessionDescriptor(schemaVersion: 1,
+                operationID: UUID().uuidString.lowercased(), receipt: descriptor.receipt,
+                fromGeneration: descriptor.fromGeneration, toGeneration: descriptor.toGeneration,
+                fromManifest: descriptor.fromManifest, toManifest: descriptor.toManifest,
+                helperPath: descriptor.helperPath, helperSHA256: descriptor.helperSHA256,
+                helperIdentity: descriptor.helperIdentity)
+            let wrongOperation = DistributionOwnerStateOperationJournal(schemaVersion: 1,
+                descriptorSHA256: try other.digest, descriptor: other, snapshot: nil, checkpoint: "committed")
+            XCTAssertThrowsError(try fixture.validate(journal: wrongOperation))
+        }
+    }
+
+    func testCompensationReceiptRecoveryRejectsChangedCurrentState() throws {
+        try withCompensatedOwnerStateFixture { fixture in
+            _ = try fixture.trail.append(AuditAppendInput(subjectID: "owner", requestID: "after-publication",
+                action: .operation, outcome: "accepted", reasonCode: "accepted",
+                payloadDigest: "sha256:" + String(repeating: "b", count: 64)))
+            XCTAssertEqual(fixture.trail.verify().health, .healthy)
+            XCTAssertThrowsError(try fixture.validate())
+        }
+    }
+
+    func testCompensationReceiptRecoveryRejectsChangedPublicChallenge() throws {
+        try withCompensatedOwnerStateFixture { fixture in
+            let challenge = fixture.receipt.challenge
+            let changed = DistributionStatePreparationChallenge(schemaVersion: 1,
+                installationID: challenge.installationID, generation: fixture.descriptor.toGeneration,
+                prefix: challenge.prefix, installedManifestSHA256: challenge.installedManifestSHA256)
+            try DistributionJSON.encode(changed).write(to:
+                URL(fileURLWithPath: challenge.prefix).appendingPathComponent(".hostwright-state-preparation-v1.json"))
+            XCTAssertThrowsError(try fixture.validate())
+        }
+    }
+
     func testPreparedExactStateBindingRequiredBeforeUpgrade() throws {
         try withTemporaryRoot { root in
             let baseline = try makeVerifiedArtifact(root: root, name: "bound-A", version: "0.0.1", commit: baselineCommit)
@@ -2811,6 +2909,70 @@ final class DistributionDurableLifecycleTests: XCTestCase {
                 }
                 XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: prefix.path), [])
             }
+        }
+    }
+
+    private struct CompensatedOwnerStateFixture {
+        let descriptor: DistributionOwnerStateSessionDescriptor
+        let receipt: DistributionOwnerStateReceipt
+        let journal: DistributionOwnerStateOperationJournal
+        let journalURL: URL
+        let service: StateUpgradeService
+        let trail: TamperEvidentAuditTrail
+
+        func validate(receipt: DistributionOwnerStateReceipt? = nil,
+            journal: DistributionOwnerStateOperationJournal? = nil) throws {
+            try DistributionOwnerStateSessionService.validateCompensationReceipt(receipt ?? self.receipt,
+                descriptor: descriptor, journal: journal ?? self.journal, service: service)
+        }
+    }
+
+    private func withCompensatedOwnerStateFixture(_ body: (CompensatedOwnerStateFixture) throws -> Void) throws {
+        try withTemporaryRoot { root in
+            let artifact = try makeVerifiedArtifact(root: root, name: "compensation-owner",
+                version: "0.0.2-rc.1", commit: baselineCommit)
+            let prefix = root.appendingPathComponent("compensation-prefix")
+            try FileManager.default.createDirectory(at: prefix, withIntermediateDirectories: false)
+            let lifecycle = DistributionInstalledLifecycle()
+            let status = try lifecycle.install(artifact: artifact, prefix: prefix)
+            _ = try lifecycle.exportStatePreparationChallenge(prefix: prefix)
+            let stateRoot = root.appendingPathComponent("owner-state")
+            try FileManager.default.createDirectory(at: stateRoot, withIntermediateDirectories: false,
+                attributes: [.posixPermissions: 0o700])
+            let resolution = try HostwrightLocalPathResolver.resolve(
+                explicitStateDatabasePath: stateRoot.appendingPathComponent("state.sqlite").path,
+                homeDirectory: root.path, environment: [:])
+            let configuration = StateStoreConfiguration(localPathResolution: resolution)
+            let store = SQLiteStateStore(configuration: configuration)
+            try store.migrate()
+            let original = try lifecycle.prepareOwnerStateReceipt(prefix: prefix, configuration: configuration,
+                requireEmptyIdentityAuthority: true)
+            let file = try XCTUnwrap(status.installedManifest.files.first { $0.path == "bin/hostwright-dist" })
+            let descriptor = DistributionOwnerStateSessionDescriptor(schemaVersion: 1,
+                operationID: UUID().uuidString.lowercased(), receipt: original,
+                fromGeneration: status.generation, toGeneration: status.generation + 1,
+                fromManifest: status.installedManifest, toManifest: status.installedManifest,
+                helperPath: prefix.appendingPathComponent(file.path).path, helperSHA256: file.sha256,
+                helperIdentity: CodeIdentity(teamIdentifier: "993YC3JY4Q", signingIdentifier: "hostwright-dist",
+                    codeDirectoryHash: String(repeating: "a", count: 64), validationMode: .installedRequirement))
+            let trail = TamperEvidentAuditTrail(store: store, keyStore: InMemoryAuditSigningKeyStore())
+            _ = try trail.append(AuditAppendInput(subjectID: "owner", requestID: "compensated",
+                action: .operation, outcome: "accepted", reasonCode: "accepted",
+                payloadDigest: "sha256:" + String(repeating: "a", count: 64)))
+            let service = StateUpgradeService(store: store)
+            let receipt = try lifecycle.refreshOwnerSessionReceipt(descriptor: descriptor,
+                revision: XCTUnwrap(service.verifiedRevision()), prior: true)
+            let journal = DistributionOwnerStateOperationJournal(schemaVersion: 1,
+                descriptorSHA256: try descriptor.digest, descriptor: descriptor, snapshot: nil, checkpoint: "committed")
+            let operation = URL(fileURLWithPath: resolution.layout.runtimeDirectory)
+                .appendingPathComponent("distribution-state/\(status.installationID)/\(descriptor.operationID)")
+            try FileManager.default.createDirectory(at: operation, withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o700])
+            let journalURL = operation.appendingPathComponent("owner-journal-v1.json")
+            try DistributionJSON.encode(journal).write(to: journalURL, options: .withoutOverwriting)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: journalURL.path)
+            try body(CompensatedOwnerStateFixture(descriptor: descriptor, receipt: receipt,
+                journal: journal, journalURL: journalURL, service: service, trail: trail))
         }
     }
 

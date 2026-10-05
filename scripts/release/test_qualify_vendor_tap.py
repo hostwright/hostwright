@@ -171,6 +171,17 @@ class VendorTapContracts(unittest.TestCase):
         self.assertFalse(stale.exists())
         self.assertNotEqual(replace().returncode,0)
 
+    def test_config_directory_cleanup_refuses_residue_and_ambiguous_ownership(self):
+        directory=self.root/'config';directory.mkdir(mode=0o700);file=directory/'unknown';file.write_text('preserve')
+        definitions=SCRIPT.read_text().split('\ncommand="${1:-}"\n')[0]
+        def cleanup():
+            return subprocess.run(['/bin/bash','-s','--',str(directory)],input=definitions+'\nremove_owned_config_directory "$1"\n',
+                                  env=self.env,capture_output=True,text=True,timeout=10)
+        result=cleanup();self.assertNotEqual(result.returncode,0);self.assertIn('incomplete',result.stderr)
+        self.assertEqual(file.read_text(),'preserve');file.unlink()
+        directory.chmod(0o755);self.assertNotEqual(cleanup().returncode,0);self.assertTrue(directory.exists());directory.chmod(0o700)
+        self.assertEqual(cleanup().returncode,0);self.assertFalse(directory.exists());self.assertEqual(cleanup().returncode,0)
+
     def test_current_service_checks_follow_bootstrap_and_matching_daemon_start(self):
         source=SCRIPT.read_text();prepare=source.split('\nprepare() {',1)[1].split('\nresume() {',1)[0]
         self.assertLess(prepare.index('bootstrap_installed_identities'),prepare.index('brew services start'))

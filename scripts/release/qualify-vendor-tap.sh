@@ -557,6 +557,15 @@ remove_owned_file() {
   rm -f "$path"
 }
 
+remove_owned_config_directory() {
+  local path="$1"
+  [[ -e "$path" || -L "$path" ]] || return 0
+  [[ -d "$path" && ! -L "$path" && "$(stat -f '%u:%Lp' "$path")" == "$(id -u):700" ]] \
+    || die "Qualification config directory ownership changed; preserving it." 70
+  rmdir "$path" || die "Qualification config directory contains remaining files; cleanup is incomplete." 70
+}
+
+
 validate_qualification_install() {
   local inventory formula version
   inventory="$(brew list --versions hostwright 2>/dev/null)" \
@@ -1035,7 +1044,7 @@ resume() {
   remove_owned_file "$config_path"
   remove_owned_file "$log_path"
   remove_owned_file "$error_log_path"
-  rmdir "$(dirname "$config_path")" 2>/dev/null || true
+  remove_owned_config_directory "$(dirname "$config_path")"
   brew untap "$tap_name"
   record "uninstall-preservation-and-exact-qualification-cleanup-passed"
   rm -f "$state_file"
@@ -1077,7 +1086,7 @@ cleanup_failed_run() {
     if [[ -e "$config_path" ]]; then
       remove_owned_file "$config_path"
     fi
-    rmdir "$(dirname "$config_path")" 2>/dev/null || true
+    remove_owned_config_directory "$(dirname "$config_path")"
   fi
   remove_owned_file "$brew_prefix/var/log/hostwrightd.log"
   remove_owned_file "$brew_prefix/var/log/hostwrightd.error.log"

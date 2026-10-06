@@ -4,7 +4,7 @@ import XCTest
 import HostwrightControlPlane
 import HostwrightCore
 import HostwrightScheduler
-// @testable is setup-only for the isolated SQLite project/peer seed; all
+// @testable is setup-only for isolated SQLite project/peer and state-fence fixtures; all
 // control, reservation, recovery, and capability assertions use public APIs.
 @testable import HostwrightState
 
@@ -162,6 +162,14 @@ final class Phase10ControlCompatibilityQualificationTests: XCTestCase {
     }
 
     func testSchedulerReservationRaceCommitsOnlyOneCapacityWinner() async throws {
+        try await verifyReservationRace(holdingWriterFence: false)
+    }
+
+    func testSchedulerReservationRaceWaitsForBoundedWriterContention() async throws {
+        try await verifyReservationRace(holdingWriterFence: true)
+    }
+
+    private func verifyReservationRace(holdingWriterFence: Bool) async throws {
         let (repository, sandbox) = try makeRepository()
         defer { cleanupQualificationRoot(sandbox) }
 
@@ -195,32 +203,39 @@ final class Phase10ControlCompatibilityQualificationTests: XCTestCase {
             (bindingB, try authority(for: bindingB)),
         ]
 
+        let writerAcquired = DispatchSemaphore(value: 0)
+        let writerFinished = DispatchSemaphore(value: 0)
+        if holdingWriterFence {
+            let configuration = SQLiteStateStore(
+                path: sandbox.ownedRoot.appendingPathComponent("state.sqlite").path
+            ).configuration
+            DispatchQueue.global().async {
+                defer { writerFinished.signal() }
+                do {
+                    try StateAccessCoordinator(configuration: configuration).withLock(.write) {
+                        writerAcquired.signal()
+                        Thread.sleep(forTimeInterval: 0.75)
+                    }
+                } catch {
+                    XCTFail("Could not acquire the isolated writer fence: \(error)")
+                    writerAcquired.signal()
+                }
+            }
+            XCTAssertEqual(writerAcquired.wait(timeout: .now() + 5), .success)
+        }
+        defer {
+            if holdingWriterFence {
+                XCTAssertEqual(writerFinished.wait(timeout: .now() + 5), .success)
+            }
+        }
+
         let outcomes = await withTaskGroup(
             of: ReservationRaceOutcome.self,
             returning: [ReservationRaceOutcome].self
         ) { group in
             for (binding, authority) in requests {
                 group.addTask {
-                    do {
-                        _ = try repository.reserve(
-                            binding: binding,
-                            authority: authority
-                        )
-                        return ReservationRaceOutcome(
-                            succeeded: true,
-                            errorCode: nil
-                        )
-                    } catch let error as SchedulerAdmissionError {
-                        return ReservationRaceOutcome(
-                            succeeded: false,
-                            errorCode: error.code
-                        )
-                    } catch {
-                        return ReservationRaceOutcome(
-                            succeeded: false,
-                            errorCode: nil
-                        )
-                    }
+                    Self.reserveForRace(repository: repository, binding: binding, authority: authority)
                 }
             }
 
@@ -231,11 +246,16 @@ final class Phase10ControlCompatibilityQualificationTests: XCTestCase {
             return collected
         }
 
-        XCTAssertEqual(outcomes.filter(\.succeeded).count, 1)
+        XCTAssertEqual(outcomes.filter(\.succeeded).count, 1, "Reservation outcomes: \(outcomes)")
         XCTAssertEqual(
             outcomes.filter { $0.errorCode == .insufficientCapacity }.count,
-            1
+            1,
+            "Reservation outcomes: \(outcomes)"
         )
+        XCTAssertFalse(outcomes.contains { $0.unexpectedError != nil }, "Reservation outcomes: \(outcomes)")
+        if holdingWriterFence {
+            XCTAssertTrue(outcomes.contains { $0.writerContentionRetries > 0 })
+        }
         XCTAssertEqual(try repository.reservations(nodeID: nodeID).count, 1)
         XCTAssertEqual(
             try repository.availableCapacity(nodeID: nodeID).values,
@@ -356,6 +376,46 @@ final class Phase10ControlCompatibilityQualificationTests: XCTestCase {
     private struct ReservationRaceOutcome: Sendable {
         let succeeded: Bool
         let errorCode: SchedulerAdmissionErrorCode?
+        let unexpectedError: String?
+        let writerContentionRetries: Int
+    }
+
+    private static func reserveForRace(
+        repository: SchedulerAdmissionRepository,
+        binding: SchedulerAdmissionBinding,
+        authority: SchedulerAdmissionAuthority
+    ) -> ReservationRaceOutcome {
+        var retries = 0
+        do {
+            for _ in 0..<9 {
+                do {
+                    _ = try repository.reserve(binding: binding, authority: authority)
+                    return ReservationRaceOutcome(
+                        succeeded: true, errorCode: nil, unexpectedError: nil,
+                        writerContentionRetries: retries
+                    )
+                } catch StateStoreError.databaseLocked(_, let message)
+                    where message.contains("state-writer fence") {
+                    retries += 1
+                    Thread.sleep(forTimeInterval: 0.05)
+                }
+            }
+            _ = try repository.reserve(binding: binding, authority: authority)
+            return ReservationRaceOutcome(
+                succeeded: true, errorCode: nil, unexpectedError: nil,
+                writerContentionRetries: retries
+            )
+        } catch let error as SchedulerAdmissionError {
+            return ReservationRaceOutcome(
+                succeeded: false, errorCode: error.code, unexpectedError: nil,
+                writerContentionRetries: retries
+            )
+        } catch {
+            return ReservationRaceOutcome(
+                succeeded: false, errorCode: nil, unexpectedError: String(describing: error),
+                writerContentionRetries: retries
+            )
+        }
     }
 
     private struct QualificationSandbox {

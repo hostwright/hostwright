@@ -169,6 +169,52 @@ final class Phase10ControlCompatibilityQualificationTests: XCTestCase {
         try await verifyReservationRace(holdingWriterFence: true)
     }
 
+    func testSchedulerReservationRaceDoesNotRetryAnExclusiveStateFence() throws {
+        let (repository, sandbox) = try makeRepository()
+        let acquired = DispatchSemaphore(value: 0)
+        let release = DispatchSemaphore(value: 0)
+        let finished = DispatchSemaphore(value: 0)
+        defer {
+            release.signal()
+            XCTAssertEqual(finished.wait(timeout: .now() + 5), .success)
+            cleanupQualificationRoot(sandbox)
+        }
+        let nodeID = UUID()
+        let capacity = try SchedulerNodeCapacitySnapshot(
+            nodeID: nodeID, capacity: ResourceVector(["cpu": 100]),
+            generation: 1, observedAt: createdAt
+        )
+        _ = try repository.recordNodeCapacity(snapshot: capacity)
+        let request = try binding(
+            decision: UUID().uuidString, workload: UUID().uuidString,
+            nodeID: nodeID, resources: ["cpu": 60], capacity: capacity
+        )
+        try recordArtifact(for: request, repository: repository)
+        let configuration = SQLiteStateStore(
+            path: sandbox.ownedRoot.appendingPathComponent("state.sqlite").path
+        ).configuration
+        DispatchQueue.global().async {
+            defer { finished.signal() }
+            do {
+                try StateAccessCoordinator(configuration: configuration).withLock(.exclusive) {
+                    acquired.signal()
+                    XCTAssertEqual(release.wait(timeout: .now() + 5), .success)
+                }
+            } catch {
+                XCTFail("Could not acquire the isolated state fence: \(error)")
+                acquired.signal()
+            }
+        }
+        XCTAssertEqual(acquired.wait(timeout: .now() + 5), .success)
+        let outcome = Self.reserveForRace(
+            repository: repository, binding: request, authority: try authority(for: request)
+        )
+        XCTAssertFalse(outcome.succeeded)
+        XCTAssertNil(outcome.errorCode)
+        XCTAssertEqual(outcome.writerContentionRetries, 0)
+        XCTAssertTrue(outcome.unexpectedError?.contains("state-access fence") == true)
+    }
+
     private func verifyReservationRace(holdingWriterFence: Bool) async throws {
         let (repository, sandbox) = try makeRepository()
         defer { cleanupQualificationRoot(sandbox) }

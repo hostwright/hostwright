@@ -1,0 +1,50 @@
+{
+  "kind": "hostwright.historical-qualification-summary.v1",
+  "sourceCommit": "b23dd15d8fe4770a48012c70afc8449ed63676d6",
+  "version": "0.0.2-rc.5",
+  "fullSource": {
+    "reportedCases": 3535,
+    "passedCases": 3525,
+    "skippedCases": 10,
+    "failedCases": 0,
+    "privateReceiptSHA256": "a909b656181352b83fe6e98bd8e361955e6f04865c3c580fdda488f5172b734b"
+  },
+  "supplementaryCases": {
+    "executedPassing": [
+      "registry",
+      "scheduler",
+      "apple-cli-lifecycle",
+      "apple-cli-network-isolation-dual-attachment"
+    ],
+    "remainingRequiredCases": 6,
+    "supportedMatrixStatus": "refused-missing-attended-coverage",
+    "privateMatrixSHA256": "40f738291a87ed3955ee9ac4584b5859a87bf03114ff05593e6ed7789cec6e63"
+  },
+  "shards": {
+    "run": 37387214992,
+    "release": {
+      "passed": 37,
+      "skipped": 0,
+      "failed": 0
+    },
+    "distribution": {
+      "passed": 54,
+      "skipped": 0,
+      "failed": 0
+    },
+    "live": {
+      "passed": 0,
+      "skipped": 6,
+      "failed": 0
+    },
+    "privateOutcomesSHA256": "a08cf618d8e0daf471084843c135b713a5e51253b7781876016781f8773c9f71"
+  },
+  "fuzz": {
+    "targets": 6,
+    "minimumElapsedSeconds": 301.0941135000903,
+    "initialAndFinalReplayPassed": true,
+    "receiptSHA256": "0372704ec05c002f0234eb94ebbf52ac7999c0f5e3b7287189472341ab3330ac"
+  },
+  "qualificationAccepted": false,
+  "qualifiesLaterSource": false
+}

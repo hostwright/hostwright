@@ -5941,8 +5941,8 @@
       "phase": 15,
       "child": 12,
       "parent": 283,
-      "title": "P15-C12: Submit the unqualified Homebrew-core formula",
-      "state": "closed",
+      "title": "P15-C12: Qualify and obtain official Homebrew cask distribution",
+      "state": "open",
       "url": "https://github.com/hostwright/hostwright/issues/282",
       "labels": [
         "area:ci",
@@ -5951,6 +5951,7 @@
         "area:release",
         "risk:high",
         "roadmap:v0.0.2",
+        "status:in-progress",
         "type:docs",
         "type:implementation",
         "type:release",
@@ -5960,10 +5961,21 @@
       "assignees": [
         "d3v07"
       ],
-      "releaseDisposition": "deferred",
+      "releaseDisposition": "required",
       "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
-      "deferralReason": "Outside the approved single-Mac CLI, desktop and narrow Compose scope; preserved for a future scope decision without a promised release date.",
-      "stateReason": "not_planned"
+      "stateReason": null,
+      "acceptanceCriteria": [
+        "Generate a Hostwright cask from the exact verified signed native application and CLI package; stable public bytes and SHA-256 must match the accepted release inventory.",
+        "Pass Homebrew DSL/style and new-cask audits plus real clean-machine install, CLI/app launch, upgrade and preserve-data uninstall; verify Gatekeeper and current Homebrew platform requirements.",
+        "Submit the official cask with accurate public-interest evidence and resolve maintainer feedback without fabricating adoption or acceptance.",
+        "Obtain official Homebrew acceptance and verify brew install hostwright on a fresh Homebrew environment before closing this workstream or announcing the Homebrew-available GA launch."
+      ],
+      "requiredEvidence": [
+        "local-integration",
+        "distribution-artifact",
+        "migration-upgrade",
+        "security-assessment"
+      ]
     }
   ],
   "historicalPhaseSchedule": [

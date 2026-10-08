@@ -32,6 +32,7 @@ swift_test() {
 }
 
 run_cheap_checks() {
+  python3 scripts/release/test-homebrew-cask.py
   python3 scripts/release/test-staged-release.py
   python3 scripts/release/test-assemble-qualification.py
   python3 scripts/release/test-swift-test-results.py

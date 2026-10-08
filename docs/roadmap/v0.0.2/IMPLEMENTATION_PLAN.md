@@ -1,11 +1,13 @@
 # Hostwright v0.0.2 Local Release Plan
 
 The active release target is `v0.0.2`: a reliable single-Mac CLI, native desktop app,
-and narrow Compose conversion workflow. The current source prepares `0.0.2-rc.5`; RC and GA publication
+and narrow Compose conversion workflow. The current source prepares `0.0.2-rc.6`; RC and GA publication
 remain gated on exact-source and artifact qualification. Scope decision: [ADR 0015](../../design/adr-0015-reduced-local-release.md).
 
 The ledger preserves one master issue, 15 phase epics, and 167 child workstreams.
-Of the 78 issues open at the scope decision, 28 remain required and 50 are deferred.
+Of the 78 issues open at the original scope decision, 28 were retained and 50
+deferred. The October 8 amendment returns #282 to required work: 29 retained and
+49 deferred from that original set.
 Phases 01–09 remain closed with their historical evidence; later changes receive
 regression coverage for the supported local product under [ADR 0016](../../design/adr-0016-release-focused-test-suite.md). A deferred closure is not completed implementation.
 
@@ -22,7 +24,7 @@ There is no replacement calendar deadline or promise for deferred work.
 | 12 / #247 | Preserve development contracts without Kubernetes compatibility claims. | #236–#247: sandbox VM, CRI/CNI/CSI, kubelet, Helm and conformance. |
 | 13 / #257 | #250: existing Compose subset import/export/update planning, explicit loss reports, and real execution through normal Hostwright lifecycle commands. | #248–#249 and #251–#256: Docker socket/API, Podman, Testcontainers and dedicated CI/IDE integrations. |
 | 14 / #270 | #258–#262: signed local SwiftUI/menu-bar app, manifest selection, services/health/logs/events, reviewed up/down/restart, accessibility and package upgrade/rollback. | #263–#269: team/MDM/cloud/SSO/fleet/remote support. Full CLI parity and automatic updates are removed from retained requirements. |
-| 15 / #283 | #271–#281: bounded local qualification, security, recovery, upgrade lineage, docs, support, signed artifacts and vendor tap. | #282: Homebrew-core submission; physical cluster, broad client and multi-day qualification requirements are removed. |
+| 15 / #283 | #271–#281: bounded local qualification, security, recovery, upgrade lineage, docs, support, signed artifacts and vendor tap. #282: official cask acceptance and fresh-machine `brew install hostwright`. | Core source-build formula; physical cluster, broad client and multi-day qualification requirements are removed. |
 
 The [issue manifest](issues.json) owns each retained issue's reduced acceptance
 criteria and required evidence. The [generated index](WORKSTREAM_INDEX.md) lists
@@ -157,5 +159,7 @@ for a deferred issue. Historical release artifacts and evidence remain unchanged
 Follow the [release process](../../release/RELEASE_PROCESS.md). Publish immutable
 v0.0.2, verify downloaded artifact bytes and vendor-tap installation, and close
 #283 and #284 only after the supported local workflows and all required evidence
-are complete. `brew install hostwright/tap/hostwright` is the supported distribution
-goal; unqualified Homebrew-core installation and acceptance are deferred.
+are complete, including the requested official Homebrew launch channel under the
+October 8 scope amendment. Keep the verified vendor tap as a controlled channel;
+close #282 only after official acceptance and fresh-machine `brew install hostwright`
+verification. Homebrew review time is external and has no guaranteed ETA.

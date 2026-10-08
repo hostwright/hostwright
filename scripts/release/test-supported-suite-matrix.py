@@ -156,6 +156,7 @@ class MatrixVerificationTests(unittest.TestCase):
         binding = dict(sourceCommit=commit, version='0.0.2-rc.6', executionMode='real',
                        exitCode=0, sourceCleanBefore=True, sourceCleanAfter=True)
         base = dict(binding, status='incomplete', command=['scripts/test.sh', 'full'], failedCases=[],
+                    binarySHA256=matrix.sha(self.binary), compiledInventorySHA256=matrix.sha(compiled),
                     attachments={name: matrix.sha(evidence / name) for name in ['commands.log', 'swift.xml']})
         (evidence / 'base.json').write_text(json.dumps(base))
         (evidence / 'attended.log').write_text("Test Case '-[M.C b]' passed (0.1 seconds).\n")
@@ -191,6 +192,28 @@ class MatrixVerificationTests(unittest.TestCase):
         (self.source / 'untracked.txt').write_text('dirty fixture')
         with self.assertRaisesRegex(ValueError, 'current source is dirty'):
             matrix.verify(self.config)
+
+    def test_complete_verification_refuses_missing_and_mixed_base_binary(self):
+        self.reject_base_binding('binarySHA256', 'base execution has missing or mixed binary')
+
+    def test_complete_verification_refuses_missing_and_mixed_base_inventory(self):
+        self.reject_base_binding('compiledInventorySHA256', 'base execution has missing or mixed compiled inventory')
+
+    def reject_base_binding(self, field, message):
+        descriptor = self.config['base']
+        path = Path(descriptor['root']) / descriptor['receipt']
+        original = json.loads(path.read_text())
+        for value in [None, '0' * 64]:
+            with self.subTest(field=field, value=value):
+                modified = dict(original)
+                if value is None:
+                    modified.pop(field)
+                else:
+                    modified[field] = value
+                path.write_text(json.dumps(modified))
+                descriptor['receiptSHA256'] = matrix.sha(path)
+                with self.assertRaisesRegex(ValueError, message):
+                    matrix.verify(self.config)
 
 if __name__ == '__main__':
     unittest.main()

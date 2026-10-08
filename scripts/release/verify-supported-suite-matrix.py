@@ -142,6 +142,8 @@ def verify(config):
     require(len(routed) == len(config['routedSelectors']), 'duplicate routed identities')
     base_root, base_path, base, base_sha = load_record(config['base'])
     binding(base, commit, version, lane)
+    require(base.get('binarySHA256') == binary_sha, 'base execution has missing or mixed binary binding')
+    require(base.get('compiledInventorySHA256') == config['compiledInventorySHA256'], 'base execution has missing or mixed compiled inventory binding')
     require(base.get('status') == ('incomplete' if lane == 'source' else 'partial-base-passed'), 'unexpected base execution status')
     if lane == 'source':
         require(base.get('command') == ['scripts/test.sh', 'full'] and base.get('failedCases') == [], 'source base is not full or contains failures')

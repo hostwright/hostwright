@@ -21,6 +21,8 @@ The source base must be the complete `scripts/test.sh full` execution. Keep its 
 
 Every receipt must retain raw command output, execution mode, exit status and source cleanliness before and after. Attended runtime cases additionally bind cleanup proof attachments and passing unmanaged-resource preservation. Registry authentication and the deterministic scheduler fixture have no runtime-resource cleanup exemption beyond their exact existing selectors.
 
+The base receipt must also carry `binarySHA256` and `compiledInventorySHA256`, matching the configured executable and retained inventory. Missing bindings and digests from another build are refused.
+
 ## Verification
 
 Pass the config with `--config` and a fresh absolute result path with `--output`. The output must be outside the checkout. The verifier refuses missing, extra, duplicate, failed, skipped, mixed-source, mixed-version, mixed-binary, dirty, simulated, tampered or symlinked evidence. It also checks both framework summaries against the actual unique case identities.

@@ -1,0 +1,44 @@
+{
+  "kind": "hostwright.historical-object-variance-disposition.v1",
+  "originalSourceCommit": "751d8d771bf1e74a01e30b30c22c5f6843d4b70d",
+  "originalVersion": "0.0.2-rc.2",
+  "originalBuildRunID": "37281269383",
+  "originalBuildRunAttempt": "1",
+  "producerRerun": false,
+  "changedFiles": [
+    "objects/SystemPackage.build/SystemString.swift.o"
+  ],
+  "offsetsZeroBased": [
+    23680,
+    23681,
+    23682,
+    23683,
+    23684,
+    23685,
+    23686,
+    23687,
+    23688,
+    23689,
+    23690,
+    23691,
+    23692,
+    23693,
+    23694,
+    23695
+  ],
+  "differingSection": {
+    "segment": "__LLVM",
+    "section": "__swift_modhash",
+    "offset": 23680,
+    "size": 16
+  },
+  "outsideSectionBytesIdentical": true,
+  "allObjectsIdentical": false,
+  "allNineExecutablesIdentical": true,
+  "causeEstablished": false,
+  "historicalAssessmentSHA256": "05bfecb757258d69904695cbed7b3a67337629b2f98163be6ce52659dba4012d",
+  "observedScope": "Retained RC.2 original two-build outputs only. The 16 differing bytes are confined to the observed __LLVM,__swift_modhash section of SystemString.swift.o; other retained compared bytes and nine executable pairs match.",
+  "qualificationAccepted": false,
+  "qualifiesLaterSource": false,
+  "privateDispositionSHA256": "f392d1c2a89308558a3d81e6fcb784f50f7bb1569e1778a205e6a8a5de45ed29"
+}

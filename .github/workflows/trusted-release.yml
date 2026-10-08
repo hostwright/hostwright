@@ -10,12 +10,12 @@ on:
       version:
         description: Exact binary semantic version
         required: true
-        default: 0.0.2-dev.12
+        default: 0.0.2-rc.6
         type: string
       tag:
         description: Exact immutable release tag
         required: true
-        default: v0.0.2-dev.12
+        default: v0.0.2-rc.6
         type: string
       runtime_provenance_run:
         description: Successful authenticated runtime-ingredients run for this exact commit

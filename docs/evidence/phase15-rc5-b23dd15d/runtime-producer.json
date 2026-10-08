@@ -1,0 +1,20 @@
+{
+  "kind": "hostwright.exact-runtime-retention-progress.v1",
+  "sourceCommit": "b23dd15d8fe4770a48012c70afc8449ed63676d6",
+  "version": "0.0.2-rc.5",
+  "runID": 37387211717,
+  "attempt": 1,
+  "status": "verified-exact-producer-inputs-ready-for-staging",
+  "archiveSHA256": "434ecfbc6a3d8557c5fdff84aed8c90bd238d254bd68940f5fe23acf4dbec66b",
+  "artifactID": 11385955627,
+  "artifactDigest": "sha256:eb18c12dbdb8c8685c6141da68631095a1a26eb71c2ae57c83344f7852b9044a",
+  "verifierSHA256": "269c44e97c3d4ce80b75fe36e6ae49daf9ce3a57f8008439835f4ab096949503",
+  "verificationLogSHA256": "b235649390af133ba38c41bbbfd28a2f97d73697861fe3e53e39d508dc54e192",
+  "completedAt": "2026-10-06T02:11:21.532480+00:00",
+  "finalAuthenticatedArchiveVerified": true,
+  "protectedAcceptance": false,
+  "privateReceiptSHA256": "b91ea9c1cac439c985882bcfa67fd399c028c48921cec79411cfcacd39f86c3e",
+  "workflowURL": "https://github.com/hostwright/hostwright/actions/runs/37387211717",
+  "qualifiesLaterSource": false,
+  "qualificationAccepted": false
+}

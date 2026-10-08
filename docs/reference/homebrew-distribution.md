@@ -118,10 +118,13 @@ verifier and package hashes before writing a new file. Existing output is never
 overwritten. Release JSON supplied without executed verification is insufficient.
 The emitted preparation receipt is not Homebrew acceptance or install evidence.
 
-For private RC qualification only, use the exact candidate version and add
+For RC qualification in a test tap only, use the exact candidate version and add
 `--allow-prerelease`. Development releases and app-less legacy packages remain
 rejected. Regenerate from stable bytes before official submission; an RC checksum
-cannot be reused for GA.
+cannot be reused for GA. The recipe expects that version's immutable package at
+its GitHub release URL; generating it does not publish staged private artifacts.
+Installation must wait until the protected release flow makes those bytes
+available at that URL.
 
 The cask's two-part version retains the product version and twelve-character
 source commit. Livecheck obtains both from the stable release's package asset so

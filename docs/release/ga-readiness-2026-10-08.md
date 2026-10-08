@@ -19,10 +19,11 @@ Required CI passed at the reviewed head; that does not complete the release matr
 
 At the 15:56 UTC snapshot, the exact-source
 [runtime producer](https://github.com/hostwright/hostwright/actions/runs/37795746430)
-is running. The release and live
+is running. The release
 [qualification shards](https://github.com/hostwright/hostwright/actions/runs/37795756601)
-have passed; the distribution shard is still running. No signed RC.6 stage,
-protected acceptance, RC publication or GA
+job succeeded; the distribution shard is still running. The live job is green,
+but its log reports six tests and six skips. It provides no passing live-runtime
+qualification. No signed RC.6 stage, protected acceptance, RC publication or GA
 publication is established by this snapshot.
 
 The first local full-source attempt failed during compilation, before tests ran.

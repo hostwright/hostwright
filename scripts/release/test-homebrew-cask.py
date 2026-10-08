@@ -2,6 +2,7 @@
 """Cask input-boundary tests; fixtures do not constitute release qualification."""
 import copy
 import importlib.util
+import json
 from pathlib import Path
 import subprocess
 import tempfile
@@ -103,6 +104,44 @@ class HomebrewCaskTests(unittest.TestCase):
                 path.write_text(cask.render(manifest))
                 result = subprocess.run(['/usr/bin/ruby', '-c', str(path)], capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_generation_preserves_existing_files_and_immutable_release(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            release = root / 'release'
+            release.mkdir()
+            verifier = Path('/usr/bin/false').resolve()
+            existing = root / 'hostwright.rb'
+            existing.write_text('retain this recipe')
+            for output in (existing, release / 'hostwright.rb'):
+                with self.subTest(output=output), self.assertRaises(ValueError):
+                    cask.generate(release, verifier, COMMIT, '0.0.2', TEAM, output)
+            self.assertEqual(existing.read_text(), 'retain this recipe')
+            self.assertEqual(list(release.iterdir()), [])
+            links = root / 'links'
+            links.mkdir()
+            linked_output = links / 'hostwright.rb'
+            linked_output.symlink_to(root / 'missing.rb')
+            with self.assertRaises(ValueError):
+                cask.generate(release, verifier, COMMIT, '0.0.2', TEAM, linked_output)
+            self.assertTrue(linked_output.is_symlink())
+            self.assertFalse((root / 'missing.rb').exists())
+
+    def test_verifier_failure_or_non_json_success_cannot_emit_recipe(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            release = root / 'release'
+            release.mkdir()
+            manifest = release / 'release-manifest.json'
+            manifest.write_text(json.dumps(fixture()))
+            original = manifest.read_bytes()
+            output = root / 'hostwright.rb'
+            for executable, error in (('/usr/bin/false', subprocess.CalledProcessError),
+                                      ('/usr/bin/true', json.JSONDecodeError)):
+                with self.subTest(executable=executable), self.assertRaises(error):
+                    cask.generate(release, Path(executable).resolve(), COMMIT, '0.0.2', TEAM, output)
+                self.assertFalse(output.exists())
+                self.assertEqual(manifest.read_bytes(), original)
 
 
 if __name__ == '__main__':

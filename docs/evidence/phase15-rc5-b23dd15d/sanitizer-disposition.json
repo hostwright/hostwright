@@ -1,0 +1,31 @@
+{
+  "kind": "hostwright.historical-sanitizer-disposition.v1",
+  "sourceCommit": "b23dd15d8fe4770a48012c70afc8449ed63676d6",
+  "version": "0.0.2-rc.5",
+  "original": {
+    "status": "failed",
+    "reportedNativeCases": 3464,
+    "passedNativeCases": 3462,
+    "failedNativeCases": 2,
+    "swiftTestingPassed": 61,
+    "receiptSHA256": "c8a53b25f01356f651d85207ccdecb474090de4b3615f807bc2f1ed9dd4e77ce"
+  },
+  "storageRetry": {
+    "status": "failed",
+    "reportedNativeCases": 3464,
+    "passedNativeCases": 3463,
+    "failedNativeCases": 1,
+    "swiftTestingPassed": 61,
+    "resourceGuardTerminated": false,
+    "sanitizerDiagnostic": false,
+    "failedCases": [
+      "-[HostwrightDaemonTests.Phase10ControlCompatibilityQualificationTests testSchedulerReservationRaceCommitsOnlyOneCapacityWinner]"
+    ],
+    "receiptSHA256": "5c07b56b138c990857e89eecf3190cd8f3a84ec37cb831f7a20d2cd7c81be935"
+  },
+  "stagingDispatched": false,
+  "requiredDisposition": "Investigate and repair the repeated scheduler race qualification failure before freezing the next candidate. Preserve both failed runs.",
+  "completeSupportedSuite": false,
+  "qualificationAccepted": false,
+  "qualifiesLaterSource": false
+}

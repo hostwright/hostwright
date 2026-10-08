@@ -21,7 +21,9 @@ The Hostwright-controlled package-manager command is:
 brew install hostwright/tap/hostwright
 ```
 
-That command uses [`hostwright/homebrew-tap`](https://github.com/hostwright/homebrew-tap) and installs an immutable unsupported qualification release. Homebrew-core submission is deferred from v0.0.2; use the vendor tap rather than `brew install hostwright`.
+That command uses [`hostwright/homebrew-tap`](https://github.com/hostwright/homebrew-tap) and installs the immutable unsupported dev.12 qualification release with older contracts. It does not install the current source candidate.
+
+The launch requires an official Homebrew cask for the signed package and desktop app so a fresh Mac can use `brew install hostwright` without adding the vendor tap. Signed-package qualification, latest-major macOS validation, submission eligibility, and upstream acceptance remain pending. The separate Homebrew-core formula is deferred; that does not defer the official cask requirement. See [Homebrew distribution](homebrew-distribution.md) for the acceptance path.
 
 ## Current Source Build
 

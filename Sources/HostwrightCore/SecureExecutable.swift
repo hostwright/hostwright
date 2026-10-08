@@ -159,6 +159,7 @@ public enum SecureExecutableResolver {
         guard metadata.st_mode & (S_IWGRP | S_IWOTH) == 0 else {
             throw SecureExecutableValidationError.unsafePermissions
         }
+        try validateAccessControl(path: canonicalPath, descriptor: descriptor)
         guard metadata.st_mode & (S_ISUID | S_ISGID) == 0 else {
             throw SecureExecutableValidationError.setIDExecutable
         }
@@ -227,6 +228,7 @@ public enum SecureExecutableResolver {
                 throw SecureExecutableValidationError.unsafePermissions
             }
         }
+        try validateAccessControl(path: canonicalPath, descriptor: descriptor)
         accepted = true
         return (canonicalPath, descriptor)
     }
@@ -302,6 +304,23 @@ public enum SecureExecutableResolver {
             guard isRootOwnedStickyDirectory else {
                 throw SecureExecutableValidationError.unsafePermissions
             }
+        }
+        try validateAccessControl(path: path)
+    }
+
+    private static func validateAccessControl(path: String, descriptor: Int32? = nil) throws {
+        do {
+            if let descriptor {
+                try HostwrightLocalFilesystemPolicy.validateNoAccessGrantingACL(
+                    fileDescriptor: descriptor, path: path, role: "trusted subprocess path"
+                )
+            } else {
+                try HostwrightLocalFilesystemPolicy.validateNoAccessGrantingACL(
+                    atPath: path, role: "trusted subprocess path"
+                )
+            }
+        } catch {
+            throw SecureExecutableValidationError.unsafePermissions
         }
     }
 

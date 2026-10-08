@@ -614,7 +614,7 @@ HW-RUNTIME-001: logs requires an observed Hostwright-managed service.
 
 ## `hostwright restart-budget ...`
 
-`restart-budget status` reads schema-v23 workload/project budget state without observing runtime, creating state, or migrating a missing database. Optional `--project` uses the exact persisted `project-*` identity. Text and JSON include workload status, reason class, attempts, rolling windows, priority, backoff, policy digest, release generation, and the current hold token when one exists.
+`restart-budget status` reads schema-v24 workload/project budget state without observing runtime, creating state, or migrating a missing database. Optional `--project` uses the exact persisted `project-*` identity. Text and JSON include workload status, reason class, attempts, rolling windows, priority, backoff, policy digest, release generation, and the current hold token when one exists.
 
 `restart-budget release` requires exact `--project`, Manifest service name, and lowercase SHA-256 `--confirm-hold`. It atomically resets only the matching held workload, increments its release generation, and records append-only manual-release history plus `restart.policy.manual-release`. A stale token or changed workload generation returns confirmation mismatch and changes nothing. Release never starts, restarts, or otherwise touches runtime; the daemon must re-observe on its next level-triggered iteration.
 
@@ -622,13 +622,13 @@ HW-RUNTIME-001: logs requires an observed Hostwright-managed service.
 
 `maintenance preview` securely parses and validates the named Manifest v3 file, then evaluates one or more unique elective `--action` values at the current time or an optional canonical UTC `--at`. It is read-only: it does not create or open state and reports the active or next applicable window plus the exact policy digest.
 
-`maintenance status` reads the latest append-only schema-v23 deferral state for one exact project or all projects. A deferred record reports its action classes, plan and policy digests, hard deadline, state, and exact confirmation token.
+`maintenance status` reads the latest append-only schema-v24 deferral state for one exact project or all projects. A deferred record reports its action classes, plan and policy digests, hard deadline, state, and exact confirmation token.
 
 `maintenance cancel` atomically cancels only the current matching deferred or override-authorized record. `maintenance override` atomically authorizes only the current matching deferred record and requires a bounded redacted reason. Both require the exact project and `--confirm-deferral` SHA-256; stale, superseded, admitted, failed, or mismatched input changes nothing. Neither command touches runtime. The daemon re-observes and revalidates the exact binding immediately before any admitted lifecycle effect.
 
 ## `hostwright ownership ...`
 
-`ownership status` is a local read-only view over the already-migrated schema-v23 ownership authority and active or interrupted mutation groups. Text and schema-v1 JSON distinguish active, deleting, released, quarantined, legacy, and invalid ownership and report only bounded non-secret identity, proof, finalizer, deletion, lease, and handoff fields. It does not create or migrate state, inspect runtime, or infer ownership from a resource name.
+`ownership status` is a local read-only view over the already-migrated schema-v24 ownership authority and active or interrupted mutation groups. Text and schema-v1 JSON distinguish active, deleting, released, quarantined, legacy, and invalid ownership and report only bounded non-secret identity, proof, finalizer, deletion, lease, and handoff fields. It does not create or migrate state, inspect runtime, or infer ownership from a resource name.
 
 `ownership handoff` performs one exact expired-lease compare-and-swap for `lifecycle-v1` operation groups, whose recovery driver can immediately claim the fixed handoff controller through the same local effect fence. It requires the operation-group UUID, persisted plan SHA-256, fencing UUID, prior controller, canonical prior UTC expiry, target local controller (`resume` or `rollback`), and a 1–900 second lease. Success atomically rebinds the group and every exact ownership record attached to it. A live, in-flight, unsupported-kind, stale, malformed, or mismatched tuple returns confirmation mismatch and changes nothing. Other mutation kinds retain their existing native recovery contracts and cannot be handed off through this command. Handoff does not execute recovery or runtime mutation, bypass finalizers, authorize another user, or add a multi-host lease.
 

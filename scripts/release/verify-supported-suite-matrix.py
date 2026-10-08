@@ -12,6 +12,17 @@ import xml.etree.ElementTree as ET
 IDENTITY = re.compile(r'[A-Za-z0-9_.]+/[A-Za-z0-9_]+(?:\([^\n]*\))?')
 CASE = re.compile(r"^Test Case '-\[([A-Za-z0-9_.]+) ([A-Za-z0-9_]+)\]' (passed|failed|skipped) \(", re.M)
 
+def load_json(path):
+    def pairs(items):
+        result = {}
+        for key, value in items:
+            require(key not in result, 'duplicate JSON key: ' + key)
+            result[key] = value
+        return result
+    def invalid_constant(value):
+        raise ValueError('non-finite JSON value: ' + value)
+    return json.loads(Path(path).read_text(), object_pairs_hook=pairs, parse_constant=invalid_constant)
+
 def require(condition, message):
     if not condition:
         raise ValueError(message)
@@ -38,7 +49,7 @@ def load_record(descriptor):
     expected_receipt = descriptor['receiptSHA256']
     require(isinstance(expected_receipt, str) and re.fullmatch('[a-f0-9]{64}', expected_receipt), 'invalid receipt digest')
     require(sha(path) == expected_receipt, 'receipt digest mismatch')
-    record = json.loads(path.read_text())
+    record = load_json(path)
     attachments = record.get('attachments')
     require(isinstance(attachments, dict) and attachments, 'missing raw attachments')
     for relative, expected in attachments.items():
@@ -117,7 +128,7 @@ def verify(config):
     def clean():
         return (subprocess.check_output(['git', '-C', str(source), 'rev-parse', 'HEAD'], text=True).strip() == commit
                 and not subprocess.check_output(['git', '-C', str(source), 'status', '--porcelain=v1', '--untracked-files=all'], text=True).strip()
-                and json.loads((source / 'contracts/v0.0.2/versions.json').read_text())['productVersion'] == version)
+                and load_json(source / 'contracts/v0.0.2/versions.json')['productVersion'] == version)
     require(clean(), 'current source is dirty or different')
     compiled_path = Path(config['compiledInventory'])
     require(compiled_path.is_absolute() and compiled_path.resolve() == compiled_path and compiled_path.is_file(), 'unsafe compiled inventory')
@@ -178,7 +189,7 @@ if __name__ == '__main__':
     parser.add_argument('--config', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
-    config = json.loads(args.config.read_text())
+    config = load_json(args.config)
     require(args.output.is_absolute() and args.output.resolve() == args.output and not args.output.exists(), 'unsafe or existing output path')
     require(Path(config['sourceRoot']) not in args.output.parents, 'output must be outside clean source')
     result = verify(config)

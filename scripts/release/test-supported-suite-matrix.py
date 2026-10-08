@@ -5,6 +5,7 @@ import importlib.util
 import unittest
 import tempfile
 import json
+import subprocess
 
 spec = importlib.util.spec_from_file_location('matrix', Path(__file__).with_name('verify-supported-suite-matrix.py'))
 matrix = importlib.util.module_from_spec(spec)
@@ -112,6 +113,84 @@ class CoverageTests(unittest.TestCase):
     def test_similarly_named_runtime_test_does_not_bypass_cleanup(self):
         with self.assertRaisesRegex(ValueError, 'verified cleanup'):
             matrix.resource_proofs({'selector': 'Other.RegistryAuthenticationTests/runtimeMutation'})
+
+    def test_duplicate_keys_and_nonfinite_json_refused(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'record.json'
+            for text in ['{"status":"failed","status":"passed"}', '{"duration":NaN}', '{"duration":Infinity}']:
+                path.write_text(text)
+                with self.subTest(text=text), self.assertRaises(ValueError):
+                    matrix.load_json(path)
+
+
+class MatrixVerificationTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name).resolve()
+        self.source = self.root / 'source'
+        self.source.mkdir()
+        versions = self.source / 'contracts/v0.0.2/versions.json'
+        versions.parent.mkdir(parents=True)
+        versions.write_text('{"productVersion":"0.0.2-rc.6"}')
+        def git(*args):
+            return subprocess.check_output(['git', *args], cwd=self.source, text=True, stderr=subprocess.DEVNULL).strip()
+        git('init', '-b', 'fix/qualification-fixture')
+        git('add', 'contracts')
+        git('-c', 'user.name=Qualification fixtures', '-c', 'user.email=fixtures@example.test', 'commit', '-m', 'test fixture')
+        commit = git('rev-parse', 'HEAD')
+        self.binary = self.root / 'test-binary'
+        self.binary.write_bytes(b'isolated unit fixture, never release evidence')
+        compiled = self.root / 'inventory.log'
+        compiled.write_text('M.C/a\nM.C/b\nM.S/c()\n')
+        evidence = self.root / 'evidence'
+        evidence.mkdir()
+        (evidence / 'commands.log').write_text(
+            "Test Case '-[M.C a]' passed (0.1 seconds).\n"
+            "Test Case '-[M.C b]' skipped (0.0 seconds).\n"
+            "Test Suite 'All tests' passed at fixture\n"
+            "Executed 2 tests, with 1 test skipped and 0 failures\n"
+            "Test run with 1 test in 1 suite passed after 0.1 seconds.\n"
+        )
+        (evidence / 'swift.xml').write_text('<testsuite><testcase classname="M.S" name="c()"/></testsuite>')
+        binding = dict(sourceCommit=commit, version='0.0.2-rc.6', executionMode='real',
+                       exitCode=0, sourceCleanBefore=True, sourceCleanAfter=True)
+        base = dict(binding, status='incomplete', command=['scripts/test.sh', 'full'], failedCases=[],
+                    attachments={name: matrix.sha(evidence / name) for name in ['commands.log', 'swift.xml']})
+        (evidence / 'base.json').write_text(json.dumps(base))
+        (evidence / 'attended.log').write_text("Test Case '-[M.C b]' passed (0.1 seconds).\n")
+        (evidence / 'cleanup.json').write_text('{"unitFixture":true}')
+        attended = dict(binding, status='passed', binarySHA256=matrix.sha(self.binary), selector='M.C/b',
+                        cleanupStatus='passed', unmanagedPreservationStatus='passed',
+                        cleanupProofAttachments={'cleanup.json': matrix.sha(evidence / 'cleanup.json')},
+                        attachments={name: matrix.sha(evidence / name) for name in ['attended.log', 'cleanup.json']})
+        (evidence / 'attended.json').write_text(json.dumps(attended))
+        self.config = dict(sourceRoot=str(self.source), sourceCommit=commit, version='0.0.2-rc.6', lane='source',
+                           compiledInventory=str(compiled), compiledInventorySHA256=matrix.sha(compiled),
+                           binary=str(self.binary), binarySHA256=matrix.sha(self.binary), routedSelectors=['M.C/b'],
+                           base={'root': str(evidence), 'receipt': 'base.json', 'receiptSHA256': matrix.sha(evidence / 'base.json')},
+                           baseSwiftXML='swift.xml', attended=[{'root': str(evidence), 'receipt': 'attended.json',
+                                                            'receiptSHA256': matrix.sha(evidence / 'attended.json'), 'log': 'attended.log'}])
+
+    def test_complete_source_matrix_checks_raw_files_and_inventory(self):
+        report = matrix.verify(self.config)
+        self.assertEqual(report['counts']['passedCases'], 3)
+        self.assertTrue(report['completeSupportedSuite'])
+        self.assertFalse(report['protectedQualificationAccepted'])
+
+    def test_complete_verification_refuses_missing_attended_execution(self):
+        with self.assertRaisesRegex(ValueError, 'missing required attended'):
+            matrix.verify(dict(self.config, attended=[]))
+
+    def test_complete_verification_refuses_changed_executable(self):
+        self.binary.write_bytes(b'changed fixture')
+        with self.assertRaisesRegex(ValueError, 'executed binary changed'):
+            matrix.verify(self.config)
+
+    def test_complete_verification_refuses_dirty_source(self):
+        (self.source / 'untracked.txt').write_text('dirty fixture')
+        with self.assertRaisesRegex(ValueError, 'current source is dirty'):
+            matrix.verify(self.config)
 
 if __name__ == '__main__':
     unittest.main()

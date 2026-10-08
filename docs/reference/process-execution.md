@@ -32,6 +32,8 @@ The launch sequence is deliberately ordered:
 8. Drain stdout and stderr and write stdin without blocking. Enforce separate byte limits, a wall-clock timeout, task/token cancellation, and a bounded TERM-to-KILL escalation.
 9. Observe leader exit with `waitid(..., WNOWAIT)` without immediately reaping it. This keeps its PID and process-group identity fenced while Hostwright freezes the inherited group with uncatchable `SIGSTOP`. Reap the leader, preserve whether stopped descendants remain, terminate those descendants with `SIGKILL`, and wait for group and pipe convergence. This ordering never depends on private process-listing APIs and never signals a reused PID or process group.
 
+Executable and working-directory validation rejects access-granting extended ACL entries on the opened object and its lexical/canonical ancestor chains. Deny-only ACLs remain accepted. Unsafe ownership, mode, or ACL failures are reported without silently changing filesystem permissions.
+
 ## Default Contract
 
 | Field | Default or bound |

@@ -146,7 +146,7 @@ The trusted path requires exact non-ambiguous Developer ID Application and Insta
 
 The protected release workflow separates build/sign, attestation, and publication. Repository code runs with read-only contents permission and no OIDC or publication authority. A GitHub-hosted no-checkout job receives only OIDC/attestation authority for the retained signed files. Only the final no-checkout publication job receives contents write permission. Actions are commit-pinned, tags are immutable, published bytes are downloaded and compared, GitHub attestations are verified, and a failure after tag creation removes the release/tag.
 
-Current public Hostwright releases nevertheless remain source-only. Local unsigned artifacts are non-publishable, and no trusted artifact is called supported until real Developer ID identities, notarization, Gatekeeper, signed `.pkg`, system lifecycle, vendor-tap publication/install, and clean-Mac evidence pass. No usable identities or release variables are configured on the reviewed machine/repository. The vendor-tap repository exists, but it has no qualified formula until immutable signed public artifacts are available.
+Immutable dev.11/dev.12 releases provide signed/notarized archives and packages; the vendor tap installs dev.12 as an unsupported qualification prerelease. Current RC and final-version bytes require their own signing, Gatekeeper, full lifecycle, and protected acceptance evidence. Local unsigned artifacts cannot satisfy those gates.
 
 ## Control Surface Boundary
 

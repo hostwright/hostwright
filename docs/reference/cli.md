@@ -243,7 +243,7 @@ hostwright metrics snapshot [--state-db <path>] [--output text|json]
 hostwright metrics export --output-path <absolute-new-path> --confirm-snapshot <sha256> [--state-db <path>] [--output text|json]
 ```
 
-`snapshot` is a schema-v1 read-only projection over one existing compatible schema-v23 database. It reports the fixed 59-series catalog, bounded histogram/summary values, three minimum-sample SLO results, source database identity, dropped-sample accounting, retention authority, and `snapshotSHA256`. It does not create, migrate, repair, sample, inspect runtime, listen, or upload.
+`snapshot` is a schema-v1 read-only projection over one existing compatible schema-v24 database. It reports the fixed 59-series catalog, bounded histogram/summary values, three minimum-sample SLO results, source database identity, dropped-sample accounting, retention authority, and `snapshotSHA256`. It does not create, migrate, repair, sample, inspect runtime, listen, or upload.
 
 `export` recomputes the snapshot, requires the exact current hash, and creates one canonical new mode-`0600` file under an existing private current-user directory. It refuses overwrite, stale confirmation, symlink/parent/path/hard-link races, cancellation, or unverifiable bytes. The result remains operator-owned and is never uploaded or automatically removed. See [Bounded Local Metrics and SLOs](metrics.md).
 
@@ -295,7 +295,7 @@ Result JSON is schema version 1 and includes the provider, provider version, ope
 
 ## `hostwright volume ...`
 
-Provides current schema-v23 inspection, capacity, health, recovery, exact deletion/prune, snapshot, and verified backup/restore operations through Storage Provider API v1. The shipped `hostwright-local` provider stores exact Hostwright-owned resources on one Mac. `list`, `inspect`, `capacity`, and `health` are read-only. `recover` requires the persisted idempotency key for the exact interrupted volume operation.
+Provides current schema-v24 inspection, capacity, health, recovery, exact deletion/prune, snapshot, and verified backup/restore operations through Storage Provider API v1. The shipped `hostwright-local` provider stores exact Hostwright-owned resources on one Mac. `list`, `inspect`, `capacity`, and `health` are read-only. `recover` requires the persisted idempotency key for the exact interrupted volume operation.
 
 Every destructive operation requires exactly one `--dry-run` or `--confirm-plan <sha256>`. Confirmation binds provider and capability identity, project/resource UUIDs, generation, fence, ownership, attachments, holds, reclaim policy, protection evidence, and current observation. Changed or ambiguous evidence fails before provider mutation. `prune` never invokes global or name-based cleanup.
 

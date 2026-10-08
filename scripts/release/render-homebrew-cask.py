@@ -102,12 +102,15 @@ def render(manifest):
 
   pkg "hostwright-#{{version.csv.first}}-macos-arm64-#{{version.csv.second}}.pkg"
 
-  uninstall script: {{
-    executable:   "/usr/local/bin/hostwright-dist",
-    args:         ["package-uninstall", "--prefix", "/usr/local", "--data-policy", "preserve", "--output", "json"],
-    sudo:         true,
-    must_succeed: true,
-  }}
+  uninstall quit:   "dev.hostwright.desktop",
+            script: {{
+              executable:   "/usr/local/bin/hostwright-dist",
+              args:         [
+                "package-uninstall", "--prefix", "/usr/local", "--data-policy", "preserve", "--output", "json"
+              ],
+              sudo:         true,
+              must_succeed: true,
+            }}
 
   caveats <<~EOS
     The command-line tools are installed in /usr/local/bin.

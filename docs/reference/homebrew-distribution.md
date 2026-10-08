@@ -137,8 +137,15 @@ installation is managed by Hostwright. The cask therefore calls the installed
 `hostwright-dist package-uninstall --prefix /usr/local --data-policy preserve
 --output json` with elevated authority and requires success. That command verifies
 ownership, removes the managed generation and cleans up its exact receipt/staging
-payload. A separate broad `pkgutil`, wildcard deletion or user-data zap would
-bypass this boundary and is deliberately absent.
+payload. Homebrew first requests a graceful quit of the exact desktop bundle
+`dev.hostwright.desktop`. A separate broad `pkgutil`, wildcard deletion or user-data
+zap would bypass this boundary and is deliberately absent.
+
+Homebrew also executes this uninstall stanza during cask upgrades and reinstalls.
+Qualify the resulting removal/reinstallation path with a running desktop app and
+existing workload data, including restoration after a failed upgrade. Direct
+`.pkg` upgrade evidence alone does not establish that this Homebrew path works.
+See the [uninstall lifecycle](https://docs.brew.sh/Cask-Cookbook#stanza-uninstall).
 
 Before submission, use an isolated clean macOS environment to run the current
 [Homebrew contribution checks](https://docs.brew.sh/Adding-Software-to-Homebrew).

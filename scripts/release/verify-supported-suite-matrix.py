@@ -156,9 +156,10 @@ def verify(config):
     base_text = bound_attachment(base_root, base, 'commands.log').read_text()
     require('ERROR: AddressSanitizer' not in base_text and 'WARNING: ThreadSanitizer' not in base_text, 'reported sanitizer defect in base')
     observed = native_cases(base_text)
-    summaries = re.findall(r"Test Suite 'All tests' (passed|failed)[^\n]*\n[ \t]*Executed (\d+) tests?, with (?:(\d+) tests? skipped and )?(\d+) failures?", base_text)
-    require(len(summaries) == 1 and summaries[0][0] == 'passed', 'missing complete native base summary')
-    require(int(summaries[0][1]) == len(observed) and int(summaries[0][2] or 0) == sum(x == 'skipped' for x in observed.values()) and int(summaries[0][3]) == 0, 'native base summary mismatch')
+    summaries = re.findall(r"Test Suite '(All tests|Selected tests)' (passed|failed)[^\n]*\n[ \t]*Executed (\d+) tests?, with (?:(\d+) tests? skipped and )?(\d+) failures?", base_text)
+    expected_suite = 'All tests' if lane == 'source' else 'Selected tests'
+    require(len(summaries) == 1 and summaries[0][:2] == (expected_suite, 'passed'), 'missing complete native base summary')
+    require(int(summaries[0][2]) == len(observed) and int(summaries[0][3] or 0) == sum(x == 'skipped' for x in observed.values()) and int(summaries[0][4]) == 0, 'native base summary mismatch')
     base_swift_path = bound_attachment(base_root, base, config['baseSwiftXML'])
     actual_swift = swift_cases(base_swift_path)
     swift_summary = re.findall(r'Test run with (\d+) tests? in \d+ suites? (passed|failed) after', base_text)

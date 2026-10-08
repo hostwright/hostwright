@@ -179,6 +179,71 @@ class MatrixVerificationTests(unittest.TestCase):
         self.assertTrue(report['completeSupportedSuite'])
         self.assertFalse(report['protectedQualificationAccepted'])
 
+    def use_sanitizer_base(self, lane='address'):
+        self.config['lane'] = lane
+        evidence = Path(self.config['base']['root'])
+        (evidence / 'commands.log').write_text(
+            "Test Case '-[M.C a]' passed (0.1 seconds).\n"
+            "Test Suite 'Selected tests' passed at fixture\n"
+            "Executed 1 test, with 0 failures\n"
+            "Test run with 1 test in 1 suite passed after 0.1 seconds.\n"
+        )
+        base_path = evidence / 'base.json'
+        base = json.loads(base_path.read_text())
+        base.update(status='partial-base-passed', sanitizer=lane,
+                    command=['swift', 'test', '--sanitize', lane, '--skip', r'^(?:M\.C/b)$'],
+                    qualifiedRoutedSelectors=['M.C/b'])
+        base['attachments']['commands.log'] = matrix.sha(evidence / 'commands.log')
+        base_path.write_text(json.dumps(base))
+        self.config['base']['receiptSHA256'] = matrix.sha(base_path)
+        attended_path = evidence / 'attended.json'
+        attended = json.loads(attended_path.read_text())
+        attended['sanitizer'] = lane
+        attended_path.write_text(json.dumps(attended))
+        self.config['attended'][0]['receiptSHA256'] = matrix.sha(attended_path)
+
+    def replace_base_log(self, before, after):
+        evidence = Path(self.config['base']['root'])
+        log = evidence / 'commands.log'
+        log.write_text(log.read_text().replace(before, after))
+        path = evidence / 'base.json'
+        base = json.loads(path.read_text())
+        base['attachments']['commands.log'] = matrix.sha(log)
+        path.write_text(json.dumps(base))
+        self.config['base']['receiptSHA256'] = matrix.sha(path)
+
+    def test_sanitizer_selected_base_requires_complete_attended_union(self):
+        for lane in ['address', 'thread']:
+            with self.subTest(lane=lane):
+                self.use_sanitizer_base(lane)
+                report = matrix.verify(self.config)
+                self.assertEqual(report['lane'], lane)
+                self.assertEqual(report['counts']['passedCases'], 3)
+                self.assertTrue(report['completeSupportedSuite'])
+                self.assertFalse(report['protectedQualificationAccepted'])
+
+    def test_sanitizer_selected_base_refuses_missing_attended_case(self):
+        self.use_sanitizer_base()
+        with self.assertRaisesRegex(ValueError, 'missing required attended'):
+            matrix.verify(dict(self.config, attended=[]))
+
+    def test_sanitizer_base_refuses_source_suite_header(self):
+        self.use_sanitizer_base()
+        self.replace_base_log("'Selected tests'", "'All tests'")
+        with self.assertRaisesRegex(ValueError, 'missing complete native base summary'):
+            matrix.verify(self.config)
+
+    def test_source_base_refuses_selected_suite_header(self):
+        self.replace_base_log("'All tests'", "'Selected tests'")
+        with self.assertRaisesRegex(ValueError, 'missing complete native base summary'):
+            matrix.verify(self.config)
+
+    def test_sanitizer_base_refuses_unaccounted_omission(self):
+        self.use_sanitizer_base()
+        self.replace_base_log("Test Case '-[M.C a]' passed (0.1 seconds).\n", '')
+        with self.assertRaisesRegex(ValueError, 'empty or duplicate executed XCTest'):
+            matrix.verify(self.config)
+
     def test_complete_verification_refuses_missing_attended_execution(self):
         with self.assertRaisesRegex(ValueError, 'missing required attended'):
             matrix.verify(dict(self.config, attended=[]))

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Regression coverage for incomplete sanitizer execution evidence."""
 import unittest
-from swift_test_results import full_suite_results, verify_checkpoint_results
+from swift_test_results import full_suite_results, sanitizer_base_results, verify_checkpoint_results
 
 
 PASSED = """Test Case '-[CoreTests testOne]' passed (0.001 seconds).
@@ -68,6 +68,45 @@ class FullSuiteResultsTests(unittest.TestCase):
     def testFailedSwiftTestingCannotPass(self):
         with self.assertRaisesRegex(ValueError, 'failed or skipped'):
             full_suite_results(PASSED.replace('suite passed after', 'suite failed after'))
+
+
+class SanitizerBaseResultsTests(unittest.TestCase):
+    def setUp(self):
+        self.selected = PASSED.replace("'All tests'", "'Selected tests'")
+
+    def testSelectedBaseAccountsForBothFrameworks(self):
+        self.assertEqual(sanitizer_base_results(self.selected)['passedCases'], 3)
+
+    def testSelectedBaseCannotQualifyAsFullSuiteOrResumeFullCheckpoint(self):
+        with self.assertRaisesRegex(ValueError, 'one complete'):
+            full_suite_results(self.selected)
+        with self.assertRaisesRegex(ValueError, 'one complete'):
+            verify_checkpoint_results({'fullSuiteResults': sanitizer_base_results(self.selected)}, self.selected)
+
+    def testFullSuiteCannotMasqueradeAsSelectedBase(self):
+        with self.assertRaisesRegex(ValueError, 'one complete'):
+            sanitizer_base_results(PASSED)
+
+    def testMixedSuiteHeadersAreRefused(self):
+        for reader in [full_suite_results, sanitizer_base_results]:
+            with self.subTest(reader=reader.__name__), self.assertRaisesRegex(ValueError, 'one complete'):
+                reader(PASSED + self.selected)
+
+    def testSelectedBaseRejectsSkippedFailedAndMismatchedCases(self):
+        for raw in [
+            self.selected.replace("testOne]' passed", "testOne]' skipped").replace('with 0 failures', 'with 1 test skipped and 0 failures'),
+            self.selected.replace("testOne]' passed", "testOne]' failed").replace('with 0 failures', 'with 1 failure'),
+            self.selected.replace('Executed 1 test', 'Executed 2 tests'),
+            self.selected.replace('suite passed after', 'suite failed after'),
+        ]:
+            with self.subTest(raw=raw), self.assertRaises(ValueError):
+                sanitizer_base_results(raw)
+
+    def testSelectedBaseRequiresBothFrameworksAndNonemptyExecution(self):
+        for raw in [self.selected.split('✔')[0], self.selected.split('✔')[1],
+                    self.selected.replace('with 2 tests', 'with 0 tests')]:
+            with self.subTest(raw=raw), self.assertRaises(ValueError):
+                sanitizer_base_results(raw)
 
 
 if __name__ == '__main__':

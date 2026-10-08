@@ -120,3 +120,8 @@ Remaining Phase 15 gates follow the [accepted local release scope](../design/adr
 The [retained RC.2 object variance assessment](rc2-object-variance-assessment.md)
 preserves its original build identity and limits. It provides no qualification
 for the current candidate or final-version bytes.
+
+The October 8 [Homebrew scope amendment](../design/adr-0015-reduced-local-release.md#official-homebrew-availability-2026-10-08)
+requires official cask acceptance and verified fresh-machine short-name
+installation for the requested GA launch. The core source-build formula remains
+deferred; cask preparation and qualification proceed alongside the existing gates.

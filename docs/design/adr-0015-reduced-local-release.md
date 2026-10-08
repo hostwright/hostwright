@@ -1,6 +1,6 @@
 # ADR 0015: Reduce v0.0.2 to local CLI, desktop, and Compose import
 
-Status: accepted by the maintainer on 2026-09-07; Phase 14 acceptance amended on 2026-10-05. Final release qualification remains pending.
+Status: accepted by the maintainer on 2026-09-07; Phase 14 acceptance amended on 2026-10-05; official Homebrew distribution requested on 2026-10-08. Final release qualification remains pending.
 
 ## Decision
 
@@ -25,11 +25,13 @@ supported release packaging.
 
 Preserve all 183 identities and historical evidence. The issue manifest records
 `releaseDisposition` as `required` or `deferred`, with this document as its
-`scopeDecision`. The 50 deferred issues may close only as `not_planned`, with a
+`scopeDecision`. Originally 50 issues were deferred; the October 8 amendment
+returns #282 to required work, leaving 49 deferred. Deferred issues may close only as `not_planned`, with a
 scope-decision link, and after their children have the same recorded disposition
 and closure reason. Required issues still close through clean final evidence.
 A deferred issue never counts as completed implementation. The 105 previously
-closed issues retain their evidence; 28 open issues remain required for release.
+closed issues retain their evidence; the original scope decision retained 28 of
+the then-open issues. The October 8 amendment adds one required workstream.
 
 Retained workstreams receive explicit acceptance criteria and evidence classes in
 the manifest. GitHub bodies and the generated index mirror that authority. Scope
@@ -38,6 +40,32 @@ can enforce the decision. The old July daily schedule is historical; current
 delivery follows scope reset, Phase 10, Phase 13, Phase 14, then Phase 15.
 
 ## Qualification
+
+### Official Homebrew availability (2026-10-08)
+
+The maintainer requested `brew install hostwright` on a fresh Homebrew installation
+alongside GA. Return #282 to required Phase 15 work as official Homebrew cask
+distribution of the signed native app and CLI package. The core source-build
+formula remains a separate deferred approach. Preserve the original issue identity
+and its historical not-planned closure; the new local ledger records the requested
+reopening and must be synchronized with GitHub through the reviewed scope change.
+
+Generate the cask only from a trusted, verified package, qualify its real install,
+launch, upgrade and preserve-data uninstall, then submit it using immutable public
+release bytes. Official repository acceptance and a fresh-machine short-name
+installation are required before closing #282 or announcing the requested
+Homebrew-available GA launch. A vendor tap or local trust setting does not satisfy
+that result. Homebrew decides eligibility and acceptance; no acceptance date is
+promised. Track its current platform and public-interest requirements explicitly.
+
+Continue all existing product qualification while this work proceeds. The signed
+stable artifact must be published before Homebrew can audit its public download;
+this dependency does not permit announcing that the complete Homebrew launch gate
+has passed early. Keep #282 and the release parents open until the official
+channel is verified, or the maintainer explicitly changes the launch requirement.
+
+See [Homebrew distribution](../reference/homebrew-distribution.md) for the generator,
+test procedure and current external prerequisites.
 
 ### Phase 14 implementation acceptance (2026-10-05)
 

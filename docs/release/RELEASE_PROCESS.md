@@ -45,6 +45,7 @@ All of the following are required:
 - every documentation quickstart executes and website typecheck/build/link checks pass;
 - signed/notarized archives and `.pkg` pass checksum, stapling, Gatekeeper, clean install, reboot, upgrade, rollback, repair, and uninstall;
 - the vendor Homebrew tap installs those exact verified artifacts;
+- for the requested Homebrew-available launch, #282 has official cask acceptance and a verified fresh-machine `brew install hostwright`; the October 8 [scope amendment](../design/adr-0015-reduced-local-release.md#official-homebrew-availability-2026-10-08) defines the publication dependency;
 - one complete clean RC qualification and independent signed-artifact install/reboot/upgrade/rollback/repair/uninstall verification pass; final-version bytes qualify before promotion.
 
 ## Artifact and Package Policy
@@ -55,7 +56,14 @@ Staging requires an authenticated runtime-provenance archive from the exact sour
 
 The protected workflow retains staged bundles for 90 days. Published assets, signatures, provenance, inventories, checksums, and release evidence are retained indefinitely. Exceptional removal requires a separate reviewed action.
 
-Homebrew-core submission is deferred. Publish only the verified `brew install hostwright/tap/hostwright` channel; do not claim `brew install hostwright` before core acceptance.
+The core source-build formula remains deferred. Official cask distribution is now
+required for the requested Homebrew-available GA launch. Publish and verify the
+signed stable bytes before submitting their cask; keep the official-channel and
+parent issues open until Homebrew acceptance and fresh installation verification.
+Do not advertise `brew install hostwright` before that verification.
+
+See [Homebrew distribution and package names](../reference/homebrew-distribution.md)
+for vendor-tap setup, official formula/cask requirements and submission order.
 
 ## Final Evidence Record
 

@@ -46,10 +46,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$VALIDATION_COMMIT" =~ ^[a-f0-9]{40}$ ]]
-          [[ "$VALIDATION_VERSION" =~ ^0\.0\.2(-dev\.[1-9][0-9]{0,2}|-rc\.[1-9][0-9]?)?$ ]]
-          [[ "$VALIDATION_TAG" == "v$VALIDATION_VERSION" ]]
-          [[ "$VALIDATION_RUNTIME_RUN" =~ ^[1-9][0-9]*$ ]]
+          [[ "$VALIDATION_COMMIT" =~ ^[a-f0-9]{40}$ ]] || exit 1
+          [[ "$VALIDATION_VERSION" =~ ^0\.0\.2(-dev\.[1-9][0-9]{0,2}|-rc\.[1-9][0-9]?)?$ ]] || exit 1
+          [[ "$VALIDATION_TAG" == "v$VALIDATION_VERSION" ]] || exit 1
+          [[ "$VALIDATION_RUNTIME_RUN" =~ ^[1-9][0-9]*$ ]] || exit 1
           test "$GITHUB_REPOSITORY" = hostwright/hostwright
 
       - name: Check out the exact reviewed commit
@@ -67,7 +67,7 @@ jobs:
           git fetch --no-tags origin main
           git merge-base --is-ancestor "$VALIDATION_COMMIT" origin/main
           baseline_commit="$(git ls-remote origin 'refs/tags/v0.0.2-dev.11^{}' | awk '{ print $1 }')"
-          [[ "$baseline_commit" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$baseline_commit" =~ ^[a-f0-9]{40}$ ]] || exit 1
           test "$baseline_commit" != "$VALIDATION_COMMIT"
           git cat-file -e "$baseline_commit^{commit}"
           git merge-base --is-ancestor "$baseline_commit" "$VALIDATION_COMMIT"
@@ -110,21 +110,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$RELEASE_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$RELEASE_COMMIT" =~ ^[a-f0-9]{40}$ ]] || exit 1
           python3 scripts/release/staged-release.py version --version "$RELEASE_VERSION"
-          [[ "$RELEASE_TAG" == "v$RELEASE_VERSION" ]]
-          [[ "$RELEASE_APPLICATION_IDENTITY" =~ ^[A-F0-9]{40}$ ]]
-          [[ "$RELEASE_INSTALLER_IDENTITY" =~ ^[A-F0-9]{40}$ ]]
-          [[ "$RELEASE_APPLICATION_IDENTITY" != "$RELEASE_INSTALLER_IDENTITY" ]]
-          [[ "$RELEASE_TEAM_ID" =~ ^[A-Z0-9]{10}$ ]]
-          [[ "$RELEASE_NOTARY_PROFILE" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]]
+          [[ "$RELEASE_TAG" == "v$RELEASE_VERSION" ]] || exit 1
+          [[ "$RELEASE_APPLICATION_IDENTITY" =~ ^[A-F0-9]{40}$ ]] || exit 1
+          [[ "$RELEASE_INSTALLER_IDENTITY" =~ ^[A-F0-9]{40}$ ]] || exit 1
+          [[ "$RELEASE_APPLICATION_IDENTITY" != "$RELEASE_INSTALLER_IDENTITY" ]] || exit 1
+          [[ "$RELEASE_TEAM_ID" =~ ^[A-Z0-9]{10}$ ]] || exit 1
+          [[ "$RELEASE_NOTARY_PROFILE" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] || exit 1
           test "$GITHUB_REPOSITORY" = hostwright/hostwright
           test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
           git fetch --no-tags origin main
           git merge-base --is-ancestor "$RELEASE_COMMIT" origin/main
           baseline_commit="$(git ls-remote origin 'refs/tags/v0.0.2-dev.11^{}' | awk '{ print $1 }')"
-          [[ "$baseline_commit" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$baseline_commit" =~ ^[a-f0-9]{40}$ ]] || exit 1
           test "$baseline_commit" != "$RELEASE_COMMIT"
           git cat-file -e "$baseline_commit^{commit}"
           git merge-base --is-ancestor "$baseline_commit" "$RELEASE_COMMIT"
@@ -150,7 +150,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$RELEASE_RUNTIME_PROVENANCE_RUN" =~ ^[1-9][0-9]*$ ]]
+          [[ "$RELEASE_RUNTIME_PROVENANCE_RUN" =~ ^[1-9][0-9]*$ ]] || exit 1
           run_receipt="$RUNNER_TEMP/runtime-provenance-run.json"
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RELEASE_RUNTIME_PROVENANCE_RUN" > "$run_receipt"
           attempt="$(python3 - "$run_receipt" "$RELEASE_RUNTIME_PROVENANCE_RUN" "$RELEASE_COMMIT" <<'PY'
@@ -192,13 +192,13 @@ jobs:
           RELEASE_RUNTIME_PROVENANCE_ARCHIVE: ${{ steps.runtime-source.outputs.archive }}
         run: |
           set -euo pipefail
-          [[ "$RELEASE_RUNTIME_PROVENANCE_ARCHIVE" == /* ]]
+          [[ "$RELEASE_RUNTIME_PROVENANCE_ARCHIVE" == /* ]] || exit 1
           test -f "$RELEASE_RUNTIME_PROVENANCE_ARCHIVE"
           test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
           gpg_arguments=()
           if [[ -n "$RELEASE_GPG" || -n "$RELEASE_GPG_SHA256" ]]; then
-            [[ "$RELEASE_GPG" == /* && "$RELEASE_GPG_SHA256" =~ ^[a-f0-9]{64}$ ]]
+            [[ "$RELEASE_GPG" == /* && "$RELEASE_GPG_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
             gpg_arguments=(--gpg "$RELEASE_GPG" --gpg-sha256 "$RELEASE_GPG_SHA256")
           fi
           python3 scripts/release/corresponding-source.py prepare --root "$GITHUB_WORKSPACE" --runtime-provenance-archive "$RELEASE_RUNTIME_PROVENANCE_ARCHIVE" --output-parent "$RUNNER_TEMP" --version "$RELEASE_VERSION" --source "$RELEASE_COMMIT" "${gpg_arguments[@]}" > "$RUNNER_TEMP/corresponding-source-preparation.json"
@@ -266,7 +266,7 @@ jobs:
           set -euo pipefail
           gpg_arguments=()
           if [[ -n "$RELEASE_GPG" || -n "$RELEASE_GPG_SHA256" ]]; then
-            [[ "$RELEASE_GPG" == /* && "$RELEASE_GPG_SHA256" =~ ^[a-f0-9]{64}$ ]]
+            [[ "$RELEASE_GPG" == /* && "$RELEASE_GPG_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
             gpg_arguments=(--gpg "$RELEASE_GPG" --gpg-sha256 "$RELEASE_GPG_SHA256")
           fi
           python3 scripts/release/stage-corresponding-source.py install --root "$STAGE_BUNDLE" --prepared-dir "$SOURCE_PREPARED" --commit "$RELEASE_COMMIT" --version "$RELEASE_VERSION" "${gpg_arguments[@]}"

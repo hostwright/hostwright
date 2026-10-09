@@ -22,8 +22,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$(sw_vers -productVersion)" == 27.* ]]
-          [[ "$(uname -m)" == arm64 ]]
+          [[ "$(sw_vers -productVersion)" == 27.* ]] || exit 1
+          [[ "$(uname -m)" == arm64 ]] || exit 1
           xcodebuild -version
           swift --version
       - name: Build the package and exercise the Docker proxy process

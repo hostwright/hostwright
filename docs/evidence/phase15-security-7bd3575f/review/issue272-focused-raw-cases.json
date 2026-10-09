@@ -1,0 +1,3060 @@
+{
+  "sourceCommit": "7bd3575fff351fd4f1b20c694619457ded99a1a6",
+  "rawLogSHA256": "d0577af5e50ad2429e082e32abc602fa403970371839bfd3aa7b1c33947100da",
+  "xmlSHA256": "aa4cd5fa17afa3cba95fb103258cd8f4fdc2e1d3efeca9768adada54b7b40b50",
+  "cases": [
+    {
+      "identifier": "HostwrightRuntimeTests.AppleContainerCodecTests/testBothVersionCodecsAcceptUnknownNonSemanticFieldsAcrossStructuredReads",
+      "testClass": "HostwrightRuntimeTests.AppleContainerCodecTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 5929,
+      "raw": "Test Case '-[HostwrightRuntimeTests.AppleContainerCodecTests testBothVersionCodecsAcceptUnknownNonSemanticFieldsAcrossStructuredReads]' passed (0.011 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightRuntimeTests.AppleContainerCodecTests/testBothVersionCodecsDecodeSemanticFixtureMatrix",
+      "testClass": "HostwrightRuntimeTests.AppleContainerCodecTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 5931,
+      "raw": "Test Case '-[HostwrightRuntimeTests.AppleContainerCodecTests testBothVersionCodecsDecodeSemanticFixtureMatrix]' passed (0.003 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightRuntimeTests.AppleContainerCodecTests/testBothVersionCodecsRejectUnknownRequiredEnumsBeforeMutationConstruction",
+      "testClass": "HostwrightRuntimeTests.AppleContainerCodecTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 5933,
+      "raw": "Test Case '-[HostwrightRuntimeTests.AppleContainerCodecTests testBothVersionCodecsRejectUnknownRequiredEnumsBeforeMutationConstruction]' passed (0.002 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightRuntimeTests.AppleContainerCodecTests/testInfrastructureCodecsAcceptEmptyListsAndRejectAmbiguousOrPartialEvidence",
+      "testClass": "HostwrightRuntimeTests.AppleContainerCodecTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 5935,
+      "raw": "Test Case '-[HostwrightRuntimeTests.AppleContainerCodecTests testInfrastructureCodecsAcceptEmptyListsAndRejectAmbiguousOrPartialEvidence]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightRuntimeTests.AppleContainerCodecTests/testInfrastructureCodecsEnforceListStringMetadataAndByteBounds",
+      "testClass": "HostwrightRuntimeTests.AppleContainerCodecTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 5937,
+      "raw": "Test Case '-[HostwrightRuntimeTests.AppleContainerCodecTests testInfrastructureCodecsEnforceListStringMetadataAndByteBounds]' passed (0.056 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightRuntimeTests.AppleContainerCodecTests/testLogsAreOpaqueAndBoundedAndMutationStdoutHasNoSemantics",
+      "testClass": "HostwrightRuntimeTests.AppleContainerCodecTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 5939,
+      "raw": "Test Case '-[HostwrightRuntimeTests.AppleContainerCodecTests testLogsAreOpaqueAndBoundedAndMutationStdoutHasNoSemantics]' passed (0.010 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightRuntimeTests.AppleContainerCodecTests/testSelectsOnlyExactOnePointZeroAndOnePointOneVersionOutputs",
+      "testClass": "HostwrightRuntimeTests.AppleContainerCodecTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 5941,
+      "raw": "Test Case '-[HostwrightRuntimeTests.AppleContainerCodecTests testSelectsOnlyExactOnePointZeroAndOnePointOneVersionOutputs]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightRuntimeTests.AppleContainerCodecTests/testSemanticDecodersRejectDuplicatePartialMalformedAndOversizedOutput",
+      "testClass": "HostwrightRuntimeTests.AppleContainerCodecTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 5943,
+      "raw": "Test Case '-[HostwrightRuntimeTests.AppleContainerCodecTests testSemanticDecodersRejectDuplicatePartialMalformedAndOversizedOutput]' passed (0.077 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightRuntimeTests.AppleContainerCodecTests/testUnsupportedVersionFailsMutationPreflightBeforeCommandConstruction",
+      "testClass": "HostwrightRuntimeTests.AppleContainerCodecTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 5945,
+      "raw": "Test Case '-[HostwrightRuntimeTests.AppleContainerCodecTests testUnsupportedVersionFailsMutationPreflightBeforeCommandConstruction]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightRuntimeTests.AppleContainerCodecTests/testVersionBoundCommandMatrixUsesJSONOnlyForSemanticReads",
+      "testClass": "HostwrightRuntimeTests.AppleContainerCodecTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 5947,
+      "raw": "Test Case '-[HostwrightRuntimeTests.AppleContainerCodecTests testVersionBoundCommandMatrixUsesJSONOnlyForSemanticReads]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightRuntimeTests.ContainerizationHelperProtocolTests/testCanonicalDecoderRejectsProtocolMismatch",
+      "testClass": "HostwrightRuntimeTests.ContainerizationHelperProtocolTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 5952,
+      "raw": "Test Case '-[HostwrightRuntimeTests.ContainerizationHelperProtocolTests testCanonicalDecoderRejectsProtocolMismatch]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightRuntimeTests.ContainerizationHelperProtocolTests/testCanonicalDecoderRejectsWhitespaceUnknownAndDuplicateFields",
+      "testClass": "HostwrightRuntimeTests.ContainerizationHelperProtocolTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 5954,
+      "raw": "Test Case '-[HostwrightRuntimeTests.ContainerizationHelperProtocolTests testCanonicalDecoderRejectsWhitespaceUnknownAndDuplicateFields]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightRuntimeTests.ContainerizationHelperProtocolTests/testFrameBoundIsExactlyEightMiB",
+      "testClass": "HostwrightRuntimeTests.ContainerizationHelperProtocolTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 5956,
+      "raw": "Test Case '-[HostwrightRuntimeTests.ContainerizationHelperProtocolTests testFrameBoundIsExactlyEightMiB]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightRuntimeTests.ContainerizationHelperProtocolTests/testFrameDecoderRejectsZeroOverflowTruncationAndTrailingBytes",
+      "testClass": "HostwrightRuntimeTests.ContainerizationHelperProtocolTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 5958,
+      "raw": "Test Case '-[HostwrightRuntimeTests.ContainerizationHelperProtocolTests testFrameDecoderRejectsZeroOverflowTruncationAndTrailingBytes]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightRuntimeTests.ContainerizationHelperProtocolTests/testFrameUsesFourByteBigEndianLength",
+      "testClass": "HostwrightRuntimeTests.ContainerizationHelperProtocolTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 5960,
+      "raw": "Test Case '-[HostwrightRuntimeTests.ContainerizationHelperProtocolTests testFrameUsesFourByteBigEndianLength]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightRuntimeTests.ContainerizationHelperProtocolTests/testIncrementalDecoderAcceptsSplitHeaderAndPayload",
+      "testClass": "HostwrightRuntimeTests.ContainerizationHelperProtocolTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 5962,
+      "raw": "Test Case '-[HostwrightRuntimeTests.ContainerizationHelperProtocolTests testIncrementalDecoderAcceptsSplitHeaderAndPayload]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightRuntimeTests.ContainerizationHelperProtocolTests/testMutationPriorOwnershipProofRoundTripsAndRemainsPayloadBounded",
+      "testClass": "HostwrightRuntimeTests.ContainerizationHelperProtocolTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 5964,
+      "raw": "Test Case '-[HostwrightRuntimeTests.ContainerizationHelperProtocolTests testMutationPriorOwnershipProofRoundTripsAndRemainsPayloadBounded]' passed (0.086 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightRuntimeTests.ContainerizationHelperProtocolTests/testOperationContractIsExact",
+      "testClass": "HostwrightRuntimeTests.ContainerizationHelperProtocolTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 5966,
+      "raw": "Test Case '-[HostwrightRuntimeTests.ContainerizationHelperProtocolTests testOperationContractIsExact]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightRuntimeTests.ContainerizationHelperProtocolTests/testPeerIdentityPolicyRequiresSameUIDPositivePIDExactTeamAndRequirement",
+      "testClass": "HostwrightRuntimeTests.ContainerizationHelperProtocolTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 5968,
+      "raw": "Test Case '-[HostwrightRuntimeTests.ContainerizationHelperProtocolTests testPeerIdentityPolicyRequiresSameUIDPositivePIDExactTeamAndRequirement]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightRuntimeTests.ContainerizationHelperProtocolTests/testRequestRoundTripsAsCanonicalJSONWithTypedPayloadAndMutationContext",
+      "testClass": "HostwrightRuntimeTests.ContainerizationHelperProtocolTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 5970,
+      "raw": "Test Case '-[HostwrightRuntimeTests.ContainerizationHelperProtocolTests testRequestRoundTripsAsCanonicalJSONWithTypedPayloadAndMutationContext]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightRuntimeTests.ContainerizationHelperProtocolTests/testRequestValidatorRejectsReplayExpiredAndInvalidBindings",
+      "testClass": "HostwrightRuntimeTests.ContainerizationHelperProtocolTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 5972,
+      "raw": "Test Case '-[HostwrightRuntimeTests.ContainerizationHelperProtocolTests testRequestValidatorRejectsReplayExpiredAndInvalidBindings]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightRuntimeTests.ContainerizationHelperProtocolTests/testResultAndErrorEnvelopesAreVersionedTypedAndRedacted",
+      "testClass": "HostwrightRuntimeTests.ContainerizationHelperProtocolTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 5974,
+      "raw": "Test Case '-[HostwrightRuntimeTests.ContainerizationHelperProtocolTests testResultAndErrorEnvelopesAreVersionedTypedAndRedacted]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightControlTransportTests.ControlFrameCodecTests/testAcceptsBufferedReadWhenPeerHalfCloses",
+      "testClass": "HostwrightControlTransportTests.ControlFrameCodecTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 5979,
+      "raw": "Test Case '-[HostwrightControlTransportTests.ControlFrameCodecTests testAcceptsBufferedReadWhenPeerHalfCloses]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightControlTransportTests.ControlFrameCodecTests/testDelayedUnixPeerReadCompletesMaximumFrameOnNonblockingWriter",
+      "testClass": "HostwrightControlTransportTests.ControlFrameCodecTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 5981,
+      "raw": "Test Case '-[HostwrightControlTransportTests.ControlFrameCodecTests testDelayedUnixPeerReadCompletesMaximumFrameOnNonblockingWriter]' passed (0.063 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightControlTransportTests.ControlFrameCodecTests/testNonReadingUnixPeerExpiresMaximumFrameWriteAtDeadline",
+      "testClass": "HostwrightControlTransportTests.ControlFrameCodecTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 5983,
+      "raw": "Test Case '-[HostwrightControlTransportTests.ControlFrameCodecTests testNonReadingUnixPeerExpiresMaximumFrameWriteAtDeadline]' passed (0.051 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightControlTransportTests.ControlFrameCodecTests/testReadDeadlineExpiresWithoutPeerData",
+      "testClass": "HostwrightControlTransportTests.ControlFrameCodecTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 5985,
+      "raw": "Test Case '-[HostwrightControlTransportTests.ControlFrameCodecTests testReadDeadlineExpiresWithoutPeerData]' passed (0.006 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightControlTransportTests.ControlFrameCodecTests/testReadsFragmentedPrefixAndBody",
+      "testClass": "HostwrightControlTransportTests.ControlFrameCodecTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 5987,
+      "raw": "Test Case '-[HostwrightControlTransportTests.ControlFrameCodecTests testReadsFragmentedPrefixAndBody]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightControlTransportTests.ControlFrameCodecTests/testRejectsOversizeDeclaredLengthBeforePayloadAllocation",
+      "testClass": "HostwrightControlTransportTests.ControlFrameCodecTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 5989,
+      "raw": "Test Case '-[HostwrightControlTransportTests.ControlFrameCodecTests testRejectsOversizeDeclaredLengthBeforePayloadAllocation]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightControlTransportTests.ControlFrameCodecTests/testRoundTripUsesBigEndianLengthPrefix",
+      "testClass": "HostwrightControlTransportTests.ControlFrameCodecTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 5991,
+      "raw": "Test Case '-[HostwrightControlTransportTests.ControlFrameCodecTests testRoundTripUsesBigEndianLengthPrefix]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightControlTransportTests.ControlFrameCodecTests/testWriteRejectsPeerCloseWithoutSignal",
+      "testClass": "HostwrightControlTransportTests.ControlFrameCodecTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 5993,
+      "raw": "Test Case '-[HostwrightControlTransportTests.ControlFrameCodecTests testWriteRejectsPeerCloseWithoutSignal]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.ControlIdentityBootstrapTransactionTests/testAllRotationsAndDesktopBindingCommitTogether",
+      "testClass": "HostwrightStateTests.ControlIdentityBootstrapTransactionTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 5998,
+      "raw": "Test Case '-[HostwrightStateTests.ControlIdentityBootstrapTransactionTests testAllRotationsAndDesktopBindingCommitTogether]' passed (0.090 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.ControlIdentityBootstrapTransactionTests/testChangedExpectedSnapshotRefusesBeforeRotations",
+      "testClass": "HostwrightStateTests.ControlIdentityBootstrapTransactionTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6000,
+      "raw": "Test Case '-[HostwrightStateTests.ControlIdentityBootstrapTransactionTests testChangedExpectedSnapshotRefusesBeforeRotations]' passed (0.066 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.ControlIdentityBootstrapTransactionTests/testFailureAfterInstallerRotationPreservesHashesSessionsAndRBAC",
+      "testClass": "HostwrightStateTests.ControlIdentityBootstrapTransactionTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6002,
+      "raw": "Test Case '-[HostwrightStateTests.ControlIdentityBootstrapTransactionTests testFailureAfterInstallerRotationPreservesHashesSessionsAndRBAC]' passed (0.085 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.ControlIdentitySecurityAdapterTests/testInstalledRequirementAllowsCDHashRotationButRejectsDuplicateIdentity",
+      "testClass": "HostwrightStateTests.ControlIdentitySecurityAdapterTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6007,
+      "raw": "Test Case '-[HostwrightStateTests.ControlIdentitySecurityAdapterTests testInstalledRequirementAllowsCDHashRotationButRejectsDuplicateIdentity]' passed (0.059 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.ControlIdentitySecurityAdapterTests/testInstalledRequirementRequiresAtomicCDHashRotationAndRejectsOldHash",
+      "testClass": "HostwrightStateTests.ControlIdentitySecurityAdapterTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6009,
+      "raw": "Test Case '-[HostwrightStateTests.ControlIdentitySecurityAdapterTests testInstalledRequirementRequiresAtomicCDHashRotationAndRejectsOldHash]' passed (0.058 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.ControlIdentitySecurityAdapterTests/testRefusesUnboundedSessionLifetimeAndUnsignedIntegerOverflow",
+      "testClass": "HostwrightStateTests.ControlIdentitySecurityAdapterTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6011,
+      "raw": "Test Case '-[HostwrightStateTests.ControlIdentitySecurityAdapterTests testRefusesUnboundedSessionLifetimeAndUnsignedIntegerOverflow]' passed (0.035 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.ControlIdentitySecurityAdapterTests/testResolvesExactNativeCDHashAndPersistsBoundSession",
+      "testClass": "HostwrightStateTests.ControlIdentitySecurityAdapterTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6013,
+      "raw": "Test Case '-[HostwrightStateTests.ControlIdentitySecurityAdapterTests testResolvesExactNativeCDHashAndPersistsBoundSession]' passed (0.057 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.ControlIdentitySecurityAdapterTests/testRevocationAndGenerationChangeInvalidateSessionImmediately",
+      "testClass": "HostwrightStateTests.ControlIdentitySecurityAdapterTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6015,
+      "raw": "Test Case '-[HostwrightStateTests.ControlIdentitySecurityAdapterTests testRevocationAndGenerationChangeInvalidateSessionImmediately]' passed (0.057 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.ControlIdentitySecurityAdapterTests/testSessionPersistenceWaitsForTransientWriterFenceContention",
+      "testClass": "HostwrightStateTests.ControlIdentitySecurityAdapterTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6017,
+      "raw": "Test Case '-[HostwrightStateTests.ControlIdentitySecurityAdapterTests testSessionPersistenceWaitsForTransientWriterFenceContention]' passed (0.692 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.ControlIdentitySecurityAdapterTests/testSessionValidationWaitsForTransientExclusiveContention",
+      "testClass": "HostwrightStateTests.ControlIdentitySecurityAdapterTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6019,
+      "raw": "Test Case '-[HostwrightStateTests.ControlIdentitySecurityAdapterTests testSessionValidationWaitsForTransientExclusiveContention]' passed (0.706 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.ControlRequestRepositoryTests/testExactReplayReturnsPriorRecordAndDigestConflictIsRejected",
+      "testClass": "HostwrightStateTests.ControlRequestRepositoryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6024,
+      "raw": "Test Case '-[HostwrightStateTests.ControlRequestRepositoryTests testExactReplayReturnsPriorRecordAndDigestConflictIsRejected]' passed (0.064 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.ControlRequestRepositoryTests/testExpiredStreamIdempotencyIsAStableConflict",
+      "testClass": "HostwrightStateTests.ControlRequestRepositoryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6026,
+      "raw": "Test Case '-[HostwrightStateTests.ControlRequestRepositoryTests testExpiredStreamIdempotencyIsAStableConflict]' passed (0.049 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.ControlRequestRepositoryTests/testIdempotencyKeysAreSubjectIsolated",
+      "testClass": "HostwrightStateTests.ControlRequestRepositoryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6028,
+      "raw": "Test Case '-[HostwrightStateTests.ControlRequestRepositoryTests testIdempotencyKeysAreSubjectIsolated]' passed (0.060 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.ControlRequestRepositoryTests/testInvalidInputsAndExpiredIdempotencyAreRejectedWithoutDeletion",
+      "testClass": "HostwrightStateTests.ControlRequestRepositoryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6030,
+      "raw": "Test Case '-[HostwrightStateTests.ControlRequestRepositoryTests testInvalidInputsAndExpiredIdempotencyAreRejectedWithoutDeletion]' passed (0.051 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.ControlRequestRepositoryTests/testOnlyAcceptedRequestsMayTransitionOnceToTerminalStatus",
+      "testClass": "HostwrightStateTests.ControlRequestRepositoryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6032,
+      "raw": "Test Case '-[HostwrightStateTests.ControlRequestRepositoryTests testOnlyAcceptedRequestsMayTransitionOnceToTerminalStatus]' passed (0.101 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.ControlRequestRepositoryTests/testOperationEventPayloadEscapesHostilePrintableReference",
+      "testClass": "HostwrightStateTests.ControlRequestRepositoryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6034,
+      "raw": "Test Case '-[HostwrightStateTests.ControlRequestRepositoryTests testOperationEventPayloadEscapesHostilePrintableReference]' passed (0.046 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.ControlRequestRepositoryTests/testOperationWatchReceivesPlannedStartedCancelAndTerminalLifecycleInOrder",
+      "testClass": "HostwrightStateTests.ControlRequestRepositoryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6036,
+      "raw": "Test Case '-[HostwrightStateTests.ControlRequestRepositoryTests testOperationWatchReceivesPlannedStartedCancelAndTerminalLifecycleInOrder]' passed (0.067 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.ControlRequestRepositoryTests/testPlannedStreamCancellationIsAtomicAndNeverMarksStarted",
+      "testClass": "HostwrightStateTests.ControlRequestRepositoryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6038,
+      "raw": "Test Case '-[HostwrightStateTests.ControlRequestRepositoryTests testPlannedStreamCancellationIsAtomicAndNeverMarksStarted]' passed (0.055 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.ControlRequestRepositoryTests/testRecordsAtomicallyAndPersistsAfterReopen",
+      "testClass": "HostwrightStateTests.ControlRequestRepositoryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6040,
+      "raw": "Test Case '-[HostwrightStateTests.ControlRequestRepositoryTests testRecordsAtomicallyAndPersistsAfterReopen]' passed (0.051 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.ControlRequestRepositoryTests/testRestartRecoveryTerminatesOnlyInterruptedUnaryRequests",
+      "testClass": "HostwrightStateTests.ControlRequestRepositoryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6042,
+      "raw": "Test Case '-[HostwrightStateTests.ControlRequestRepositoryTests testRestartRecoveryTerminatesOnlyInterruptedUnaryRequests]' passed (0.071 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.ControlRequestRepositoryTests/testStartedStreamReplayIsAmbiguousAndNeverStartsAgain",
+      "testClass": "HostwrightStateTests.ControlRequestRepositoryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6044,
+      "raw": "Test Case '-[HostwrightStateTests.ControlRequestRepositoryTests testStartedStreamReplayIsAmbiguousAndNeverStartsAgain]' passed (0.057 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.ControlRequestRepositoryTests/testStreamOperationCreatesRequestAndPlannedLedgerAtomicallyThenRetriesBeforeStart",
+      "testClass": "HostwrightStateTests.ControlRequestRepositoryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6046,
+      "raw": "Test Case '-[HostwrightStateTests.ControlRequestRepositoryTests testStreamOperationCreatesRequestAndPlannedLedgerAtomicallyThenRetriesBeforeStart]' passed (0.052 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.ControlRequestRepositoryTests/testStreamOperationPersistsSuccessAndFailureTerminalStates",
+      "testClass": "HostwrightStateTests.ControlRequestRepositoryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6048,
+      "raw": "Test Case '-[HostwrightStateTests.ControlRequestRepositoryTests testStreamOperationPersistsSuccessAndFailureTerminalStates]' passed (0.090 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.ControlRequestRepositoryTests/testStreamOperationRejectsCompetingRequestDigestAndOperationIdentity",
+      "testClass": "HostwrightStateTests.ControlRequestRepositoryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6050,
+      "raw": "Test Case '-[HostwrightStateTests.ControlRequestRepositoryTests testStreamOperationRejectsCompetingRequestDigestAndOperationIdentity]' passed (0.056 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.ControlRequestRepositoryTests/testTerminalResponsePersistsExactlyAcrossReopenAndRejectsMismatchedEnvelope",
+      "testClass": "HostwrightStateTests.ControlRequestRepositoryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6052,
+      "raw": "Test Case '-[HostwrightStateTests.ControlRequestRepositoryTests testTerminalResponsePersistsExactlyAcrossReopenAndRejectsMismatchedEnvelope]' passed (0.059 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests/testAuthorityStreamsMoreThan4096HistoricalGroupsAndRejectsLaterCorruption",
+      "testClass": "HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6057,
+      "raw": "Test Case '-[HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests testAuthorityStreamsMoreThan4096HistoricalGroupsAndRejectsLaterCorruption]' passed (8.401 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests/testDaemonPolicyCallbackAcceptsCurrentOwnerWithUnchangedRequest",
+      "testClass": "HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6059,
+      "raw": "Test Case '-[HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests testDaemonPolicyCallbackAcceptsCurrentOwnerWithUnchangedRequest]' passed (0.153 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests/testDaemonPolicyCallbackRejectsCurrentAdmissionDenial",
+      "testClass": "HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6061,
+      "raw": "Test Case '-[HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests testDaemonPolicyCallbackRejectsCurrentAdmissionDenial]' passed (0.194 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests/testDaemonPolicyCallbackRejectsRemovedRoleGrant",
+      "testClass": "HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6063,
+      "raw": "Test Case '-[HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests testDaemonPolicyCallbackRejectsRemovedRoleGrant]' passed (0.199 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests/testDaemonPolicyCallbackRejectsRevokedAndExpiredSubjects",
+      "testClass": "HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6065,
+      "raw": "Test Case '-[HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests testDaemonPolicyCallbackRejectsRevokedAndExpiredSubjects]' passed (0.473 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests/testExplicitDownStopRemoveAndInteractiveRunSuppressRecovery",
+      "testClass": "HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6067,
+      "raw": "Test Case '-[HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests testExplicitDownStopRemoveAndInteractiveRunSuppressRecovery]' passed (0.710 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests/testGenerationMismatchCannotReuseOlderAdmission",
+      "testClass": "HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6069,
+      "raw": "Test Case '-[HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests testGenerationMismatchCannotReuseOlderAdmission]' passed (0.125 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests/testLaterDownWinsWhenWallClockMovesBackwards",
+      "testClass": "HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6071,
+      "raw": "Test Case '-[HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests testLaterDownWinsWhenWallClockMovesBackwards]' passed (0.116 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests/testMalformedOrStaleGroupFailsClosed",
+      "testClass": "HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6073,
+      "raw": "Test Case '-[HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests testMalformedOrStaleGroupFailsClosed]' passed (0.242 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests/testMissingAdmissionGroupCannotPromoteAReleasedArtifactToRunAuthority",
+      "testClass": "HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6075,
+      "raw": "Test Case '-[HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests testMissingAdmissionGroupCannotPromoteAReleasedArtifactToRunAuthority]' passed (0.130 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests/testNoLocalHistoryIsDistinctFromAnExplicitlyPausedProject",
+      "testClass": "HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6077,
+      "raw": "Test Case '-[HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests testNoLocalHistoryIsDistinctFromAnExplicitlyPausedProject]' passed (0.036 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests/testPolicyBearingManifestKeepsSourceAndEffectiveDigestsDistinct",
+      "testClass": "HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6079,
+      "raw": "Test Case '-[HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests testPolicyBearingManifestKeepsSourceAndEffectiveDigestsDistinct]' passed (0.195 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests/testReleasedReservationIsHistoricalIntentWithoutReacquiringCapacity",
+      "testClass": "HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6081,
+      "raw": "Test Case '-[HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests testReleasedReservationIsHistoricalIntentWithoutReacquiringCapacity]' passed (0.147 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests/testRestartIntentCanRetainTheEarlierAdmissionArtifact",
+      "testClass": "HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6083,
+      "raw": "Test Case '-[HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests testRestartIntentCanRetainTheEarlierAdmissionArtifact]' passed (0.128 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests/testRevokedSubjectCannotSupplyContinuedRunAuthority",
+      "testClass": "HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6085,
+      "raw": "Test Case '-[HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests testRevokedSubjectCannotSupplyContinuedRunAuthority]' passed (0.118 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests/testSuccessfulRunIntentBindsExactHistoryAndRevalidates",
+      "testClass": "HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6087,
+      "raw": "Test Case '-[HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests testSuccessfulRunIntentBindsExactHistoryAndRevalidates]' passed (0.145 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests/testUnresolvedOrFailedLatestIntentHoldsInsteadOfResurrectingEarlierRun",
+      "testClass": "HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6089,
+      "raw": "Test Case '-[HostwrightDaemonTests.DaemonLocalLifecycleAuthorityTests testUnresolvedOrFailedLatestIntentHoldsInsteadOfResurrectingEarlierRun]' passed (0.362 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDesktopModelTests.DesktopOperationsModelTests/testActionAvailabilityTracksConnectionStreamsAndObservedLogResources",
+      "testClass": "HostwrightDesktopModelTests.DesktopOperationsModelTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6094,
+      "raw": "Test Case '-[HostwrightDesktopModelTests.DesktopOperationsModelTests testActionAvailabilityTracksConnectionStreamsAndObservedLogResources]' passed (0.011 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDesktopModelTests.DesktopOperationsModelTests/testAPIMapsDaemonHealthAndProjectServicesFromRealResponseShapes",
+      "testClass": "HostwrightDesktopModelTests.DesktopOperationsModelTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6096,
+      "raw": "Test Case '-[HostwrightDesktopModelTests.DesktopOperationsModelTests testAPIMapsDaemonHealthAndProjectServicesFromRealResponseShapes]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDesktopModelTests.DesktopOperationsModelTests/testAPIRejectsManifestSymlinkDirectoryAndInvalidUTF8",
+      "testClass": "HostwrightDesktopModelTests.DesktopOperationsModelTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6098,
+      "raw": "Test Case '-[HostwrightDesktopModelTests.DesktopOperationsModelTests testAPIRejectsManifestSymlinkDirectoryAndInvalidUTF8]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDesktopModelTests.DesktopOperationsModelTests/testAPIRejectsRelativeSelectedManifestPath",
+      "testClass": "HostwrightDesktopModelTests.DesktopOperationsModelTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6100,
+      "raw": "Test Case '-[HostwrightDesktopModelTests.DesktopOperationsModelTests testAPIRejectsRelativeSelectedManifestPath]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDesktopModelTests.DesktopOperationsModelTests/testAPIRejectsSelectedManifestResponseForAnotherPath",
+      "testClass": "HostwrightDesktopModelTests.DesktopOperationsModelTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6102,
+      "raw": "Test Case '-[HostwrightDesktopModelTests.DesktopOperationsModelTests testAPIRejectsSelectedManifestResponseForAnotherPath]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDesktopModelTests.DesktopOperationsModelTests/testAPIUsesSelectedManifestThroughAuthenticatedCLIControlRoute",
+      "testClass": "HostwrightDesktopModelTests.DesktopOperationsModelTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6104,
+      "raw": "Test Case '-[HostwrightDesktopModelTests.DesktopOperationsModelTests testAPIUsesSelectedManifestThroughAuthenticatedCLIControlRoute]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDesktopModelTests.DesktopOperationsModelTests/testCancellingAnActiveEventStreamCancelsTheControlStream",
+      "testClass": "HostwrightDesktopModelTests.DesktopOperationsModelTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6106,
+      "raw": "Test Case '-[HostwrightDesktopModelTests.DesktopOperationsModelTests testCancellingAnActiveEventStreamCancelsTheControlStream]' passed (0.013 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDesktopModelTests.DesktopOperationsModelTests/testCancellingExecutingLifecycleClosesRequestAndFencesFailure",
+      "testClass": "HostwrightDesktopModelTests.DesktopOperationsModelTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6108,
+      "raw": "Test Case '-[HostwrightDesktopModelTests.DesktopOperationsModelTests testCancellingExecutingLifecycleClosesRequestAndFencesFailure]' passed (0.002 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDesktopModelTests.DesktopOperationsModelTests/testCancellingReviewedPlanSendsNoExecutionRequest",
+      "testClass": "HostwrightDesktopModelTests.DesktopOperationsModelTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6110,
+      "raw": "Test Case '-[HostwrightDesktopModelTests.DesktopOperationsModelTests testCancellingReviewedPlanSendsNoExecutionRequest]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDesktopModelTests.DesktopOperationsModelTests/testCLIErrorDetailsAreValidatedRedactedAndBounded",
+      "testClass": "HostwrightDesktopModelTests.DesktopOperationsModelTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6112,
+      "raw": "Test Case '-[HostwrightDesktopModelTests.DesktopOperationsModelTests testCLIErrorDetailsAreValidatedRedactedAndBounded]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDesktopModelTests.DesktopOperationsModelTests/testConnectAndReconnectFenceLatePreexistingRefreshError",
+      "testClass": "HostwrightDesktopModelTests.DesktopOperationsModelTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6114,
+      "raw": "Test Case '-[HostwrightDesktopModelTests.DesktopOperationsModelTests testConnectAndReconnectFenceLatePreexistingRefreshError]' passed (0.002 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDesktopModelTests.DesktopOperationsModelTests/testConnectAndReconnectFenceLatePreexistingRefreshSuccess",
+      "testClass": "HostwrightDesktopModelTests.DesktopOperationsModelTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6116,
+      "raw": "Test Case '-[HostwrightDesktopModelTests.DesktopOperationsModelTests testConnectAndReconnectFenceLatePreexistingRefreshSuccess]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDesktopModelTests.DesktopOperationsModelTests/testControlErrorsStayRedactedAtTheDesktopBoundary",
+      "testClass": "HostwrightDesktopModelTests.DesktopOperationsModelTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6118,
+      "raw": "Test Case '-[HostwrightDesktopModelTests.DesktopOperationsModelTests testControlErrorsStayRedactedAtTheDesktopBoundary]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDesktopModelTests.DesktopOperationsModelTests/testDisconnectFencesLateDaemonHealthSuccessAndFailure",
+      "testClass": "HostwrightDesktopModelTests.DesktopOperationsModelTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6120,
+      "raw": "Test Case '-[HostwrightDesktopModelTests.DesktopOperationsModelTests testDisconnectFencesLateDaemonHealthSuccessAndFailure]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDesktopModelTests.DesktopOperationsModelTests/testDisconnectFencesLateProjectStatusSuccessAndFailure",
+      "testClass": "HostwrightDesktopModelTests.DesktopOperationsModelTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6122,
+      "raw": "Test Case '-[HostwrightDesktopModelTests.DesktopOperationsModelTests testDisconnectFencesLateProjectStatusSuccessAndFailure]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDesktopModelTests.DesktopOperationsModelTests/testDisconnectPreventsLateStatusRefreshFromApplyingAnError",
+      "testClass": "HostwrightDesktopModelTests.DesktopOperationsModelTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6124,
+      "raw": "Test Case '-[HostwrightDesktopModelTests.DesktopOperationsModelTests testDisconnectPreventsLateStatusRefreshFromApplyingAnError]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDesktopModelTests.DesktopOperationsModelTests/testDisconnectPreventsLateStatusRefreshFromApplyingAProject",
+      "testClass": "HostwrightDesktopModelTests.DesktopOperationsModelTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6126,
+      "raw": "Test Case '-[HostwrightDesktopModelTests.DesktopOperationsModelTests testDisconnectPreventsLateStatusRefreshFromApplyingAProject]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDesktopModelTests.DesktopOperationsModelTests/testEndpointDiscoveryUsesTheSecureLocalPathLayout",
+      "testClass": "HostwrightDesktopModelTests.DesktopOperationsModelTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6128,
+      "raw": "Test Case '-[HostwrightDesktopModelTests.DesktopOperationsModelTests testEndpointDiscoveryUsesTheSecureLocalPathLayout]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDesktopModelTests.DesktopOperationsModelTests/testEventAndLogStreamsOpenWithCreditsAcknowledgePayloadsAndFinish",
+      "testClass": "HostwrightDesktopModelTests.DesktopOperationsModelTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6130,
+      "raw": "Test Case '-[HostwrightDesktopModelTests.DesktopOperationsModelTests testEventAndLogStreamsOpenWithCreditsAcknowledgePayloadsAndFinish]' passed (0.037 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDesktopModelTests.DesktopOperationsModelTests/testEventCancellationLeavesConcurrentLogStreamRunning",
+      "testClass": "HostwrightDesktopModelTests.DesktopOperationsModelTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6132,
+      "raw": "Test Case '-[HostwrightDesktopModelTests.DesktopOperationsModelTests testEventCancellationLeavesConcurrentLogStreamRunning]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDesktopModelTests.DesktopOperationsModelTests/testEventFilterBuildsTheProtocolFilterAndRejectsUnboundedValues",
+      "testClass": "HostwrightDesktopModelTests.DesktopOperationsModelTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6134,
+      "raw": "Test Case '-[HostwrightDesktopModelTests.DesktopOperationsModelTests testEventFilterBuildsTheProtocolFilterAndRejectsUnboundedValues]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDesktopModelTests.DesktopOperationsModelTests/testLatePreviewCannotPresentReviewForReplacedProject",
+      "testClass": "HostwrightDesktopModelTests.DesktopOperationsModelTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6136,
+      "raw": "Test Case '-[HostwrightDesktopModelTests.DesktopOperationsModelTests testLatePreviewCannotPresentReviewForReplacedProject]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDesktopModelTests.DesktopOperationsModelTests/testLifecycleAPIUsesManifestBoundPreviewAndExactConfirmationRoutes",
+      "testClass": "HostwrightDesktopModelTests.DesktopOperationsModelTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6138,
+      "raw": "Test Case '-[HostwrightDesktopModelTests.DesktopOperationsModelTests testLifecycleAPIUsesManifestBoundPreviewAndExactConfirmationRoutes]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDesktopModelTests.DesktopOperationsModelTests/testLifecycleCancellationAndDisconnectCloseTheActiveControlRequest",
+      "testClass": "HostwrightDesktopModelTests.DesktopOperationsModelTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6140,
+      "raw": "Test Case '-[HostwrightDesktopModelTests.DesktopOperationsModelTests testLifecycleCancellationAndDisconnectCloseTheActiveControlRequest]' passed (0.003 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDesktopModelTests.DesktopOperationsModelTests/testLifecycleModelRejectsDuplicateAndStaleConfirmationThenExecutesExactPlan",
+      "testClass": "HostwrightDesktopModelTests.DesktopOperationsModelTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6142,
+      "raw": "Test Case '-[HostwrightDesktopModelTests.DesktopOperationsModelTests testLifecycleModelRejectsDuplicateAndStaleConfirmationThenExecutesExactPlan]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDesktopModelTests.DesktopOperationsModelTests/testLogCancellationLeavesConcurrentEventStreamRunning",
+      "testClass": "HostwrightDesktopModelTests.DesktopOperationsModelTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6144,
+      "raw": "Test Case '-[HostwrightDesktopModelTests.DesktopOperationsModelTests testLogCancellationLeavesConcurrentEventStreamRunning]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDesktopModelTests.DesktopOperationsModelTests/testModelConnectsThroughTheClientAndKeepsStatusFailureVisible",
+      "testClass": "HostwrightDesktopModelTests.DesktopOperationsModelTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6146,
+      "raw": "Test Case '-[HostwrightDesktopModelTests.DesktopOperationsModelTests testModelConnectsThroughTheClientAndKeepsStatusFailureVisible]' passed (0.013 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDesktopModelTests.DesktopOperationsModelTests/testModelConnectsToForegroundDaemonWhenManagedServiceStatusIsUnavailable",
+      "testClass": "HostwrightDesktopModelTests.DesktopOperationsModelTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6148,
+      "raw": "Test Case '-[HostwrightDesktopModelTests.DesktopOperationsModelTests testModelConnectsToForegroundDaemonWhenManagedServiceStatusIsUnavailable]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDesktopModelTests.DesktopOperationsModelTests/testNewStatusRefreshPreventsSupersededErrorFromOverwritingState",
+      "testClass": "HostwrightDesktopModelTests.DesktopOperationsModelTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6150,
+      "raw": "Test Case '-[HostwrightDesktopModelTests.DesktopOperationsModelTests testNewStatusRefreshPreventsSupersededErrorFromOverwritingState]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDesktopModelTests.DesktopOperationsModelTests/testNewStatusRefreshPreventsSupersededSuccessFromOverwritingProject",
+      "testClass": "HostwrightDesktopModelTests.DesktopOperationsModelTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6152,
+      "raw": "Test Case '-[HostwrightDesktopModelTests.DesktopOperationsModelTests testNewStatusRefreshPreventsSupersededSuccessFromOverwritingProject]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDesktopModelTests.DesktopOperationsModelTests/testReconnectCancelsBothStreamsAndFencesLateSnapshots",
+      "testClass": "HostwrightDesktopModelTests.DesktopOperationsModelTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6154,
+      "raw": "Test Case '-[HostwrightDesktopModelTests.DesktopOperationsModelTests testReconnectCancelsBothStreamsAndFencesLateSnapshots]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDesktopModelTests.DesktopOperationsModelTests/testReconnectExposesBackoffAndDisconnectCancelsTheRetryLoop",
+      "testClass": "HostwrightDesktopModelTests.DesktopOperationsModelTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6156,
+      "raw": "Test Case '-[HostwrightDesktopModelTests.DesktopOperationsModelTests testReconnectExposesBackoffAndDisconnectCancelsTheRetryLoop]' passed (0.007 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDesktopModelTests.DesktopOperationsModelTests/testReplacementConnectFencesLateDaemonHealthSuccessAndFailure",
+      "testClass": "HostwrightDesktopModelTests.DesktopOperationsModelTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6158,
+      "raw": "Test Case '-[HostwrightDesktopModelTests.DesktopOperationsModelTests testReplacementConnectFencesLateDaemonHealthSuccessAndFailure]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDesktopModelTests.DesktopOperationsModelTests/testReplacementConnectFencesLateProjectStatusSuccessAndFailure",
+      "testClass": "HostwrightDesktopModelTests.DesktopOperationsModelTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6160,
+      "raw": "Test Case '-[HostwrightDesktopModelTests.DesktopOperationsModelTests testReplacementConnectFencesLateProjectStatusSuccessAndFailure]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDesktopModelTests.DesktopOperationsModelTests/testSelectingManifestClearsOldProjectAuthorityWhenReplacementStatusFails",
+      "testClass": "HostwrightDesktopModelTests.DesktopOperationsModelTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6162,
+      "raw": "Test Case '-[HostwrightDesktopModelTests.DesktopOperationsModelTests testSelectingManifestClearsOldProjectAuthorityWhenReplacementStatusFails]' passed (0.026 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDesktopModelTests.DesktopOperationsModelTests/testStatusRefreshKeepsDistinctActionHashButInvalidatesChangedStatusHash",
+      "testClass": "HostwrightDesktopModelTests.DesktopOperationsModelTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6164,
+      "raw": "Test Case '-[HostwrightDesktopModelTests.DesktopOperationsModelTests testStatusRefreshKeepsDistinctActionHashButInvalidatesChangedStatusHash]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDesktopModelTests.DesktopOperationsModelTests/testStructuredCLIErrorShowsRecoveryWithoutJSONOrUnredactedSecrets",
+      "testClass": "HostwrightDesktopModelTests.DesktopOperationsModelTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6166,
+      "raw": "Test Case '-[HostwrightDesktopModelTests.DesktopOperationsModelTests testStructuredCLIErrorShowsRecoveryWithoutJSONOrUnredactedSecrets]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightDesktopModelTests.DesktopOperationsModelTests/testSupersededConnectCannotClearReplacementTaskOwnership",
+      "testClass": "HostwrightDesktopModelTests.DesktopOperationsModelTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6168,
+      "raw": "Test Case '-[HostwrightDesktopModelTests.DesktopOperationsModelTests testSupersededConnectCannotClearReplacementTaskOwnership]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightImportTests.HostwrightImportTests/testComposeCapacityContractRejectsPartialUnsupportedAndAmbiguousValues",
+      "testClass": "HostwrightImportTests.HostwrightImportTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6173,
+      "raw": "Test Case '-[HostwrightImportTests.HostwrightImportTests testComposeCapacityContractRejectsPartialUnsupportedAndAmbiguousValues]' passed (0.003 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightImportTests.HostwrightImportTests/testComposeCapacityContractRoundTripsCanonicalSubset",
+      "testClass": "HostwrightImportTests.HostwrightImportTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6175,
+      "raw": "Test Case '-[HostwrightImportTests.HostwrightImportTests testComposeCapacityContractRoundTripsCanonicalSubset]' passed (0.002 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightImportTests.HostwrightImportTests/testComposeCapacityMalformedQuotedScalarsKeepCanonicalLeafPaths",
+      "testClass": "HostwrightImportTests.HostwrightImportTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6177,
+      "raw": "Test Case '-[HostwrightImportTests.HostwrightImportTests testComposeCapacityMalformedQuotedScalarsKeepCanonicalLeafPaths]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightImportTests.HostwrightImportTests/testComposeCapacityMemoryUnitsMapExactly",
+      "testClass": "HostwrightImportTests.HostwrightImportTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6179,
+      "raw": "Test Case '-[HostwrightImportTests.HostwrightImportTests testComposeCapacityMemoryUnitsMapExactly]' passed (0.005 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightImportTests.HostwrightImportTests/testComposeCapacityMultiServiceRoundTripCanonicalizesManifestOrder",
+      "testClass": "HostwrightImportTests.HostwrightImportTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6181,
+      "raw": "Test Case '-[HostwrightImportTests.HostwrightImportTests testComposeCapacityMultiServiceRoundTripCanonicalizesManifestOrder]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightImportTests.HostwrightImportTests/testComposeContractJSONIsStableAndVersioned",
+      "testClass": "HostwrightImportTests.HostwrightImportTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6183,
+      "raw": "Test Case '-[HostwrightImportTests.HostwrightImportTests testComposeContractJSONIsStableAndVersioned]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightImportTests.HostwrightImportTests/testComposeExportAndUpdateRejectEveryPartialCapacityShape",
+      "testClass": "HostwrightImportTests.HostwrightImportTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6185,
+      "raw": "Test Case '-[HostwrightImportTests.HostwrightImportTests testComposeExportAndUpdateRejectEveryPartialCapacityShape]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightImportTests.HostwrightImportTests/testComposeExportFailsClosedWithDeterministicLosses",
+      "testClass": "HostwrightImportTests.HostwrightImportTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6187,
+      "raw": "Test Case '-[HostwrightImportTests.HostwrightImportTests testComposeExportFailsClosedWithDeterministicLosses]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightImportTests.HostwrightImportTests/testComposeExportRejectsResourcesOutsideExactCapacitySubset",
+      "testClass": "HostwrightImportTests.HostwrightImportTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6189,
+      "raw": "Test Case '-[HostwrightImportTests.HostwrightImportTests testComposeExportRejectsResourcesOutsideExactCapacitySubset]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightImportTests.HostwrightImportTests/testComposeImportReportsStablePathsAndRejectsUnknownSemantics",
+      "testClass": "HostwrightImportTests.HostwrightImportTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6191,
+      "raw": "Test Case '-[HostwrightImportTests.HostwrightImportTests testComposeImportReportsStablePathsAndRejectsUnknownSemantics]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightImportTests.HostwrightImportTests/testComposeImportReportsV3ResourceAdmissionAtTheServicePath",
+      "testClass": "HostwrightImportTests.HostwrightImportTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6193,
+      "raw": "Test Case '-[HostwrightImportTests.HostwrightImportTests testComposeImportReportsV3ResourceAdmissionAtTheServicePath]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightImportTests.HostwrightImportTests/testComposeMalformedInputUsesInvalidInputContractCode",
+      "testClass": "HostwrightImportTests.HostwrightImportTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6195,
+      "raw": "Test Case '-[HostwrightImportTests.HostwrightImportTests testComposeMalformedInputUsesInvalidInputContractCode]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightImportTests.HostwrightImportTests/testComposeUpdatePlanIncludesResourceChangesWithoutMutation",
+      "testClass": "HostwrightImportTests.HostwrightImportTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6197,
+      "raw": "Test Case '-[HostwrightImportTests.HostwrightImportTests testComposeUpdatePlanIncludesResourceChangesWithoutMutation]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightImportTests.HostwrightImportTests/testComposeUpdatePlanRejectsProjectMismatchBeforePlanningChanges",
+      "testClass": "HostwrightImportTests.HostwrightImportTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6199,
+      "raw": "Test Case '-[HostwrightImportTests.HostwrightImportTests testComposeUpdatePlanRejectsProjectMismatchBeforePlanningChanges]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightImportTests.HostwrightImportTests/testConvertedManifestValidationStillFailsClosed",
+      "testClass": "HostwrightImportTests.HostwrightImportTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6201,
+      "raw": "Test Case '-[HostwrightImportTests.HostwrightImportTests testConvertedManifestValidationStillFailsClosed]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightImportTests.HostwrightImportTests/testImportDiagnosticsAreDeterministic",
+      "testClass": "HostwrightImportTests.HostwrightImportTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6203,
+      "raw": "Test Case '-[HostwrightImportTests.HostwrightImportTests testImportDiagnosticsAreDeterministic]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightImportTests.HostwrightImportTests/testInlineArraysWithoutExplicitResourcesFailClosed",
+      "testClass": "HostwrightImportTests.HostwrightImportTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6205,
+      "raw": "Test Case '-[HostwrightImportTests.HostwrightImportTests testInlineArraysWithoutExplicitResourcesFailClosed]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightImportTests.HostwrightImportTests/testManifestEmitterPreservesStructuredPublishedPorts",
+      "testClass": "HostwrightImportTests.HostwrightImportTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6207,
+      "raw": "Test Case '-[HostwrightImportTests.HostwrightImportTests testManifestEmitterPreservesStructuredPublishedPorts]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightImportTests.HostwrightImportTests/testNamedVolumesAndShellHealthchecksAreRejected",
+      "testClass": "HostwrightImportTests.HostwrightImportTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6209,
+      "raw": "Test Case '-[HostwrightImportTests.HostwrightImportTests testNamedVolumesAndShellHealthchecksAreRejected]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightImportTests.HostwrightImportTests/testQuotedEnvironmentScalarsCannotBypassResourceAdmission",
+      "testClass": "HostwrightImportTests.HostwrightImportTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6211,
+      "raw": "Test Case '-[HostwrightImportTests.HostwrightImportTests testQuotedEnvironmentScalarsCannotBypassResourceAdmission]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightImportTests.HostwrightImportTests/testStackSubsetWithoutExplicitResourcesFailsClosed",
+      "testClass": "HostwrightImportTests.HostwrightImportTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6213,
+      "raw": "Test Case '-[HostwrightImportTests.HostwrightImportTests testStackSubsetWithoutExplicitResourcesFailsClosed]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightImportTests.HostwrightImportTests/testUnsupportedNetworkingAndSecretFieldsFailClosedWithPolicyReasons",
+      "testClass": "HostwrightImportTests.HostwrightImportTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6215,
+      "raw": "Test Case '-[HostwrightImportTests.HostwrightImportTests testUnsupportedNetworkingAndSecretFieldsFailClosedWithPolicyReasons]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleSchedulerEffectFreshnessTests/testPressureExpiringAfterCreatePreflightPreventsProviderMutation",
+      "testClass": "HostwrightCLITests.LifecycleSchedulerEffectFreshnessTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6220,
+      "raw": "Test Case '-[HostwrightCLITests.LifecycleSchedulerEffectFreshnessTests testPressureExpiringAfterCreatePreflightPreventsProviderMutation]' passed (0.337 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleSchedulerEffectFreshnessTests/testPressureExpiringAfterRestartPreflightPreventsRestart",
+      "testClass": "HostwrightCLITests.LifecycleSchedulerEffectFreshnessTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6222,
+      "raw": "Test Case '-[HostwrightCLITests.LifecycleSchedulerEffectFreshnessTests testPressureExpiringAfterRestartPreflightPreventsRestart]' passed (0.471 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleSchedulerEffectFreshnessTests/testPressureExpiringAfterStartPreflightAllowsExactCompensatingDeletion",
+      "testClass": "HostwrightCLITests.LifecycleSchedulerEffectFreshnessTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6224,
+      "raw": "Test Case '-[HostwrightCLITests.LifecycleSchedulerEffectFreshnessTests testPressureExpiringAfterStartPreflightAllowsExactCompensatingDeletion]' passed (0.492 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCoreTests.LocalPathsTests/testDefaultLayoutUsesMacOSNativeLocations",
+      "testClass": "HostwrightCoreTests.LocalPathsTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6229,
+      "raw": "Test Case '-[HostwrightCoreTests.LocalPathsTests testDefaultLayoutUsesMacOSNativeLocations]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCoreTests.LocalPathsTests/testExplicitStateUsesStableRuntimeLockIdentity",
+      "testClass": "HostwrightCoreTests.LocalPathsTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6231,
+      "raw": "Test Case '-[HostwrightCoreTests.LocalPathsTests testExplicitStateUsesStableRuntimeLockIdentity]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCoreTests.LocalPathsTests/testFilesystemPolicyRejectsAccessGrantingExtendedACLs",
+      "testClass": "HostwrightCoreTests.LocalPathsTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6233,
+      "raw": "Test Case '-[HostwrightCoreTests.LocalPathsTests testFilesystemPolicyRejectsAccessGrantingExtendedACLs]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCoreTests.LocalPathsTests/testPathResolutionRejectsRelativeTraversalAndInvalidOverrides",
+      "testClass": "HostwrightCoreTests.LocalPathsTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6235,
+      "raw": "Test Case '-[HostwrightCoreTests.LocalPathsTests testPathResolutionRejectsRelativeTraversalAndInvalidOverrides]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCoreTests.LocalPathsTests/testStateOverridePrecedenceIsExplicitThenEnvironmentThenDefault",
+      "testClass": "HostwrightCoreTests.LocalPathsTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6237,
+      "raw": "Test Case '-[HostwrightCoreTests.LocalPathsTests testStateOverridePrecedenceIsExplicitThenEnvironmentThenDefault]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightManifestTests.ManifestV2StrictTests/testBoundedDeterministicMutationSmokeHasStableOutcomes",
+      "testClass": "HostwrightManifestTests.ManifestV2StrictTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6242,
+      "raw": "Test Case '-[HostwrightManifestTests.ManifestV2StrictTests testBoundedDeterministicMutationSmokeHasStableOutcomes]' passed (0.110 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightManifestTests.ManifestV2StrictTests/testCancellationAndPartialDocumentsFailWithoutProducingAManifest",
+      "testClass": "HostwrightManifestTests.ManifestV2StrictTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6244,
+      "raw": "Test Case '-[HostwrightManifestTests.ManifestV2StrictTests testCancellationAndPartialDocumentsFailWithoutProducingAManifest]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightManifestTests.ManifestV2StrictTests/testCheckedInManifestCorpusRoundTripsThroughCanonicalEncoding",
+      "testClass": "HostwrightManifestTests.ManifestV2StrictTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6246,
+      "raw": "Test Case '-[HostwrightManifestTests.ManifestV2StrictTests testCheckedInManifestCorpusRoundTripsThroughCanonicalEncoding]' passed (0.104 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightManifestTests.ManifestV2StrictTests/testCompleteManifestV3SchemaParsesValidatesAndRoundTripsCanonically",
+      "testClass": "HostwrightManifestTests.ManifestV2StrictTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6248,
+      "raw": "Test Case '-[HostwrightManifestTests.ManifestV2StrictTests testCompleteManifestV3SchemaParsesValidatesAndRoundTripsCanonically]' passed (0.003 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightManifestTests.ManifestV2StrictTests/testDynamicPublishedPortRangeIsAcceptedAndCanonical",
+      "testClass": "HostwrightManifestTests.ManifestV2StrictTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6250,
+      "raw": "Test Case '-[HostwrightManifestTests.ManifestV2StrictTests testDynamicPublishedPortRangeIsAcceptedAndCanonical]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightManifestTests.ManifestV2StrictTests/testLegacyHealthMigratesToTypedLivenessDeterministically",
+      "testClass": "HostwrightManifestTests.ManifestV2StrictTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6252,
+      "raw": "Test Case '-[HostwrightManifestTests.ManifestV2StrictTests testLegacyHealthMigratesToTypedLivenessDeterministically]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightManifestTests.ManifestV2StrictTests/testProbePortsUseStructuredTargetPorts",
+      "testClass": "HostwrightManifestTests.ManifestV2StrictTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6254,
+      "raw": "Test Case '-[HostwrightManifestTests.ManifestV2StrictTests testProbePortsUseStructuredTargetPorts]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightManifestTests.ManifestV2StrictTests/testRejectsAnchorsAliasesMergeKeysAndCustomTags",
+      "testClass": "HostwrightManifestTests.ManifestV2StrictTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6256,
+      "raw": "Test Case '-[HostwrightManifestTests.ManifestV2StrictTests testRejectsAnchorsAliasesMergeKeysAndCustomTags]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightManifestTests.ManifestV2StrictTests/testRejectsByteDepthAndExpandedNodeLimits",
+      "testClass": "HostwrightManifestTests.ManifestV2StrictTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6258,
+      "raw": "Test Case '-[HostwrightManifestTests.ManifestV2StrictTests testRejectsByteDepthAndExpandedNodeLimits]' passed (0.132 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightManifestTests.ManifestV2StrictTests/testRejectsDuplicateKeysAtNestedLevelsWithSourceLocation",
+      "testClass": "HostwrightManifestTests.ManifestV2StrictTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6260,
+      "raw": "Test Case '-[HostwrightManifestTests.ManifestV2StrictTests testRejectsDuplicateKeysAtNestedLevelsWithSourceLocation]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightManifestTests.ManifestV2StrictTests/testRejectsMultipleDocumentsAmbiguousScalarsAndUnknownFields",
+      "testClass": "HostwrightManifestTests.ManifestV2StrictTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6262,
+      "raw": "Test Case '-[HostwrightManifestTests.ManifestV2StrictTests testRejectsMultipleDocumentsAmbiguousScalarsAndUnknownFields]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightManifestTests.ManifestV2StrictTests/testSchedulingIsTheOnlyProviderAndAcceleratorClaimSource",
+      "testClass": "HostwrightManifestTests.ManifestV2StrictTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6264,
+      "raw": "Test Case '-[HostwrightManifestTests.ManifestV2StrictTests testSchedulingIsTheOnlyProviderAndAcceleratorClaimSource]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightManifestTests.ManifestV2StrictTests/testSizeValidationAcceptsUInt64ByteBoundaries",
+      "testClass": "HostwrightManifestTests.ManifestV2StrictTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6266,
+      "raw": "Test Case '-[HostwrightManifestTests.ManifestV2StrictTests testSizeValidationAcceptsUInt64ByteBoundaries]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightManifestTests.ManifestV2StrictTests/testSizeValidationRejectsUInt64ParsingAndMultiplicationOverflow",
+      "testClass": "HostwrightManifestTests.ManifestV2StrictTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6268,
+      "raw": "Test Case '-[HostwrightManifestTests.ManifestV2StrictTests testSizeValidationRejectsUInt64ParsingAndMultiplicationOverflow]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightManifestTests.ManifestV2StrictTests/testTopLevelVolumesParseValidateAndRoundTripCanonically",
+      "testClass": "HostwrightManifestTests.ManifestV2StrictTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6270,
+      "raw": "Test Case '-[HostwrightManifestTests.ManifestV2StrictTests testTopLevelVolumesParseValidateAndRoundTripCanonically]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightManifestTests.ManifestV2StrictTests/testTopLevelVolumesRejectUnsupportedFieldsInvalidValuesAndReservedLabels",
+      "testClass": "HostwrightManifestTests.ManifestV2StrictTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6272,
+      "raw": "Test Case '-[HostwrightManifestTests.ManifestV2StrictTests testTopLevelVolumesRejectUnsupportedFieldsInvalidValuesAndReservedLabels]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightManifestTests.ManifestV2StrictTests/testTypedMountObjectsParseValidateAndRoundTripCanonically",
+      "testClass": "HostwrightManifestTests.ManifestV2StrictTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6274,
+      "raw": "Test Case '-[HostwrightManifestTests.ManifestV2StrictTests testTypedMountObjectsParseValidateAndRoundTripCanonically]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightManifestTests.ManifestV2StrictTests/testTypedMountObjectsRejectUnknownFieldsAndInvalidTmpfsMode",
+      "testClass": "HostwrightManifestTests.ManifestV2StrictTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6276,
+      "raw": "Test Case '-[HostwrightManifestTests.ManifestV2StrictTests testTypedMountObjectsRejectUnknownFieldsAndInvalidTmpfsMode]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightManifestTests.ManifestV2StrictTests/testV3FlatResourcesAreRejectedBeforeValidation",
+      "testClass": "HostwrightManifestTests.ManifestV2StrictTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6278,
+      "raw": "Test Case '-[HostwrightManifestTests.ManifestV2StrictTests testV3FlatResourcesAreRejectedBeforeValidation]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightManifestTests.ManifestV2StrictTests/testV3ResourceComparisonAndSchedulingDiagnosticsUseActionableFields",
+      "testClass": "HostwrightManifestTests.ManifestV2StrictTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6280,
+      "raw": "Test Case '-[HostwrightManifestTests.ManifestV2StrictTests testV3ResourceComparisonAndSchedulingDiagnosticsUseActionableFields]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightManifestTests.ManifestV2StrictTests/testV3ResourcesRequireNonEmptyMatchingDimensionsAndCPUMemory",
+      "testClass": "HostwrightManifestTests.ManifestV2StrictTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6282,
+      "raw": "Test Case '-[HostwrightManifestTests.ManifestV2StrictTests testV3ResourcesRequireNonEmptyMatchingDimensionsAndCPUMemory]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightManifestTests.ManifestV2StrictTests/testValidationRejectsDuplicateFixedLocalhostPortAcrossServices",
+      "testClass": "HostwrightManifestTests.ManifestV2StrictTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6284,
+      "raw": "Test Case '-[HostwrightManifestTests.ManifestV2StrictTests testValidationRejectsDuplicateFixedLocalhostPortAcrossServices]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightManifestTests.ManifestV2StrictTests/testValidationRejectsFixedLocalhostPortWithMultipleReplicas",
+      "testClass": "HostwrightManifestTests.ManifestV2StrictTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6286,
+      "raw": "Test Case '-[HostwrightManifestTests.ManifestV2StrictTests testValidationRejectsFixedLocalhostPortWithMultipleReplicas]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightManifestTests.ManifestV2StrictTests/testValidationRejectsInvalidBoundsAndCrossFieldCombinations",
+      "testClass": "HostwrightManifestTests.ManifestV2StrictTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6288,
+      "raw": "Test Case '-[HostwrightManifestTests.ManifestV2StrictTests testValidationRejectsInvalidBoundsAndCrossFieldCombinations]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightManifestTests.ManifestV2StrictTests/testValidationRejectsInvalidStructuredPortDeclarations",
+      "testClass": "HostwrightManifestTests.ManifestV2StrictTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6290,
+      "raw": "Test Case '-[HostwrightManifestTests.ManifestV2StrictTests testValidationRejectsInvalidStructuredPortDeclarations]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightManifestTests.ManifestV2StrictTests/testVolumeMountMustReferenceDeclaredTopLevelVolumeButUnusedDeclarationsAreAllowed",
+      "testClass": "HostwrightManifestTests.ManifestV2StrictTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6292,
+      "raw": "Test Case '-[HostwrightManifestTests.ManifestV2StrictTests testVolumeMountMustReferenceDeclaredTopLevelVolumeButUnusedDeclarationsAreAllowed]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightControlTransportTests.PersistentControlClientTests/testCancellationPinsDescriptorUntilShutdownCompletes",
+      "testClass": "HostwrightControlTransportTests.PersistentControlClientTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6297,
+      "raw": "Test Case '-[HostwrightControlTransportTests.PersistentControlClientTests testCancellationPinsDescriptorUntilShutdownCompletes]' passed (0.102 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightControlTransportTests.PersistentControlClientTests/testChallengeSocketBindingMismatchIsRejected",
+      "testClass": "HostwrightControlTransportTests.PersistentControlClientTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6299,
+      "raw": "Test Case '-[HostwrightControlTransportTests.PersistentControlClientTests testChallengeSocketBindingMismatchIsRejected]' passed (0.005 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightControlTransportTests.PersistentControlClientTests/testCurrentCodeAdHocIdentityCompletesRealHandshakeAndUnaryResponse",
+      "testClass": "HostwrightControlTransportTests.PersistentControlClientTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6301,
+      "raw": "Test Case '-[HostwrightControlTransportTests.PersistentControlClientTests testCurrentCodeAdHocIdentityCompletesRealHandshakeAndUnaryResponse]' passed (0.079 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightControlTransportTests.PersistentControlClientTests/testListenerPublishesOnlyPrivateNonSymlinkSocket",
+      "testClass": "HostwrightControlTransportTests.PersistentControlClientTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6303,
+      "raw": "Test Case '-[HostwrightControlTransportTests.PersistentControlClientTests testListenerPublishesOnlyPrivateNonSymlinkSocket]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightControlTransportTests.PersistentControlClientTests/testLiveConcurrentClientsAndDurableReplayAcrossListenerRestart",
+      "testClass": "HostwrightControlTransportTests.PersistentControlClientTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6305,
+      "raw": "Test Case '-[HostwrightControlTransportTests.PersistentControlClientTests testLiveConcurrentClientsAndDurableReplayAcrossListenerRestart]' passed (0.200 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightControlTransportTests.PersistentControlClientTests/testResponseRequestIDMismatchIsRejected",
+      "testClass": "HostwrightControlTransportTests.PersistentControlClientTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6307,
+      "raw": "Test Case '-[HostwrightControlTransportTests.PersistentControlClientTests testResponseRequestIDMismatchIsRejected]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightControlTransportTests.PersistentControlClientTests/testUnpinnedAdHocServerIsRejectedBeforeChallenge",
+      "testClass": "HostwrightControlTransportTests.PersistentControlClientTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6309,
+      "raw": "Test Case '-[HostwrightControlTransportTests.PersistentControlClientTests testUnpinnedAdHocServerIsRejectedBeforeChallenge]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightControlTransportTests.PersistentControlServerTests/testAcceptedMutationRejectionPersistsAsErrorAndReplaysOnProtocol22",
+      "testClass": "HostwrightControlTransportTests.PersistentControlServerTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6314,
+      "raw": "Test Case '-[HostwrightControlTransportTests.PersistentControlServerTests testAcceptedMutationRejectionPersistsAsErrorAndReplaysOnProtocol22]' passed (0.093 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightControlTransportTests.PersistentControlServerTests/testAuthenticatedMutationPersistsBeforeReplyAndIdempotentReplaySkipsHandler",
+      "testClass": "HostwrightControlTransportTests.PersistentControlServerTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6316,
+      "raw": "Test Case '-[HostwrightControlTransportTests.PersistentControlServerTests testAuthenticatedMutationPersistsBeforeReplyAndIdempotentReplaySkipsHandler]' passed (0.095 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightControlTransportTests.PersistentControlServerTests/testAuthenticatedUnaryBarrierCannotCompleteBeforeSessionPersistence",
+      "testClass": "HostwrightControlTransportTests.PersistentControlServerTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6318,
+      "raw": "Test Case '-[HostwrightControlTransportTests.PersistentControlServerTests testAuthenticatedUnaryBarrierCannotCompleteBeforeSessionPersistence]' passed (0.178 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightControlTransportTests.PersistentControlServerTests/testDifferentRequestIDForSameIdempotencyKeyIsRejectedWithoutInvokingHandler",
+      "testClass": "HostwrightControlTransportTests.PersistentControlServerTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6320,
+      "raw": "Test Case '-[HostwrightControlTransportTests.PersistentControlServerTests testDifferentRequestIDForSameIdempotencyKeyIsRejectedWithoutInvokingHandler]' passed (0.098 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightControlTransportTests.PersistentControlServerTests/testExpiredRequestDeadlineClosesConnectionWithoutInvokingHandler",
+      "testClass": "HostwrightControlTransportTests.PersistentControlServerTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6322,
+      "raw": "Test Case '-[HostwrightControlTransportTests.PersistentControlServerTests testExpiredRequestDeadlineClosesConnectionWithoutInvokingHandler]' passed (0.056 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightControlTransportTests.PersistentControlServerTests/testListenerCreatesSecureSocketAndPreservesInodeSubstitutionOnCleanup",
+      "testClass": "HostwrightControlTransportTests.PersistentControlServerTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6324,
+      "raw": "Test Case '-[HostwrightControlTransportTests.PersistentControlServerTests testListenerCreatesSecureSocketAndPreservesInodeSubstitutionOnCleanup]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightControlTransportTests.PersistentControlServerTests/testListenerRecoversOnlyVerifiedStaleSocket",
+      "testClass": "HostwrightControlTransportTests.PersistentControlServerTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6326,
+      "raw": "Test Case '-[HostwrightControlTransportTests.PersistentControlServerTests testListenerRecoversOnlyVerifiedStaleSocket]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightControlTransportTests.PersistentControlServerTests/testOversizedFrameClosesConnectionBeforeRequestAllocation",
+      "testClass": "HostwrightControlTransportTests.PersistentControlServerTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6328,
+      "raw": "Test Case '-[HostwrightControlTransportTests.PersistentControlServerTests testOversizedFrameClosesConnectionBeforeRequestAllocation]' passed (0.051 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightControlTransportTests.PersistentControlServerTests/testQueuedExpiredSessionCannotInvokeHandler",
+      "testClass": "HostwrightControlTransportTests.PersistentControlServerTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6330,
+      "raw": "Test Case '-[HostwrightControlTransportTests.PersistentControlServerTests testQueuedExpiredSessionCannotInvokeHandler]' passed (0.059 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightControlTransportTests.PersistentControlServerTests/testQueuedRevokedSessionCannotInvokeHandler",
+      "testClass": "HostwrightControlTransportTests.PersistentControlServerTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6332,
+      "raw": "Test Case '-[HostwrightControlTransportTests.PersistentControlServerTests testQueuedRevokedSessionCannotInvokeHandler]' passed (0.066 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightControlTransportTests.PersistentControlServerTests/testRevokedSessionPreventsNextPersistentRequestFromInvokingHandler",
+      "testClass": "HostwrightControlTransportTests.PersistentControlServerTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6334,
+      "raw": "Test Case '-[HostwrightControlTransportTests.PersistentControlServerTests testRevokedSessionPreventsNextPersistentRequestFromInvokingHandler]' passed (0.053 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightControlTransportTests.PersistentControlServerTests/testSessionRevokedDuringPreparationCannotInvokeHandler",
+      "testClass": "HostwrightControlTransportTests.PersistentControlServerTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6336,
+      "raw": "Test Case '-[HostwrightControlTransportTests.PersistentControlServerTests testSessionRevokedDuringPreparationCannotInvokeHandler]' passed (0.082 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightControlTransportTests.PersistentControlServerTests/testSessionRevokedDuringPreparationCannotInvokePreparedExecution",
+      "testClass": "HostwrightControlTransportTests.PersistentControlServerTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6338,
+      "raw": "Test Case '-[HostwrightControlTransportTests.PersistentControlServerTests testSessionRevokedDuringPreparationCannotInvokePreparedExecution]' passed (0.081 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightControlTransportTests.PersistentControlServerTests/testStreamingHooksRequireCompleteFourHookBundle",
+      "testClass": "HostwrightControlTransportTests.PersistentControlServerTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6340,
+      "raw": "Test Case '-[HostwrightControlTransportTests.PersistentControlServerTests testStreamingHooksRequireCompleteFourHookBundle]' passed (0.040 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightControlTransportTests.PersistentControlServerTests/testUnaryRequestCoordinatorDefaultsToProcessingRequest",
+      "testClass": "HostwrightControlTransportTests.PersistentControlServerTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6342,
+      "raw": "Test Case '-[HostwrightControlTransportTests.PersistentControlServerTests testUnaryRequestCoordinatorDefaultsToProcessingRequest]' passed (0.066 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightControlTransportTests.PersistentControlServerTests/testUnaryRequestCoordinatorFailureClosesConnectionWithoutInvokingHandler",
+      "testClass": "HostwrightControlTransportTests.PersistentControlServerTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6344,
+      "raw": "Test Case '-[HostwrightControlTransportTests.PersistentControlServerTests testUnaryRequestCoordinatorFailureClosesConnectionWithoutInvokingHandler]' passed (0.058 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightControlTransportTests.PersistentControlServerTests/testUnaryRequestCoordinatorWrapsSynchronousProcessing",
+      "testClass": "HostwrightControlTransportTests.PersistentControlServerTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6346,
+      "raw": "Test Case '-[HostwrightControlTransportTests.PersistentControlServerTests testUnaryRequestCoordinatorWrapsSynchronousProcessing]' passed (0.165 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationCLITests/testDependencyLockLaneProducesPassingGateEvidenceFromExactCommit",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationCLITests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6351,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationCLITests testDependencyLockLaneProducesPassingGateEvidenceFromExactCommit]' passed (0.763 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationCLITests/testDocumentationLaneMarksEvidenceStaleWhenTrackedSourceChangesDuringExecution",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationCLITests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6353,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationCLITests testDocumentationLaneMarksEvidenceStaleWhenTrackedSourceChangesDuringExecution]' passed (2.125 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationCLITests/testDocumentationLaneProducesExactNonPromotableOrPassingEvidence",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationCLITests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6355,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationCLITests testDocumentationLaneProducesExactNonPromotableOrPassingEvidence]' passed (3.328 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationCLITests/testExactCommitSafeLaneCannotPromoteDirtyWorkingTree",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationCLITests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6357,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationCLITests testExactCommitSafeLaneCannotPromoteDirtyWorkingTree]' passed (0.565 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationCLITests/testLaneEvidenceStatusPreservesPrimaryExecutionFailure",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationCLITests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6359,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationCLITests testLaneEvidenceStatusPreservesPrimaryExecutionFailure]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationCLITests/testLicensePolicyLaneMarksEvidenceStaleWhenSourceChangesDuringExecution",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationCLITests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6361,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationCLITests testLicensePolicyLaneMarksEvidenceStaleWhenSourceChangesDuringExecution]' passed (0.574 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationCLITests/testLicensePolicyLaneProducesPassingExactCommitEvidenceWithoutTextLeakage",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationCLITests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6363,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationCLITests testLicensePolicyLaneProducesPassingExactCommitEvidenceWithoutTextLeakage]' passed (1.105 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationCLITests/testLocalLaneEvidenceClassBindsProducerInsteadOfRegistryOrder",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationCLITests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6365,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationCLITests testLocalLaneEvidenceClassBindsProducerInsteadOfRegistryOrder]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationCLITests/testParserRejectsUnknownAndDuplicateOptions",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationCLITests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6367,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationCLITests testParserRejectsUnknownAndDuplicateOptions]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationCLITests/testPlanCommandIsCanonicalAndBounded",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationCLITests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6369,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationCLITests testPlanCommandIsCanonicalAndBounded]' passed (0.485 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationCLITests/testPlanUsesDetectedExactCommitDirtyBoundaryForLicensePolicy",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationCLITests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6371,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationCLITests testPlanUsesDetectedExactCommitDirtyBoundaryForLicensePolicy]' passed (0.805 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationCLITests/testPrivateLedgerStatusAndResumeAreExplicit",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationCLITests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6373,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationCLITests testPrivateLedgerStatusAndResumeAreExplicit]' passed (0.004 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationCLITests/testSecretScanLanePreservesRealFailureAndCannotSatisfyGate",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationCLITests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6375,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationCLITests testSecretScanLanePreservesRealFailureAndCannotSatisfyGate]' passed (0.578 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationCLITests/testVerifyAcceptsCommittedDependencyLicenseAndSecretLaneIDs",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationCLITests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6377,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationCLITests testVerifyAcceptsCommittedDependencyLicenseAndSecretLaneIDs]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationCLITests/testVerifyAcceptsExactLocalDocumentationLane",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationCLITests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6379,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationCLITests testVerifyAcceptsExactLocalDocumentationLane]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationLedgerTests/testArtifactCleanupRemovesOnlyOwnedExactArtifacts",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationLedgerTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6384,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationLedgerTests testArtifactCleanupRemovesOnlyOwnedExactArtifacts]' passed (0.042 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationLedgerTests/testArtifactSymlinkParentIsRejected",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationLedgerTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6386,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationLedgerTests testArtifactSymlinkParentIsRejected]' passed (0.030 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationLedgerTests/testEvidenceCompletionRejectsTamperAndStaleEnvironment",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationLedgerTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6388,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationLedgerTests testEvidenceCompletionRejectsTamperAndStaleEnvironment]' passed (0.040 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationLedgerTests/testReplayConflictRecoveryAndCancellation",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationLedgerTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6390,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationLedgerTests testReplayConflictRecoveryAndCancellation]' passed (0.027 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests/testCommittedLicensePolicyPassesWithExactDirectReceipts",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6395,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests testCommittedLicensePolicyPassesWithExactDirectReceipts]' passed (0.164 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests/testDefaultRegistryPlansReadyLocalLanesAndExplicitBlockers",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6397,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests testDefaultRegistryPlansReadyLocalLanesAndExplicitBlockers]' passed (0.002 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests/testDependencyLockLaneBlocksWhenRequiredPackageManifestIsASymlink",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6399,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests testDependencyLockLaneBlocksWhenRequiredPackageManifestIsASymlink]' passed (0.123 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests/testDependencyLockLaneIgnoresCanonicalTextInCommentAndRejectsRealFromCall",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6401,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests testDependencyLockLaneIgnoresCanonicalTextInCommentAndRejectsRealFromCall]' passed (0.136 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests/testDependencyLockLaneRejectsAdditionalDirectDependency",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6403,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests testDependencyLockLaneRejectsAdditionalDirectDependency]' passed (0.137 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests/testDependencyLockLaneRejectsCrossPairedURLAndExactVersionText",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6405,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests testDependencyLockLaneRejectsCrossPairedURLAndExactVersionText]' passed (0.129 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests/testDependencyLockLaneRejectsCryptoRevisionDriftAndHTTP2Downgrade",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6407,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests testDependencyLockLaneRejectsCryptoRevisionDriftAndHTTP2Downgrade]' passed (0.409 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests/testDependencyLockLaneTreatsOriginHashAsStructuralAndRequiresExactRevision",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6409,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests testDependencyLockLaneTreatsOriginHashAsStructuralAndRequiresExactRevision]' passed (0.425 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests/testDependencyLockLaneUsesExactCommitBlobsForPassFailureAndBlock",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6411,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests testDependencyLockLaneUsesExactCommitBlobsForPassFailureAndBlock]' passed (0.438 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests/testDocumentationLaneExecutesImmutableCommitSnapshotAfterLiveSourceSwap",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6413,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests testDocumentationLaneExecutesImmutableCommitSnapshotAfterLiveSourceSwap]' passed (1.664 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests/testDocumentationLaneFailsClosedWhenProviderScriptIsMissing",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6415,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests testDocumentationLaneFailsClosedWhenProviderScriptIsMissing]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests/testDocumentationLanePlanBlocksWhenTrustedPythonIsUnavailable",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6417,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests testDocumentationLanePlanBlocksWhenTrustedPythonIsUnavailable]' passed (0.002 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests/testDocumentationLanePreservesFirstObservationWhenSecondCommandTimesOut",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6419,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests testDocumentationLanePreservesFirstObservationWhenSecondCommandTimesOut]' passed (1.133 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests/testDocumentationLaneRecordsOnlyBoundedCommandEvidence",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6421,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests testDocumentationLaneRecordsOnlyBoundedCommandEvidence]' passed (1.099 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests/testDocumentationLaneRejectsProviderSymlinkBeforeCommandExecution",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6423,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests testDocumentationLaneRejectsProviderSymlinkBeforeCommandExecution]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests/testDocumentationLaneRejectsTamperedProviderBeforeCommandExecution",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6425,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests testDocumentationLaneRejectsTamperedProviderBeforeCommandExecution]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests/testLicensePolicyLaneBlocksMissingPolicyAndMissingDirectReceipt",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6427,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests testLicensePolicyLaneBlocksMissingPolicyAndMissingDirectReceipt]' passed (0.290 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests/testLicensePolicyLaneIgnoresOversizedUnselectedNotice",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6429,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests testLicensePolicyLaneIgnoresOversizedUnselectedNotice]' passed (0.182 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests/testLicensePolicyLanePassesOnlyExactCommittedReceiptsAndTexts",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6431,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests testLicensePolicyLanePassesOnlyExactCommittedReceiptsAndTexts]' passed (0.147 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests/testLicensePolicyLaneRejectsCommittedSymlinkAndGitlinkLicenseTexts",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6433,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests testLicensePolicyLaneRejectsCommittedSymlinkAndGitlinkLicenseTexts]' passed (0.288 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests/testLicensePolicyLaneRejectsExtraReceiptAndDirectPinMismatch",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6435,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests testLicensePolicyLaneRejectsExtraReceiptAndDirectPinMismatch]' passed (0.479 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests/testLicensePolicyLaneRejectsHashSizeAndTraversalWithoutTextLeakage",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6437,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests testLicensePolicyLaneRejectsHashSizeAndTraversalWithoutTextLeakage]' passed (0.286 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests/testLicensePolicyLaneRejectsMalformedUnknownSPDXDuplicateAndUnknownKeys",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6439,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests testLicensePolicyLaneRejectsMalformedUnknownSPDXDuplicateAndUnknownKeys]' passed (0.992 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests/testLicensePolicyLaneStillRefusesOversizedSelectedInput",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6441,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests testLicensePolicyLaneStillRefusesOversizedSelectedInput]' passed (0.158 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests/testLicensePolicyPlanBlocksExactCommitWithEmptyOrMissingReceipts",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6443,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests testLicensePolicyPlanBlocksExactCommitWithEmptyOrMissingReceipts]' passed (0.248 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests/testLicensePolicyPlanBlocksFailedExactCommitIntegrityAsTampered",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6445,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests testLicensePolicyPlanBlocksFailedExactCommitIntegrityAsTampered]' passed (0.148 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests/testLicensePolicyPlanMatchesExactCommittedReceiptsAndDirtyAuthority",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6447,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests testLicensePolicyPlanMatchesExactCommittedReceiptsAndDirtyAuthority]' passed (0.187 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests/testLicensePolicyPlanNeverPromotesMutableWorkingTreeFactsWithoutCommitAuthority",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6449,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests testLicensePolicyPlanNeverPromotesMutableWorkingTreeFactsWithoutCommitAuthority]' passed (0.250 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests/testLocalLaneRunnerExecutesExactlyFourCommittedSafeLocalProviders",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6451,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests testLocalLaneRunnerExecutesExactlyFourCommittedSafeLocalProviders]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests/testMissingOrTamperedSeededCorpusIsBlocked",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6453,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests testMissingOrTamperedSeededCorpusIsBlocked]' passed (0.002 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests/testParserBoundaryHarnessAcceptsCanonicalAndRejectsUnknownData",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6455,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests testParserBoundaryHarnessAcceptsCanonicalAndRejectsUnknownData]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests/testSafeChecksUseRealBoundedInputsAndAggregateDeterministically",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6457,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests testSafeChecksUseRealBoundedInputsAndAggregateDeterministically]' passed (0.162 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests/testSafeLanesIgnoreValidatedUnrelatedSymlinkAndGitlinkEntries",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6459,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests testSafeLanesIgnoreValidatedUnrelatedSymlinkAndGitlinkEntries]' passed (0.335 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests/testSecretScanLaneBlocksUnsupportedUTF32Input",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6461,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests testSecretScanLaneBlocksUnsupportedUTF32Input]' passed (0.136 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests/testSecretScanLaneIgnoresConcurrentLivePathSwapAfterCommitBlobRead",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6463,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests testSecretScanLaneIgnoresConcurrentLivePathSwapAfterCommitBlobRead]' passed (0.138 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests/testSecretScanLaneScansInvalidUTF8AndUTF16WithoutExposingCredentials",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6465,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests testSecretScanLaneScansInvalidUTF8AndUTF16WithoutExposingCredentials]' passed (0.138 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests/testSecretScanLaneUsesBoundedExactCommitBlobsForPassFailureAndBlock",
+      "testClass": "HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6467,
+      "raw": "Test Case '-[HostwrightReleaseQualificationTests.ReleaseQualificationRegistryTests testSecretScanLaneUsesBoundedExactCommitBlobsForPassFailureAndBlock]' passed (0.336 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.SQLiteHardeningTests/testApplicationIdentityClaimsLegacyStateAndRejectsForeignStateBeforeMutation",
+      "testClass": "HostwrightStateTests.SQLiteHardeningTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6472,
+      "raw": "Test Case '-[HostwrightStateTests.SQLiteHardeningTests testApplicationIdentityClaimsLegacyStateAndRejectsForeignStateBeforeMutation]' passed (0.067 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.SQLiteHardeningTests/testAuthoritativeAndPortableProfilesEnforceRealSQLitePolicy",
+      "testClass": "HostwrightStateTests.SQLiteHardeningTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6474,
+      "raw": "Test Case '-[HostwrightStateTests.SQLiteHardeningTests testAuthoritativeAndPortableProfilesEnforceRealSQLitePolicy]' passed (0.047 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.SQLiteHardeningTests/testCancellationAndStoragePressureRollBackAndLeaveConnectionUsable",
+      "testClass": "HostwrightStateTests.SQLiteHardeningTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6476,
+      "raw": "Test Case '-[HostwrightStateTests.SQLiteHardeningTests testCancellationAndStoragePressureRollBackAndLeaveConnectionUsable]' passed (0.037 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.SQLiteHardeningTests/testConcurrentSymlinkSwapsNeverRedirectSQLiteAccess",
+      "testClass": "HostwrightStateTests.SQLiteHardeningTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6478,
+      "raw": "Test Case '-[HostwrightStateTests.SQLiteHardeningTests testConcurrentSymlinkSwapsNeverRedirectSQLiteAccess]' passed (0.454 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.SQLiteHardeningTests/testFinalSymlinksAndUnsafeSQLiteSidecarsAreRejectedWithoutMutatingTargets",
+      "testClass": "HostwrightStateTests.SQLiteHardeningTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6480,
+      "raw": "Test Case '-[HostwrightStateTests.SQLiteHardeningTests testFinalSymlinksAndUnsafeSQLiteSidecarsAreRejectedWithoutMutatingTargets]' passed (0.045 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.SQLiteHardeningTests/testFutureDeleteModeSchemaIsRefusedBeforeAnyPersistentWriteConfiguration",
+      "testClass": "HostwrightStateTests.SQLiteHardeningTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6482,
+      "raw": "Test Case '-[HostwrightStateTests.SQLiteHardeningTests testFutureDeleteModeSchemaIsRefusedBeforeAnyPersistentWriteConfiguration]' passed (0.048 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.SQLiteHardeningTests/testManagedTransactionsRejectNestedAndEmbeddedControlWithoutCommitting",
+      "testClass": "HostwrightStateTests.SQLiteHardeningTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6484,
+      "raw": "Test Case '-[HostwrightStateTests.SQLiteHardeningTests testManagedTransactionsRejectNestedAndEmbeddedControlWithoutCommitting]' passed (0.038 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.SQLiteHardeningTests/testRealProcessKillDiscardsUncommittedWALAndPreservesCommittedWAL",
+      "testClass": "HostwrightStateTests.SQLiteHardeningTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6486,
+      "raw": "Test Case '-[HostwrightStateTests.SQLiteHardeningTests testRealProcessKillDiscardsUncommittedWALAndPreservesCommittedWAL]' passed (0.215 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.SQLiteHardeningTests/testWriterFenceSerializesWritersWhileAllowingReaders",
+      "testClass": "HostwrightStateTests.SQLiteHardeningTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6488,
+      "raw": "Test Case '-[HostwrightStateTests.SQLiteHardeningTests testWriterFenceSerializesWritersWhileAllowingReaders]' passed (0.319 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCoreTests.SecureExecutableACLTests/testAddingWriteGrantInvalidatesPreviouslyVerifiedExecutable",
+      "testClass": "HostwrightCoreTests.SecureExecutableACLTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6493,
+      "raw": "Test Case '-[HostwrightCoreTests.SecureExecutableACLTests testAddingWriteGrantInvalidatesPreviouslyVerifiedExecutable]' passed (0.003 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCoreTests.SecureExecutableACLTests/testCanonicalSymlinkTargetWithWriteGrantIsRejected",
+      "testClass": "HostwrightCoreTests.SecureExecutableACLTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6495,
+      "raw": "Test Case '-[HostwrightCoreTests.SecureExecutableACLTests testCanonicalSymlinkTargetWithWriteGrantIsRejected]' passed (0.002 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCoreTests.SecureExecutableACLTests/testDenyOnlyACLsRemainSupported",
+      "testClass": "HostwrightCoreTests.SecureExecutableACLTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6497,
+      "raw": "Test Case '-[HostwrightCoreTests.SecureExecutableACLTests testDenyOnlyACLsRemainSupported]' passed (0.002 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCoreTests.SecureExecutableACLTests/testExecutableWithWriteGrantIsRejectedDespiteSafeMode",
+      "testClass": "HostwrightCoreTests.SecureExecutableACLTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6499,
+      "raw": "Test Case '-[HostwrightCoreTests.SecureExecutableACLTests testExecutableWithWriteGrantIsRejectedDespiteSafeMode]' passed (0.002 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCoreTests.SecureExecutableACLTests/testLexicalSymlinkParentWithWriteGrantIsRejected",
+      "testClass": "HostwrightCoreTests.SecureExecutableACLTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6501,
+      "raw": "Test Case '-[HostwrightCoreTests.SecureExecutableACLTests testLexicalSymlinkParentWithWriteGrantIsRejected]' passed (0.002 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCoreTests.SecureExecutableACLTests/testWritableParentACLRejectsExecutableAndWorkingDirectory",
+      "testClass": "HostwrightCoreTests.SecureExecutableACLTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6503,
+      "raw": "Test Case '-[HostwrightCoreTests.SecureExecutableACLTests testWritableParentACLRejectsExecutableAndWorkingDirectory]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.SecureLocalPathTests/testAccessGrantingStateACLIsRejectedBeforeSQLiteUse",
+      "testClass": "HostwrightStateTests.SecureLocalPathTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6508,
+      "raw": "Test Case '-[HostwrightStateTests.SecureLocalPathTests testAccessGrantingStateACLIsRejectedBeforeSQLiteUse]' passed (0.045 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.SecureLocalPathTests/testDefaultStateCreatesPrivateMacOSLayoutAndDatabase",
+      "testClass": "HostwrightStateTests.SecureLocalPathTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6510,
+      "raw": "Test Case '-[HostwrightStateTests.SecureLocalPathTests testDefaultStateCreatesPrivateMacOSLayoutAndDatabase]' passed (0.045 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.SecureLocalPathTests/testHardLinkedStateFileIsRejectedBeforeSQLiteUse",
+      "testClass": "HostwrightStateTests.SecureLocalPathTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6512,
+      "raw": "Test Case '-[HostwrightStateTests.SecureLocalPathTests testHardLinkedStateFileIsRejectedBeforeSQLiteUse]' passed (0.035 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.SecureLocalPathTests/testLegacyConflictAndSidecarsFailWithoutChangingEitherDatabase",
+      "testClass": "HostwrightStateTests.SecureLocalPathTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6514,
+      "raw": "Test Case '-[HostwrightStateTests.SecureLocalPathTests testLegacyConflictAndSidecarsFailWithoutChangingEitherDatabase]' passed (0.129 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.SecureLocalPathTests/testLegacyMigrationRefusesAnActiveWriterAndResumesAfterRelease",
+      "testClass": "HostwrightStateTests.SecureLocalPathTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6516,
+      "raw": "Test Case '-[HostwrightStateTests.SecureLocalPathTests testLegacyMigrationRefusesAnActiveWriterAndResumesAfterRelease]' passed (0.066 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.SecureLocalPathTests/testLegacyMigrationRejectsAnInvalidHostwrightLedgerBeforeMove",
+      "testClass": "HostwrightStateTests.SecureLocalPathTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6518,
+      "raw": "Test Case '-[HostwrightStateTests.SecureLocalPathTests testLegacyMigrationRejectsAnInvalidHostwrightLedgerBeforeMove]' passed (0.004 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.SecureLocalPathTests/testLegacyMigrationRejectsEmptyLedgerAndSpecialPermissionBitsBeforeMove",
+      "testClass": "HostwrightStateTests.SecureLocalPathTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6520,
+      "raw": "Test Case '-[HostwrightStateTests.SecureLocalPathTests testLegacyMigrationRejectsEmptyLedgerAndSpecialPermissionBitsBeforeMove]' passed (0.036 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.SecureLocalPathTests/testLegacyStateMigratesAtomicallyAndPreservesUnknownLegacyFiles",
+      "testClass": "HostwrightStateTests.SecureLocalPathTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6522,
+      "raw": "Test Case '-[HostwrightStateTests.SecureLocalPathTests testLegacyStateMigratesAtomicallyAndPreservesUnknownLegacyFiles]' passed (0.062 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.SecureLocalPathTests/testMigrationJournalResumesAfterAtomicRenameCheckpoint",
+      "testClass": "HostwrightStateTests.SecureLocalPathTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6524,
+      "raw": "Test Case '-[HostwrightStateTests.SecureLocalPathTests testMigrationJournalResumesAfterAtomicRenameCheckpoint]' passed (0.055 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.SecureLocalPathTests/testMigrationResumeRefusesSourceAndDestinationSidecarsCreatedAfterIntent",
+      "testClass": "HostwrightStateTests.SecureLocalPathTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6526,
+      "raw": "Test Case '-[HostwrightStateTests.SecureLocalPathTests testMigrationResumeRefusesSourceAndDestinationSidecarsCreatedAfterIntent]' passed (0.110 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.SecureLocalPathTests/testPrivateCreationIsIndependentOfARestrictiveUmask",
+      "testClass": "HostwrightStateTests.SecureLocalPathTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6528,
+      "raw": "Test Case '-[HostwrightStateTests.SecureLocalPathTests testPrivateCreationIsIndependentOfARestrictiveUmask]' passed (0.037 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.SecureLocalPathTests/testProspectiveValidationRejectsUnsafeMissingTargetsAndAcceptsResumableRename",
+      "testClass": "HostwrightStateTests.SecureLocalPathTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6530,
+      "raw": "Test Case '-[HostwrightStateTests.SecureLocalPathTests testProspectiveValidationRejectsUnsafeMissingTargetsAndAcceptsResumableRename]' passed (0.049 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightStateTests.SecureLocalPathTests/testUnsafeExplicitParentsSymlinksModesAndOwnersFailBeforeSQLiteUse",
+      "testClass": "HostwrightStateTests.SecureLocalPathTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6532,
+      "raw": "Test Case '-[HostwrightStateTests.SecureLocalPathTests testUnsafeExplicitParentsSymlinksModesAndOwnersFailBeforeSQLiteUse]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCoreTests.SecureSubprocessTests/testBoundedStandardInputRoundTripsWithoutTruncation",
+      "testClass": "HostwrightCoreTests.SecureSubprocessTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6537,
+      "raw": "Test Case '-[HostwrightCoreTests.SecureSubprocessTests testBoundedStandardInputRoundTripsWithoutTruncation]' passed (0.600 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCoreTests.SecureSubprocessTests/testCancellationBeforeLaunchCreatesNoProcess",
+      "testClass": "HostwrightCoreTests.SecureSubprocessTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6539,
+      "raw": "Test Case '-[HostwrightCoreTests.SecureSubprocessTests testCancellationBeforeLaunchCreatesNoProcess]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCoreTests.SecureSubprocessTests/testCancellationTerminatesLeaderAndIgnoringDescendant",
+      "testClass": "HostwrightCoreTests.SecureSubprocessTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6541,
+      "raw": "Test Case '-[HostwrightCoreTests.SecureSubprocessTests testCancellationTerminatesLeaderAndIgnoringDescendant]' passed (0.463 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCoreTests.SecureSubprocessTests/testDetachedNaturalLeaderExitCleansOwnedDescendantGroup",
+      "testClass": "HostwrightCoreTests.SecureSubprocessTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6543,
+      "raw": "Test Case '-[HostwrightCoreTests.SecureSubprocessTests testDetachedNaturalLeaderExitCleansOwnedDescendantGroup]' passed (0.381 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCoreTests.SecureSubprocessTests/testDetachedProcessRecordsExactNaturalExitAndExcludesForcedTermination",
+      "testClass": "HostwrightCoreTests.SecureSubprocessTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6545,
+      "raw": "Test Case '-[HostwrightCoreTests.SecureSubprocessTests testDetachedProcessRecordsExactNaturalExitAndExcludesForcedTermination]' passed (0.032 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCoreTests.SecureSubprocessTests/testDetachedProcessStreamDescriptorsRoundTripWithoutInheritingExtraPipeEnds",
+      "testClass": "HostwrightCoreTests.SecureSubprocessTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6547,
+      "raw": "Test Case '-[HostwrightCoreTests.SecureSubprocessTests testDetachedProcessStreamDescriptorsRoundTripWithoutInheritingExtraPipeEnds]' passed (0.003 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCoreTests.SecureSubprocessTests/testEarlyStandardInputClosureFailsWithBoundedTypedError",
+      "testClass": "HostwrightCoreTests.SecureSubprocessTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6549,
+      "raw": "Test Case '-[HostwrightCoreTests.SecureSubprocessTests testEarlyStandardInputClosureFailsWithBoundedTypedError]' passed (0.365 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCoreTests.SecureSubprocessTests/testEnvironmentIsExactAndDoesNotInheritParentSecrets",
+      "testClass": "HostwrightCoreTests.SecureSubprocessTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6551,
+      "raw": "Test Case '-[HostwrightCoreTests.SecureSubprocessTests testEnvironmentIsExactAndDoesNotInheritParentSecrets]' passed (0.008 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCoreTests.SecureSubprocessTests/testExactArgumentsDoNotInvokeShellExpansion",
+      "testClass": "HostwrightCoreTests.SecureSubprocessTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6553,
+      "raw": "Test Case '-[HostwrightCoreTests.SecureSubprocessTests testExactArgumentsDoNotInvokeShellExpansion]' passed (0.007 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCoreTests.SecureSubprocessTests/testExecutableIdentityDetectsMutationAndUnsafeParent",
+      "testClass": "HostwrightCoreTests.SecureSubprocessTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6555,
+      "raw": "Test Case '-[HostwrightCoreTests.SecureSubprocessTests testExecutableIdentityDetectsMutationAndUnsafeParent]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCoreTests.SecureSubprocessTests/testLeaderExitAfterReapingItsChildReturnsNormally",
+      "testClass": "HostwrightCoreTests.SecureSubprocessTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6557,
+      "raw": "Test Case '-[HostwrightCoreTests.SecureSubprocessTests testLeaderExitAfterReapingItsChildReturnsNormally]' passed (0.385 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCoreTests.SecureSubprocessTests/testLeaderExitWithLiveDescendantFailsAndCleansProcessGroup",
+      "testClass": "HostwrightCoreTests.SecureSubprocessTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6559,
+      "raw": "Test Case '-[HostwrightCoreTests.SecureSubprocessTests testLeaderExitWithLiveDescendantFailsAndCleansProcessGroup]' passed (2.303 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCoreTests.SecureSubprocessTests/testOutputFloodIsBoundedAndTerminated",
+      "testClass": "HostwrightCoreTests.SecureSubprocessTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6561,
+      "raw": "Test Case '-[HostwrightCoreTests.SecureSubprocessTests testOutputFloodIsBoundedAndTerminated]' passed (0.013 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCoreTests.SecureSubprocessTests/testPinnedExecutableIdentityCannotDriftBetweenTrustCheckAndSuspendedSpawn",
+      "testClass": "HostwrightCoreTests.SecureSubprocessTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6563,
+      "raw": "Test Case '-[HostwrightCoreTests.SecureSubprocessTests testPinnedExecutableIdentityCannotDriftBetweenTrustCheckAndSuspendedSpawn]' passed (0.002 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCoreTests.SecureSubprocessTests/testRepeatedCancellationRacesReturnOnlyCancelled",
+      "testClass": "HostwrightCoreTests.SecureSubprocessTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6565,
+      "raw": "Test Case '-[HostwrightCoreTests.SecureSubprocessTests testRepeatedCancellationRacesReturnOnlyCancelled]' passed (0.801 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCoreTests.SecureSubprocessTests/testRequestRejectsLoaderEnvironmentAndOversizedInputBeforeLaunch",
+      "testClass": "HostwrightCoreTests.SecureSubprocessTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6567,
+      "raw": "Test Case '-[HostwrightCoreTests.SecureSubprocessTests testRequestRejectsLoaderEnvironmentAndOversizedInputBeforeLaunch]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCoreTests.SecureSubprocessTests/testResolverFailsClosedOnUnsafePathCandidate",
+      "testClass": "HostwrightCoreTests.SecureSubprocessTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6569,
+      "raw": "Test Case '-[HostwrightCoreTests.SecureSubprocessTests testResolverFailsClosedOnUnsafePathCandidate]' passed (0.005 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCoreTests.SecureSubprocessTests/testShellExecutablesAreRejectedBeforeLaunch",
+      "testClass": "HostwrightCoreTests.SecureSubprocessTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6571,
+      "raw": "Test Case '-[HostwrightCoreTests.SecureSubprocessTests testShellExecutablesAreRejectedBeforeLaunch]' passed (0.000 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCoreTests.SecureSubprocessTests/testStandardErrorFloodIsBoundedAndTerminated",
+      "testClass": "HostwrightCoreTests.SecureSubprocessTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6573,
+      "raw": "Test Case '-[HostwrightCoreTests.SecureSubprocessTests testStandardErrorFloodIsBoundedAndTerminated]' passed (0.391 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCoreTests.SecureSubprocessTests/testSuspendedProcessValidatorRejectsAndReapsBeforeExecution",
+      "testClass": "HostwrightCoreTests.SecureSubprocessTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6575,
+      "raw": "Test Case '-[HostwrightCoreTests.SecureSubprocessTests testSuspendedProcessValidatorRejectsAndReapsBeforeExecution]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCoreTests.SecureSubprocessTests/testSystemSymlinkResolvesToVerifiedCanonicalExecutable",
+      "testClass": "HostwrightCoreTests.SecureSubprocessTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6577,
+      "raw": "Test Case '-[HostwrightCoreTests.SecureSubprocessTests testSystemSymlinkResolvesToVerifiedCanonicalExecutable]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCoreTests.SecureSubprocessTests/testTaskCancellationTerminatesTheProcess",
+      "testClass": "HostwrightCoreTests.SecureSubprocessTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6579,
+      "raw": "Test Case '-[HostwrightCoreTests.SecureSubprocessTests testTaskCancellationTerminatesTheProcess]' passed (0.130 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCoreTests.SecureSubprocessTests/testTimeoutTerminatesLeaderAndIgnoringDescendant",
+      "testClass": "HostwrightCoreTests.SecureSubprocessTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6581,
+      "raw": "Test Case '-[HostwrightCoreTests.SecureSubprocessTests testTimeoutTerminatesLeaderAndIgnoringDescendant]' passed (2.825 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCoreTests.SecureSubprocessTests/testTimeoutUsesBoundedTermination",
+      "testClass": "HostwrightCoreTests.SecureSubprocessTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6583,
+      "raw": "Test Case '-[HostwrightCoreTests.SecureSubprocessTests testTimeoutUsesBoundedTermination]' passed (0.110 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCoreTests.SecureSubprocessTests/testUnrelatedFileDescriptorsAreClosedAcrossExec",
+      "testClass": "HostwrightCoreTests.SecureSubprocessTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6585,
+      "raw": "Test Case '-[HostwrightCoreTests.SecureSubprocessTests testUnrelatedFileDescriptorsAreClosedAcrossExec]' passed (0.408 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCoreTests.SecureSubprocessTests/testWorkingDirectoryAndLexicalTraversalValidationFailClosed",
+      "testClass": "HostwrightCoreTests.SecureSubprocessTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6587,
+      "raw": "Test Case '-[HostwrightCoreTests.SecureSubprocessTests testWorkingDirectoryAndLexicalTraversalValidationFailClosed]' passed (0.001 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCoreTests.SecureSubprocessTests/testWorkingDirectoryUsesVerifiedDirectoryDescriptor",
+      "testClass": "HostwrightCoreTests.SecureSubprocessTests",
+      "status": "passed",
+      "framework": "XCTest",
+      "line": 6589,
+      "raw": "Test Case '-[HostwrightCoreTests.SecureSubprocessTests testWorkingDirectoryUsesVerifiedDirectoryDescriptor]' passed (0.372 seconds).",
+      "evidence": "security-selected.log"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/confirmationMismatchHasZeroImageOrMutationEffects()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"confirmationMismatchHasZeroImageOrMutationEffects()\" time=\"0.083848417\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/runningRestartDurablyOrdersStopThenStartBeforeHooksAndProbes()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"runningRestartDurablyOrdersStopThenStartBeforeHooksAndProbes()\" time=\"0.083826292\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/imageLockingAndMountNormalizationPreserveNetworkIntent()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"imageLockingAndMountNormalizationPreserveNetworkIntent()\" time=\"0.083733292\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/existingMutationWithoutUUIDOwnershipFailsClosed()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"existingMutationWithoutUUIDOwnershipFailsClosed()\" time=\"0.083506167\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/stoppedRestartSkipsPreStopButRunsPostStartAfterActualStart()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"stoppedRestartSkipsPreStopButRunsPostStartAfterActualStart()\" time=\"0.083655375\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/movedTagProducesANewPlanAndRefusesTheReviewedConfirmation()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"movedTagProducesANewPlanAndRefusesTheReviewedConfirmation()\" time=\"0.09225825\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/updateRejectsLegacyMutablePriorRevisionWithoutAnImmutableLock()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"updateRejectsLegacyMutablePriorRevisionWithoutAnImmutableLock()\" time=\"0.083823\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/repeatedLifecycleGroupReusesOnlyExactPlanScopedImageLockEvidence()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"repeatedLifecycleGroupReusesOnlyExactPlanScopedImageLockEvidence()\" time=\"0.117873958\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/failedImageEvidencePreventsRevalidationAndExecution()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"failedImageEvidencePreventsRevalidationAndExecution()\" time=\"0.083533666\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/unattendedMaintenanceOverridePastHardDeadlineFailsClosed()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"unattendedMaintenanceOverridePastHardDeadlineFailsClosed()\" time=\"0.143334333\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/unattendedReconciliationUsesTheExactSharedPlanAndSagaOnce()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"unattendedReconciliationUsesTheExactSharedPlanAndSagaOnce()\" time=\"0.083663458\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/dryRunBindsMutableTagToExactDescriptorAndPlatformVariant()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"dryRunBindsMutableTagToExactDescriptorAndPlatformVariant()\" time=\"0.083580166\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/runUsesOneDeterministicEphemeralIdentityAndRequiresLocalImage()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"runUsesOneDeterministicEphemeralIdentityAndRequiresLocalImage()\" time=\"0.083540625\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/recreateAvailabilityImpactIsVisibleAndConfirmationBound()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"recreateAvailabilityImpactIsVisibleAndConfirmationBound()\" time=\"0.239282833\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/namedVolumeFailsBeforeRuntimeMutation()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"namedVolumeFailsBeforeRuntimeMutation()\" time=\"0.083837375\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/dryRunCompilesSharedSagaPlanNormalizesBindsAndNeverPersistsSecrets()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"dryRunCompilesSharedSagaPlanNormalizesBindsAndNeverPersistsSecrets()\" time=\"0.0837085\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/unattendedReconciliationRejectsChangedManifestBytesBeforePlanning()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"unattendedReconciliationRejectsChangedManifestBytesBeforePlanning()\" time=\"0.083677167\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/updateResultExposesVersionedExactRolloutStageAndRevisionIdentities()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"updateResultExposesVersionedExactRolloutStageAndRevisionIdentities()\" time=\"0.244288959\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/schedulerReleaseUsesOwnedRemovalRatherThanStop()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"schedulerReleaseUsesOwnedRemovalRatherThanStop()\" time=\"0.208988875\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/unattendedDaemonAuthorityFailsClosedWithoutValidatorAndOnNodeEpochTOCTOU()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"unattendedDaemonAuthorityFailsClosedWithoutValidatorAndOnNodeEpochTOCTOU()\" time=\"0.199481083\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/resourceOutcomeOrderIsDeterministicAcrossInputAndCompletionOrder()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"resourceOutcomeOrderIsDeterministicAcrossInputAndCompletionOrder()\" time=\"0.1329655\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/missingRelativeAndAbsoluteBindSourcesFailBeforeMutation()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"missingRelativeAndAbsoluteBindSourcesFailBeforeMutation()\" time=\"0.083780083\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/unattendedMaintenanceWindowClosingBeforeEffectFailsClosed()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"unattendedMaintenanceWindowClosingBeforeEffectFailsClosed()\" time=\"0.083807084\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/resolvedNamedVolumeCompilesBeforeProviderPathExists()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"resolvedNamedVolumeCompilesBeforeProviderPathExists()\" time=\"0.083687584\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/unattendedMaintenanceOverrideCancelledBeforeEffectFailsClosed()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"unattendedMaintenanceOverrideCancelledBeforeEffectFailsClosed()\" time=\"0.13212825\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/updateCompilesRealRollingPlanFromVerifiedPreviousRevision()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"updateCompilesRealRollingPlanFromVerifiedPreviousRevision()\" time=\"0.083733625\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/unattendedReconciliationHonorsCancellationBeforePlanning()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"unattendedReconciliationHonorsCancellationBeforePlanning()\" time=\"0.083926791\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/unattendedReconciliationPreservesPostAdmissionFailureAsInterruptedMutation()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"unattendedReconciliationPreservesPostAdmissionFailureAsInterruptedMutation()\" time=\"0.124485625\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/unattendedReconciliationRejectsChangedPolicyTargetBeforeExecution()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"unattendedReconciliationRejectsChangedPolicyTargetBeforeExecution()\" time=\"0.083768375\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/exactConfirmationRevalidatesThenExecutesOnce()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"exactConfirmationRevalidatesThenExecutesOnce()\" time=\"0.083688291\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/upRepairsSupportedDesiredDriftThroughTheExistingUpdatePlanner()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"upRepairsSupportedDesiredDriftThroughTheExistingUpdatePlanner()\" time=\"0.083704333\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/downPreservesAndRemoveDeletesOnlyExactOwnedResource()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"downPreservesAndRemoveDeletesOnlyExactOwnedResource()\" time=\"0.083683333\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/existingAbsoluteBindSourceCompiles()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"existingAbsoluteBindSourceCompiles()\" time=\"0.083664292\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/desiredSpecificationSortsPortsByStableTypedFields()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"desiredSpecificationSortsPortsByStableTypedFields()\" time=\"0.083708292\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/unattendedReconciliationReportsVerificationOnlyDAGAsConverged()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"unattendedReconciliationReportsVerificationOnlyDAGAsConverged()\" time=\"0.083598792\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/unattendedReconciliationDefersAnEmptyBudgetSelectionWithoutExecution()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"unattendedReconciliationDefersAnEmptyBudgetSelectionWithoutExecution()\" time=\"0.083520541\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/unattendedReconciliationReportsAnEmptySharedDAGAsConverged()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"unattendedReconciliationReportsAnEmptySharedDAGAsConverged()\" time=\"0.083590375\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/partialSafeHoldRendersExactCanonicalResourceOutcomesAsJSON()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"partialSafeHoldRendersExactCanonicalResourceOutcomesAsJSON()\" time=\"0.083893417\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/updatePreservesPriorTagLockWhileResolvingTheDesiredTagAgain()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"updatePreservesPriorTagLockWhileResolvingTheDesiredTagAgain()\" time=\"0.088151208\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCommandRunnerTests/startDoesNotCreateAMissingResource()",
+      "testClass": "HostwrightCLITests.LifecycleCommandRunnerTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCommandRunnerTests\" name=\"startDoesNotCreateAMissingResource()\" time=\"0.083602792\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCLIOptionsTests/parsesCompleteDryRunContractDeterministically()",
+      "testClass": "HostwrightCLITests.LifecycleCLIOptionsTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCLIOptionsTests\" name=\"parsesCompleteDryRunContractDeterministically()\" time=\"0.044883208\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCLIOptionsTests/rejectsAmbiguousOrUnsafeMutationArguments(arguments:)",
+      "testClass": "HostwrightCLITests.LifecycleCLIOptionsTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCLIOptionsTests\" name=\"rejectsAmbiguousOrUnsafeMutationArguments(arguments:)\" time=\"0.083609167\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    },
+    {
+      "identifier": "HostwrightCLITests.LifecycleCLIOptionsTests/parsesExactConfirmationAndRunTarget()",
+      "testClass": "HostwrightCLITests.LifecycleCLIOptionsTests",
+      "status": "passed",
+      "framework": "Swift Testing",
+      "raw": "<testcase classname=\"HostwrightCLITests.LifecycleCLIOptionsTests\" name=\"parsesExactConfirmationAndRunTarget()\" time=\"0.067065458\" />",
+      "evidence": "security-selected-swift-testing.xml"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "command": [
+    "python3",
+    "scripts/release/test-staged-release.py"
+  ],
+  "workingDirectory": "/SOURCE",
+  "startedAt": "2026-10-09T17:49:20.500575+00:00",
+  "finishedAt": "2026-10-09T17:49:20.710643+00:00",
+  "exitCode": 0,
+  "durationSeconds": 0.21009425004012883,
+  "logSHA256": "7eec14814bba16a0d8a60154de3c87fcb39cf5dcea62dc04469f598c75a07154"
+}

@@ -1,0 +1,12 @@
+{
+  "command": [
+    "python3",
+    "scripts/release/test-swift-test-results.py"
+  ],
+  "workingDirectory": "/SOURCE",
+  "startedAt": "2026-10-09T17:49:20.957156+00:00",
+  "finishedAt": "2026-10-09T17:49:20.993321+00:00",
+  "exitCode": 0,
+  "durationSeconds": 0.03618950000964105,
+  "logSHA256": "a93cfa7bf7fe0a1507bc3830da553ec02bf6af25c6d91f43ef4927e91e89b690"
+}

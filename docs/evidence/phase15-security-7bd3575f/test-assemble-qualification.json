@@ -1,0 +1,12 @@
+{
+  "command": [
+    "python3",
+    "scripts/release/test-assemble-qualification.py"
+  ],
+  "workingDirectory": "/SOURCE",
+  "startedAt": "2026-10-09T17:49:20.710936+00:00",
+  "finishedAt": "2026-10-09T17:49:20.956843+00:00",
+  "exitCode": 0,
+  "durationSeconds": 0.24593541701324284,
+  "logSHA256": "113c596f94ba6570248d710e02b9631273505b6eee9f7df2dc116e96ef815032"
+}

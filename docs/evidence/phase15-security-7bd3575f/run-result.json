@@ -1,0 +1,155 @@
+{
+  "sourceUnchanged": true,
+  "sourceCommit": "7bd3575fff351fd4f1b20c694619457ded99a1a6",
+  "sourceTree": "0e75bd167d2f01e1efafa24355bc8fc5e3a35f79",
+  "commands": [
+    {
+      "command": [
+        "python3",
+        "scripts/test-shell-assertions.py"
+      ],
+      "workingDirectory": "/SOURCE",
+      "startedAt": "2026-10-09T17:49:20.299359+00:00",
+      "finishedAt": "2026-10-09T17:49:20.349595+00:00",
+      "exitCode": 0,
+      "durationSeconds": 0.0502618330065161,
+      "logSHA256": "85bdb3d23316195a7aad16b696a688d839cd6f3a8ddf856daed46f675b993098"
+    },
+    {
+      "command": [
+        "python3",
+        "scripts/release/test-homebrew-cask.py"
+      ],
+      "workingDirectory": "/SOURCE",
+      "startedAt": "2026-10-09T17:49:20.350490+00:00",
+      "finishedAt": "2026-10-09T17:49:20.500274+00:00",
+      "exitCode": 0,
+      "durationSeconds": 0.14980979193933308,
+      "logSHA256": "fe231033cbc2e31a6ba4e2f79db22f09f5f18b4a37711260864f5536e5bd967c"
+    },
+    {
+      "command": [
+        "python3",
+        "scripts/release/test-staged-release.py"
+      ],
+      "workingDirectory": "/SOURCE",
+      "startedAt": "2026-10-09T17:49:20.500575+00:00",
+      "finishedAt": "2026-10-09T17:49:20.710643+00:00",
+      "exitCode": 0,
+      "durationSeconds": 0.21009425004012883,
+      "logSHA256": "7eec14814bba16a0d8a60154de3c87fcb39cf5dcea62dc04469f598c75a07154"
+    },
+    {
+      "command": [
+        "python3",
+        "scripts/release/test-assemble-qualification.py"
+      ],
+      "workingDirectory": "/SOURCE",
+      "startedAt": "2026-10-09T17:49:20.710936+00:00",
+      "finishedAt": "2026-10-09T17:49:20.956843+00:00",
+      "exitCode": 0,
+      "durationSeconds": 0.24593541701324284,
+      "logSHA256": "113c596f94ba6570248d710e02b9631273505b6eee9f7df2dc116e96ef815032"
+    },
+    {
+      "command": [
+        "python3",
+        "scripts/release/test-swift-test-results.py"
+      ],
+      "workingDirectory": "/SOURCE",
+      "startedAt": "2026-10-09T17:49:20.957156+00:00",
+      "finishedAt": "2026-10-09T17:49:20.993321+00:00",
+      "exitCode": 0,
+      "durationSeconds": 0.03618950000964105,
+      "logSHA256": "a93cfa7bf7fe0a1507bc3830da553ec02bf6af25c6d91f43ef4927e91e89b690"
+    },
+    {
+      "command": [
+        "python3",
+        "scripts/release/test-supported-suite-matrix.py"
+      ],
+      "workingDirectory": "/SOURCE",
+      "startedAt": "2026-10-09T17:49:20.993588+00:00",
+      "finishedAt": "2026-10-09T17:49:21.627207+00:00",
+      "exitCode": 0,
+      "durationSeconds": 0.6336475000716746,
+      "logSHA256": "49a6fb0c321757ac61786b60ccdbff50d5271245746b905ec668201b97b6be8c"
+    },
+    {
+      "command": [
+        "python3",
+        "scripts/release/test_qualify_vendor_tap.py"
+      ],
+      "workingDirectory": "/SOURCE",
+      "startedAt": "2026-10-09T17:49:21.627500+00:00",
+      "finishedAt": "2026-10-09T17:49:24.189977+00:00",
+      "exitCode": 0,
+      "durationSeconds": 2.5625210418365896,
+      "logSHA256": "fba79c3e0de69b4aa657b464d91ed2b938311f035919d84248f367f04959dcf3"
+    },
+    {
+      "command": [
+        "swift",
+        "test",
+        "--jobs",
+        "1",
+        "--filter",
+        "(^|\\.)(AppleContainerCodecTests|ContainerizationHelperProtocolTests|ControlFrameCodecTests|ControlIdentityBootstrapTransactionTests|ControlIdentitySecurityAdapterTests|ControlRequestRepositoryTests|DaemonLocalLifecycleAuthorityTests|DesktopOperationsModelTests|LifecycleCLIOptionsTests|LifecycleCommandRunnerTests|LifecycleSchedulerEffectFreshnessTests|LocalPathsTests|ManifestV2StrictTests|PersistentControlClientTests|PersistentControlServerTests|ReleaseQualificationCLITests|ReleaseQualificationLedgerTests|ReleaseQualificationRegistryTests|SQLiteHardeningTests|SecureExecutableACLTests|SecureLocalPathTests|SecureSubprocessTests)/|^HostwrightImportTests\\.",
+        "--xunit-output",
+        "/EVIDENCE/security-selected.xml"
+      ],
+      "workingDirectory": "/SOURCE",
+      "startedAt": "2026-10-09T17:49:24.190378+00:00",
+      "finishedAt": "2026-10-09T17:59:30.008135+00:00",
+      "exitCode": 0,
+      "durationSeconds": 605.8217820420396,
+      "logSHA256": "d0577af5e50ad2429e082e32abc602fa403970371839bfd3aa7b1c33947100da"
+    },
+    {
+      "command": [
+        "swift",
+        "test",
+        "--jobs",
+        "1",
+        "list",
+        "--skip-build"
+      ],
+      "workingDirectory": "/SOURCE",
+      "startedAt": "2026-10-09T17:59:30.009378+00:00",
+      "finishedAt": "2026-10-09T17:59:33.268650+00:00",
+      "exitCode": 0,
+      "durationSeconds": 3.2593219589907676,
+      "logSHA256": "170d466734eee32c13ff886a9dd4cf9e602fd389ddb27e0d6a7a1c0f73787260"
+    },
+    {
+      "command": [
+        "python3",
+        "scripts/test-docker-proxy.py",
+        "/SOURCE/.build/arm64-apple-macosx/debug/hostwright-docker-proxy"
+      ],
+      "workingDirectory": "/SOURCE",
+      "startedAt": "2026-10-09T17:59:33.469225+00:00",
+      "finishedAt": "2026-10-09T17:59:35.803298+00:00",
+      "exitCode": 0,
+      "durationSeconds": 2.3341327090747654,
+      "logSHA256": "3c2ee99759e30269e678e811f20061f39584f76cdb91f36d853db524ac101441"
+    },
+    {
+      "command": [
+        "/bin/bash",
+        "-x",
+        "scripts/integration.sh"
+      ],
+      "workingDirectory": "/SOURCE",
+      "startedAt": "2026-10-09T17:59:35.804236+00:00",
+      "finishedAt": "2026-10-09T18:00:00.192942+00:00",
+      "exitCode": 0,
+      "durationSeconds": 24.38893995899707,
+      "logSHA256": "1c41134fee5b2c5a1ae5ce06bb9ef47c53128abf717365405968ece52a5ac38b"
+    }
+  ],
+  "testBinarySHA256": {
+    ".build/arm64-apple-macosx/debug/HostwrightPackageTests.xctest/Contents/MacOS/HostwrightPackageTests": "e430b23c2a0646c3a8e4ca4e98f8f9565e56ebdafebc66db18beac81e42c5193"
+  },
+  "allCommandsPassed": true
+}

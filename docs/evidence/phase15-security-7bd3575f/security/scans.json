@@ -1,0 +1,81 @@
+{
+  "kind": "reviewed-source-security-scans",
+  "mergedAncestryPending": true,
+  "sourceCommit": "7bd3575fff351fd4f1b20c694619457ded99a1a6",
+  "version": "0.0.2-rc.7",
+  "sourceArchiveSHA256": "b537577a498cc548e6f9794dd3b311ef9f092c915be54cd553c9817b5c8836d0",
+  "sourceCleanBefore": true,
+  "sourceCleanAfter": true,
+  "target": "linux/arm64",
+  "scannerTools": [
+    {
+      "tool": "gitleaks",
+      "version": "8.30.1",
+      "binarySHA256": "ba52fb1bfabbcde42f032afad3d6e0b19dff8ed105229a16e7caa338bbc0e84f",
+      "producerSHA256": "e85c7f11b5e0f16448d990bf684f7b357daa62c746e855f0c8471225df318d6c"
+    },
+    {
+      "tool": "osv-scanner",
+      "version": "osv-scanner version: 2.6.0\nosv-scalibr version: 0.5.2\ncommit: e840a6e8adb14b7777c78e26cfbf6e2abc1d1fc6\nbuilt at: 2026-09-14T01:44:58Z",
+      "binarySHA256": "98c460dcd37de25819babd757d04542045b6243113e209edcd4d89fedb0256b4",
+      "producerSHA256": "5353f807cea4d9e714d8464926d82c927429225051e71955635479342acb4189"
+    }
+  ],
+  "commands": [
+    {
+      "command": [
+        "/QUALIFICATION/phase15-ga/tools/gitleaks",
+        "dir",
+        "/EVIDENCE/security/source",
+        "--redact=100",
+        "--report-format=json",
+        "--report-path=/EVIDENCE/security/gitleaks.json",
+        "--no-banner"
+      ],
+      "environment": {},
+      "exitCode": 1,
+      "startedAt": "2026-10-09T17:50:23.441826+00:00",
+      "completedAt": "2026-10-09T17:50:25.496116+00:00",
+      "elapsedSeconds": 2.053531166864559,
+      "log": "gitleaks.log",
+      "logSHA256": "37d6bbbd7000b553a7842f388383c0ade9bbbbfe3005f019ca1185694b7d0e18"
+    },
+    {
+      "command": [
+        "/QUALIFICATION/phase15-ga/tools/osv-scanner",
+        "scan",
+        "source",
+        "--recursive",
+        "--call-analysis=go",
+        "--format=json",
+        "--output-file=/EVIDENCE/security/osv-linux-arm64.json",
+        "/EVIDENCE/security/source"
+      ],
+      "environment": {
+        "GOOS": "linux",
+        "GOARCH": "arm64",
+        "CGO_ENABLED": "0",
+        "GOMAXPROCS": "1",
+        "GOFLAGS": "-p=1"
+      },
+      "exitCode": 0,
+      "startedAt": "2026-10-09T17:50:25.517275+00:00",
+      "completedAt": "2026-10-09T17:50:27.848427+00:00",
+      "elapsedSeconds": 2.331182250054553,
+      "log": "osv.log",
+      "logSHA256": "2234748d589762044493b7e0d011c9649e468b0a1d52b4b7d5fdf8e02f08ab67"
+    }
+  ],
+  "status": "requires-assessment",
+  "artifactScanPending": true,
+  "independentAssessmentPending": true,
+  "qualificationAccepted": false,
+  "runnerSHA256": "bcaae3c3492964458729095ae4e2da4a286f906dfa2f7305c73690240501b76f",
+  "attachments": {
+    "osv-linux-arm64.json": "be05f71d1cefa0af6a768fb23fbaa4aa35e33c334503041e828dfd66b844cfeb",
+    "source.tar": "b537577a498cc548e6f9794dd3b311ef9f092c915be54cd553c9817b5c8836d0",
+    "gitleaks.json": "3356fb51e99bf46457e4c9598818c31ea3984cfc88cc361b055654b35c3ed9b5",
+    "gitleaks.log": "37d6bbbd7000b553a7842f388383c0ade9bbbbfe3005f019ca1185694b7d0e18",
+    "osv.log": "2234748d589762044493b7e0d011c9649e468b0a1d52b4b7d5fdf8e02f08ab67"
+  }
+}

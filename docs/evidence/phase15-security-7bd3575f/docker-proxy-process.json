@@ -1,0 +1,13 @@
+{
+  "command": [
+    "python3",
+    "scripts/test-docker-proxy.py",
+    "/SOURCE/.build/arm64-apple-macosx/debug/hostwright-docker-proxy"
+  ],
+  "workingDirectory": "/SOURCE",
+  "startedAt": "2026-10-09T17:59:33.469225+00:00",
+  "finishedAt": "2026-10-09T17:59:35.803298+00:00",
+  "exitCode": 0,
+  "durationSeconds": 2.3341327090747654,
+  "logSHA256": "3c2ee99759e30269e678e811f20061f39584f76cdb91f36d853db524ac101441"
+}

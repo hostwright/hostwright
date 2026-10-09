@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="TestResults" errors="0" tests="43" failures="0" skipped="0" time="0.245394083">
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="confirmationMismatchHasZeroImageOrMutationEffects()" time="0.083848417" />
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="runningRestartDurablyOrdersStopThenStartBeforeHooksAndProbes()" time="0.083826292" />
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="imageLockingAndMountNormalizationPreserveNetworkIntent()" time="0.083733292" />
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="existingMutationWithoutUUIDOwnershipFailsClosed()" time="0.083506167" />
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="stoppedRestartSkipsPreStopButRunsPostStartAfterActualStart()" time="0.083655375" />
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="movedTagProducesANewPlanAndRefusesTheReviewedConfirmation()" time="0.09225825" />
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="updateRejectsLegacyMutablePriorRevisionWithoutAnImmutableLock()" time="0.083823" />
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="repeatedLifecycleGroupReusesOnlyExactPlanScopedImageLockEvidence()" time="0.117873958" />
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="failedImageEvidencePreventsRevalidationAndExecution()" time="0.083533666" />
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="unattendedMaintenanceOverridePastHardDeadlineFailsClosed()" time="0.143334333" />
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="unattendedReconciliationUsesTheExactSharedPlanAndSagaOnce()" time="0.083663458" />
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="dryRunBindsMutableTagToExactDescriptorAndPlatformVariant()" time="0.083580166" />
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="runUsesOneDeterministicEphemeralIdentityAndRequiresLocalImage()" time="0.083540625" />
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="recreateAvailabilityImpactIsVisibleAndConfirmationBound()" time="0.239282833" />
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="namedVolumeFailsBeforeRuntimeMutation()" time="0.083837375" />
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="dryRunCompilesSharedSagaPlanNormalizesBindsAndNeverPersistsSecrets()" time="0.0837085" />
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="unattendedReconciliationRejectsChangedManifestBytesBeforePlanning()" time="0.083677167" />
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="updateResultExposesVersionedExactRolloutStageAndRevisionIdentities()" time="0.244288959" />
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="schedulerReleaseUsesOwnedRemovalRatherThanStop()" time="0.208988875" />
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="unattendedDaemonAuthorityFailsClosedWithoutValidatorAndOnNodeEpochTOCTOU()" time="0.199481083" />
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="resourceOutcomeOrderIsDeterministicAcrossInputAndCompletionOrder()" time="0.1329655" />
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="missingRelativeAndAbsoluteBindSourcesFailBeforeMutation()" time="0.083780083" />
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="unattendedMaintenanceWindowClosingBeforeEffectFailsClosed()" time="0.083807084" />
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="resolvedNamedVolumeCompilesBeforeProviderPathExists()" time="0.083687584" />
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="unattendedMaintenanceOverrideCancelledBeforeEffectFailsClosed()" time="0.13212825" />
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="updateCompilesRealRollingPlanFromVerifiedPreviousRevision()" time="0.083733625" />
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="unattendedReconciliationHonorsCancellationBeforePlanning()" time="0.083926791" />
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="unattendedReconciliationPreservesPostAdmissionFailureAsInterruptedMutation()" time="0.124485625" />
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="unattendedReconciliationRejectsChangedPolicyTargetBeforeExecution()" time="0.083768375" />
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="exactConfirmationRevalidatesThenExecutesOnce()" time="0.083688291" />
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="upRepairsSupportedDesiredDriftThroughTheExistingUpdatePlanner()" time="0.083704333" />
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="downPreservesAndRemoveDeletesOnlyExactOwnedResource()" time="0.083683333" />
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="existingAbsoluteBindSourceCompiles()" time="0.083664292" />
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="desiredSpecificationSortsPortsByStableTypedFields()" time="0.083708292" />
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="unattendedReconciliationReportsVerificationOnlyDAGAsConverged()" time="0.083598792" />
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="unattendedReconciliationDefersAnEmptyBudgetSelectionWithoutExecution()" time="0.083520541" />
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="unattendedReconciliationReportsAnEmptySharedDAGAsConverged()" time="0.083590375" />
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="partialSafeHoldRendersExactCanonicalResourceOutcomesAsJSON()" time="0.083893417" />
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="updatePreservesPriorTagLockWhileResolvingTheDesiredTagAgain()" time="0.088151208" />
+    <testcase classname="HostwrightCLITests.LifecycleCommandRunnerTests" name="startDoesNotCreateAMissingResource()" time="0.083602792" />
+    <testcase classname="HostwrightCLITests.LifecycleCLIOptionsTests" name="parsesCompleteDryRunContractDeterministically()" time="0.044883208" />
+    <testcase classname="HostwrightCLITests.LifecycleCLIOptionsTests" name="rejectsAmbiguousOrUnsafeMutationArguments(arguments:)" time="0.083609167" />
+    <testcase classname="HostwrightCLITests.LifecycleCLIOptionsTests" name="parsesExactConfirmationAndRunTarget()" time="0.067065458" />
+  </testsuite>
+</testsuites>

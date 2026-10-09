@@ -1,0 +1,13 @@
+{
+  "command": [
+    "/bin/bash",
+    "-x",
+    "scripts/integration.sh"
+  ],
+  "workingDirectory": "/SOURCE",
+  "startedAt": "2026-10-09T17:59:35.804236+00:00",
+  "finishedAt": "2026-10-09T18:00:00.192942+00:00",
+  "exitCode": 0,
+  "durationSeconds": 24.38893995899707,
+  "logSHA256": "1c41134fee5b2c5a1ae5ce06bb9ef47c53128abf717365405968ece52a5ac38b"
+}

@@ -1,0 +1,498 @@
+{
+  "kind": "sanitized-source-security-evidence-publication",
+  "sourceCommit": "7bd3575fff351fd4f1b20c694619457ded99a1a6",
+  "originals": "Private immutable evidence retains original bytes; embedded command/log hashes refer to those originals. This manifest binds each sanitized public derivative. No outcomes, counts or findings are changed.",
+  "pathRules": [
+    {
+      "id": 1,
+      "pattern": "/Users/[^/]+/\\.codex/worktrees/p15s/hostwright",
+      "replacement": "/SOURCE"
+    },
+    {
+      "id": 2,
+      "pattern": "/Users/[^/]+/\\.codex/qualification/phase15-ga/issue272-final",
+      "replacement": "/EVIDENCE"
+    },
+    {
+      "id": 3,
+      "pattern": "/Users/[^/]+/\\.codex/qualification/phase15-homebrew-01a11c01/rc7-preparation/independent-security-review",
+      "replacement": "/REVIEW"
+    },
+    {
+      "id": 4,
+      "pattern": "/Users/[^/]+/\\.codex/worktrees",
+      "replacement": "/WORKTREES"
+    },
+    {
+      "id": 5,
+      "pattern": "/Users/[^/]+/\\.codex/qualification",
+      "replacement": "/QUALIFICATION"
+    },
+    {
+      "id": 6,
+      "pattern": "/Users/[^/]+",
+      "replacement": "/HOME"
+    },
+    {
+      "id": 7,
+      "pattern": "/(?:private/)?var/folders/[^/]+/[^/]+/T",
+      "replacement": "/TMP"
+    },
+    {
+      "id": 8,
+      "pattern": "/private/tmp(?=/)",
+      "replacement": "/TMP"
+    },
+    {
+      "id": 9,
+      "pattern": "/tmp(?=/)",
+      "replacement": "/TMP"
+    }
+  ],
+  "notes": [
+    "Temporary-directory aliases are normalized; test-owned scratch basenames remain for scoped cleanup correlation.",
+    "Sanitized wrappers show the executed recipe; substitute local paths before reproducing.",
+    "Two console logs additionally remove trailing horizontal whitespace for repository formatting; per-file pathSanitizedSHA256 retains the intermediate content hash. Outcomes, counts, findings and line order are unchanged."
+  ],
+  "files": [
+    {
+      "path": "compiled-inventory.json",
+      "originalSHA256": "cd4da259ec0b0b60345da787fd7ba9fbd4a8e5eb29afc5e1f66efb4093b42f8d",
+      "publishedSHA256": "67d364e4746aab8bfd0d6178155d5d0cf777b5fa545a7efc7b028417c33b7ad6",
+      "substitutions": [
+        {
+          "rule": 1,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "compiled-inventory.log",
+      "originalSHA256": "170d466734eee32c13ff886a9dd4cf9e602fd389ddb27e0d6a7a1c0f73787260",
+      "publishedSHA256": "170d466734eee32c13ff886a9dd4cf9e602fd389ddb27e0d6a7a1c0f73787260",
+      "substitutions": []
+    },
+    {
+      "path": "docker-proxy-process.json",
+      "originalSHA256": "74330694bcdaf5f873c0cd6247fbe29749617c3f0bc7a392c7eabbff5ae88ec6",
+      "publishedSHA256": "e600aff2a2920e04c8ff57719adc06f1dddadeef082d277f581e03939a45bcf7",
+      "substitutions": [
+        {
+          "rule": 1,
+          "count": 2
+        }
+      ]
+    },
+    {
+      "path": "docker-proxy-process.log",
+      "originalSHA256": "3c2ee99759e30269e678e811f20061f39584f76cdb91f36d853db524ac101441",
+      "publishedSHA256": "3c2ee99759e30269e678e811f20061f39584f76cdb91f36d853db524ac101441",
+      "substitutions": []
+    },
+    {
+      "path": "enforced-integration.json",
+      "originalSHA256": "611e1ff134a802e78ee5b728946f77d24493fb41fdd898bb2695a6a2d32074c4",
+      "publishedSHA256": "0fdf54ee0a496e980d1dddbfb8b825eeb58c60b7e35b16508292ead1fa29fc9e",
+      "substitutions": [
+        {
+          "rule": 1,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "enforced-integration.log",
+      "originalSHA256": "1c41134fee5b2c5a1ae5ce06bb9ef47c53128abf717365405968ece52a5ac38b",
+      "publishedSHA256": "d7346570aeaa7874e434bcd957ae33b19a150443f2a9864a1c22a872aa1546d1",
+      "substitutions": [
+        {
+          "rule": 1,
+          "count": 51
+        },
+        {
+          "rule": 7,
+          "count": 321
+        }
+      ]
+    },
+    {
+      "path": "environment.json",
+      "originalSHA256": "2dede9eacb0f5a359af24928561024e737d15a0287014bb9b33179aeebd8647c",
+      "publishedSHA256": "2dede9eacb0f5a359af24928561024e737d15a0287014bb9b33179aeebd8647c",
+      "substitutions": []
+    },
+    {
+      "path": "host-environment.json",
+      "originalSHA256": "13478426962085c4f48629a374160673c0b6ee45a6ffabdb3cb26366ec6a80b6",
+      "publishedSHA256": "13478426962085c4f48629a374160673c0b6ee45a6ffabdb3cb26366ec6a80b6",
+      "substitutions": []
+    },
+    {
+      "path": "review/issue272-focused-collector-execution.json",
+      "originalSHA256": "f96e233d913df6f138879ba5ec6ddd5984f5f74a173580e86015860ef505d131",
+      "publishedSHA256": "57b3aa991ecb0620bcdb0ce54c40aec3695587f4769d3c22d91d6a7b7adf3f4f",
+      "substitutions": [
+        {
+          "rule": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "review/issue272-focused-evidence-verification.json",
+      "originalSHA256": "4ee96152606e4f6f32d9147d755fdb08905d0427ac004361948900c5c22b9fce",
+      "publishedSHA256": "45408f25e891af5131894f10c2c163d90430b5e044c76b72c8d2a1bbfe2aa4be",
+      "substitutions": [
+        {
+          "rule": 1,
+          "count": 13
+        },
+        {
+          "rule": 2,
+          "count": 30
+        },
+        {
+          "rule": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "review/issue272-focused-raw-cases.json",
+      "originalSHA256": "a3c8cfd3b10d91dc60420189a63b37b0951b76f5fff22a007644d5ed6a61c5e2",
+      "publishedSHA256": "a3c8cfd3b10d91dc60420189a63b37b0951b76f5fff22a007644d5ed6a61c5e2",
+      "substitutions": []
+    },
+    {
+      "path": "review/issue272-post-run-products-and-cleanup.json",
+      "originalSHA256": "e4b85a8a55ab2ea0f4d407f60d9e259d82cb27bea17e8279a279523991119a1b",
+      "publishedSHA256": "73fc87d8f87bea8ac7eacc4938f505ad281082b8e101c1638a927e40d783ce26",
+      "substitutions": [
+        {
+          "rule": 1,
+          "count": 5
+        },
+        {
+          "rule": 7,
+          "count": 2
+        }
+      ]
+    },
+    {
+      "path": "run-focused.py",
+      "originalSHA256": "f98f3c4e51b1e94e1a3bc88ac6395dcee38d7dec8b1ba8ee83eab4c4d7925808",
+      "publishedSHA256": "0bcca6b94a1ae013e708d0a8eaa4c828509ce3d9f0d5043144247932fc553761",
+      "substitutions": [
+        {
+          "rule": 1,
+          "count": 1
+        },
+        {
+          "rule": 2,
+          "count": 1
+        },
+        {
+          "rule": 3,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "run-result.json",
+      "originalSHA256": "c84bc8991a741befae4530187609c00daac85e95c55327403b2fdf1f670cb5da",
+      "publishedSHA256": "407b9935cd02e02b2a33082fcc69e64744df845f5f9c4b7a7f0d61ffe7ba4b19",
+      "substitutions": [
+        {
+          "rule": 1,
+          "count": 12
+        },
+        {
+          "rule": 2,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "sast/complete.json",
+      "originalSHA256": "b03bb71b8c1bab7749c03f7ba20dc010f9144178469c7efb7d5ee8fae7c75211",
+      "publishedSHA256": "b03bb71b8c1bab7749c03f7ba20dc010f9144178469c7efb7d5ee8fae7c75211",
+      "substitutions": []
+    },
+    {
+      "path": "sast/semgrep.json",
+      "originalSHA256": "c37afb8df9f087e531f5cf40ed0e3c6e834decd00e22ee2e7fe9cc57b1e01f5c",
+      "publishedSHA256": "d7b5c170251dbfd4f8b3483c61ab0a9a1d77a3fea02a62e8c29520103d637e02",
+      "substitutions": [
+        {
+          "rule": 1,
+          "count": 1036
+        },
+        {
+          "rule": 6,
+          "count": 5
+        }
+      ]
+    },
+    {
+      "path": "sast/semgrep.stderr.log",
+      "originalSHA256": "efceede0b80a1775aeb7b0cc0fce453cd9ad7211f4082d8969c95f9d9115bb8e",
+      "publishedSHA256": "be4cf5bbd1fae5309d7fea7ffa5efdbeddd1c2bc67bbe9fb3683c0b0c94ab171",
+      "substitutions": [],
+      "pathSanitizedSHA256": "efceede0b80a1775aeb7b0cc0fce453cd9ad7211f4082d8969c95f9d9115bb8e",
+      "displayNormalization": {
+        "operation": "remove trailing spaces and tabs before line endings",
+        "normalizedLines": 10
+      }
+    },
+    {
+      "path": "sast/semgrep.stdout.log",
+      "originalSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "publishedSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "substitutions": []
+    },
+    {
+      "path": "sast-result.json",
+      "originalSHA256": "809a49f74c84fcb07bbbdbf066fcaf6dccfe66bec01b1c6e3732d0d241b6f441",
+      "publishedSHA256": "b6c8aae1df829c9516320b9cf7ef11fb45dbf4944b632dd907a99a74344bf8c6",
+      "substitutions": [
+        {
+          "rule": 1,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "sast-wrapper.log",
+      "originalSHA256": "f91c9ca62f86a4181a56197a9af519f5bb86ab8ce9a71d29ede4e3c21fbffc5b",
+      "publishedSHA256": "1185f7dc95c634d1eb6ba0562518c9b6e361440ae63dc4d563e95fb401f4fcdf",
+      "substitutions": [
+        {
+          "rule": 2,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "security/gitleaks.json",
+      "originalSHA256": "3356fb51e99bf46457e4c9598818c31ea3984cfc88cc361b055654b35c3ed9b5",
+      "publishedSHA256": "5b4d6749b6f416037a747546149c964725349b4775cb073041f70bfd13687971",
+      "substitutions": [
+        {
+          "rule": 2,
+          "count": 32
+        }
+      ]
+    },
+    {
+      "path": "security/gitleaks.log",
+      "originalSHA256": "37d6bbbd7000b553a7842f388383c0ade9bbbbfe3005f019ca1185694b7d0e18",
+      "publishedSHA256": "37d6bbbd7000b553a7842f388383c0ade9bbbbfe3005f019ca1185694b7d0e18",
+      "substitutions": []
+    },
+    {
+      "path": "security/osv-linux-arm64.json",
+      "originalSHA256": "be05f71d1cefa0af6a768fb23fbaa4aa35e33c334503041e828dfd66b844cfeb",
+      "publishedSHA256": "e77673dc3f419aa3060d4e3fca3aa8dbb2dd4d2849b2c2d57742bf807631fdce",
+      "substitutions": [
+        {
+          "rule": 2,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "security/osv.log",
+      "originalSHA256": "2234748d589762044493b7e0d011c9649e468b0a1d52b4b7d5fdf8e02f08ab67",
+      "publishedSHA256": "b41244d875985fc08c4b00ed2e40695620b28948a312b4883362f49cbe6c2e4a",
+      "substitutions": [
+        {
+          "rule": 2,
+          "count": 3
+        }
+      ]
+    },
+    {
+      "path": "security/scans.json",
+      "originalSHA256": "1f4558a7f7f95dc1d86029f16b0e0ae41812c0a5ef1b4c4c6022eff0bb66d6cc",
+      "publishedSHA256": "a9287c302ac14b4a64c179ee21c2eed45ea7a68bcdc0ca166a4ada7bedc39419",
+      "substitutions": [
+        {
+          "rule": 2,
+          "count": 4
+        },
+        {
+          "rule": 5,
+          "count": 2
+        }
+      ]
+    },
+    {
+      "path": "security-selected-swift-testing.xml",
+      "originalSHA256": "aa4cd5fa17afa3cba95fb103258cd8f4fdc2e1d3efeca9768adada54b7b40b50",
+      "publishedSHA256": "aa4cd5fa17afa3cba95fb103258cd8f4fdc2e1d3efeca9768adada54b7b40b50",
+      "substitutions": []
+    },
+    {
+      "path": "security-selected.json",
+      "originalSHA256": "18140b9041fab1e55e770735f888b0f11294d8ac15d7dcc43ccc6d7c222ff21c",
+      "publishedSHA256": "bc66ad1ee9f2246a9fcc9413e9a0bdf6077adc20401e1848b02c0a32f59e7e40",
+      "substitutions": [
+        {
+          "rule": 1,
+          "count": 1
+        },
+        {
+          "rule": 2,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "security-selected.log",
+      "originalSHA256": "d0577af5e50ad2429e082e32abc602fa403970371839bfd3aa7b1c33947100da",
+      "publishedSHA256": "00a35bea68923dae0b4e58534ef1c194aa9a9b34b8b80b8f85932ab92f4c85ab",
+      "substitutions": [
+        {
+          "rule": 1,
+          "count": 220
+        }
+      ],
+      "pathSanitizedSHA256": "0c6e09f20487a174b7baf002929de632cfc780f4cc6035fb6a16278027c5a9ec",
+      "displayNormalization": {
+        "operation": "remove trailing spaces and tabs before line endings",
+        "normalizedLines": 57
+      }
+    },
+    {
+      "path": "source-after.json",
+      "originalSHA256": "c196fe7b893ebfbaa63efd15e8d0d00f9768bae58933cfde14f31d499ad779bc",
+      "publishedSHA256": "c196fe7b893ebfbaa63efd15e8d0d00f9768bae58933cfde14f31d499ad779bc",
+      "substitutions": []
+    },
+    {
+      "path": "source-before.json",
+      "originalSHA256": "c196fe7b893ebfbaa63efd15e8d0d00f9768bae58933cfde14f31d499ad779bc",
+      "publishedSHA256": "c196fe7b893ebfbaa63efd15e8d0d00f9768bae58933cfde14f31d499ad779bc",
+      "substitutions": []
+    },
+    {
+      "path": "test-assemble-qualification.json",
+      "originalSHA256": "17d30908af1f673d192df2eb9dc2212a90f936be9273415b6785bd5beaa75df6",
+      "publishedSHA256": "2eec5235aeb281649a7d866a7ae18fc03cc54168aa30d1615e3594d09b7bfcca",
+      "substitutions": [
+        {
+          "rule": 1,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "test-assemble-qualification.log",
+      "originalSHA256": "113c596f94ba6570248d710e02b9631273505b6eee9f7df2dc116e96ef815032",
+      "publishedSHA256": "113c596f94ba6570248d710e02b9631273505b6eee9f7df2dc116e96ef815032",
+      "substitutions": []
+    },
+    {
+      "path": "test-homebrew-cask.json",
+      "originalSHA256": "a2e2fec89d359a5ec83517dc40eca13dcf5622779e1fed9c085018346557fee1",
+      "publishedSHA256": "6f2a26dc0c6e1422cdb1fb1ab4cd06b0c77c514d23614e7de16b5f91f6786398",
+      "substitutions": [
+        {
+          "rule": 1,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "test-homebrew-cask.log",
+      "originalSHA256": "fe231033cbc2e31a6ba4e2f79db22f09f5f18b4a37711260864f5536e5bd967c",
+      "publishedSHA256": "fe231033cbc2e31a6ba4e2f79db22f09f5f18b4a37711260864f5536e5bd967c",
+      "substitutions": []
+    },
+    {
+      "path": "test-shell-assertions.json",
+      "originalSHA256": "77744af5d5601f9e8791049cbb8b692a2b9d103d4afeefaa344308b85eda7ab4",
+      "publishedSHA256": "404369e051081579a198beffb61072b6fcb798804d304ccf70df547249609e06",
+      "substitutions": [
+        {
+          "rule": 1,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "test-shell-assertions.log",
+      "originalSHA256": "85bdb3d23316195a7aad16b696a688d839cd6f3a8ddf856daed46f675b993098",
+      "publishedSHA256": "85bdb3d23316195a7aad16b696a688d839cd6f3a8ddf856daed46f675b993098",
+      "substitutions": []
+    },
+    {
+      "path": "test-staged-release.json",
+      "originalSHA256": "cf1cd229ae58696438431cce4905403653b227375fc8561264a040ecdf8b72e5",
+      "publishedSHA256": "65b05951b455f8da613d427e4a7138ebdb739fc1d394eeedef120f8b05ec7729",
+      "substitutions": [
+        {
+          "rule": 1,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "test-staged-release.log",
+      "originalSHA256": "7eec14814bba16a0d8a60154de3c87fcb39cf5dcea62dc04469f598c75a07154",
+      "publishedSHA256": "7eec14814bba16a0d8a60154de3c87fcb39cf5dcea62dc04469f598c75a07154",
+      "substitutions": []
+    },
+    {
+      "path": "test-supported-suite-matrix.json",
+      "originalSHA256": "32d253a2877843a6b36e5baefe2baf18eef5aa873cfb69c855575ea65599443c",
+      "publishedSHA256": "8b1b2b41dfc0dfd09ab4f6db7765ada1ec4413070eccdbf658914c07676c8f15",
+      "substitutions": [
+        {
+          "rule": 1,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "test-supported-suite-matrix.log",
+      "originalSHA256": "49a6fb0c321757ac61786b60ccdbff50d5271245746b905ec668201b97b6be8c",
+      "publishedSHA256": "49a6fb0c321757ac61786b60ccdbff50d5271245746b905ec668201b97b6be8c",
+      "substitutions": []
+    },
+    {
+      "path": "test-swift-test-results.json",
+      "originalSHA256": "77a355b6248047d97fd0588aac7b7ec29cf3cb8f732bd7e4c38a1dc516f0aa16",
+      "publishedSHA256": "6b07c4348d3a4252fce8709fa0ce81d56d37e6cbaeac706b14a4ceff683c037c",
+      "substitutions": [
+        {
+          "rule": 1,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "test-swift-test-results.log",
+      "originalSHA256": "a93cfa7bf7fe0a1507bc3830da553ec02bf6af25c6d91f43ef4927e91e89b690",
+      "publishedSHA256": "a93cfa7bf7fe0a1507bc3830da553ec02bf6af25c6d91f43ef4927e91e89b690",
+      "substitutions": []
+    },
+    {
+      "path": "test_qualify_vendor_tap.json",
+      "originalSHA256": "bfd28c468f12a2060eefc0ddab99d0bb13af0226592c9aea3be04a50efcff558",
+      "publishedSHA256": "e4d5c26a8608f95d59812ea9dafbd345d1afdb368be824ef0c6dbdab89f5e400",
+      "substitutions": [
+        {
+          "rule": 1,
+          "count": 1
+        }
+      ]
+    },
+    {
+      "path": "test_qualify_vendor_tap.log",
+      "originalSHA256": "fba79c3e0de69b4aa657b464d91ed2b938311f035919d84248f367f04959dcf3",
+      "publishedSHA256": "fba79c3e0de69b4aa657b464d91ed2b938311f035919d84248f367f04959dcf3",
+      "substitutions": []
+    }
+  ]
+}

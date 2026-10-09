@@ -1,0 +1,12 @@
+{
+  "command": [
+    "python3",
+    "scripts/release/test_qualify_vendor_tap.py"
+  ],
+  "workingDirectory": "/SOURCE",
+  "startedAt": "2026-10-09T17:49:21.627500+00:00",
+  "finishedAt": "2026-10-09T17:49:24.189977+00:00",
+  "exitCode": 0,
+  "durationSeconds": 2.5625210418365896,
+  "logSHA256": "fba79c3e0de69b4aa657b464d91ed2b938311f035919d84248f367f04959dcf3"
+}

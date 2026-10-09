@@ -1,0 +1,29 @@
+
+
+┌─────────────┐
+│ Scan Status │
+└─────────────┘
+  Scanning 700 files tracked by git with 8 Code rules:
+
+  Language   Rules   Files          Origin      Rules
+ ──────────────────────────        ───────────────────
+  swift          6     553          Custom          6
+  bash           2      40          Community       2
+
+
+
+┌──────────────┐
+│ Scan Summary │
+└──────────────┘
+✅ Scan completed successfully.
+ • Findings: 0 (0 blocking)
+ • Rules run: 8
+ • Targets scanned: 593
+ • Parsed lines: ~99.4%
+ • Scan was limited to files tracked by git
+ • For a detailed list of skipped files and lines, run semgrep with the --verbose flag
+Ran 8 rules on 593 files: 0 findings.
+
+A new version of Semgrep is available. See https://semgrep.dev/docs/upgrading
+If Semgrep missed a finding, please send us feedback to let us know!
+See https://semgrep.dev/docs/reporting-false-negatives/

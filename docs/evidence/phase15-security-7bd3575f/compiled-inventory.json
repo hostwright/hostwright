@@ -1,0 +1,16 @@
+{
+  "command": [
+    "swift",
+    "test",
+    "--jobs",
+    "1",
+    "list",
+    "--skip-build"
+  ],
+  "workingDirectory": "/SOURCE",
+  "startedAt": "2026-10-09T17:59:30.009378+00:00",
+  "finishedAt": "2026-10-09T17:59:33.268650+00:00",
+  "exitCode": 0,
+  "durationSeconds": 3.2593219589907676,
+  "logSHA256": "170d466734eee32c13ff886a9dd4cf9e602fd389ddb27e0d6a7a1c0f73787260"
+}

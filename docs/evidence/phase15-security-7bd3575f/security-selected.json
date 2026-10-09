@@ -1,0 +1,18 @@
+{
+  "command": [
+    "swift",
+    "test",
+    "--jobs",
+    "1",
+    "--filter",
+    "(^|\\.)(AppleContainerCodecTests|ContainerizationHelperProtocolTests|ControlFrameCodecTests|ControlIdentityBootstrapTransactionTests|ControlIdentitySecurityAdapterTests|ControlRequestRepositoryTests|DaemonLocalLifecycleAuthorityTests|DesktopOperationsModelTests|LifecycleCLIOptionsTests|LifecycleCommandRunnerTests|LifecycleSchedulerEffectFreshnessTests|LocalPathsTests|ManifestV2StrictTests|PersistentControlClientTests|PersistentControlServerTests|ReleaseQualificationCLITests|ReleaseQualificationLedgerTests|ReleaseQualificationRegistryTests|SQLiteHardeningTests|SecureExecutableACLTests|SecureLocalPathTests|SecureSubprocessTests)/|^HostwrightImportTests\\.",
+    "--xunit-output",
+    "/EVIDENCE/security-selected.xml"
+  ],
+  "workingDirectory": "/SOURCE",
+  "startedAt": "2026-10-09T17:49:24.190378+00:00",
+  "finishedAt": "2026-10-09T17:59:30.008135+00:00",
+  "exitCode": 0,
+  "durationSeconds": 605.8217820420396,
+  "logSHA256": "d0577af5e50ad2429e082e32abc602fa403970371839bfd3aa7b1c33947100da"
+}

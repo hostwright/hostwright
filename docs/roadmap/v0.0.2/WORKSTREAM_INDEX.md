@@ -266,7 +266,7 @@ Epic: [#283](https://github.com/hostwright/hostwright/issues/283) — required
 | Marker | Issue | Workstream | Release disposition | Recorded state |
 | --- | ---: | --- | --- | --- |
 | `P15-C01` | [#271](https://github.com/hostwright/hostwright/issues/271) | Freeze the supported local compatibility matrix | required | open |
-| `P15-C02` | [#272](https://github.com/hostwright/hostwright/issues/272) | Review shipped local security boundaries | required | open |
+| `P15-C02` | [#272](https://github.com/hostwright/hostwright/issues/272) | Review shipped local security boundaries | required | closed: completed |
 | `P15-C03` | [#273](https://github.com/hostwright/hostwright/issues/273) | Run bounded fuzzing and retained corpus replay | required | closed: completed |
 | `P15-C04` | [#274](https://github.com/hostwright/hostwright/issues/274) | Run supported local sanitizer lanes | required | closed: completed |
 | `P15-C05` | [#275](https://github.com/hostwright/hostwright/issues/275) | Complete release dependency and supply-chain checks | required | open |

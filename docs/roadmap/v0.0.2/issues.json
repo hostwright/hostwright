@@ -5534,7 +5534,7 @@
       "child": 2,
       "parent": 283,
       "title": "P15-C02: Review shipped local security boundaries",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/272",
       "labels": [
         "area:ci",
@@ -5543,7 +5543,7 @@
         "area:release",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:docs",
         "type:implementation",
         "type:release",
@@ -5563,7 +5563,7 @@
       "requiredEvidence": [
         "security-assessment"
       ],
-      "stateReason": null
+      "stateReason": "completed"
     },
     {
       "marker": "P15-C03",

@@ -2,32 +2,95 @@ name: Qualification tests
 
 on:
   workflow_dispatch:
+    inputs:
+      source_commit:
+        description: Exact merged source commit (empty uses the workflow commit)
+        required: false
+        type: string
+      runner:
+        description: Host OS (xcode-27 is the macOS 27 preview image)
+        required: true
+        default: macos-26
+        type: choice
+        options:
+          - macos-26
+          - xcode-27
 
 permissions:
   contents: read
 
 jobs:
   qualification:
-    runs-on: macos-26
+    runs-on: ${{ inputs.runner == 'xcode-27' && 'xcode-27' || 'macos-26' }}
     timeout-minutes: 180
+    env:
+      QUALIFICATION_COMMIT: ${{ inputs.source_commit || github.sha }}
+      QUALIFICATION_RUNNER: ${{ inputs.runner || 'macos-26' }}
+      HOSTWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/hostwright-test-results
     strategy:
       fail-fast: false
       matrix:
         shard: [distribution, release, live]
     steps:
+      - name: Validate source and runner selection
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$QUALIFICATION_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$QUALIFICATION_RUNNER" == macos-26 || "$QUALIFICATION_RUNNER" == xcode-27 ]]
       - uses: actions/checkout@v4
         with:
+          ref: ${{ env.QUALIFICATION_COMMIT }}
+          fetch-depth: 0
           persist-credentials: false
+      - name: Bind source and actual host environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$QUALIFICATION_COMMIT"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$QUALIFICATION_COMMIT" origin/main
+          mkdir -p "$HOSTWRIGHT_TEST_RESULTS_DIR"
+          python3 - <<'PY'
+          import json, os, pathlib, subprocess
+          def output(*command):
+              return subprocess.check_output(command, text=True).strip()
+          version = output('sw_vers', '-productVersion')
+          architecture = output('uname', '-m')
+          expected = {'macos-26': '26', 'xcode-27': '27'}[os.environ['QUALIFICATION_RUNNER']]
+          record = {
+              'sourceCommit': os.environ['QUALIFICATION_COMMIT'],
+              'workflowCommit': os.environ['GITHUB_SHA'],
+              'sourceCleanBefore': True,
+              'runnerLabel': os.environ['QUALIFICATION_RUNNER'],
+              'imageOS': os.environ.get('ImageOS'),
+              'imageVersion': os.environ.get('ImageVersion'),
+              'osVersion': version,
+              'osBuild': output('sw_vers', '-buildVersion'),
+              'architecture': architecture,
+              'xcode': output('xcodebuild', '-version'),
+              'swift': output('swift', '--version'),
+              'homebrew': output('brew', '--version'),
+              'qualificationAccepted': False,
+              'homebrewInstallQualified': False,
+          }
+          path = pathlib.Path(os.environ['HOSTWRIGHT_TEST_RESULTS_DIR']) / 'environment.json'
+          path.write_text(json.dumps(record, indent=2) + '\n')
+          if version.split('.')[0] != expected or architecture != 'arm64':
+              raise SystemExit('Hosted image does not match the requested OS/architecture')
+          PY
       - name: Run qualification shard
         shell: bash
         env:
           HOSTWRIGHT_TEST_SHARD: ${{ matrix.shard }}
-          HOSTWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/hostwright-test-results
         run: |
           set -euo pipefail
           mkdir -p "$HOSTWRIGHT_TEST_RESULTS_DIR"
           scripts/test.sh qualification "$HOSTWRIGHT_TEST_SHARD" 2>&1 \
             | tee "$HOSTWRIGHT_TEST_RESULTS_DIR/qualification.log"
+          test "$(git rev-parse HEAD)" = "$QUALIFICATION_COMMIT"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
       - name: Retain qualification logs and results
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -1,0 +1,6 @@
+Scanning dir /EVIDENCE/security/source
+Starting filesystem walk for root: /
+Scanned /EVIDENCE/security/source/Package.resolved file and found 31 packages
+Scanned /EVIDENCE/security/source/Guest/HostwrightNetfilter/go.mod file and found 8 packages
+End status: 238 dirs visited, 1749 inodes visited, 2 Extract calls, 21.629875ms elapsed, 21.63ms wall time
+Filtered 1 local/unscannable package/s from the scan.

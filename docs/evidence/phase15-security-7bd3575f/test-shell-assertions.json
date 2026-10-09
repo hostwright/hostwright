@@ -1,0 +1,12 @@
+{
+  "command": [
+    "python3",
+    "scripts/test-shell-assertions.py"
+  ],
+  "workingDirectory": "/SOURCE",
+  "startedAt": "2026-10-09T17:49:20.299359+00:00",
+  "finishedAt": "2026-10-09T17:49:20.349595+00:00",
+  "exitCode": 0,
+  "durationSeconds": 0.0502618330065161,
+  "logSHA256": "85bdb3d23316195a7aad16b696a688d839cd6f3a8ddf856daed46f675b993098"
+}

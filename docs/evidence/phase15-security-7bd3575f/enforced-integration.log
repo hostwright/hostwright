@@ -1,0 +1,496 @@
++ set -euo pipefail
++++ dirname scripts/integration.sh
+++ cd scripts/..
+++ pwd
++ root=/SOURCE
++ cd /SOURCE
++ swift build --jobs 1 --product hostwright
+[0/1] Planning build
+Building for debugging...
+[0/3] Write swift-version--58304C5D6DBC2206.txt
+Build of product 'hostwright' complete! (13.17s)
++ swift build --jobs 1 --product hostwright-control
+Building for debugging...
+[0/3] Write swift-version--58304C5D6DBC2206.txt
+Build of product 'hostwright-control' complete! (0.65s)
++ swift build --jobs 1 --product hostwright-dist
+Building for debugging...
+[0/3] Write swift-version--58304C5D6DBC2206.txt
+Build of product 'hostwright-dist' complete! (0.60s)
++ swift build --jobs 1 --product HostwrightLocalIntegrationTool
+Building for debugging...
+[0/3] Write swift-version--58304C5D6DBC2206.txt
+Build of product 'HostwrightLocalIntegrationTool' complete! (0.66s)
+++ swift build --show-bin-path
++ bin_dir=/SOURCE/.build/arm64-apple-macosx/debug
++ hostwright_cli=/SOURCE/.build/arm64-apple-macosx/debug/hostwright
++ hostwright=/SOURCE/.build/arm64-apple-macosx/debug/HostwrightLocalIntegrationTool
++ hostwright_control=/SOURCE/.build/arm64-apple-macosx/debug/hostwright-control
++ hostwright_dist=/SOURCE/.build/arm64-apple-macosx/debug/hostwright-dist
++ [[ ! -x /SOURCE/.build/arm64-apple-macosx/debug/hostwright ]]
++ [[ ! -x /SOURCE/.build/arm64-apple-macosx/debug/HostwrightLocalIntegrationTool ]]
++ [[ ! -x /SOURCE/.build/arm64-apple-macosx/debug/hostwright-dist ]]
++ [[ ! -x /SOURCE/.build/arm64-apple-macosx/debug/hostwright-control ]]
+++ mktemp -d /TMP//hostwright-integration.XXXXXX
++ workdir=/TMP//hostwright-integration.aG0YCb
+++ swift -e 'import Foundation; print(URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true).resolvingSymlinksInPath().path)' /TMP//hostwright-integration.aG0YCb
++ workdir=/TMP/hostwright-integration.aG0YCb
++ manifest=/TMP/hostwright-integration.aG0YCb/hostwright.yaml
++ plan_json=/TMP/hostwright-integration.aG0YCb/plan.json
++ status_json=/TMP/hostwright-integration.aG0YCb/status.json
++ doctor_json=/TMP/hostwright-integration.aG0YCb/doctor.json
++ doctor_state_json=/TMP/hostwright-integration.aG0YCb/doctor-state.json
++ default_paths_json=/TMP/hostwright-integration.aG0YCb/default-paths.json
++ paths_before_json=/TMP/hostwright-integration.aG0YCb/paths-before.json
++ paths_after_json=/TMP/hostwright-integration.aG0YCb/paths-after.json
++ application_support='/TMP/hostwright-integration.aG0YCb/Application Support/Hostwright'
++ cache_directory=/TMP/hostwright-integration.aG0YCb/Caches/Hostwright
++ log_directory=/TMP/hostwright-integration.aG0YCb/Logs/Hostwright
++ state_directory=/TMP/hostwright-integration.aG0YCb/state
++ state_database=/TMP/hostwright-integration.aG0YCb/state/state.sqlite
+++ printf %s /TMP/hostwright-integration.aG0YCb/state/state.sqlite
+++ shasum -a 256
+++ awk '{print substr($1, 1, 16)}'
++ state_digest=cace2b66c8170833
++ state_access_lock=/TMP/hostwright-integration.aG0YCb/state/.hostwright-cace2b66c8170833-access-v1.lock
++ state_writer_lock=/TMP/hostwright-integration.aG0YCb/state/.hostwright-cace2b66c8170833-access-v1.lock.writer
++ state_service_lock=/TMP/hostwright-integration.aG0YCb/state/.hostwright-cace2b66c8170833-access-v1.lock.service
++ state_maintenance_journal=/TMP/hostwright-integration.aG0YCb/state/.hostwright-cace2b66c8170833-maintenance-v1.json
++ state_backups=/TMP/hostwright-integration.aG0YCb/state/.hostwright-cace2b66c8170833-backups
++ state_integrity_json=/TMP/hostwright-integration.aG0YCb/state-integrity.json
++ state_backup_json=/TMP/hostwright-integration.aG0YCb/state-backup.json
++ state_catalog_json=/TMP/hostwright-integration.aG0YCb/state-catalog.json
++ state_restore_plan_json=/TMP/hostwright-integration.aG0YCb/state-restore-plan.json
++ state_restore_result_json=/TMP/hostwright-integration.aG0YCb/state-restore-result.json
++ state_recovery_json=/TMP/hostwright-integration.aG0YCb/state-recovery.json
++ team_profile=/TMP/hostwright-integration.aG0YCb/team-profile.json
++ team_plan_json=/TMP/hostwright-integration.aG0YCb/team-plan.json
++ stack_file=/TMP/hostwright-integration.aG0YCb/compose.yaml
++ team_import_json=/TMP/hostwright-integration.aG0YCb/team-import.json
++ invalid_profile=/TMP/hostwright-integration.aG0YCb/invalid-team-profile.json
++ overwrite_stdout=/TMP/hostwright-integration.aG0YCb/overwrite.stdout
++ overwrite_stderr=/TMP/hostwright-integration.aG0YCb/overwrite.stderr
++ missing_stdout=/TMP/hostwright-integration.aG0YCb/missing.stdout
++ missing_stderr=/TMP/hostwright-integration.aG0YCb/missing.stderr
++ readonly_dir=/TMP/hostwright-integration.aG0YCb/read-only
++ benchmark_existing_report=/TMP/hostwright-integration.aG0YCb/benchmark-existing.json
++ benchmark_absent_report=/TMP/hostwright-integration.aG0YCb/benchmark-absent.json
++ unexpected_distribution_report=/TMP/hostwright-integration.aG0YCb/unexpected-distribution-report.json
++ extension_fixture=/TMP/hostwright-integration.aG0YCb/extension-fixture
++ extension_declaration=/TMP/hostwright-integration.aG0YCb/extension.json
++ extension_failure_declaration=/TMP/hostwright-integration.aG0YCb/extension-failure.json
++ extension_json=/TMP/hostwright-integration.aG0YCb/extension-result.json
++ control_request=/TMP/hostwright-integration.aG0YCb/control-request.json
++ control_response=/TMP/hostwright-integration.aG0YCb/control-response.json
++ control_rejected_request=/TMP/hostwright-integration.aG0YCb/control-rejected-request.json
++ control_rejected_response=/TMP/hostwright-integration.aG0YCb/control-rejected-response.json
++ trap cleanup EXIT
+++ /SOURCE/.build/arm64-apple-macosx/debug/hostwright --version
++ version=0.0.2-rc.7
+++ plutil -extract productVersion raw contracts/v0.0.2/versions.json
++ golden_version=0.0.2-rc.7
++ printf 'Integration version: binary=%s contract=%s\n' 0.0.2-rc.7 0.0.2-rc.7
+Integration version: binary=0.0.2-rc.7 contract=0.0.2-rc.7
++ [[ 0.0.2-rc.7 == \0\.\0\.\2\-\r\c\.\7 ]]
++ export 'HOSTWRIGHT_APPLICATION_SUPPORT_DIR=/TMP/hostwright-integration.aG0YCb/Application Support/Hostwright'
++ HOSTWRIGHT_APPLICATION_SUPPORT_DIR='/TMP/hostwright-integration.aG0YCb/Application Support/Hostwright'
++ export HOSTWRIGHT_CACHE_DIR=/TMP/hostwright-integration.aG0YCb/Caches/Hostwright
++ HOSTWRIGHT_CACHE_DIR=/TMP/hostwright-integration.aG0YCb/Caches/Hostwright
++ export HOSTWRIGHT_LOG_DIR=/TMP/hostwright-integration.aG0YCb/Logs/Hostwright
++ HOSTWRIGHT_LOG_DIR=/TMP/hostwright-integration.aG0YCb/Logs/Hostwright
++ set +e
++ env -u HOSTWRIGHT_STATE_DB /SOURCE/.build/arm64-apple-macosx/debug/hostwright paths --json
++ daemonless_paths_exit=66
++ set -e
++ [[ 66 -eq 66 ]]
++ [[ ! -s /TMP/hostwright-integration.aG0YCb/missing.stdout ]]
++ plutil -convert json -o /dev/null /TMP/hostwright-integration.aG0YCb/missing.stderr
++ grep -q '"code":"HW-API-002"' /TMP/hostwright-integration.aG0YCb/missing.stderr
++ [[ ! -e /TMP/hostwright-integration.aG0YCb/Application Support/Hostwright ]]
++ env -u HOSTWRIGHT_STATE_DB /SOURCE/.build/arm64-apple-macosx/debug/HostwrightLocalIntegrationTool paths --json
++ plutil -convert json -o /dev/null /TMP/hostwright-integration.aG0YCb/default-paths.json
++ grep -q '"statePathOrigin":"application-support-default"' /TMP/hostwright-integration.aG0YCb/default-paths.json
++ grep -Fq 'Application Support\/Hostwright\/state\/state.sqlite' /TMP/hostwright-integration.aG0YCb/default-paths.json
++ [[ ! -e /TMP/hostwright-integration.aG0YCb/Application Support/Hostwright ]]
++ mkdir /TMP/hostwright-integration.aG0YCb/state
++ chmod 700 /TMP/hostwright-integration.aG0YCb/state
++ export HOSTWRIGHT_STATE_DB=/TMP/hostwright-integration.aG0YCb/state/state.sqlite
++ HOSTWRIGHT_STATE_DB=/TMP/hostwright-integration.aG0YCb/state/state.sqlite
++ /SOURCE/.build/arm64-apple-macosx/debug/HostwrightLocalIntegrationTool paths --json
++ plutil -convert json -o /dev/null /TMP/hostwright-integration.aG0YCb/paths-before.json
++ grep -q '"statePathOrigin":"environment"' /TMP/hostwright-integration.aG0YCb/paths-before.json
++ grep -q '"readiness":"needs-creation"' /TMP/hostwright-integration.aG0YCb/paths-before.json
++ [[ ! -e /TMP/hostwright-integration.aG0YCb/state/state.sqlite ]]
++ cd /TMP/hostwright-integration.aG0YCb
++ /SOURCE/.build/arm64-apple-macosx/debug/HostwrightLocalIntegrationTool init
++ [[ -f /TMP/hostwright-integration.aG0YCb/hostwright.yaml ]]
+++ shasum -a 256 /TMP/hostwright-integration.aG0YCb/hostwright.yaml
+++ awk '{print $1}'
++ before_checksum=feed54127f1490b85fba057b6d4602509814694c1deba689e9564007f5032cbb
++ set +e
++ cd /TMP/hostwright-integration.aG0YCb
++ /SOURCE/.build/arm64-apple-macosx/debug/HostwrightLocalIntegrationTool init
++ overwrite_exit=64
++ set -e
++ [[ 64 -eq 64 ]]
+++ shasum -a 256 /TMP/hostwright-integration.aG0YCb/hostwright.yaml
+++ awk '{print $1}'
++ after_checksum=feed54127f1490b85fba057b6d4602509814694c1deba689e9564007f5032cbb
++ [[ feed54127f1490b85fba057b6d4602509814694c1deba689e9564007f5032cbb == \f\e\e\d\5\4\1\2\7\f\1\4\9\0\b\8\5\f\b\a\0\5\7\b\6\d\4\6\0\2\5\0\9\8\1\4\6\9\4\c\1\d\e\b\a\6\8\9\e\9\5\6\4\0\0\7\f\5\0\3\2\c\b\b ]]
++ /SOURCE/.build/arm64-apple-macosx/debug/HostwrightLocalIntegrationTool validate /TMP/hostwright-integration.aG0YCb/hostwright.yaml
++ /SOURCE/.build/arm64-apple-macosx/debug/HostwrightLocalIntegrationTool plan /TMP/hostwright-integration.aG0YCb/hostwright.yaml --output json
++ set +e
++ cd /TMP/hostwright-integration.aG0YCb
++ /SOURCE/.build/arm64-apple-macosx/debug/HostwrightLocalIntegrationTool doctor --state-db /TMP/hostwright-integration.aG0YCb/state/state.sqlite --json
++ doctor_exit=65
++ set -e
++ python3 scripts/integration_doctor.py /TMP/hostwright-integration.aG0YCb/doctor.json 65
++ for json_file in '"$plan_json"' '"$doctor_json"'
++ plutil -convert json -o /dev/null /TMP/hostwright-integration.aG0YCb/plan.json
++ for json_file in '"$plan_json"' '"$doctor_json"'
++ plutil -convert json -o /dev/null /TMP/hostwright-integration.aG0YCb/doctor.json
++ grep -q '"planHash"' /TMP/hostwright-integration.aG0YCb/plan.json
++ grep -q '"checks"' /TMP/hostwright-integration.aG0YCb/doctor.json
+++ plutil -extract schemaVersion raw /TMP/hostwright-integration.aG0YCb/doctor.json
++ [[ 2 == \2 ]]
+++ plutil -extract checks.7.identifier raw /TMP/hostwright-integration.aG0YCb/doctor.json
++ [[ stateIntegrity == \s\t\a\t\e\I\n\t\e\g\r\i\t\y ]]
+++ plutil -extract checks.7.status raw /TMP/hostwright-integration.aG0YCb/doctor.json
++ [[ degraded == \d\e\g\r\a\d\e\d ]]
++ [[ ! -e /TMP/hostwright-integration.aG0YCb/state/state.sqlite ]]
++ [[ 65 -eq 69 ]]
++ command -v container
++ /SOURCE/.build/arm64-apple-macosx/debug/HostwrightLocalIntegrationTool status /TMP/hostwright-integration.aG0YCb/hostwright.yaml --output json
++ plutil -convert json -o /dev/null /TMP/hostwright-integration.aG0YCb/status.json
++ grep -q '"observed":true' /TMP/hostwright-integration.aG0YCb/status.json
+++ plutil -extract stateDatabasePath raw /TMP/hostwright-integration.aG0YCb/status.json
++ [[ /TMP/hostwright-integration.aG0YCb/state/state.sqlite == \/\v\a\r\/\f\o\l\d\e\r\s\/\j\t\/\4\9\4\k\v\b\z\9\5\4\9\5\w\9\9\y\4\k\m\w\d\2\0\4\0\0\0\0\g\n\/\T\/\h\o\s\t\w\r\i\g\h\t\-\i\n\t\e\g\r\a\t\i\o\n\.\a\G\0\Y\C\b\/\s\t\a\t\e\/\s\t\a\t\e\.\s\q\l\i\t\e ]]
++ /SOURCE/.build/arm64-apple-macosx/debug/HostwrightLocalIntegrationTool paths --json
++ plutil -convert json -o /dev/null /TMP/hostwright-integration.aG0YCb/paths-after.json
++ grep -q '"readiness":"ready"' /TMP/hostwright-integration.aG0YCb/paths-after.json
++ [[ -f /TMP/hostwright-integration.aG0YCb/state/state.sqlite ]]
+++ stat -f %Lp /TMP/hostwright-integration.aG0YCb/state
++ [[ 700 == \7\0\0 ]]
+++ stat -f %Lp /TMP/hostwright-integration.aG0YCb/state/state.sqlite
++ [[ 600 == \6\0\0 ]]
+++ find /TMP/hostwright-integration.aG0YCb/state -type f
+++ LC_ALL=C
+++ sort
++ state_files_before_doctor='/TMP/hostwright-integration.aG0YCb/state/.hostwright-cace2b66c8170833-access-v1.lock
+/TMP/hostwright-integration.aG0YCb/state/.hostwright-cace2b66c8170833-access-v1.lock.writer
+/TMP/hostwright-integration.aG0YCb/state/state.sqlite
+/TMP/hostwright-integration.aG0YCb/state/state.sqlite-shm
+/TMP/hostwright-integration.aG0YCb/state/state.sqlite-wal'
+++ find /TMP/hostwright-integration.aG0YCb/state -type f -exec shasum -a 256 '{}' ';'
+++ LC_ALL=C
+++ sort
++ state_hashes_before_doctor='16e91c5e7599110c87c488786c1c9766f2c2f9496f49715fbec09d127dcb09b2  /TMP/hostwright-integration.aG0YCb/state/state.sqlite-shm
+7dff59af39f091758e1b62cf50912cda95fa08076b4b5d63233f0ca78f76fad7  /TMP/hostwright-integration.aG0YCb/state/state.sqlite
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  /TMP/hostwright-integration.aG0YCb/state/.hostwright-cace2b66c8170833-access-v1.lock
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  /TMP/hostwright-integration.aG0YCb/state/.hostwright-cace2b66c8170833-access-v1.lock.writer
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  /TMP/hostwright-integration.aG0YCb/state/state.sqlite-wal'
++ set +e
++ cd /TMP/hostwright-integration.aG0YCb
++ /SOURCE/.build/arm64-apple-macosx/debug/HostwrightLocalIntegrationTool doctor --state-db /TMP/hostwright-integration.aG0YCb/state/state.sqlite --json
++ doctor_state_exit=65
++ set -e
++ python3 scripts/integration_doctor.py /TMP/hostwright-integration.aG0YCb/doctor-state.json 65
++ plutil -convert json -o /dev/null /TMP/hostwright-integration.aG0YCb/doctor-state.json
+++ plutil -extract checks.7.identifier raw /TMP/hostwright-integration.aG0YCb/doctor-state.json
++ [[ stateIntegrity == \s\t\a\t\e\I\n\t\e\g\r\i\t\y ]]
+++ plutil -extract checks.7.status raw /TMP/hostwright-integration.aG0YCb/doctor-state.json
++ [[ ready == \r\e\a\d\y ]]
+++ find /TMP/hostwright-integration.aG0YCb/state -type f
+++ LC_ALL=C
+++ sort
++ [[ /TMP/hostwright-integration.aG0YCb/state/.hostwright-cace2b66c8170833-access-v1.lock
+/TMP/hostwright-integration.aG0YCb/state/.hostwright-cace2b66c8170833-access-v1.lock.writer
+/TMP/hostwright-integration.aG0YCb/state/state.sqlite
+/TMP/hostwright-integration.aG0YCb/state/state.sqlite-shm
+/TMP/hostwright-integration.aG0YCb/state/state.sqlite-wal == \/\v\a\r\/\f\o\l\d\e\r\s\/\j\t\/\4\9\4\k\v\b\z\9\5\4\9\5\w\9\9\y\4\k\m\w\d\2\0\4\0\0\0\0\g\n\/\T\/\h\o\s\t\w\r\i\g\h\t\-\i\n\t\e\g\r\a\t\i\o\n\.\a\G\0\Y\C\b\/\s\t\a\t\e\/\.\h\o\s\t\w\r\i\g\h\t\-\c\a\c\e\2\b\6\6\c\8\1\7\0\8\3\3\-\a\c\c\e\s\s\-\v\1\.\l\o\c\k\
+\/\v\a\r\/\f\o\l\d\e\r\s\/\j\t\/\4\9\4\k\v\b\z\9\5\4\9\5\w\9\9\y\4\k\m\w\d\2\0\4\0\0\0\0\g\n\/\T\/\h\o\s\t\w\r\i\g\h\t\-\i\n\t\e\g\r\a\t\i\o\n\.\a\G\0\Y\C\b\/\s\t\a\t\e\/\.\h\o\s\t\w\r\i\g\h\t\-\c\a\c\e\2\b\6\6\c\8\1\7\0\8\3\3\-\a\c\c\e\s\s\-\v\1\.\l\o\c\k\.\w\r\i\t\e\r\
+\/\v\a\r\/\f\o\l\d\e\r\s\/\j\t\/\4\9\4\k\v\b\z\9\5\4\9\5\w\9\9\y\4\k\m\w\d\2\0\4\0\0\0\0\g\n\/\T\/\h\o\s\t\w\r\i\g\h\t\-\i\n\t\e\g\r\a\t\i\o\n\.\a\G\0\Y\C\b\/\s\t\a\t\e\/\s\t\a\t\e\.\s\q\l\i\t\e\
+\/\v\a\r\/\f\o\l\d\e\r\s\/\j\t\/\4\9\4\k\v\b\z\9\5\4\9\5\w\9\9\y\4\k\m\w\d\2\0\4\0\0\0\0\g\n\/\T\/\h\o\s\t\w\r\i\g\h\t\-\i\n\t\e\g\r\a\t\i\o\n\.\a\G\0\Y\C\b\/\s\t\a\t\e\/\s\t\a\t\e\.\s\q\l\i\t\e\-\s\h\m\
+\/\v\a\r\/\f\o\l\d\e\r\s\/\j\t\/\4\9\4\k\v\b\z\9\5\4\9\5\w\9\9\y\4\k\m\w\d\2\0\4\0\0\0\0\g\n\/\T\/\h\o\s\t\w\r\i\g\h\t\-\i\n\t\e\g\r\a\t\i\o\n\.\a\G\0\Y\C\b\/\s\t\a\t\e\/\s\t\a\t\e\.\s\q\l\i\t\e\-\w\a\l ]]
+++ find /TMP/hostwright-integration.aG0YCb/state -type f -exec shasum -a 256 '{}' ';'
+++ LC_ALL=C
+++ sort
++ [[ 16e91c5e7599110c87c488786c1c9766f2c2f9496f49715fbec09d127dcb09b2  /TMP/hostwright-integration.aG0YCb/state/state.sqlite-shm
+7dff59af39f091758e1b62cf50912cda95fa08076b4b5d63233f0ca78f76fad7  /TMP/hostwright-integration.aG0YCb/state/state.sqlite
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  /TMP/hostwright-integration.aG0YCb/state/.hostwright-cace2b66c8170833-access-v1.lock
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  /TMP/hostwright-integration.aG0YCb/state/.hostwright-cace2b66c8170833-access-v1.lock.writer
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  /TMP/hostwright-integration.aG0YCb/state/state.sqlite-wal == \1\6\e\9\1\c\5\e\7\5\9\9\1\1\0\c\8\7\c\4\8\8\7\8\6\c\1\c\9\7\6\6\f\2\c\2\f\9\4\9\6\f\4\9\7\1\5\f\b\e\c\0\9\d\1\2\7\d\c\b\0\9\b\2\ \ \/\v\a\r\/\f\o\l\d\e\r\s\/\j\t\/\4\9\4\k\v\b\z\9\5\4\9\5\w\9\9\y\4\k\m\w\d\2\0\4\0\0\0\0\g\n\/\T\/\h\o\s\t\w\r\i\g\h\t\-\i\n\t\e\g\r\a\t\i\o\n\.\a\G\0\Y\C\b\/\s\t\a\t\e\/\s\t\a\t\e\.\s\q\l\i\t\e\-\s\h\m\
+\7\d\f\f\5\9\a\f\3\9\f\0\9\1\7\5\8\e\1\b\6\2\c\f\5\0\9\1\2\c\d\a\9\5\f\a\0\8\0\7\6\b\4\b\5\d\6\3\2\3\3\f\0\c\a\7\8\f\7\6\f\a\d\7\ \ \/\v\a\r\/\f\o\l\d\e\r\s\/\j\t\/\4\9\4\k\v\b\z\9\5\4\9\5\w\9\9\y\4\k\m\w\d\2\0\4\0\0\0\0\g\n\/\T\/\h\o\s\t\w\r\i\g\h\t\-\i\n\t\e\g\r\a\t\i\o\n\.\a\G\0\Y\C\b\/\s\t\a\t\e\/\s\t\a\t\e\.\s\q\l\i\t\e\
+\e\3\b\0\c\4\4\2\9\8\f\c\1\c\1\4\9\a\f\b\f\4\c\8\9\9\6\f\b\9\2\4\2\7\a\e\4\1\e\4\6\4\9\b\9\3\4\c\a\4\9\5\9\9\1\b\7\8\5\2\b\8\5\5\ \ \/\v\a\r\/\f\o\l\d\e\r\s\/\j\t\/\4\9\4\k\v\b\z\9\5\4\9\5\w\9\9\y\4\k\m\w\d\2\0\4\0\0\0\0\g\n\/\T\/\h\o\s\t\w\r\i\g\h\t\-\i\n\t\e\g\r\a\t\i\o\n\.\a\G\0\Y\C\b\/\s\t\a\t\e\/\.\h\o\s\t\w\r\i\g\h\t\-\c\a\c\e\2\b\6\6\c\8\1\7\0\8\3\3\-\a\c\c\e\s\s\-\v\1\.\l\o\c\k\
+\e\3\b\0\c\4\4\2\9\8\f\c\1\c\1\4\9\a\f\b\f\4\c\8\9\9\6\f\b\9\2\4\2\7\a\e\4\1\e\4\6\4\9\b\9\3\4\c\a\4\9\5\9\9\1\b\7\8\5\2\b\8\5\5\ \ \/\v\a\r\/\f\o\l\d\e\r\s\/\j\t\/\4\9\4\k\v\b\z\9\5\4\9\5\w\9\9\y\4\k\m\w\d\2\0\4\0\0\0\0\g\n\/\T\/\h\o\s\t\w\r\i\g\h\t\-\i\n\t\e\g\r\a\t\i\o\n\.\a\G\0\Y\C\b\/\s\t\a\t\e\/\.\h\o\s\t\w\r\i\g\h\t\-\c\a\c\e\2\b\6\6\c\8\1\7\0\8\3\3\-\a\c\c\e\s\s\-\v\1\.\l\o\c\k\.\w\r\i\t\e\r\
+\e\3\b\0\c\4\4\2\9\8\f\c\1\c\1\4\9\a\f\b\f\4\c\8\9\9\6\f\b\9\2\4\2\7\a\e\4\1\e\4\6\4\9\b\9\3\4\c\a\4\9\5\9\9\1\b\7\8\5\2\b\8\5\5\ \ \/\v\a\r\/\f\o\l\d\e\r\s\/\j\t\/\4\9\4\k\v\b\z\9\5\4\9\5\w\9\9\y\4\k\m\w\d\2\0\4\0\0\0\0\g\n\/\T\/\h\o\s\t\w\r\i\g\h\t\-\i\n\t\e\g\r\a\t\i\o\n\.\a\G\0\Y\C\b\/\s\t\a\t\e\/\s\t\a\t\e\.\s\q\l\i\t\e\-\w\a\l ]]
++ /SOURCE/.build/arm64-apple-macosx/debug/HostwrightLocalIntegrationTool state integrity --state-db /TMP/hostwright-integration.aG0YCb/state/state.sqlite --json
++ /SOURCE/.build/arm64-apple-macosx/debug/HostwrightLocalIntegrationTool state backup --state-db /TMP/hostwright-integration.aG0YCb/state/state.sqlite --json
++ /SOURCE/.build/arm64-apple-macosx/debug/HostwrightLocalIntegrationTool state backups --state-db /TMP/hostwright-integration.aG0YCb/state/state.sqlite --json
++ for json_file in '"$state_integrity_json"' '"$state_backup_json"' '"$state_catalog_json"'
++ plutil -convert json -o /dev/null /TMP/hostwright-integration.aG0YCb/state-integrity.json
++ for json_file in '"$state_integrity_json"' '"$state_backup_json"' '"$state_catalog_json"'
++ plutil -convert json -o /dev/null /TMP/hostwright-integration.aG0YCb/state-backup.json
++ for json_file in '"$state_integrity_json"' '"$state_backup_json"' '"$state_catalog_json"'
++ plutil -convert json -o /dev/null /TMP/hostwright-integration.aG0YCb/state-catalog.json
++ grep -q '"kind":"stateIntegrityReport"' /TMP/hostwright-integration.aG0YCb/state-integrity.json
++ grep -q '"health":"healthy"' /TMP/hostwright-integration.aG0YCb/state-integrity.json
++ grep -q '"kind":"stateBackupRecord"' /TMP/hostwright-integration.aG0YCb/state-backup.json
++ grep -q '"restorable":true' /TMP/hostwright-integration.aG0YCb/state-backup.json
+++ plutil -extract backupID raw /TMP/hostwright-integration.aG0YCb/state-backup.json
++ state_backup_id=backup-18dfea6f-11cc-40f8-9a38-441909b2a7cd
++ [[ backup-18dfea6f-11cc-40f8-9a38-441909b2a7cd == backup-* ]]
++ grep -Fq '"backupID":"backup-18dfea6f-11cc-40f8-9a38-441909b2a7cd"' /TMP/hostwright-integration.aG0YCb/state-catalog.json
++ /SOURCE/.build/arm64-apple-macosx/debug/HostwrightLocalIntegrationTool state restore --backup backup-18dfea6f-11cc-40f8-9a38-441909b2a7cd --dry-run --state-db /TMP/hostwright-integration.aG0YCb/state/state.sqlite --json
++ plutil -convert json -o /dev/null /TMP/hostwright-integration.aG0YCb/state-restore-plan.json
+++ plutil -extract confirmationToken raw /TMP/hostwright-integration.aG0YCb/state-restore-plan.json
++ state_restore_token=50607a39c6ebce0f74182712f2a874c32eb64c6aedc01a4b2dbd720614358d10
++ [[ 50607a39c6ebce0f74182712f2a874c32eb64c6aedc01a4b2dbd720614358d10 =~ ^[a-f0-9]{64}$ ]]
++ /SOURCE/.build/arm64-apple-macosx/debug/HostwrightLocalIntegrationTool state restore --backup backup-18dfea6f-11cc-40f8-9a38-441909b2a7cd --confirm-restore 50607a39c6ebce0f74182712f2a874c32eb64c6aedc01a4b2dbd720614358d10 --state-db /TMP/hostwright-integration.aG0YCb/state/state.sqlite --json
++ plutil -convert json -o /dev/null /TMP/hostwright-integration.aG0YCb/state-restore-result.json
++ grep -q '"health":"healthy"' /TMP/hostwright-integration.aG0YCb/state-restore-result.json
++ grep -Fq '"backupID":"backup-18dfea6f-11cc-40f8-9a38-441909b2a7cd"' /TMP/hostwright-integration.aG0YCb/state-restore-result.json
++ /SOURCE/.build/arm64-apple-macosx/debug/HostwrightLocalIntegrationTool state recover --state-db /TMP/hostwright-integration.aG0YCb/state/state.sqlite --json
++ plutil -convert json -o /dev/null /TMP/hostwright-integration.aG0YCb/state-recovery.json
++ grep -q '"recovered":false' /TMP/hostwright-integration.aG0YCb/state-recovery.json
+++ stat -f %Lp /TMP/hostwright-integration.aG0YCb/state/.hostwright-cace2b66c8170833-backups
++ [[ 700 == \7\0\0 ]]
+++ stat -f %Lp /TMP/hostwright-integration.aG0YCb/state/.hostwright-cace2b66c8170833-backups/backup-18dfea6f-11cc-40f8-9a38-441909b2a7cd/state.sqlite
++ [[ 600 == \6\0\0 ]]
++ printf '%s\n' '{"apiVersion":2,"requestID":"integration-plan-1","operation":"plan"}'
++ /SOURCE/.build/arm64-apple-macosx/debug/hostwright-control --manifest /TMP/hostwright-integration.aG0YCb/hostwright.yaml
++ [[ ! -s /TMP/hostwright-integration.aG0YCb/missing.stderr ]]
+++ wc -l
+++ tr -d ' '
++ [[ 1 -eq 1 ]]
++ plutil -convert json -o /dev/null /TMP/hostwright-integration.aG0YCb/control-response.json
++ grep -q '"apiVersion":2' /TMP/hostwright-integration.aG0YCb/control-response.json
++ grep -q '"requestID":"integration-plan-1"' /TMP/hostwright-integration.aG0YCb/control-response.json
++ grep -q '"success":true' /TMP/hostwright-integration.aG0YCb/control-response.json
++ grep -q '"kind":"plan"' /TMP/hostwright-integration.aG0YCb/control-response.json
++ printf '%s\n' '{"apiVersion":2,"requestID":"integration-apply-1","operation":"apply"}'
++ set +e
++ /SOURCE/.build/arm64-apple-macosx/debug/hostwright-control --manifest /TMP/hostwright-integration.aG0YCb/hostwright.yaml
++ control_rejected_exit=65
++ set -e
++ [[ 65 -eq 65 ]]
++ [[ ! -s /TMP/hostwright-integration.aG0YCb/missing.stderr ]]
+++ wc -l
+++ tr -d ' '
++ [[ 1 -eq 1 ]]
++ plutil -convert json -o /dev/null /TMP/hostwright-integration.aG0YCb/control-rejected-response.json
++ grep -q '"code":"HW-API-001"' /TMP/hostwright-integration.aG0YCb/control-rejected-response.json
++ grep -q '"success":false' /TMP/hostwright-integration.aG0YCb/control-rejected-response.json
++ printf '%s\n' '{' '  "kind": "HostwrightTeamProfile",' '  "apiVersion": 1,' '  "identifier": "dev.hostwright.integration",' '  "displayName": "Built CLI Integration",' '  "optIn": true,' '  "requiredGates": ["runtimeAdapter", "explicitStatePath", "localPolicy", "redaction", "auditTrail", "planConfirmation", "cleanupConfirmation", "ownershipChecks", "localOnlyNoCloud", "noTelemetryUpload"],' '  "requirements": ["requireManifestReview"]' '}'
++ printf '%s\n' 'name: integration' services: '  api:' '    image: local/integration:latest' '    command: ["serve"]' '    deploy:' '      resources:' '        reservations:' '          cpus: 1' '          memory: 512M' '        limits:' '          cpus: 1' '          memory: 512M'
++ /SOURCE/.build/arm64-apple-macosx/debug/HostwrightLocalIntegrationTool validate /TMP/hostwright-integration.aG0YCb/hostwright.yaml --team-profile /TMP/hostwright-integration.aG0YCb/team-profile.json
++ /SOURCE/.build/arm64-apple-macosx/debug/HostwrightLocalIntegrationTool plan /TMP/hostwright-integration.aG0YCb/hostwright.yaml --team-profile /TMP/hostwright-integration.aG0YCb/team-profile.json --output json
++ /SOURCE/.build/arm64-apple-macosx/debug/HostwrightLocalIntegrationTool import-stack /TMP/hostwright-integration.aG0YCb/compose.yaml --team-profile /TMP/hostwright-integration.aG0YCb/team-profile.json --output json
++ for json_file in '"$team_plan_json"' '"$team_import_json"'
++ plutil -convert json -o /dev/null /TMP/hostwright-integration.aG0YCb/team-plan.json
++ grep -q '"teamPolicy"' /TMP/hostwright-integration.aG0YCb/team-plan.json
++ grep -q '"profileHash"' /TMP/hostwright-integration.aG0YCb/team-plan.json
++ grep -q '"manifestHash"' /TMP/hostwright-integration.aG0YCb/team-plan.json
++ for json_file in '"$team_plan_json"' '"$team_import_json"'
++ plutil -convert json -o /dev/null /TMP/hostwright-integration.aG0YCb/team-import.json
++ grep -q '"teamPolicy"' /TMP/hostwright-integration.aG0YCb/team-import.json
++ grep -q '"profileHash"' /TMP/hostwright-integration.aG0YCb/team-import.json
++ grep -q '"manifestHash"' /TMP/hostwright-integration.aG0YCb/team-import.json
++ printf '%s\n' '{"kind":"HostwrightTeamProfile","unexpected":"token=must-not-leak"}'
++ set +e
++ /SOURCE/.build/arm64-apple-macosx/debug/HostwrightLocalIntegrationTool plan /TMP/hostwright-integration.aG0YCb/hostwright.yaml --team-profile /TMP/hostwright-integration.aG0YCb/invalid-team-profile.json --output json
++ invalid_profile_exit=65
++ set -e
++ [[ 65 -eq 65 ]]
++ [[ ! -s /TMP/hostwright-integration.aG0YCb/missing.stdout ]]
++ plutil -convert json -o /dev/null /TMP/hostwright-integration.aG0YCb/missing.stderr
++ grep -q '"code":"HW-TEAM-001"' /TMP/hostwright-integration.aG0YCb/missing.stderr
++ grep -q must-not-leak /TMP/hostwright-integration.aG0YCb/missing.stderr
++ set +e
++ /SOURCE/.build/arm64-apple-macosx/debug/HostwrightLocalIntegrationTool apply /TMP/hostwright-integration.aG0YCb/hostwright.yaml --state-db /TMP/hostwright-integration.aG0YCb/unexpected.sqlite --confirm-plan unused --team-profile /TMP/hostwright-integration.aG0YCb/team-profile.json
++ missing_approval_exit=64
++ set -e
++ [[ 64 -eq 64 ]]
++ grep -q -- --approval-record /TMP/hostwright-integration.aG0YCb/missing.stderr
++ [[ ! -e /TMP/hostwright-integration.aG0YCb/unexpected.sqlite ]]
++ set +e
++ /SOURCE/.build/arm64-apple-macosx/debug/HostwrightLocalIntegrationTool benchmark --image docker.io/library/python:alpine --samples 3 --report /TMP/hostwright-integration.aG0YCb/benchmark-absent.json --source-commit aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --source-dirty false --expected-container-version 1.0.0
++ benchmark_confirmation_exit=64
++ set -e
++ [[ 64 -eq 64 ]]
++ grep -q -- --confirm-live /TMP/hostwright-integration.aG0YCb/missing.stderr
++ [[ ! -e /TMP/hostwright-integration.aG0YCb/benchmark-absent.json ]]
++ printf 'sentinel benchmark report\n'
+++ shasum -a 256 /TMP/hostwright-integration.aG0YCb/benchmark-existing.json
+++ awk '{print $1}'
++ benchmark_before_checksum=312c79a5a40de0dd66985663abb5145bf1513eab315da26118c9b49e469a3b9b
++ set +e
++ /SOURCE/.build/arm64-apple-macosx/debug/HostwrightLocalIntegrationTool benchmark --image docker.io/library/python:alpine --samples 3 --report /TMP/hostwright-integration.aG0YCb/benchmark-existing.json --source-commit aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --source-dirty false --expected-container-version 1.0.0 --confirm-live
++ benchmark_overwrite_exit=64
++ set -e
++ [[ 64 -eq 64 ]]
++ grep -q HW-CLI-002 /TMP/hostwright-integration.aG0YCb/missing.stderr
+++ shasum -a 256 /TMP/hostwright-integration.aG0YCb/benchmark-existing.json
+++ awk '{print $1}'
++ benchmark_after_checksum=312c79a5a40de0dd66985663abb5145bf1513eab315da26118c9b49e469a3b9b
++ [[ 312c79a5a40de0dd66985663abb5145bf1513eab315da26118c9b49e469a3b9b == \3\1\2\c\7\9\a\5\a\4\0\d\e\0\d\d\6\6\9\8\5\6\6\3\a\b\b\5\1\4\5\b\f\1\5\1\3\e\a\b\3\1\5\d\a\2\6\1\1\8\c\9\b\4\9\e\4\6\9\a\3\b\9\b ]]
++ /SOURCE/.build/arm64-apple-macosx/debug/hostwright-dist --help
++ grep -q 'trusted and developer distribution tool' /TMP/hostwright-integration.aG0YCb/missing.stdout
++ grep -q 'hostwright-dist release' /TMP/hostwright-integration.aG0YCb/missing.stdout
++ grep -q 'hostwright-dist verify-release' /TMP/hostwright-integration.aG0YCb/missing.stdout
++ grep -q 'hostwright-dist homebrew-formula' /TMP/hostwright-integration.aG0YCb/missing.stdout
++ grep -q 'never accepts passwords, private keys, or tokens in argv' /TMP/hostwright-integration.aG0YCb/missing.stdout
++ for trusted_release_command in release verify-release homebrew-formula
++ set +e
++ /SOURCE/.build/arm64-apple-macosx/debug/hostwright-dist release --format json
++ trusted_release_error_exit=64
++ set -e
++ [[ 64 -eq 64 ]]
++ [[ ! -s /TMP/hostwright-integration.aG0YCb/missing.stdout ]]
++ plutil -convert json -o /dev/null /TMP/hostwright-integration.aG0YCb/missing.stderr
+++ plutil -extract kind raw /TMP/hostwright-integration.aG0YCb/missing.stderr
++ [[ distributionToolError == \d\i\s\t\r\i\b\u\t\i\o\n\T\o\o\l\E\r\r\o\r ]]
+++ plutil -extract exitCode raw /TMP/hostwright-integration.aG0YCb/missing.stderr
++ [[ 64 == \6\4 ]]
++ for trusted_release_command in release verify-release homebrew-formula
++ set +e
++ /SOURCE/.build/arm64-apple-macosx/debug/hostwright-dist verify-release --format json
++ trusted_release_error_exit=64
++ set -e
++ [[ 64 -eq 64 ]]
++ [[ ! -s /TMP/hostwright-integration.aG0YCb/missing.stdout ]]
++ plutil -convert json -o /dev/null /TMP/hostwright-integration.aG0YCb/missing.stderr
+++ plutil -extract kind raw /TMP/hostwright-integration.aG0YCb/missing.stderr
++ [[ distributionToolError == \d\i\s\t\r\i\b\u\t\i\o\n\T\o\o\l\E\r\r\o\r ]]
+++ plutil -extract exitCode raw /TMP/hostwright-integration.aG0YCb/missing.stderr
++ [[ 64 == \6\4 ]]
++ for trusted_release_command in release verify-release homebrew-formula
++ set +e
++ /SOURCE/.build/arm64-apple-macosx/debug/hostwright-dist homebrew-formula --format json
++ trusted_release_error_exit=64
++ set -e
++ [[ 64 -eq 64 ]]
++ [[ ! -s /TMP/hostwright-integration.aG0YCb/missing.stdout ]]
++ plutil -convert json -o /dev/null /TMP/hostwright-integration.aG0YCb/missing.stderr
+++ plutil -extract kind raw /TMP/hostwright-integration.aG0YCb/missing.stderr
++ [[ distributionToolError == \d\i\s\t\r\i\b\u\t\i\o\n\T\o\o\l\E\r\r\o\r ]]
+++ plutil -extract exitCode raw /TMP/hostwright-integration.aG0YCb/missing.stderr
++ [[ 64 == \6\4 ]]
++ set +e
++ /SOURCE/.build/arm64-apple-macosx/debug/hostwright-dist homebrew-formula --output json
++ formula_path_error_exit=64
++ set -e
++ [[ 64 -eq 64 ]]
++ grep -q '^HW-DIST-001:' /TMP/hostwright-integration.aG0YCb/missing.stderr
++ /usr/bin/swiftc /SOURCE/Tests/HostwrightExtensionsTests/Fixtures/ExtensionFixture.swift -o /TMP/hostwright-integration.aG0YCb/extension-fixture
++ chmod 700 /TMP/hostwright-integration.aG0YCb/extension-fixture
+++ shasum -a 256 /TMP/hostwright-integration.aG0YCb/extension-fixture
+++ awk '{print $1}'
++ extension_sha256=2fd0eb75a0dad80ecba1689151e42272df57df43ef9890b72202f6ad3855c2d9
++ printf '%s\n' '{' '  "kind": "diagnosticsIntegration",' '  "apiVersion": 1,' '  "protocolVersion": 1,' '  "identifier": "dev.hostwright.built-cli",' '  "trust": "reviewedLocal",' '  "capability": "diagnosticsRead",' '  "purpose": "Exercise the built CLI reviewed-local extension handshake.",' '  "boundaries": ["stateStore", "explicitStatePath", "redaction", "auditTrail", "localOnlyNoUpload", "noRuntimeMutation"],' '  "executableSHA256": "2fd0eb75a0dad80ecba1689151e42272df57df43ef9890b72202f6ad3855c2d9"' '}'
++ chmod 600 /TMP/hostwright-integration.aG0YCb/extension.json
++ HOSTWRIGHT_EXTENSION_TEST_SECRET=token=parent-must-not-reach-extension
++ /SOURCE/.build/arm64-apple-macosx/debug/HostwrightLocalIntegrationTool extension check --declaration /TMP/hostwright-integration.aG0YCb/extension.json --executable /TMP/hostwright-integration.aG0YCb/extension-fixture --output json
++ plutil -convert json -o /dev/null /TMP/hostwright-integration.aG0YCb/extension-result.json
++ grep -q '"kind":"extensionHandshake"' /TMP/hostwright-integration.aG0YCb/extension-result.json
++ grep -q '"status":"ready"' /TMP/hostwright-integration.aG0YCb/extension-result.json
++ grep -q '"cleanup":"succeeded"' /TMP/hostwright-integration.aG0YCb/extension-result.json
++ HOSTWRIGHT_EXTENSION_TEST_SECRET=token=parent-must-not-reach-extension
++ /SOURCE/.build/arm64-apple-macosx/debug/HostwrightLocalIntegrationTool extension check --declaration /TMP/hostwright-integration.aG0YCb/extension.json --executable /TMP/hostwright-integration.aG0YCb/extension-fixture
++ grep -q 'Reviewed-local extension handshake ready' /TMP/hostwright-integration.aG0YCb/missing.stdout
++ grep -q 'Staging cleanup: succeeded' /TMP/hostwright-integration.aG0YCb/missing.stdout
++ sed s/dev.hostwright.built-cli/dev.hostwright.built-cli.failure/ /TMP/hostwright-integration.aG0YCb/extension.json
++ chmod 600 /TMP/hostwright-integration.aG0YCb/extension-failure.json
++ set +e
++ /SOURCE/.build/arm64-apple-macosx/debug/HostwrightLocalIntegrationTool extension check --declaration /TMP/hostwright-integration.aG0YCb/extension-failure.json --executable /TMP/hostwright-integration.aG0YCb/extension-fixture --output json
++ extension_failure_exit=72
++ set -e
++ [[ 72 -eq 72 ]]
++ [[ ! -s /TMP/hostwright-integration.aG0YCb/missing.stdout ]]
++ plutil -convert json -o /dev/null /TMP/hostwright-integration.aG0YCb/missing.stderr
++ grep -q '"code":"HW-EXT-003"' /TMP/hostwright-integration.aG0YCb/missing.stderr
++ grep -q fixture-secret-must-not-leak /TMP/hostwright-integration.aG0YCb/missing.stderr
++ set +e
++ /SOURCE/.build/arm64-apple-macosx/debug/hostwright-dist lifecycle --baseline-dir /TMP/hostwright-integration.aG0YCb/missing-baseline --candidate-dir /TMP/hostwright-integration.aG0YCb/missing-candidate --prefix /usr/local/hostwright-dist-unsafe --report /TMP/hostwright-integration.aG0YCb/unexpected-distribution-report.json
++ distribution_prefix_exit=64
++ set -e
++ [[ 64 -eq 64 ]]
++ grep -q 'temporary directory' /TMP/hostwright-integration.aG0YCb/missing.stderr
++ [[ ! -e /TMP/hostwright-integration.aG0YCb/unexpected-distribution-report.json ]]
++ set +e
++ /SOURCE/.build/arm64-apple-macosx/debug/HostwrightLocalIntegrationTool plan /TMP/hostwright-integration.aG0YCb/missing.yaml --output json
++ missing_exit=65
++ set -e
++ [[ 65 -eq 65 ]]
++ [[ ! -s /TMP/hostwright-integration.aG0YCb/missing.stdout ]]
++ plutil -convert json -o /dev/null /TMP/hostwright-integration.aG0YCb/missing.stderr
++ grep -q '"code":"HW-MANIFEST-004"' /TMP/hostwright-integration.aG0YCb/missing.stderr
++ set +e
++ /SOURCE/.build/arm64-apple-macosx/debug/HostwrightLocalIntegrationTool import-stack /TMP/hostwright-integration.aG0YCb/missing-compose.yaml --output json
++ missing_exit=64
++ set -e
++ [[ 64 -eq 64 ]]
++ [[ ! -s /TMP/hostwright-integration.aG0YCb/missing.stdout ]]
++ plutil -convert json -o /dev/null /TMP/hostwright-integration.aG0YCb/missing.stderr
++ grep -q '"code":"HW-CLI-005"' /TMP/hostwright-integration.aG0YCb/missing.stderr
++ mkdir /TMP/hostwright-integration.aG0YCb/read-only
++ chmod 500 /TMP/hostwright-integration.aG0YCb/read-only
++ set +e
++ cd /TMP/hostwright-integration.aG0YCb/read-only
++ /SOURCE/.build/arm64-apple-macosx/debug/HostwrightLocalIntegrationTool init
++ readonly_exit=64
++ set -e
++ chmod 700 /TMP/hostwright-integration.aG0YCb/read-only
++ [[ 64 -eq 64 ]]
++ [[ ! -s /TMP/hostwright-integration.aG0YCb/missing.stdout ]]
++ grep -q HW-CLI-005 /TMP/hostwright-integration.aG0YCb/missing.stderr
++ IFS=
++ read -r sqlite_path
+++ find /TMP/hostwright-integration.aG0YCb -name '*.sqlite*' -print
++ [[ /TMP/hostwright-integration.aG0YCb/state/.hostwright-cace2b66c8170833-backups/backup-918a8021-69a2-4b10-afce-861c9636070c/state.sqlite == \/\v\a\r\/\f\o\l\d\e\r\s\/\j\t\/\4\9\4\k\v\b\z\9\5\4\9\5\w\9\9\y\4\k\m\w\d\2\0\4\0\0\0\0\g\n\/\T\/\h\o\s\t\w\r\i\g\h\t\-\i\n\t\e\g\r\a\t\i\o\n\.\a\G\0\Y\C\b\/\s\t\a\t\e\/\s\t\a\t\e\.\s\q\l\i\t\e ]]
++ case "$sqlite_path" in
++ IFS=
++ read -r sqlite_path
++ [[ /TMP/hostwright-integration.aG0YCb/state/.hostwright-cace2b66c8170833-backups/backup-18dfea6f-11cc-40f8-9a38-441909b2a7cd/state.sqlite == \/\v\a\r\/\f\o\l\d\e\r\s\/\j\t\/\4\9\4\k\v\b\z\9\5\4\9\5\w\9\9\y\4\k\m\w\d\2\0\4\0\0\0\0\g\n\/\T\/\h\o\s\t\w\r\i\g\h\t\-\i\n\t\e\g\r\a\t\i\o\n\.\a\G\0\Y\C\b\/\s\t\a\t\e\/\s\t\a\t\e\.\s\q\l\i\t\e ]]
++ case "$sqlite_path" in
++ IFS=
++ read -r sqlite_path
++ [[ /TMP/hostwright-integration.aG0YCb/state/state.sqlite-shm == \/\v\a\r\/\f\o\l\d\e\r\s\/\j\t\/\4\9\4\k\v\b\z\9\5\4\9\5\w\9\9\y\4\k\m\w\d\2\0\4\0\0\0\0\g\n\/\T\/\h\o\s\t\w\r\i\g\h\t\-\i\n\t\e\g\r\a\t\i\o\n\.\a\G\0\Y\C\b\/\s\t\a\t\e\/\s\t\a\t\e\.\s\q\l\i\t\e ]]
++ case "$sqlite_path" in
+++ stat -f %Lp /TMP/hostwright-integration.aG0YCb/state/state.sqlite-shm
++ [[ 600 == \6\0\0 ]]
++ IFS=
++ read -r sqlite_path
++ [[ /TMP/hostwright-integration.aG0YCb/state/state.sqlite-wal == \/\v\a\r\/\f\o\l\d\e\r\s\/\j\t\/\4\9\4\k\v\b\z\9\5\4\9\5\w\9\9\y\4\k\m\w\d\2\0\4\0\0\0\0\g\n\/\T\/\h\o\s\t\w\r\i\g\h\t\-\i\n\t\e\g\r\a\t\i\o\n\.\a\G\0\Y\C\b\/\s\t\a\t\e\/\s\t\a\t\e\.\s\q\l\i\t\e ]]
++ case "$sqlite_path" in
+++ stat -f %Lp /TMP/hostwright-integration.aG0YCb/state/state.sqlite-wal
++ [[ 600 == \6\0\0 ]]
++ IFS=
++ read -r sqlite_path
++ [[ /TMP/hostwright-integration.aG0YCb/state/state.sqlite == \/\v\a\r\/\f\o\l\d\e\r\s\/\j\t\/\4\9\4\k\v\b\z\9\5\4\9\5\w\9\9\y\4\k\m\w\d\2\0\4\0\0\0\0\g\n\/\T\/\h\o\s\t\w\r\i\g\h\t\-\i\n\t\e\g\r\a\t\i\o\n\.\a\G\0\Y\C\b\/\s\t\a\t\e\/\s\t\a\t\e\.\s\q\l\i\t\e ]]
++ continue
++ IFS=
++ read -r sqlite_path
++ [[ ! -e /TMP/hostwright-integration.aG0YCb/state/state.sqlite-journal ]]
++ echo 'local-integration passed: production CLI daemonless refusal, isolated direct-core qualification, private state creation, verified online backup/restore/recovery, one-shot control API, and distribution tool; reviewed-local extension subprocess handshake, team-profile/benchmark/distribution gates, JSON output/errors, real file failures, overwrite refusal, rejected control mutation, and no unexpected state writes'
+local-integration passed: production CLI daemonless refusal, isolated direct-core qualification, private state creation, verified online backup/restore/recovery, one-shot control API, and distribution tool; reviewed-local extension subprocess handshake, team-profile/benchmark/distribution gates, JSON output/errors, real file failures, overwrite refusal, rejected control mutation, and no unexpected state writes
++ cleanup
++ exit_code=0
++ trap - EXIT
++ set +e
++ chmod 700 /TMP/hostwright-integration.aG0YCb/read-only
++ rm -f /TMP/hostwright-integration.aG0YCb/hostwright.yaml /TMP/hostwright-integration.aG0YCb/plan.json /TMP/hostwright-integration.aG0YCb/status.json /TMP/hostwright-integration.aG0YCb/doctor.json /TMP/hostwright-integration.aG0YCb/doctor-state.json /TMP/hostwright-integration.aG0YCb/default-paths.json /TMP/hostwright-integration.aG0YCb/paths-before.json /TMP/hostwright-integration.aG0YCb/paths-after.json /TMP/hostwright-integration.aG0YCb/state-integrity.json /TMP/hostwright-integration.aG0YCb/state-backup.json /TMP/hostwright-integration.aG0YCb/state-catalog.json /TMP/hostwright-integration.aG0YCb/state-restore-plan.json /TMP/hostwright-integration.aG0YCb/state-restore-result.json /TMP/hostwright-integration.aG0YCb/state-recovery.json /TMP/hostwright-integration.aG0YCb/team-profile.json /TMP/hostwright-integration.aG0YCb/team-plan.json /TMP/hostwright-integration.aG0YCb/compose.yaml /TMP/hostwright-integration.aG0YCb/team-import.json /TMP/hostwright-integration.aG0YCb/invalid-team-profile.json /TMP/hostwright-integration.aG0YCb/overwrite.stdout /TMP/hostwright-integration.aG0YCb/overwrite.stderr /TMP/hostwright-integration.aG0YCb/missing.stdout /TMP/hostwright-integration.aG0YCb/missing.stderr /TMP/hostwright-integration.aG0YCb/benchmark-existing.json /TMP/hostwright-integration.aG0YCb/benchmark-absent.json /TMP/hostwright-integration.aG0YCb/unexpected-distribution-report.json /TMP/hostwright-integration.aG0YCb/extension-fixture /TMP/hostwright-integration.aG0YCb/extension.json /TMP/hostwright-integration.aG0YCb/extension-failure.json /TMP/hostwright-integration.aG0YCb/extension-result.json /TMP/hostwright-integration.aG0YCb/control-request.json /TMP/hostwright-integration.aG0YCb/control-response.json /TMP/hostwright-integration.aG0YCb/control-rejected-request.json /TMP/hostwright-integration.aG0YCb/control-rejected-response.json /TMP/hostwright-integration.aG0YCb/read-only/hostwright.yaml /TMP/hostwright-integration.aG0YCb/state/state.sqlite /TMP/hostwright-integration.aG0YCb/state/state.sqlite-wal /TMP/hostwright-integration.aG0YCb/state/state.sqlite-shm /TMP/hostwright-integration.aG0YCb/state/state.sqlite-journal /TMP/hostwright-integration.aG0YCb/state/.hostwright-cace2b66c8170833-access-v1.lock /TMP/hostwright-integration.aG0YCb/state/.hostwright-cace2b66c8170833-access-v1.lock.writer /TMP/hostwright-integration.aG0YCb/state/.hostwright-cace2b66c8170833-access-v1.lock.service /TMP/hostwright-integration.aG0YCb/state/.hostwright-cace2b66c8170833-maintenance-v1.json
++ [[ -d /TMP/hostwright-integration.aG0YCb/state/.hostwright-cace2b66c8170833-backups ]]
++ shopt -s nullglob
++ for backup_directory in '"$state_backups"/backup-*'
++ rm -f /TMP/hostwright-integration.aG0YCb/state/.hostwright-cace2b66c8170833-backups/backup-18dfea6f-11cc-40f8-9a38-441909b2a7cd/manifest.json /TMP/hostwright-integration.aG0YCb/state/.hostwright-cace2b66c8170833-backups/backup-18dfea6f-11cc-40f8-9a38-441909b2a7cd/state.sqlite
++ rmdir /TMP/hostwright-integration.aG0YCb/state/.hostwright-cace2b66c8170833-backups/backup-18dfea6f-11cc-40f8-9a38-441909b2a7cd
++ for backup_directory in '"$state_backups"/backup-*'
++ rm -f /TMP/hostwright-integration.aG0YCb/state/.hostwright-cace2b66c8170833-backups/backup-918a8021-69a2-4b10-afce-861c9636070c/manifest.json /TMP/hostwright-integration.aG0YCb/state/.hostwright-cace2b66c8170833-backups/backup-918a8021-69a2-4b10-afce-861c9636070c/state.sqlite
++ rmdir /TMP/hostwright-integration.aG0YCb/state/.hostwright-cace2b66c8170833-backups/backup-918a8021-69a2-4b10-afce-861c9636070c
++ shopt -u nullglob
++ rmdir /TMP/hostwright-integration.aG0YCb/state/.hostwright-cace2b66c8170833-backups
++ rmdir /TMP/hostwright-integration.aG0YCb/read-only
++ rmdir /TMP/hostwright-integration.aG0YCb/state
++ rmdir /TMP/hostwright-integration.aG0YCb
++ exit 0

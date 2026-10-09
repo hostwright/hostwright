@@ -1,0 +1,12 @@
+{
+  "command": [
+    "python3",
+    "scripts/release/test-supported-suite-matrix.py"
+  ],
+  "workingDirectory": "/SOURCE",
+  "startedAt": "2026-10-09T17:49:20.993588+00:00",
+  "finishedAt": "2026-10-09T17:49:21.627207+00:00",
+  "exitCode": 0,
+  "durationSeconds": 0.6336475000716746,
+  "logSHA256": "49a6fb0c321757ac61786b60ccdbff50d5271245746b905ec668201b97b6be8c"
+}

@@ -1,0 +1,24 @@
+{
+  "kind": "reviewed-public-assessment-extension",
+  "baseManifestSHA256": "4e9f2bbecf9c7c2a46bae7e2b92d39d86d2d68ca103e4fe67e0b8328f3d52867",
+  "files": [
+    {
+      "path": "issue272-public-final-assessment.md",
+      "originalSHA256": "3fb14d2c36ad6f8cd9700b7f5da82f8a7f8d9678cf392a57689572d3dc94af03",
+      "publishedSHA256": "3fb14d2c36ad6f8cd9700b7f5da82f8a7f8d9678cf392a57689572d3dc94af03",
+      "substitutions": []
+    },
+    {
+      "path": "issue272-public-final-assessment.json",
+      "originalSHA256": "a28d45ae09eee733ddaef2274b6eb77649db26d4a978687aa3a32694cdd70c62",
+      "publishedSHA256": "a28d45ae09eee733ddaef2274b6eb77649db26d4a978687aa3a32694cdd70c62",
+      "substitutions": []
+    },
+    {
+      "path": "issue272-public-final-companion.json",
+      "originalSHA256": "d4c0029ee8489729d919963d5386c184752b9693eb004670ab9f7c0020f9e865",
+      "publishedSHA256": "d4c0029ee8489729d919963d5386c184752b9693eb004670ab9f7c0020f9e865",
+      "substitutions": []
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "command": [
+    "/bin/bash",
+    "scripts/phase15-sast.sh"
+  ],
+  "cwd": "/SOURCE",
+  "sourceCommit": "7bd3575fff351fd4f1b20c694619457ded99a1a6",
+  "exitCode": 0,
+  "startedAt": "2026-10-09T17:50:32.367419+00:00",
+  "durationSeconds": 7.109720582840964,
+  "wrapperLogSHA256": "f91c9ca62f86a4181a56197a9af519f5bb86ab8ce9a71d29ede4e3c21fbffc5b"
+}

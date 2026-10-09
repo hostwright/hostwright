@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "security-assessment",
+  "status": "passed",
+  "recordedAt": "2026-10-09T18:06:40.243213+00:00",
+  "source": {
+    "commit": "7bd3575fff351fd4f1b20c694619457ded99a1a6",
+    "dirty": false
+  },
+  "environment": {
+    "operatingSystem": "macOS 26.6.2",
+    "build": "25G83",
+    "architecture": "arm64",
+    "hardwareModel": "Mac16,8",
+    "memoryBytes": 25769803776,
+    "toolVersions": {
+      "Swift": "Apple Swift version 6.3.3 (swiftlang-6.3.3.1.3 clang-2100.1.1.101)\nTarget: arm64-apple-macosx26.0",
+      "Xcode": "Xcode 26.6\nBuild version 17F113",
+      "Bash": "3.2.57(1)-release",
+      "Gitleaks": "8.30.1",
+      "Semgrep": "1.176.1",
+      "OSV Scanner": "2.6.0"
+    }
+  },
+  "commands": [
+    {
+      "command": "python3 /REVIEW/collect-issue272-focused-evidence.py (publication-normalized path; exact private invocation retained)",
+      "exitCode": 0,
+      "durationMilliseconds": 368
+    }
+  ],
+  "rawResults": {
+    "executed": 445,
+    "passed": 445,
+    "failed": 0,
+    "blocked": 0
+  },
+  "failures": [],
+  "blockers": [],
+  "cleanup": {
+    "status": "not-required",
+    "exactResourceIdentifiers": [],
+    "message": "The assessment collector only reads retained evidence and source. Supporting checks observed the exact traced integration root absent and no process matching the five product or root paths; proxy cases assert child and socket teardown. Test-owned teardown is limited to reviewed implementations. No system-wide cleanup baseline is claimed."
+  }
+}

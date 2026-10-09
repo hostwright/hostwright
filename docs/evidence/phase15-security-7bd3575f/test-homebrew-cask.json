@@ -1,0 +1,12 @@
+{
+  "command": [
+    "python3",
+    "scripts/release/test-homebrew-cask.py"
+  ],
+  "workingDirectory": "/SOURCE",
+  "startedAt": "2026-10-09T17:49:20.350490+00:00",
+  "finishedAt": "2026-10-09T17:49:20.500274+00:00",
+  "exitCode": 0,
+  "durationSeconds": 0.14980979193933308,
+  "logSHA256": "fe231033cbc2e31a6ba4e2f79db22f09f5f18b4a37711260864f5536e5bd967c"
+}

@@ -1,0 +1,12 @@
+{
+  "command": [
+    "python3",
+    "/REVIEW/collect-issue272-focused-evidence.py"
+  ],
+  "startedAt": "2026-10-09T18:00:32.902383+00:00",
+  "completedAt": "2026-10-09T18:00:33.270681+00:00",
+  "durationMilliseconds": 368,
+  "exitCode": 0,
+  "collectorSHA256": "7ce9b3a5ec9de82c787215065f911655193c8960920aa5a29aae35e6eae626ae",
+  "logSHA256": "6b7ae2a92f186fc75ecccdccffd5ff85647cbaa2d90f490001ab9c06d02dc2ff"
+}

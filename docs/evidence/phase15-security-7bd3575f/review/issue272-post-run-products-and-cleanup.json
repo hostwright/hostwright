@@ -1,0 +1,54 @@
+{
+  "reviewerIdentity": "rc6_review",
+  "recordedAt": "2026-10-09T18:01:20.866858+00:00",
+  "sourceCommit": "7bd3575fff351fd4f1b20c694619457ded99a1a6",
+  "sourceClean": true,
+  "rawIntegrationLogSHA256": "1c41134fee5b2c5a1ae5ce06bb9ef47c53128abf717365405968ece52a5ac38b",
+  "products": [
+    {
+      "name": "hostwright",
+      "path": "/SOURCE/.build/arm64-apple-macosx/debug/hostwright",
+      "sha256": "63a66fc4dfa9a09dd24d3d3079779626068bed9c31918c589d768dc2dae84de2"
+    },
+    {
+      "name": "hostwright-control",
+      "path": "/SOURCE/.build/arm64-apple-macosx/debug/hostwright-control",
+      "sha256": "9d2d5f6240c7514a513ba60e187732614cdb85576ade611192ea925c8c35f65c"
+    },
+    {
+      "name": "hostwright-dist",
+      "path": "/SOURCE/.build/arm64-apple-macosx/debug/hostwright-dist",
+      "sha256": "b25a7778b8d729fff2e4ce14b3a57f3f9f789e44dcf272e4bd4fdcc3044d7bc3"
+    },
+    {
+      "name": "HostwrightLocalIntegrationTool",
+      "path": "/SOURCE/.build/arm64-apple-macosx/debug/HostwrightLocalIntegrationTool",
+      "sha256": "9da94971fd169bf0aac3d603ec79fd74732655ff0c4948490cde06f9571339e3"
+    },
+    {
+      "name": "hostwright-docker-proxy",
+      "path": "/SOURCE/.build/arm64-apple-macosx/debug/hostwright-docker-proxy",
+      "sha256": "157d857a6a82519100d20289382e9662cd52a4720212d8e75631bd86bd4a9d00"
+    }
+  ],
+  "testBinarySHA256": {
+    ".build/arm64-apple-macosx/debug/HostwrightPackageTests.xctest/Contents/MacOS/HostwrightPackageTests": "e430b23c2a0646c3a8e4ca4e98f8f9565e56ebdafebc66db18beac81e42c5193"
+  },
+  "swiftTestingXMLSHA256": "aa4cd5fa17afa3cba95fb103258cd8f4fdc2e1d3efeca9768adada54b7b40b50",
+  "exactIntegrationRoots": [
+    {
+      "path": "/TMP//hostwright-integration.aG0YCb",
+      "exists": false,
+      "scope": "exact integration-owned root recorded by fresh command trace"
+    },
+    {
+      "path": "/TMP/hostwright-integration.aG0YCb",
+      "exists": false,
+      "scope": "exact integration-owned root recorded by fresh command trace"
+    }
+  ],
+  "matchingProductOrRootProcesses": [],
+  "scope": "Read-only post-run check of five exact source-built product paths and traced integration scratch roots. This is not a system-wide cleanup baseline or inventory of every temporary path allocated by unit tests. Passing proxy cases include bounded child wait and socket teardown; other test-owned teardown is limited to the reviewed test implementations.",
+  "productHashTiming": "Observed after the completed command; no claim of an independently captured pre-execution product hash. Exact source snapshots and raw build/command evidence are retained.",
+  "qualificationAccepted": false
+}

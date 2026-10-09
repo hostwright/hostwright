@@ -1,0 +1,3454 @@
+{
+  "kind": "hostwright.independent-source-security-assessment.v1",
+  "reviewerIdentity": "rc6_review",
+  "recordedAt": "2026-10-09T18:06:40.243213+00:00",
+  "issue": 272,
+  "sourceCommit": "7bd3575fff351fd4f1b20c694619457ded99a1a6",
+  "sourceTree": "0e75bd167d2f01e1efafa24355bc8fc5e3a35f79",
+  "version": "0.0.2-rc.7",
+  "sourceClean": true,
+  "sourceSecurityAssessmentStatus": "passed",
+  "sourceIssueAcceptanceCriteriaSatisfied": true,
+  "issueReadyToClose": false,
+  "remainingClosureActions": [
+    "Append verified final-head CI and merged-source ancestry/tree binding.",
+    "Publish this reviewed sanitized evidence at an immutable public commit and record the final evidence marker, required fields, status:verification and child disposition checks."
+  ],
+  "qualificationAccepted": false,
+  "artifactBoundReleaseApproval": false,
+  "unresolvedP0P1Findings": [],
+  "unresolvedReleaseBlockingSecurityFindings": [],
+  "acceptanceCriteria": [
+    {
+      "criterion": "Focused independent shipped auth/authz, parsers, state, mutations, desktop confirmation and distribution review",
+      "result": "passed",
+      "evidence": "127 exact source-map entries, selected ranges and individually reviewed changed code; not whole-file exhaustive coverage"
+    },
+    {
+      "criterion": "Remediate and retest release-blocking source-security findings",
+      "result": "passed",
+      "evidence": "Fresh344 relevant Swift cases,96 named Python cases,five real proxy cases and complete enforced integration; all actual commands exit0"
+    },
+    {
+      "criterion": "No unresolved P0/P1 defects within reviewed security scope",
+      "result": "passed",
+      "evidence": "Corrected initial-ACL policy and shell assertion findings verified; remaining parser depth concern is P3 hardening without established production attacker path"
+    }
+  ],
+  "coverage": [
+    {
+      "boundary": "authentication and authorization",
+      "conclusion": "Prior focused persistent Control API, native peer identity/session, helper authorization and extension containment review retained; reviewed source bytes unchanged. RC7 executable ACL correction closes the initial descriptor/ancestor ACL policy gap.",
+      "regressionSelectors": [
+        "ControlIdentitySecurityAdapterTests",
+        "ControlIdentityBootstrapTransactionTests",
+        "PersistentControlServerTests",
+        "SecureExecutableACLTests",
+        "SecureSubprocessTests",
+        "LocalPathsTests"
+      ]
+    },
+    {
+      "boundary": "desktop confirmation",
+      "conclusion": "UI exposes manifest/observation/plan hashes and exact actions. Model snapshots project identity, allows confirmation only from awaiting state, fences duplicate/late responses and cancels active transport on disconnect. Server runner recomputes the plan and compares the exact digest, then revalidates before execution.",
+      "references": [
+        "Sources/HostwrightDesktopApp/OperationsConsoleView.swift:372",
+        "Sources/HostwrightDesktopModel/DesktopOperationsModel.swift:807",
+        "Sources/HostwrightDesktopModel/DesktopOperationsModel.swift:883",
+        "Sources/HostwrightDesktopModel/DesktopOperationsModel.swift:954",
+        "Sources/HostwrightCLI/LifecycleCommandRunner.swift:536"
+      ],
+      "regressionSelectors": [
+        "DesktopOperationsModelTests",
+        "LifecycleCLIOptionsTests",
+        "LifecycleCommandRunnerTests",
+        "DaemonLocalLifecycleAuthorityTests"
+      ]
+    },
+    {
+      "boundary": "shipped parsers and protocols",
+      "conclusion": "Manifest admission bounds UTF8 bytes/depth/nodes and rejects aliases/anchors/merge/custom tags; schema decoder rejects unsupported fields. Compose uses a narrow grammar and validates rendered output before success. Control frames reject declared oversize before body allocation and impose deadlines; JSON scanner caps128depth/100000nodes. Helper framing caps8MiB and canonical re-encoding rejects duplicate/unknown fields. Qualification JSON requires byte-for-byte canonical form and validated contract. Apple JSON byte limits/duplicate fields/semantic identities checked; explicit scanner depth remains a hardening follow-up.",
+      "references": [
+        "Sources/HostwrightManifest/ManifestParser.swift:7",
+        "Sources/HostwrightManifest/ManifestParser.swift:222",
+        "Sources/HostwrightImport/StackFileImporter.swift:317",
+        "Sources/HostwrightControlTransport/ControlFrameCodec.swift:211",
+        "Sources/HostwrightControlPlane/ControlPlaneFoundation.swift:790",
+        "Sources/HostwrightRuntime/ContainerizationHelperProtocol.swift:335",
+        "Sources/HostwrightReleaseQualification/ReleaseQualificationJSON.swift:19",
+        "Sources/HostwrightRuntime/AppleContainerCodec.swift:264"
+      ],
+      "regressionSelectors": [
+        "ManifestV2StrictTests",
+        "HostwrightImportTests",
+        "ControlFrameCodecTests",
+        "ContainerizationHelperProtocolTests",
+        "AppleContainerCodecTests",
+        "ReleaseQualificationCLITests",
+        "ReleaseQualificationLedgerTests"
+      ]
+    },
+    {
+      "boundary": "state and durable request identity",
+      "conclusion": "Database and sidecars require owned private regular single-link files; ancestor and descriptor ACL policy rejects access grants. Managed connection locks and before/after identity checks protect SQLite opening. Defensive/trusted-schema/load-extension/attachment policy is set and verified. Managed transactions reject nesting, roll back cancellation, surface uncertain outcomes. Replay links subject/key/digest/request and terminal stream transitions atomically.",
+      "references": [
+        "Sources/HostwrightState/SecureStatePath.swift:717",
+        "Sources/HostwrightState/SecureStatePath.swift:795",
+        "Sources/HostwrightState/SQLiteStateStore.swift:175",
+        "Sources/HostwrightState/SQLiteConnection.swift:504",
+        "Sources/HostwrightState/ControlRequestRepository.swift:189",
+        "Sources/HostwrightState/ControlRequestRepository.swift:521"
+      ],
+      "regressionSelectors": [
+        "SecureLocalPathTests",
+        "SQLiteHardeningTests",
+        "ControlRequestRepositoryTests",
+        "ControlIdentityBootstrapTransactionTests"
+      ]
+    },
+    {
+      "boundary": "mutations and ownership",
+      "conclusion": "Prior exact resource ownership/fence/helper mutation review reused only for byte-identical files. Current lifecycle exact-plan check precedes revalidation/execution; desktop cannot supply a substitute execution plan. Existing runtime observations are not alone mutation authority.",
+      "references": [
+        "Sources/HostwrightCLI/LifecycleCommandRunner.swift:561",
+        "Sources/HostwrightCLI/LifecycleCommandRunner.swift:576"
+      ],
+      "regressionSelectors": [
+        "LifecycleCommandRunnerTests",
+        "DaemonLocalLifecycleAuthorityTests",
+        "LifecycleSchedulerEffectFreshnessTests"
+      ]
+    },
+    {
+      "boundary": "distribution and evidence integrity",
+      "conclusion": "Reviewed stage/accept/promotion/cask source and signer/hash bindings remain enforced. Mandatory macOS assertions now exit explicitly; exact-source before/after CI checks and source doctor expectations have regression coverage. Authenticated Linux SDK recipe is unchanged; runtime preparation ordering and static runner guard reviewed. This is source-only evidence, not an installed or signed-artifact claim.",
+      "references": [
+        "scripts/release/render-homebrew-cask.py:132",
+        "scripts/release/swift_test_results.py:5",
+        "scripts/release/verify-supported-suite-matrix.py:156",
+        ".github/workflows/trusted-release.yml"
+      ],
+      "regressionSelectors": [
+        "test-homebrew-cask.py",
+        "test-swift-test-results.py",
+        "test-supported-suite-matrix.py",
+        "ReleaseQualificationRegistryTests"
+      ]
+    }
+  ],
+  "sourceMap": [
+    {
+      "path": ".github/workflows/ci.yml",
+      "reviewBasis": "reviewed delta from RC7",
+      "inspection": "Final whole-PR377 diff reviewed, including explicit assertions, source identity checks, doctor expectation validation and Docker proxy isolation/process regressions.",
+      "sha256": "5a22256c8b6449890f1fac4343229bb37a06875909d9ea5b5bd2ac2a5d5f0c84"
+    },
+    {
+      "path": ".github/workflows/promote-release.yml",
+      "priorSHA256": "c33153740ce563f085d002ea78b2d5f46859b202b0122f70219a454a3e231df9",
+      "inspection": "Final whole-PR377 diff reviewed, including explicit assertions, source identity checks, doctor expectation validation and Docker proxy isolation/process regressions.",
+      "reviewBasis": "reviewed delta from RC7",
+      "sha256": "a0bfeaf77c16ac367bbe6f048f03e961189996eae5ceb07dd9a6ce7000c39673",
+      "unchangedFromRC7": false
+    },
+    {
+      "path": ".github/workflows/qualification.yml",
+      "reviewBasis": "reviewed delta from RC7",
+      "inspection": "Final whole-PR377 diff reviewed, including explicit assertions, source identity checks, doctor expectation validation and Docker proxy isolation/process regressions.",
+      "sha256": "7d2c4b7662ba27321e089cc98f7a6725b210defea97ade772bfad5f6d87bd09e"
+    },
+    {
+      "path": ".github/workflows/release-qualification-acceptance.yml",
+      "priorSHA256": "9b62f505813d5bd53cf7ef753424391c99c3e172bbc7b32f19599982671a5d8e",
+      "inspection": "Final whole-PR377 diff reviewed, including explicit assertions, source identity checks, doctor expectation validation and Docker proxy isolation/process regressions.",
+      "reviewBasis": "reviewed delta from RC7",
+      "sha256": "6356524e1fd5b4be3d21c30589543be55f5213cca24f49ead527681440cc1ad6",
+      "unchangedFromRC7": false
+    },
+    {
+      "path": ".github/workflows/retain-qualification-evidence.yml",
+      "reviewBasis": "reviewed delta from RC7",
+      "inspection": "Final whole-PR377 diff reviewed, including explicit assertions, source identity checks, doctor expectation validation and Docker proxy isolation/process regressions.",
+      "sha256": "547bb5c08c0ef7a2191f7a4c53fc7e78b72f9ba17f7377d85ac9faf1b6cc98e2"
+    },
+    {
+      "path": ".github/workflows/runtime-ingredients.yml",
+      "reviewBasis": "reviewed delta from RC7",
+      "inspection": "Merged PR376 background SDK download ordering; exact authenticated compiler recipe retained; final static Linux runner lint guard reviewed.",
+      "sha256": "4c121e134dedca1fafa06106c45db24289b10077e64e755ceeff2772e30260e5"
+    },
+    {
+      "path": ".github/workflows/trusted-release.yml",
+      "priorSHA256": "f4c426392860d7dd3ceb96bcb3cedf4ad72c4517fddd3e054004e6070439ab00",
+      "inspection": "Final whole-PR377 diff reviewed, including explicit assertions, source identity checks, doctor expectation validation and Docker proxy isolation/process regressions.",
+      "reviewBasis": "reviewed delta from RC7",
+      "sha256": "e4fa81051c4aefe226f2556d78e578c5fdecea06f57226bc04ac15091718cccb",
+      "unchangedFromRC7": false
+    },
+    {
+      "path": "Guest/HostwrightNetfilter/go.mod",
+      "priorSHA256": "48d90aca6468ddb2e004b2779b6a87299462c798056c8abda26045e486eae67f",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "48d90aca6468ddb2e004b2779b6a87299462c798056c8abda26045e486eae67f",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightCLI/CLIEnvironment.swift",
+      "priorSHA256": "b138ff5f8298df29eacbf0aeb2213760e139dc7041c4e023670c62f84b6c49c5",
+      "inspection": "readTextFile default295 and bounded reader helper references: distinct IO contracts",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "b138ff5f8298df29eacbf0aeb2213760e139dc7041c4e023670c62f84b6c49c5",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightCLI/CLIUtilities.swift",
+      "priorSHA256": "ba4dbdd71c636154a7de11a03bf73e2c2416f5e21591e16138bb771012434452",
+      "inspection": "255-266: production text reader wrapper",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "ba4dbdd71c636154a7de11a03bf73e2c2416f5e21591e16138bb771012434452",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightCLI/HostwrightCLI.swift",
+      "priorSHA256": "0ccfe2ba70a29d09bbc565ee614b5184f4a6ae7189f7e6bacb79b24093fe19ea",
+      "inspection": "875-925: production Compose import entrypoint",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "0ccfe2ba70a29d09bbc565ee614b5184f4a6ae7189f7e6bacb79b24093fe19ea",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightCLI/LifecycleCLIOptions.swift",
+      "priorSHA256": "1e81e5dcded6bc71cb242687274b19aaef1a0b2af5bd721ca0e06bf64ad6f915",
+      "inspection": "1-140,exact-mode requirement at204",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "1e81e5dcded6bc71cb242687274b19aaef1a0b2af5bd721ca0e06bf64ad6f915",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightCLI/LifecycleCommandRunner.swift",
+      "priorSHA256": "4b71d27e64eae63cc40b131194d7dabcf4d3736c1430b0b74c3928ea5fdee622",
+      "inspection": "525-620: fresh plan computation and revalidation before execute; digest references",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "4b71d27e64eae63cc40b131194d7dabcf4d3736c1430b0b74c3928ea5fdee622",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightCLI/LifecycleLiveDriver.swift",
+      "priorSHA256": "16b95ebb7c435f930ac6e3d8bfa610cc73888caaa09b402e1c2454cebd640410",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "16b95ebb7c435f930ac6e3d8bfa610cc73888caaa09b402e1c2454cebd640410",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightCommandTransport/CLIControlRoute.swift",
+      "priorSHA256": "3c38e282c6f9d2b597db88a82662fa6e3810defe6f2c5bec405c84dc3964bf6f",
+      "inspection": "1-175: persistent route and argument/scope limits",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "3c38e282c6f9d2b597db88a82662fa6e3810defe6f2c5bec405c84dc3964bf6f",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightContainerizationHelper/ContainerizationFrameworkBackend.swift",
+      "priorSHA256": "dd4d33168ff80217bd4d9ad8345f20025fdfd9bda70e8f7f147ca0b4820d47bc",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "dd4d33168ff80217bd4d9ad8345f20025fdfd9bda70e8f7f147ca0b4820d47bc",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightContainerizationHelper/ContainerizationHelperSecurity.swift",
+      "priorSHA256": "814484c9f634cdd8e4e206a62fdbbebbfe155ce78e5624864cf6091cce090a01",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "814484c9f634cdd8e4e206a62fdbbebbfe155ce78e5624864cf6091cce090a01",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightControlPlane/ControlPlaneFoundation.swift",
+      "priorSHA256": "743e60c7885b6c9c58c89d1bc86fcaca59c6cebcc3fde6c589128a4696601a5c",
+      "inspection": "790-865,935-950: duplicate key/depth/node guards; prior selected review reused",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "743e60c7885b6c9c58c89d1bc86fcaca59c6cebcc3fde6c589128a4696601a5c",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightControlPlane/ProfilePluginContracts.swift",
+      "priorSHA256": "ef9f9b087d876a3811ccd009666e81fa07f8f28c97f83face7e0e2f86ca9b2cf",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "ef9f9b087d876a3811ccd009666e81fa07f8f28c97f83face7e0e2f86ca9b2cf",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightControlSecurity/ControlPeerAuthenticator.swift",
+      "priorSHA256": "3613a9ea144ef2633d58a41b8504fb5f9bd80d0b589d02f72fab08999630d97d",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "3613a9ea144ef2633d58a41b8504fb5f9bd80d0b589d02f72fab08999630d97d",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightControlSecurityQualificationTool/ControlSecurityQualification.swift",
+      "priorSHA256": "b4bc90ff66bd834141be7aee5e6124acc8e389b900fdb057c945e38711ae0cee",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "b4bc90ff66bd834141be7aee5e6124acc8e389b900fdb057c945e38711ae0cee",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightControlTransport/ControlFrameCodec.swift",
+      "priorSHA256": "71c476fad92a0592a6d9b297a13bdf9c06fc3cab816f38539e31814528391538",
+      "inspection": "full file: frame limit before payload allocation, deadlines and short reads/writes",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "71c476fad92a0592a6d9b297a13bdf9c06fc3cab816f38539e31814528391538",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightControlTransport/ControlStreamConnectionContext.swift",
+      "priorSHA256": "fa2ec659a71f8a62b10da914586f48324a86a1e2a2733e711c223d8e55ffab67",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "fa2ec659a71f8a62b10da914586f48324a86a1e2a2733e711c223d8e55ffab67",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightControlTransport/PersistentControlServer.swift",
+      "priorSHA256": "0a3f144a2d32cd7a8fe1110b023c51f0550cc9de6a9bbd5ab9800fae825ac5db",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "0a3f144a2d32cd7a8fe1110b023c51f0550cc9de6a9bbd5ab9800fae825ac5db",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightCore/LocalPaths.swift",
+      "priorSHA256": "326a326118b394cd13e013a4c5d37b34b78e0a60b2f894549260335b56d533f3",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "326a326118b394cd13e013a4c5d37b34b78e0a60b2f894549260335b56d533f3",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightCore/SecureExecutable.swift",
+      "priorSHA256": "90d1f58f44a44e722eec412df8c13da295ed453f65de6e4c7e6f4dc0d3468219",
+      "inspection": "complete reviewed ACL delta and owner switch warning331-333; approved remediation reused",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "90d1f58f44a44e722eec412df8c13da295ed453f65de6e4c7e6f4dc0d3468219",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightCore/SecureSubprocess.swift",
+      "priorSHA256": "d6c736a60ec0b705fb3f66e91fff630ab8bbe771139def1d57c529a2015f9075",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "d6c736a60ec0b705fb3f66e91fff630ab8bbe771139def1d57c529a2015f9075",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightDaemon/DaemonControlStreamAuthorizationPipeline.swift",
+      "priorSHA256": "b33794c6c15d3789512cbb9d487fb3fdec0836faf2474f7a39a48d66fde95594",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "b33794c6c15d3789512cbb9d487fb3fdec0836faf2474f7a39a48d66fde95594",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightDaemonCore/DaemonCore.swift",
+      "priorSHA256": "fd0e01681feacf7662ea65dc84c1d1a46602f88a8aefb0f58d4d98a395bf0f91",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "fd0e01681feacf7662ea65dc84c1d1a46602f88a8aefb0f58d4d98a395bf0f91",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightDaemonCore/DaemonLifecycleController.swift",
+      "priorSHA256": "f1ed54685db99337afb99f2547a959fc76a007f02662f8c2541aec9567ab1021",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "f1ed54685db99337afb99f2547a959fc76a007f02662f8c2541aec9567ab1021",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightDesktopApp/OperationsConsoleView.swift",
+      "priorSHA256": "80c0c1380cc64a5e94afa0b040656ed5d909262d90e25eada01ce54902dd95f9",
+      "inspection": "335-445: visible exact-plan review and confirmation",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "80c0c1380cc64a5e94afa0b040656ed5d909262d90e25eada01ce54902dd95f9",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightDesktopModel/DesktopModelTypes.swift",
+      "priorSHA256": "937271c4fccb4f01d063a480bfb429d1ed25f5fe9b56649639517dad6d07a3e7",
+      "inspection": "92-164: review and lifecycle state types",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "937271c4fccb4f01d063a480bfb429d1ed25f5fe9b56649639517dad6d07a3e7",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightDesktopModel/DesktopOperationsModel.swift",
+      "priorSHA256": "f47c956f11d6ba623f7e663856fb89aea8d192e16a374099e977d6aa56475d0f",
+      "inspection": "370-570,807-1000,1180-1285: preview/confirm/route/reply/cancel and project guards",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "f47c956f11d6ba623f7e663856fb89aea8d192e16a374099e977d6aa56475d0f",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightDistribution/DistributionInstalledLifecycle.swift",
+      "priorSHA256": "4375117486a54f9dc3a3c8d80fe6885354ef854687f0f86646776e063f41afdb",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "4375117486a54f9dc3a3c8d80fe6885354ef854687f0f86646776e063f41afdb",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightDistribution/DistributionPackageLifecycle.swift",
+      "priorSHA256": "403c147e68ee336f09367c2e2668e463f2681be5d0e6c0d2235e5459692e7e8e",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "403c147e68ee336f09367c2e2668e463f2681be5d0e6c0d2235e5459692e7e8e",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightDistribution/DistributionSupport.swift",
+      "priorSHA256": "7294d114cd7cadbcd94dcbbaac3d11b38b73d095440bdfaaa45b721de8c15fe9",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "7294d114cd7cadbcd94dcbbaac3d11b38b73d095440bdfaaa45b721de8c15fe9",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightDistribution/DistributionTerminalCleanup.swift",
+      "priorSHA256": "9beac0ab93e06c1d2f99269b3426957886c506e59d4833e10506ba18c01decf4",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "9beac0ab93e06c1d2f99269b3426957886c506e59d4833e10506ba18c01decf4",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightDistribution/TrustedReleaseSupport.swift",
+      "priorSHA256": "2c08d288df46293a2c50700a6fe6222ade1bae35519672cbaafa8aefe60e0eab",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "2c08d288df46293a2c50700a6fe6222ade1bae35519672cbaafa8aefe60e0eab",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightDockerProxy/main.swift",
+      "reviewBasis": "reviewed delta from RC7",
+      "inspection": "Final whole-PR377 diff reviewed, including explicit assertions, source identity checks, doctor expectation validation and Docker proxy isolation/process regressions.",
+      "sha256": "2cf278117401bedfd1d56bc3dd5573872323547109e755c0907726aab3f66c61"
+    },
+    {
+      "path": "Sources/HostwrightExtensions/ExtensionFileSecurity.swift",
+      "priorSHA256": "d8dfc10dc4e8d607adbb209d7e42263e71d1ba063f0a1158d36bd7c918380fe3",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "d8dfc10dc4e8d607adbb209d7e42263e71d1ba063f0a1158d36bd7c918380fe3",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightExtensions/ReviewedLocalExtensionHost.swift",
+      "priorSHA256": "b729fc72072922e795720514b6df03c81804ea34e42a30ad7b0e8cacb26c48f5",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "b729fc72072922e795720514b6df03c81804ea34e42a30ad7b0e8cacb26c48f5",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightImport/ComposeContracts.swift",
+      "priorSHA256": "a6e506cd310b2e082d57c73394e9b24df01addc54959fe33f0c9ad7b6383bf4a",
+      "inspection": "215-255: public import delegates to restricted importer",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "a6e506cd310b2e082d57c73394e9b24df01addc54959fe33f0c9ad7b6383bf4a",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightImport/StackFileImporter.swift",
+      "priorSHA256": "eada478e5bbb834d45f8cf009df18615868c18258883484649a01ea20797d849",
+      "inspection": "1-352 and selected field/parser references: narrow import, diagnostic failure and emitted-manifest revalidation",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "eada478e5bbb834d45f8cf009df18615868c18258883484649a01ea20797d849",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightManifest/ManifestParser.swift",
+      "priorSHA256": "de6fcd9f33bb68078d96dcd62a98541543ea7976e5e79b6e4a16e5c11074a7c2",
+      "inspection": "1-350: byte/depth/node/cancellation/tag/anchor admission and schema-root decoding",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "de6fcd9f33bb68078d96dcd62a98541543ea7976e5e79b6e4a16e5c11074a7c2",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightManifest/RestrictedYAMLSubsetParser.swift",
+      "priorSHA256": "2dfb886b0c18b586f3d4b9df798f80c194b367ab88870a257587c2b5abc9e83a",
+      "inspection": "1-210 and parser entrypoint references: restricted scalar/array syntax",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "2dfb886b0c18b586f3d4b9df798f80c194b367ab88870a257587c2b5abc9e83a",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightNetworkHelperCore/NetworkHelperProtocol.swift",
+      "priorSHA256": "551b5247072c88643ca779572644c4833a160e4887f7e9d83df59ba70316ecce",
+      "inspection": "selected validation and canonical-codec delegation references; prior authorization review reused",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "551b5247072c88643ca779572644c4833a160e4887f7e9d83df59ba70316ecce",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightNetworkHelperCore/NetworkHelperSecurity.swift",
+      "priorSHA256": "0e8249e5eb5b2da869412ec9e5180ebf063b9de1a0aa7d780fbb88a99ce4e1a1",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "0e8249e5eb5b2da869412ec9e5180ebf063b9de1a0aa7d780fbb88a99ce4e1a1",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightNetworkHelperCore/NetworkHelperServer.swift",
+      "priorSHA256": "c785e8403b75c4dbae5761868682104f1792ab836b13078b6b9a83068fa06136",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "c785e8403b75c4dbae5761868682104f1792ab836b13078b6b9a83068fa06136",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightNetworkHelperCore/NetworkHelperStateStore.swift",
+      "priorSHA256": "0e747a7a23e687594c6fc75b03f6cd4ec103ebd04e60a06faf6a70197c87ec35",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "0e747a7a23e687594c6fc75b03f6cd4ec103ebd04e60a06faf6a70197c87ec35",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightObservability/OSLogSink.swift",
+      "priorSHA256": "b61a2e6c392b3a168950950fb4591ea119feb3ffe8ca708abf5794202b38b7ef",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "b61a2e6c392b3a168950950fb4591ea119feb3ffe8ca708abf5794202b38b7ef",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightReconciler/ManifestRuntimeMapper.swift",
+      "priorSHA256": "2bfa9be87387190305ce90cfc0648d4a0ecd66d1b3dfd08842245c99278389a2",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "2bfa9be87387190305ce90cfc0648d4a0ecd66d1b3dfd08842245c99278389a2",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightRegistry/ImageProvenance.swift",
+      "priorSHA256": "2eb3f1c536522ec16c78b7aa65cc5f359083664f2e5e3ca1f64825ddee59839d",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "2eb3f1c536522ec16c78b7aa65cc5f359083664f2e5e3ca1f64825ddee59839d",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightRegistry/ImageTrustVerifier.swift",
+      "priorSHA256": "a90edf0dcb35b5c09bbfe003bb8caec1b9476062f65919956e59325dcb3bdcc5",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "a90edf0dcb35b5c09bbfe003bb8caec1b9476062f65919956e59325dcb3bdcc5",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightRegistry/RegistryCredentialFiles.swift",
+      "priorSHA256": "91380677694597ca17c6c8382cc447d7a025ff9c8a3c3254d86753880b751595",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "91380677694597ca17c6c8382cc447d7a025ff9c8a3c3254d86753880b751595",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightRegistry/RegistryCredentialLookup.swift",
+      "priorSHA256": "41b23f780b6b1c00b55571b3d482c6a3c910ab754dc2cc30bd22b1c2596f713e",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "41b23f780b6b1c00b55571b3d482c6a3c910ab754dc2cc30bd22b1c2596f713e",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightReleaseQualification/ReleaseQualificationJSON.swift",
+      "priorSHA256": "eebdcbe669ba9a971c21a3a60217c6414c6e07496336dbb9984104c0313e35df",
+      "inspection": "1-205: bounded/canonical JSON and nofollow descriptor reads",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "eebdcbe669ba9a971c21a3a60217c6414c6e07496336dbb9984104c0313e35df",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightReleaseQualification/ReleaseQualificationRegistry.swift",
+      "priorSHA256": "cc3da682854139556f3e420a58dec78b290624ca3103b25ef7bccb73ba9e88ae",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "cc3da682854139556f3e420a58dec78b290624ca3103b25ef7bccb73ba9e88ae",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightRuntime/AppleContainerCodec.swift",
+      "priorSHA256": "b8e955d3de09876c47708c6b17984da5bfa1208a65d4122ca6517e50a647a81f",
+      "inspection": "1-415: selected codecs, output bounds and recursive duplicate-key scanner",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "b8e955d3de09876c47708c6b17984da5bfa1208a65d4122ca6517e50a647a81f",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightRuntime/AppleContainerCommand.swift",
+      "priorSHA256": "4c652b037b2eec8d264eb9c68ada170b95247f0496f1ea5481edd35bbcd69518",
+      "inspection": "148-172: fixed JSON provider arguments",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "4c652b037b2eec8d264eb9c68ada170b95247f0496f1ea5481edd35bbcd69518",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightRuntime/AppleContainerInventoryParser.swift",
+      "priorSHA256": "016ab2fda0776fc6e0dd018131bed53d9038eedcf6c12f8078fed7a28d6c1260",
+      "inspection": "1-80,108-195: bounded container/image/stats entrypoints",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "016ab2fda0776fc6e0dd018131bed53d9038eedcf6c12f8078fed7a28d6c1260",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightRuntime/AppleContainerObservationParser.swift",
+      "priorSHA256": "a6fcb65246b1bdbddba6d4bb8e7abc6b71039d84ec8a95a8cb5000a9bcb0642c",
+      "inspection": "1-120: shared validation before shape/identity decode",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "a6fcb65246b1bdbddba6d4bb8e7abc6b71039d84ec8a95a8cb5000a9bcb0642c",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightRuntime/AppleContainerReadOnlyAdapter.swift",
+      "priorSHA256": "8d6d72fa9b127f5817f12408d62608574040857239ab5a8dcc5bf9f10d43e065",
+      "inspection": "1-335,335-363: secured provider output to inventory decode, capability freshness",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "8d6d72fa9b127f5817f12408d62608574040857239ab5a8dcc5bf9f10d43e065",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightRuntime/ContainerizationHelperClient.swift",
+      "priorSHA256": "47a5ba9b979744526c99be972ab964e43746b8870411bcff3fba3b262ddb5ab6",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "47a5ba9b979744526c99be972ab964e43746b8870411bcff3fba3b262ddb5ab6",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightRuntime/ContainerizationHelperProtocol.swift",
+      "priorSHA256": "cf0aba148a762fc83a5c55ba431a5895d26dc6e09a1fa16b1596146348db2144",
+      "inspection": "1-200,314-475,request validator references: canonical decode, protocol/framing limits; prior peer-policy review reused",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "cf0aba148a762fc83a5c55ba431a5895d26dc6e09a1fa16b1596146348db2144",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightRuntime/RuntimeExecutableResolver.swift",
+      "priorSHA256": "726187fa15f8b6380719330fc40c9e1071d738cce677e3f26b867f94cf7f1715",
+      "inspection": "full file: SecureExecutableResolver use",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "726187fa15f8b6380719330fc40c9e1071d738cce677e3f26b867f94cf7f1715",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightRuntime/SecureRuntimeProcessRunner.swift",
+      "priorSHA256": "72a00f891de695650447505c4337ce1e64da961875c928398ef775e9c25295eb",
+      "inspection": "1-110: command allowlist, secure environment and subprocess/output cap",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "72a00f891de695650447505c4337ce1e64da961875c928398ef775e9c25295eb",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightRuntimeConformanceTool/RuntimeQualificationLiveDriver.swift",
+      "priorSHA256": "96ee5bcb0603059380498a8da3cd8d00a001ff026bd5bc88e90e248993e959d9",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "96ee5bcb0603059380498a8da3cd8d00a001ff026bd5bc88e90e248993e959d9",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightRuntimeConformanceTool/RuntimeQualificationRecoveryDriver.swift",
+      "priorSHA256": "9786fc0ad39ae38090c9ecf6a103b54748312ea5fe2bfe3ec24b046e799c9c1d",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "9786fc0ad39ae38090c9ecf6a103b54748312ea5fe2bfe3ec24b046e799c9c1d",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightState/ControlRequestRepository.swift",
+      "priorSHA256": "5ddeb4f2d5d17d5f4f919a894910bb91fe9243a1ace1f7e986cc5ef56cbff624",
+      "inspection": "185-276,520-581 and terminal/state-transition references: transactionally bound replay and stream operation",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "5ddeb4f2d5d17d5f4f919a894910bb91fe9243a1ace1f7e986cc5ef56cbff624",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightState/PluginLifecycleRepository.swift",
+      "priorSHA256": "fdfd4612fd99d9d3589a5714fc16c176c12c2deea8a2d6b4250f39e24e3dea48",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "fdfd4612fd99d9d3589a5714fc16c176c12c2deea8a2d6b4250f39e24e3dea48",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightState/SQLiteConnection.swift",
+      "priorSHA256": "05be986e43109fdf2e58a4e7d8a52ed265aeeffa96d9ac7d7932671bd16f9718",
+      "inspection": "1-145,transaction implementation,504-568,authorizer references: secure open, transaction and SQL policy",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "05be986e43109fdf2e58a4e7d8a52ed265aeeffa96d9ac7d7932671bd16f9718",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightState/SQLiteStateStore.swift",
+      "priorSHA256": "464492d678b0e94b91de52d881fb5160cd82af16a921b340425e3afc191c9b35",
+      "inspection": "125-272: connection locking and repeated file identity validation",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "464492d678b0e94b91de52d881fb5160cd82af16a921b340425e3afc191c9b35",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightState/SecureStatePath.swift",
+      "priorSHA256": "54e60f43ab7c3946a0241530fda0cd5c62c01308978806985c371dda71654917",
+      "inspection": "1-250,700-855: layout/file-set and descriptor/ancestor ACL/ownership policy",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "54e60f43ab7c3946a0241530fda0cd5c62c01308978806985c371dda71654917",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightState/StateAccessCoordinator.swift",
+      "priorSHA256": "0d5dcc0cd2c58275edfab7805793d9b0338f89374acd71d40d10f56cfbbcf8b6",
+      "inspection": "selected lock descriptor creation/open/identity/ACL policy",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "0d5dcc0cd2c58275edfab7805793d9b0338f89374acd71d40d10f56cfbbcf8b6",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightStorage/LocalStorageProvider.swift",
+      "priorSHA256": "aa91db067f7900d94e3839144f44bcc554d139516f648f51e378ec9b491068d3",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "aa91db067f7900d94e3839144f44bcc554d139516f648f51e378ec9b491068d3",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightStreamQualificationTool/main.swift",
+      "priorSHA256": "cc31f942288bd9761abe919b2f7c5f47e47ef70230079e4f7b003033e2b09e34",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "cc31f942288bd9761abe919b2f7c5f47e47ef70230079e4f7b003033e2b09e34",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightWASIProviderRuntime/WASIProviderRuntime.swift",
+      "priorSHA256": "a5c447fc76313397f978dc2585d728897c8748bbd9469c2900951228675e8da2",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "a5c447fc76313397f978dc2585d728897c8748bbd9469c2900951228675e8da2",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightWASIProviderWorker/main.swift",
+      "priorSHA256": "82cdb63300dd64a6a8e5b8392e5ff3d855d1c01be40fb5016f324076576f2bd2",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "82cdb63300dd64a6a8e5b8392e5ff3d855d1c01be40fb5016f324076576f2bd2",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Sources/HostwrightXPCProvider/XPCProvider.swift",
+      "priorSHA256": "d18d7662cea7955de9b1878ef3616ea3f27b2f96d2ce5598c8703a000a1e723a",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "d18d7662cea7955de9b1878ef3616ea3f27b2f96d2ce5598c8703a000a1e723a",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Tests/HostwrightCLITests/LifecycleImageProvenancePreflightTests.swift",
+      "priorSHA256": "8abf7301e6556742d0ad0e819dd7ee545a2400331edcd634ad93a0b4988a4b80",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "8abf7301e6556742d0ad0e819dd7ee545a2400331edcd634ad93a0b4988a4b80",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Tests/HostwrightControlTransportTests/ControlFrameCodecTests.swift",
+      "priorSHA256": "60a54c079c8f81cf3f59fbca1877bfef96077890f056455468f157acd479d780",
+      "inspection": "named frame/timeout/partial/oversized coverage",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "60a54c079c8f81cf3f59fbca1877bfef96077890f056455468f157acd479d780",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Tests/HostwrightControlTransportTests/PersistentControlServerTests.swift",
+      "priorSHA256": "a14e7f33e0b499365eae22f35c4ce0211dea5156b5efd385cabd9e1a74b0de0a",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "a14e7f33e0b499365eae22f35c4ce0211dea5156b5efd385cabd9e1a74b0de0a",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Tests/HostwrightCoreTests/SecureExecutableACLTests.swift",
+      "priorSHA256": "22ffd114f210e48b39379b55b4a811ec558397a5719505e974517890e1af11d5",
+      "inspection": "complete approved remediation test file; exact hash unchanged",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "22ffd114f210e48b39379b55b4a811ec558397a5719505e974517890e1af11d5",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Tests/HostwrightDaemonTests/MutationCheckpointQualificationScriptTests.swift",
+      "priorSHA256": "ad020a0d93f127710a6c321fd537fbf7ac66ccf963b2a5096c9e009087bbe935",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "ad020a0d93f127710a6c321fd537fbf7ac66ccf963b2a5096c9e009087bbe935",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Tests/HostwrightDesktopModelTests/DesktopOperationsModelTests.swift",
+      "priorSHA256": "b0f4eaaf93d38bbfec528a28afae6327e2b24da725731788a02e26927bada09f",
+      "inspection": "900-1215: exact route, duplicate/stale/cancel/disconnect/project replacement tests",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "b0f4eaaf93d38bbfec528a28afae6327e2b24da725731788a02e26927bada09f",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Tests/HostwrightImportTests/HostwrightImportSmoke.swift",
+      "priorSHA256": "9d6e79f5063675254e5bee62163665195fed19db084978530399ae17c331d598",
+      "inspection": "named narrow parser/admission/deterministic diagnostics coverage",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "9d6e79f5063675254e5bee62163665195fed19db084978530399ae17c331d598",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Tests/HostwrightManifestTests/ManifestV2StrictTests.swift",
+      "priorSHA256": "77a31198474895d8b8cb3885ef8076387cd2c39717a9214a1bfe058439747b9f",
+      "inspection": "named strict parser regression coverage;167-201 bounds/cancellation tests",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "77a31198474895d8b8cb3885ef8076387cd2c39717a9214a1bfe058439747b9f",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Tests/HostwrightNetworkHelperTests/NetworkHelperIngressBrokerTests.swift",
+      "priorSHA256": "089679def878f876e671d18faba2f61b02bdc2877c29a9644547d7b0305ee5ca",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "089679def878f876e671d18faba2f61b02bdc2877c29a9644547d7b0305ee5ca",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Tests/HostwrightRuntimeTests/AppleContainerCodecTests.swift",
+      "priorSHA256": "d5882b5ac58a532430e1dc377f436d1b18e36c316ebcb707eaeb281fbd5a4974",
+      "inspection": "208-235,514-625: unknown nonsemantic fields, malformed/duplicate/oversized regression coverage",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "d5882b5ac58a532430e1dc377f436d1b18e36c316ebcb707eaeb281fbd5a4974",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Tests/HostwrightRuntimeTests/ContainerizationHelperProtocolTests.swift",
+      "priorSHA256": "c75dfaaf87353d130ac05154f52c23f4106234fe0a4ef215928cc8c443168a3e",
+      "inspection": "named framing/canonical/peer/replay coverage",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "c75dfaaf87353d130ac05154f52c23f4106234fe0a4ef215928cc8c443168a3e",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Tests/HostwrightRuntimeTests/LifecycleGate05LiveTests.swift",
+      "priorSHA256": "b75f28c3c570efaf7756371dae5a79128f5f4103e95bd6daa2355eaba67ea431",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "b75f28c3c570efaf7756371dae5a79128f5f4103e95bd6daa2355eaba67ea431",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Tests/HostwrightStateTests/ControlRequestRepositoryTests.swift",
+      "priorSHA256": "dd80db30a72710b3e6de0b11617f6cecdd8701deee5892f8412b87638777f7d2",
+      "inspection": "named idempotency/subject/terminal/stream-cancellation coverage",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "dd80db30a72710b3e6de0b11617f6cecdd8701deee5892f8412b87638777f7d2",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Tests/HostwrightStateTests/SQLiteHardeningTests.swift",
+      "priorSHA256": "0bb2da5c6252ef6240b3e846c8d98a9975e837c3db6e136737509fca3dc59e10",
+      "inspection": "named policy/transaction/cancellation/symlink/concurrency/crash coverage",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "0bb2da5c6252ef6240b3e846c8d98a9975e837c3db6e136737509fca3dc59e10",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "Tests/HostwrightStateTests/SecureLocalPathTests.swift",
+      "priorSHA256": "09883c5615567d028d807409adc8115a90b70e2fc42f2fe23a4a6df2af9ce983",
+      "inspection": "named ACL/ownership/sidecar/symlink/hardlink coverage",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "09883c5615567d028d807409adc8115a90b70e2fc42f2fe23a4a6df2af9ce983",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "contracts/v0.0.2/versions.json",
+      "priorSHA256": "f8c5a1f2d732559bfa1eb9303d4dd53bb13658505f8871e4eb9be56cb40e03c2",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "f8c5a1f2d732559bfa1eb9303d4dd53bb13658505f8871e4eb9be56cb40e03c2",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "docs/reference/homebrew-distribution.md",
+      "reviewBasis": "reviewed delta from RC7",
+      "inspection": "Reviewed PR374/375 hosted macOS qualification guidance; no install or release acceptance claim.",
+      "sha256": "048609351f3bd53e9e43bc7214d810307dd87089907e38195e24fde32fe6f818"
+    },
+    {
+      "path": "scripts/integration.sh",
+      "reviewBasis": "reviewed delta from RC7",
+      "inspection": "Final whole-PR377 diff reviewed, including explicit assertions, source identity checks, doctor expectation validation and Docker proxy isolation/process regressions.",
+      "sha256": "9df2703ee4d25894b9459723cc3d54c3602ec877158019c1643c231a35953773"
+    },
+    {
+      "path": "scripts/integration_doctor.py",
+      "reviewBasis": "reviewed delta from RC7",
+      "inspection": "Final whole-PR377 diff reviewed, including explicit assertions, source identity checks, doctor expectation validation and Docker proxy isolation/process regressions.",
+      "sha256": "2a9de3ce1b13f607478a3c2af296c2a48460517d33f3b8897265433a03163bf6"
+    },
+    {
+      "path": "scripts/live-runtime-identity-proof.sh",
+      "priorSHA256": "c173e47a8cea181e7b1755980073f7fcc7b9ad9d0a003196350636fe2d16d69d",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "c173e47a8cea181e7b1755980073f7fcc7b9ad9d0a003196350636fe2d16d69d",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "scripts/phase08-soak-qualification.sh",
+      "priorSHA256": "ad743ea4c7175acf6dbd52682900d5bd0e42e14700cb4867ab282f5f3d70a121",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "ad743ea4c7175acf6dbd52682900d5bd0e42e14700cb4867ab282f5f3d70a121",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "scripts/phase09-gate05-qualification.sh",
+      "priorSHA256": "cff37c5298d6c10eb4156b0c3a097470710313bdf3ddee4e17950317fa7e7128",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "cff37c5298d6c10eb4156b0c3a097470710313bdf3ddee4e17950317fa7e7128",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "scripts/phase09-gate06-qualification.sh",
+      "priorSHA256": "cffb571235fadc3d5ab6cd644b317709e3918b49f0b26d9fc2a2f90277864e6e",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "cffb571235fadc3d5ab6cd644b317709e3918b49f0b26d9fc2a2f90277864e6e",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "scripts/phase09-gate07-qualification.sh",
+      "priorSHA256": "58aaabbac68054f5aa3d922f6264d901dd1bcda38cec3a1845fde7140cff286d",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "58aaabbac68054f5aa3d922f6264d901dd1bcda38cec3a1845fde7140cff286d",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "scripts/phase09-gate08-qualification.sh",
+      "priorSHA256": "fc05909d03b7a4a9142a7c1718540ea3ce69090b38562e1632f0508e8133cf6d",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "fc05909d03b7a4a9142a7c1718540ea3ce69090b38562e1632f0508e8133cf6d",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "scripts/phase09-gate09-qualification.sh",
+      "priorSHA256": "44a769102e989a2dc62f80977e5a8d773e4739fa3e7fc7285e64f23c031b56dc",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "44a769102e989a2dc62f80977e5a8d773e4739fa3e7fc7285e64f23c031b56dc",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "scripts/phase09-gate10-qualification.sh",
+      "priorSHA256": "4de182e17517771bd800abb70a3a10a283c3300ec1861fd8a144aef3c7999aaa",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "4de182e17517771bd800abb70a3a10a283c3300ec1861fd8a144aef3c7999aaa",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "scripts/phase09-gate11-qualification.sh",
+      "priorSHA256": "67430f20a4c54d8c5ae42a653b6576ac6e5936fd543d92fef08478d194c906bc",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "67430f20a4c54d8c5ae42a653b6576ac6e5936fd543d92fef08478d194c906bc",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "scripts/phase09-gate12-qualification.sh",
+      "priorSHA256": "91d2abe625fbabcae8ab2722217116f3454c1b9a36229ea675d9661218de931c",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "91d2abe625fbabcae8ab2722217116f3454c1b9a36229ea675d9661218de931c",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "scripts/phase09-gate13-qualification.sh",
+      "priorSHA256": "4a73ae9acbfffb6e65d12ffe51223b35f2f8ee2883042a5210aef32f55b881e4",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "4a73ae9acbfffb6e65d12ffe51223b35f2f8ee2883042a5210aef32f55b881e4",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "scripts/phase09-gate15-live.sh",
+      "priorSHA256": "b2550357635b56b7237195ce1795976c147ff28b4ff52c2304d781a8fa221d83",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "b2550357635b56b7237195ce1795976c147ff28b4ff52c2304d781a8fa221d83",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "scripts/phase09-gate15-qualification.sh",
+      "priorSHA256": "9ad2e58ca76e5b410ee6457f8d0e8f8162867d37b73609ef2f03c3b5fb440c05",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "9ad2e58ca76e5b410ee6457f8d0e8f8162867d37b73609ef2f03c3b5fb440c05",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "scripts/release/accept-qualification.py",
+      "priorSHA256": "152a42e4f0e15a5a04067b9a79032934eda920c167f3075b08c9accc66911868",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "152a42e4f0e15a5a04067b9a79032934eda920c167f3075b08c9accc66911868",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "scripts/release/capture-static-swift-sdk-evidence.sh",
+      "reviewBasis": "reviewed delta from RC7",
+      "inspection": "Final whole-PR377 diff reviewed, including explicit assertions, source identity checks, doctor expectation validation and Docker proxy isolation/process regressions.",
+      "sha256": "a03dde7e05ef2c34040039b8c4e7e9403eec2177c250f537f15f55c385a81d52"
+    },
+    {
+      "path": "scripts/release/prepare-containerization-assets.sh",
+      "priorSHA256": "cec5f6b14714c595c319e2abdbaa14cb6e9b90d9ab94cf1f609ee80d76127fca",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "cec5f6b14714c595c319e2abdbaa14cb6e9b90d9ab94cf1f609ee80d76127fca",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "scripts/release/qualify-vendor-tap.sh",
+      "priorSHA256": "50604da06e37a7c807a893cbf56d51be3b58af9a41805c701eb861e4a1d06035",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "50604da06e37a7c807a893cbf56d51be3b58af9a41805c701eb861e4a1d06035",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "scripts/release/render-homebrew-cask.py",
+      "priorSHA256": "a916d70bd6254192403bd47ae63d27f4fcf35d8cffa2cdbb9ed4939c7884153c",
+      "inspection": "complete new189-line generator including exact source/signer/version/hash and preservation guards",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "a916d70bd6254192403bd47ae63d27f4fcf35d8cffa2cdbb9ed4939c7884153c",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "scripts/release/staged-release.py",
+      "priorSHA256": "910da1c6646ffa22e50bf47769880fbe2848a2eddbd71a42c4d7a00f4a351e21",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "910da1c6646ffa22e50bf47769880fbe2848a2eddbd71a42c4d7a00f4a351e21",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "scripts/release/swift_test_results.py",
+      "priorSHA256": "3ce83983a0840d6ea122156d280c30cbcdbed749fb2048e5677ef4e9a7658df1",
+      "inspection": "complete delta: All versus Selected suite distinction",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "3ce83983a0840d6ea122156d280c30cbcdbed749fb2048e5677ef4e9a7658df1",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "scripts/release/test-homebrew-cask.py",
+      "priorSHA256": "1f87b5bc5acac42239d23d47cde9311f48d71179dffbb4df4a2e39fb82fcdc31",
+      "inspection": "complete148-line fixture boundary tests; fixtures are not artifact approval",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "1f87b5bc5acac42239d23d47cde9311f48d71179dffbb4df4a2e39fb82fcdc31",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "scripts/release/test-supported-suite-matrix.py",
+      "priorSHA256": "c7c6b8b1e5152aae2eb8c1205a85e92129996ca01a62becd70a7917db9615956",
+      "inspection": "new selected-base and missing-attended matrix regression cases",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "c7c6b8b1e5152aae2eb8c1205a85e92129996ca01a62becd70a7917db9615956",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "scripts/release/test-swift-test-results.py",
+      "priorSHA256": "0bb25f6c83621dc2ce3d319199de77721595707ed70a2b27ca24f80e0209bb2d",
+      "inspection": "new invalid/ambiguous/sanitizer header regression cases",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "0bb25f6c83621dc2ce3d319199de77721595707ed70a2b27ca24f80e0209bb2d",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "scripts/release/validate-run.py",
+      "priorSHA256": "020c8a025be98c4f388ab73cb86c68702534c973579cc6103623aebcea19a009",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "020c8a025be98c4f388ab73cb86c68702534c973579cc6103623aebcea19a009",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "scripts/release/verify-runtime-provenance.py",
+      "priorSHA256": "269c44e97c3d4ce80b75fe36e6ae49daf9ce3a57f8008439835f4ab096949503",
+      "inspection": "Selected security-boundary code, call sites, or exact scanner warning/context locations; whole-file coverage is not asserted.",
+      "reviewBasis": "prior selected-range review",
+      "sha256": "269c44e97c3d4ce80b75fe36e6ae49daf9ce3a57f8008439835f4ab096949503",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "scripts/release/verify-supported-suite-matrix.py",
+      "priorSHA256": "678141f9c759370373ea4c0f38d20bec3ac757ae5f06041ee78b886f34f692ce",
+      "inspection": "complete delta and prior reviewed coverage requirements",
+      "reviewBasis": "RC7 selected-range review",
+      "sha256": "678141f9c759370373ea4c0f38d20bec3ac757ae5f06041ee78b886f34f692ce",
+      "unchangedFromRC7": true
+    },
+    {
+      "path": "scripts/test-docker-proxy.py",
+      "reviewBasis": "reviewed delta from RC7",
+      "inspection": "Final whole-PR377 diff reviewed, including explicit assertions, source identity checks, doctor expectation validation and Docker proxy isolation/process regressions.",
+      "sha256": "b90d9fd452547df7105ed08b96bd750f28cd9cd3f151f18c07cce7fef1d34669"
+    },
+    {
+      "path": "scripts/test-shell-assertions.py",
+      "reviewBasis": "reviewed delta from RC7",
+      "inspection": "Final whole-PR377 diff reviewed, including explicit assertions, source identity checks, doctor expectation validation and Docker proxy isolation/process regressions.",
+      "sha256": "b985c76350735c1968eb89eda65c861916dae0eed9704f8e24bee9cd9dbdbc0f"
+    },
+    {
+      "path": "scripts/test.sh",
+      "reviewBasis": "reviewed delta from RC7",
+      "inspection": "Final whole-PR377 diff reviewed, including explicit assertions, source identity checks, doctor expectation validation and Docker proxy isolation/process regressions.",
+      "sha256": "53ef460d17932ae61dda34ce21abc0db74439b704e52da999791dff6ddea91cb"
+    }
+  ],
+  "sourceMapScope": "Exact bytes and stated selected-range/delta inspection only. Prior source reuse is limited to identical current hashes or reviewed changes.",
+  "prior48ExaminedFilesUnchanged": 47,
+  "sourceScanArchiveMatchesAllTrackedFiles": true,
+  "testCounts": {
+    "executed": 344,
+    "passed": 344,
+    "failed": 0,
+    "skipped": 0,
+    "XCTest": 301,
+    "SwiftTesting": 43
+  },
+  "perSelector": [
+    {
+      "selector": "AppleContainerCodecTests",
+      "selectorKind": "class",
+      "inventoryCases": 10,
+      "reportedCases": 10,
+      "passedCases": 10,
+      "failedCases": 0,
+      "skippedCases": 0,
+      "missingCases": [],
+      "unexpectedCases": []
+    },
+    {
+      "selector": "ContainerizationHelperProtocolTests",
+      "selectorKind": "class",
+      "inventoryCases": 12,
+      "reportedCases": 12,
+      "passedCases": 12,
+      "failedCases": 0,
+      "skippedCases": 0,
+      "missingCases": [],
+      "unexpectedCases": []
+    },
+    {
+      "selector": "ControlFrameCodecTests",
+      "selectorKind": "class",
+      "inventoryCases": 8,
+      "reportedCases": 8,
+      "passedCases": 8,
+      "failedCases": 0,
+      "skippedCases": 0,
+      "missingCases": [],
+      "unexpectedCases": []
+    },
+    {
+      "selector": "ControlIdentityBootstrapTransactionTests",
+      "selectorKind": "class",
+      "inventoryCases": 3,
+      "reportedCases": 3,
+      "passedCases": 3,
+      "failedCases": 0,
+      "skippedCases": 0,
+      "missingCases": [],
+      "unexpectedCases": []
+    },
+    {
+      "selector": "ControlIdentitySecurityAdapterTests",
+      "selectorKind": "class",
+      "inventoryCases": 7,
+      "reportedCases": 7,
+      "passedCases": 7,
+      "failedCases": 0,
+      "skippedCases": 0,
+      "missingCases": [],
+      "unexpectedCases": []
+    },
+    {
+      "selector": "ControlRequestRepositoryTests",
+      "selectorKind": "class",
+      "inventoryCases": 15,
+      "reportedCases": 15,
+      "passedCases": 15,
+      "failedCases": 0,
+      "skippedCases": 0,
+      "missingCases": [],
+      "unexpectedCases": []
+    },
+    {
+      "selector": "DaemonLocalLifecycleAuthorityTests",
+      "selectorKind": "class",
+      "inventoryCases": 17,
+      "reportedCases": 17,
+      "passedCases": 17,
+      "failedCases": 0,
+      "skippedCases": 0,
+      "missingCases": [],
+      "unexpectedCases": []
+    },
+    {
+      "selector": "DesktopOperationsModelTests",
+      "selectorKind": "class",
+      "inventoryCases": 38,
+      "reportedCases": 38,
+      "passedCases": 38,
+      "failedCases": 0,
+      "skippedCases": 0,
+      "missingCases": [],
+      "unexpectedCases": []
+    },
+    {
+      "selector": "HostwrightImportTests",
+      "selectorKind": "module",
+      "inventoryCases": 22,
+      "reportedCases": 22,
+      "passedCases": 22,
+      "failedCases": 0,
+      "skippedCases": 0,
+      "missingCases": [],
+      "unexpectedCases": []
+    },
+    {
+      "selector": "LifecycleCLIOptionsTests",
+      "selectorKind": "class",
+      "inventoryCases": 3,
+      "reportedCases": 3,
+      "passedCases": 3,
+      "failedCases": 0,
+      "skippedCases": 0,
+      "missingCases": [],
+      "unexpectedCases": []
+    },
+    {
+      "selector": "LifecycleCommandRunnerTests",
+      "selectorKind": "class",
+      "inventoryCases": 40,
+      "reportedCases": 40,
+      "passedCases": 40,
+      "failedCases": 0,
+      "skippedCases": 0,
+      "missingCases": [],
+      "unexpectedCases": []
+    },
+    {
+      "selector": "LifecycleSchedulerEffectFreshnessTests",
+      "selectorKind": "class",
+      "inventoryCases": 3,
+      "reportedCases": 3,
+      "passedCases": 3,
+      "failedCases": 0,
+      "skippedCases": 0,
+      "missingCases": [],
+      "unexpectedCases": []
+    },
+    {
+      "selector": "LocalPathsTests",
+      "selectorKind": "class",
+      "inventoryCases": 5,
+      "reportedCases": 5,
+      "passedCases": 5,
+      "failedCases": 0,
+      "skippedCases": 0,
+      "missingCases": [],
+      "unexpectedCases": []
+    },
+    {
+      "selector": "ManifestV2StrictTests",
+      "selectorKind": "class",
+      "inventoryCases": 26,
+      "reportedCases": 26,
+      "passedCases": 26,
+      "failedCases": 0,
+      "skippedCases": 0,
+      "missingCases": [],
+      "unexpectedCases": []
+    },
+    {
+      "selector": "PersistentControlClientTests",
+      "selectorKind": "class",
+      "inventoryCases": 7,
+      "reportedCases": 7,
+      "passedCases": 7,
+      "failedCases": 0,
+      "skippedCases": 0,
+      "missingCases": [],
+      "unexpectedCases": []
+    },
+    {
+      "selector": "PersistentControlServerTests",
+      "selectorKind": "class",
+      "inventoryCases": 17,
+      "reportedCases": 17,
+      "passedCases": 17,
+      "failedCases": 0,
+      "skippedCases": 0,
+      "missingCases": [],
+      "unexpectedCases": []
+    },
+    {
+      "selector": "ReleaseQualificationCLITests",
+      "selectorKind": "class",
+      "inventoryCases": 15,
+      "reportedCases": 15,
+      "passedCases": 15,
+      "failedCases": 0,
+      "skippedCases": 0,
+      "missingCases": [],
+      "unexpectedCases": []
+    },
+    {
+      "selector": "ReleaseQualificationLedgerTests",
+      "selectorKind": "class",
+      "inventoryCases": 4,
+      "reportedCases": 4,
+      "passedCases": 4,
+      "failedCases": 0,
+      "skippedCases": 0,
+      "missingCases": [],
+      "unexpectedCases": []
+    },
+    {
+      "selector": "ReleaseQualificationRegistryTests",
+      "selectorKind": "class",
+      "inventoryCases": 37,
+      "reportedCases": 37,
+      "passedCases": 37,
+      "failedCases": 0,
+      "skippedCases": 0,
+      "missingCases": [],
+      "unexpectedCases": []
+    },
+    {
+      "selector": "SQLiteHardeningTests",
+      "selectorKind": "class",
+      "inventoryCases": 9,
+      "reportedCases": 9,
+      "passedCases": 9,
+      "failedCases": 0,
+      "skippedCases": 0,
+      "missingCases": [],
+      "unexpectedCases": []
+    },
+    {
+      "selector": "SecureExecutableACLTests",
+      "selectorKind": "class",
+      "inventoryCases": 6,
+      "reportedCases": 6,
+      "passedCases": 6,
+      "failedCases": 0,
+      "skippedCases": 0,
+      "missingCases": [],
+      "unexpectedCases": []
+    },
+    {
+      "selector": "SecureLocalPathTests",
+      "selectorKind": "class",
+      "inventoryCases": 13,
+      "reportedCases": 13,
+      "passedCases": 13,
+      "failedCases": 0,
+      "skippedCases": 0,
+      "missingCases": [],
+      "unexpectedCases": []
+    },
+    {
+      "selector": "SecureSubprocessTests",
+      "selectorKind": "class",
+      "inventoryCases": 27,
+      "reportedCases": 27,
+      "passedCases": 27,
+      "failedCases": 0,
+      "skippedCases": 0,
+      "missingCases": [],
+      "unexpectedCases": []
+    }
+  ],
+  "pythonChecks": [
+    {
+      "script": "scripts/test-shell-assertions.py",
+      "sha256": "b985c76350735c1968eb89eda65c861916dae0eed9704f8e24bee9cd9dbdbc0f",
+      "passedCases": 10,
+      "raw": "Ran 10 tests in 0.008s\n\nOK"
+    },
+    {
+      "script": "scripts/release/test-homebrew-cask.py",
+      "sha256": "1f87b5bc5acac42239d23d47cde9311f48d71179dffbb4df4a2e39fb82fcdc31",
+      "passedCases": 8,
+      "raw": "Ran 8 tests in 0.103s\n\nOK"
+    },
+    {
+      "script": "scripts/release/test-staged-release.py",
+      "sha256": "1ef5a39a4bb5421d20412825265c20fe0a7e63af944deb242263bc2daad6c464",
+      "passedCases": 9,
+      "raw": "Ran 9 tests in 0.145s\n\nOK"
+    },
+    {
+      "script": "scripts/release/test-assemble-qualification.py",
+      "sha256": "75adc28a32546d0c346cc132395a2d190ea54f574374cb99f10ed33169e4de27",
+      "passedCases": 5,
+      "raw": "Ran 5 tests in 0.188s\n\nOK"
+    },
+    {
+      "script": "scripts/release/test-swift-test-results.py",
+      "sha256": "0bb25f6c83621dc2ce3d319199de77721595707ed70a2b27ca24f80e0209bb2d",
+      "passedCases": 18,
+      "raw": "Ran 18 tests in 0.001s\n\nOK"
+    },
+    {
+      "script": "scripts/release/test-supported-suite-matrix.py",
+      "sha256": "c7c6b8b1e5152aae2eb8c1205a85e92129996ca01a62becd70a7917db9615956",
+      "passedCases": 28,
+      "raw": "Ran 28 tests in 0.585s\n\nOK"
+    },
+    {
+      "script": "scripts/release/test_qualify_vendor_tap.py",
+      "sha256": "2083952974b3526f627d96eb27151b3fbf3b36327cf841491f605f6a16c22afa",
+      "passedCases": 18,
+      "raw": "Ran 18 tests in 2.521s\n\nOK"
+    }
+  ],
+  "pythonCaseCount": 96,
+  "proxyProcessCases": 5,
+  "enforcedIntegration": {
+    "name": "enforced-integration",
+    "exitCode": 0,
+    "durationSeconds": 24.38893995899707,
+    "originalLogSHA256": "1c41134fee5b2c5a1ae5ce06bb9ef47c53128abf717365405968ece52a5ac38b"
+  },
+  "commands": [
+    {
+      "name": "test-shell-assertions",
+      "exitCode": 0,
+      "durationSeconds": 0.0502618330065161,
+      "originalLogSHA256": "85bdb3d23316195a7aad16b696a688d839cd6f3a8ddf856daed46f675b993098"
+    },
+    {
+      "name": "test-homebrew-cask",
+      "exitCode": 0,
+      "durationSeconds": 0.14980979193933308,
+      "originalLogSHA256": "fe231033cbc2e31a6ba4e2f79db22f09f5f18b4a37711260864f5536e5bd967c"
+    },
+    {
+      "name": "test-staged-release",
+      "exitCode": 0,
+      "durationSeconds": 0.21009425004012883,
+      "originalLogSHA256": "7eec14814bba16a0d8a60154de3c87fcb39cf5dcea62dc04469f598c75a07154"
+    },
+    {
+      "name": "test-assemble-qualification",
+      "exitCode": 0,
+      "durationSeconds": 0.24593541701324284,
+      "originalLogSHA256": "113c596f94ba6570248d710e02b9631273505b6eee9f7df2dc116e96ef815032"
+    },
+    {
+      "name": "test-swift-test-results",
+      "exitCode": 0,
+      "durationSeconds": 0.03618950000964105,
+      "originalLogSHA256": "a93cfa7bf7fe0a1507bc3830da553ec02bf6af25c6d91f43ef4927e91e89b690"
+    },
+    {
+      "name": "test-supported-suite-matrix",
+      "exitCode": 0,
+      "durationSeconds": 0.6336475000716746,
+      "originalLogSHA256": "49a6fb0c321757ac61786b60ccdbff50d5271245746b905ec668201b97b6be8c"
+    },
+    {
+      "name": "test_qualify_vendor_tap",
+      "exitCode": 0,
+      "durationSeconds": 2.5625210418365896,
+      "originalLogSHA256": "fba79c3e0de69b4aa657b464d91ed2b938311f035919d84248f367f04959dcf3"
+    },
+    {
+      "name": "security-selected",
+      "exitCode": 0,
+      "durationSeconds": 605.8217820420396,
+      "originalLogSHA256": "d0577af5e50ad2429e082e32abc602fa403970371839bfd3aa7b1c33947100da"
+    },
+    {
+      "name": "compiled-inventory",
+      "exitCode": 0,
+      "durationSeconds": 3.2593219589907676,
+      "originalLogSHA256": "170d466734eee32c13ff886a9dd4cf9e602fd389ddb27e0d6a7a1c0f73787260"
+    },
+    {
+      "name": "docker-proxy-process",
+      "exitCode": 0,
+      "durationSeconds": 2.3341327090747654,
+      "originalLogSHA256": "3c2ee99759e30269e678e811f20061f39584f76cdb91f36d853db524ac101441"
+    },
+    {
+      "name": "enforced-integration",
+      "exitCode": 0,
+      "durationSeconds": 24.38893995899707,
+      "originalLogSHA256": "1c41134fee5b2c5a1ae5ce06bb9ef47c53128abf717365405968ece52a5ac38b"
+    }
+  ],
+  "collector": {
+    "exitCode": 0,
+    "durationMilliseconds": 368,
+    "sha256": "7ce9b3a5ec9de82c787215065f911655193c8960920aa5a29aae35e6eae626ae",
+    "originalExecutionReceiptSHA256": "f96e233d913df6f138879ba5ec6ddd5984f5f74a173580e86015860ef505d131",
+    "originalLogSHA256": "6b7ae2a92f186fc75ecccdccffd5ff85647cbaa2d90f490001ab9c06d02dc2ff"
+  },
+  "testBinarySHA256": "e430b23c2a0646c3a8e4ca4e98f8f9565e56ebdafebc66db18beac81e42c5193",
+  "products": [
+    {
+      "name": "hostwright",
+      "sha256": "63a66fc4dfa9a09dd24d3d3079779626068bed9c31918c589d768dc2dae84de2"
+    },
+    {
+      "name": "hostwright-control",
+      "sha256": "9d2d5f6240c7514a513ba60e187732614cdb85576ade611192ea925c8c35f65c"
+    },
+    {
+      "name": "hostwright-dist",
+      "sha256": "b25a7778b8d729fff2e4ce14b3a57f3f9f789e44dcf272e4bd4fdcc3044d7bc3"
+    },
+    {
+      "name": "HostwrightLocalIntegrationTool",
+      "sha256": "9da94971fd169bf0aac3d603ec79fd74732655ff0c4948490cde06f9571339e3"
+    },
+    {
+      "name": "hostwright-docker-proxy",
+      "sha256": "157d857a6a82519100d20289382e9662cd52a4720212d8e75631bd86bd4a9d00"
+    }
+  ],
+  "scanCounts": {
+    "secretContexts": 16,
+    "sastFindings": 0,
+    "sastWarnings": 32,
+    "advisoryGroups": 18
+  },
+  "rawScannerExits": {
+    "gitleaks": 1,
+    "osv": 0,
+    "semgrep": 0
+  },
+  "secretContexts": [
+    {
+      "path": "Sources/HostwrightControlSecurityQualificationTool/ControlSecurityQualification.swift",
+      "startLine": 1030,
+      "endLine": 1030,
+      "rule": "generic-api-key",
+      "sha256": "b4bc90ff66bd834141be7aee5e6124acc8e389b900fdb057c945e38711ae0cee",
+      "priorContextMatches": true,
+      "disposition": "false-positive-confirmed-by-source-context",
+      "reason": "Swift type or variable declaration; key material is generated or read at runtime"
+    },
+    {
+      "path": "Sources/HostwrightControlSecurityQualificationTool/ControlSecurityQualification.swift",
+      "startLine": 1063,
+      "endLine": 1063,
+      "rule": "generic-api-key",
+      "sha256": "b4bc90ff66bd834141be7aee5e6124acc8e389b900fdb057c945e38711ae0cee",
+      "priorContextMatches": true,
+      "disposition": "false-positive-confirmed-by-source-context",
+      "reason": "Swift type or variable declaration; key material is generated or read at runtime"
+    },
+    {
+      "path": "Sources/HostwrightRegistry/ImageProvenance.swift",
+      "startLine": 1344,
+      "endLine": 1381,
+      "rule": "private-key",
+      "sha256": "2eb3f1c536522ec16c78b7aa65cc5f359083664f2e5e3ca1f64825ddee59839d",
+      "priorContextMatches": true,
+      "disposition": "false-positive-confirmed-by-source-context",
+      "reason": "PEM format marker in parser; no embedded private key material"
+    },
+    {
+      "path": "Sources/HostwrightState/PluginLifecycleRepository.swift",
+      "startLine": 662,
+      "endLine": 662,
+      "rule": "generic-api-key",
+      "sha256": "fdfd4612fd99d9d3589a5714fc16c176c12c2deea8a2d6b4250f39e24e3dea48",
+      "priorContextMatches": true,
+      "disposition": "false-positive-confirmed-by-source-context",
+      "reason": "Validation of idempotency key length; no credential value"
+    },
+    {
+      "path": "Tests/HostwrightCLITests/LifecycleImageProvenancePreflightTests.swift",
+      "startLine": 503,
+      "endLine": 503,
+      "rule": "generic-api-key",
+      "sha256": "8abf7301e6556742d0ad0e819dd7ee545a2400331edcd634ad93a0b4988a4b80",
+      "priorContextMatches": true,
+      "disposition": "false-positive-confirmed-by-source-context",
+      "reason": "Swift type or variable declaration; key material is generated or read at runtime"
+    },
+    {
+      "path": "Sources/HostwrightStreamQualificationTool/main.swift",
+      "startLine": 758,
+      "endLine": 758,
+      "rule": "generic-api-key",
+      "sha256": "cc31f942288bd9761abe919b2f7c5f47e47ef70230079e4f7b003033e2b09e34",
+      "priorContextMatches": true,
+      "disposition": "false-positive-confirmed-by-source-context",
+      "reason": "Fixed idempotency request identifier for qualification or regression test"
+    },
+    {
+      "path": "Sources/HostwrightStreamQualificationTool/main.swift",
+      "startLine": 822,
+      "endLine": 822,
+      "rule": "generic-api-key",
+      "sha256": "cc31f942288bd9761abe919b2f7c5f47e47ef70230079e4f7b003033e2b09e34",
+      "priorContextMatches": true,
+      "disposition": "false-positive-confirmed-by-source-context",
+      "reason": "Fixed idempotency request identifier for qualification or regression test"
+    },
+    {
+      "path": "Tests/HostwrightControlTransportTests/PersistentControlServerTests.swift",
+      "startLine": 428,
+      "endLine": 428,
+      "rule": "generic-api-key",
+      "sha256": "a14e7f33e0b499365eae22f35c4ce0211dea5156b5efd385cabd9e1a74b0de0a",
+      "priorContextMatches": true,
+      "disposition": "false-positive-confirmed-by-source-context",
+      "reason": "Fixed idempotency request identifier for qualification or regression test"
+    },
+    {
+      "path": "Tests/HostwrightRuntimeTests/LifecycleGate05LiveTests.swift",
+      "startLine": 39,
+      "endLine": 39,
+      "rule": "generic-api-key",
+      "sha256": "b75f28c3c570efaf7756371dae5a79128f5f4103e95bd6daa2355eaba67ea431",
+      "priorContextMatches": true,
+      "disposition": "false-positive-confirmed-by-source-context",
+      "reason": "Fixed ownership fencing UUID for explicit disposable runtime test"
+    },
+    {
+      "path": "Tests/HostwrightDaemonTests/MutationCheckpointQualificationScriptTests.swift",
+      "startLine": 64,
+      "endLine": 64,
+      "rule": "generic-api-key",
+      "sha256": "ad020a0d93f127710a6c321fd537fbf7ac66ccf963b2a5096c9e009087bbe935",
+      "priorContextMatches": true,
+      "disposition": "false-positive-confirmed-by-source-context",
+      "reason": "Deterministic restart hold-token fixture used for confirmation tests"
+    },
+    {
+      "path": "Tests/HostwrightDaemonTests/MutationCheckpointQualificationScriptTests.swift",
+      "startLine": 263,
+      "endLine": 263,
+      "rule": "generic-api-key",
+      "sha256": "ad020a0d93f127710a6c321fd537fbf7ac66ccf963b2a5096c9e009087bbe935",
+      "priorContextMatches": true,
+      "disposition": "false-positive-confirmed-by-source-context",
+      "reason": "Deterministic restart hold-token fixture used for confirmation tests"
+    },
+    {
+      "path": "Tests/HostwrightDaemonTests/MutationCheckpointQualificationScriptTests.swift",
+      "startLine": 342,
+      "endLine": 342,
+      "rule": "generic-api-key",
+      "sha256": "ad020a0d93f127710a6c321fd537fbf7ac66ccf963b2a5096c9e009087bbe935",
+      "priorContextMatches": true,
+      "disposition": "false-positive-confirmed-by-source-context",
+      "reason": "Deterministic restart hold-token fixture used for confirmation tests"
+    },
+    {
+      "path": "Tests/HostwrightNetworkHelperTests/NetworkHelperIngressBrokerTests.swift",
+      "startLine": 59,
+      "endLine": 59,
+      "rule": "generic-api-key",
+      "sha256": "089679def878f876e671d18faba2f61b02bdc2877c29a9644547d7b0305ee5ca",
+      "priorContextMatches": true,
+      "disposition": "false-positive-confirmed-by-source-context",
+      "reason": "Fixed WebSocket handshake test vector, not authentication credentials"
+    },
+    {
+      "path": "Tests/HostwrightNetworkHelperTests/NetworkHelperIngressBrokerTests.swift",
+      "startLine": 1712,
+      "endLine": 1712,
+      "rule": "generic-api-key",
+      "sha256": "089679def878f876e671d18faba2f61b02bdc2877c29a9644547d7b0305ee5ca",
+      "priorContextMatches": true,
+      "disposition": "false-positive-confirmed-by-source-context",
+      "reason": "Fixed WebSocket handshake test vector, not authentication credentials"
+    },
+    {
+      "path": "Tests/HostwrightNetworkHelperTests/NetworkHelperIngressBrokerTests.swift",
+      "startLine": 59,
+      "endLine": 59,
+      "rule": "generic-api-key",
+      "sha256": "089679def878f876e671d18faba2f61b02bdc2877c29a9644547d7b0305ee5ca",
+      "priorContextMatches": true,
+      "disposition": "false-positive-confirmed-by-source-context",
+      "reason": "Fixed WebSocket handshake test vector, not authentication credentials"
+    },
+    {
+      "path": "Tests/HostwrightNetworkHelperTests/NetworkHelperIngressBrokerTests.swift",
+      "startLine": 1712,
+      "endLine": 1712,
+      "rule": "generic-api-key",
+      "sha256": "089679def878f876e671d18faba2f61b02bdc2877c29a9644547d7b0305ee5ca",
+      "priorContextMatches": true,
+      "disposition": "false-positive-confirmed-by-source-context",
+      "reason": "Fixed WebSocket handshake test vector, not authentication credentials"
+    }
+  ],
+  "sastWarnings": [
+    {
+      "path": "scripts/live-runtime-identity-proof.sh",
+      "sha256": "c173e47a8cea181e7b1755980073f7fcc7b9ad9d0a003196350636fe2d16d69d",
+      "type": "Syntax error",
+      "spans": [],
+      "assessment": "Prior independent warning-context assessment reused for identical bytes; parser coverage gap retained.",
+      "securityClearance": false,
+      "priorBaselineUnchanged": true,
+      "currentSourceUnchangedSinceRC7": true,
+      "freshWarningPayloadAndSpansMatch": true
+    },
+    {
+      "path": "scripts/phase09-gate15-qualification.sh",
+      "sha256": "9ad2e58ca76e5b410ee6457f8d0e8f8162867d37b73609ef2f03c3b5fb440c05",
+      "type": "Syntax error",
+      "spans": [],
+      "assessment": "Prior independent warning-context assessment reused for identical bytes; parser coverage gap retained.",
+      "securityClearance": false,
+      "priorBaselineUnchanged": true,
+      "currentSourceUnchangedSinceRC7": true,
+      "freshWarningPayloadAndSpansMatch": true
+    },
+    {
+      "path": "Sources/HostwrightCLI/LifecycleLiveDriver.swift",
+      "sha256": "16b95ebb7c435f930ac6e3d8bfa610cc73888caaa09b402e1c2454cebd640410",
+      "type": "PartialParsing",
+      "spans": [
+        {
+          "startLine": 2232,
+          "endLine": 2232
+        },
+        {
+          "startLine": 2233,
+          "endLine": 2233
+        },
+        {
+          "startLine": 2234,
+          "endLine": 2234
+        },
+        {
+          "startLine": 6830,
+          "endLine": 6830
+        },
+        {
+          "startLine": 6832,
+          "endLine": 6832
+        }
+      ],
+      "assessment": "Prior independent warning-context assessment reused for identical bytes; parser coverage gap retained.",
+      "securityClearance": false,
+      "priorBaselineUnchanged": true,
+      "currentSourceUnchangedSinceRC7": true,
+      "freshWarningPayloadAndSpansMatch": true
+    },
+    {
+      "path": "Sources/HostwrightCore/LocalPaths.swift",
+      "sha256": "326a326118b394cd13e013a4c5d37b34b78e0a60b2f894549260335b56d533f3",
+      "type": "PartialParsing",
+      "spans": [
+        {
+          "startLine": 367,
+          "endLine": 367
+        },
+        {
+          "startLine": 368,
+          "endLine": 368
+        },
+        {
+          "startLine": 389,
+          "endLine": 389
+        },
+        {
+          "startLine": 411,
+          "endLine": 411
+        },
+        {
+          "startLine": 473,
+          "endLine": 473
+        }
+      ],
+      "assessment": "Prior independent warning-context assessment reused for identical bytes; parser coverage gap retained.",
+      "securityClearance": false,
+      "priorBaselineUnchanged": true,
+      "currentSourceUnchangedSinceRC7": true,
+      "freshWarningPayloadAndSpansMatch": true
+    },
+    {
+      "path": "Sources/HostwrightCore/SecureExecutable.swift",
+      "sha256": "90d1f58f44a44e722eec412df8c13da295ed453f65de6e4c7e6f4dc0d3468219",
+      "type": "PartialParsing",
+      "spans": [
+        {
+          "startLine": 331,
+          "endLine": 331
+        },
+        {
+          "startLine": 332,
+          "endLine": 332
+        },
+        {
+          "startLine": 333,
+          "endLine": 333
+        }
+      ],
+      "assessment": "SecureExecutable ACL delta reviewed; warning is switch-expression at331-333, shifted19lines. Parser coverage gap retained.",
+      "securityClearance": false,
+      "priorBaselineUnchanged": false,
+      "currentSourceUnchangedSinceRC7": true,
+      "freshWarningPayloadAndSpansMatch": true
+    },
+    {
+      "path": "Sources/HostwrightCore/SecureSubprocess.swift",
+      "sha256": "d6c736a60ec0b705fb3f66e91fff630ab8bbe771139def1d57c529a2015f9075",
+      "type": "PartialParsing",
+      "spans": [
+        {
+          "startLine": 137,
+          "endLine": 137
+        },
+        {
+          "startLine": 154,
+          "endLine": 154
+        },
+        {
+          "startLine": 168,
+          "endLine": 168
+        },
+        {
+          "startLine": 183,
+          "endLine": 183
+        },
+        {
+          "startLine": 358,
+          "endLine": 358
+        },
+        {
+          "startLine": 367,
+          "endLine": 367
+        },
+        {
+          "startLine": 847,
+          "endLine": 847
+        }
+      ],
+      "assessment": "Prior independent warning-context assessment reused for identical bytes; parser coverage gap retained.",
+      "securityClearance": false,
+      "priorBaselineUnchanged": true,
+      "currentSourceUnchangedSinceRC7": true,
+      "freshWarningPayloadAndSpansMatch": true
+    },
+    {
+      "path": "Sources/HostwrightDaemonCore/DaemonCore.swift",
+      "sha256": "fd0e01681feacf7662ea65dc84c1d1a46602f88a8aefb0f58d4d98a395bf0f91",
+      "type": "PartialParsing",
+      "spans": [
+        {
+          "startLine": 1315,
+          "endLine": 1316
+        }
+      ],
+      "assessment": "Prior independent warning-context assessment reused for identical bytes; parser coverage gap retained.",
+      "securityClearance": false,
+      "priorBaselineUnchanged": true,
+      "currentSourceUnchangedSinceRC7": true,
+      "freshWarningPayloadAndSpansMatch": true
+    },
+    {
+      "path": "Sources/HostwrightDaemonCore/DaemonLifecycleController.swift",
+      "sha256": "f1ed54685db99337afb99f2547a959fc76a007f02662f8c2541aec9567ab1021",
+      "type": "PartialParsing",
+      "spans": [
+        {
+          "startLine": 243,
+          "endLine": 243
+        },
+        {
+          "startLine": 256,
+          "endLine": 256
+        },
+        {
+          "startLine": 323,
+          "endLine": 323
+        },
+        {
+          "startLine": 745,
+          "endLine": 745
+        },
+        {
+          "startLine": 746,
+          "endLine": 746
+        },
+        {
+          "startLine": 747,
+          "endLine": 747
+        },
+        {
+          "startLine": 748,
+          "endLine": 748
+        },
+        {
+          "startLine": 749,
+          "endLine": 749
+        },
+        {
+          "startLine": 750,
+          "endLine": 750
+        }
+      ],
+      "assessment": "Prior independent warning-context assessment reused for identical bytes; parser coverage gap retained.",
+      "securityClearance": false,
+      "priorBaselineUnchanged": true,
+      "currentSourceUnchangedSinceRC7": true,
+      "freshWarningPayloadAndSpansMatch": true
+    },
+    {
+      "path": "Sources/HostwrightDistribution/DistributionInstalledLifecycle.swift",
+      "sha256": "4375117486a54f9dc3a3c8d80fe6885354ef854687f0f86646776e063f41afdb",
+      "type": "PartialParsing",
+      "spans": [
+        {
+          "startLine": 1212,
+          "endLine": 1212
+        },
+        {
+          "startLine": 1218,
+          "endLine": 1218
+        },
+        {
+          "startLine": 1219,
+          "endLine": 1219
+        }
+      ],
+      "assessment": "Prior independent warning-context assessment reused for identical bytes; parser coverage gap retained.",
+      "securityClearance": false,
+      "priorBaselineUnchanged": true,
+      "currentSourceUnchangedSinceRC7": true,
+      "freshWarningPayloadAndSpansMatch": true
+    },
+    {
+      "path": "Sources/HostwrightDistribution/DistributionPackageLifecycle.swift",
+      "sha256": "403c147e68ee336f09367c2e2668e463f2681be5d0e6c0d2235e5459692e7e8e",
+      "type": "PartialParsing",
+      "spans": [
+        {
+          "startLine": 107,
+          "endLine": 107
+        },
+        {
+          "startLine": 108,
+          "endLine": 108
+        },
+        {
+          "startLine": 110,
+          "endLine": 110
+        },
+        {
+          "startLine": 112,
+          "endLine": 112
+        },
+        {
+          "startLine": 518,
+          "endLine": 518
+        },
+        {
+          "startLine": 524,
+          "endLine": 524
+        },
+        {
+          "startLine": 525,
+          "endLine": 525
+        }
+      ],
+      "assessment": "Prior independent warning-context assessment reused for identical bytes; parser coverage gap retained.",
+      "securityClearance": false,
+      "priorBaselineUnchanged": true,
+      "currentSourceUnchangedSinceRC7": true,
+      "freshWarningPayloadAndSpansMatch": true
+    },
+    {
+      "path": "Sources/HostwrightDistribution/DistributionSupport.swift",
+      "sha256": "7294d114cd7cadbcd94dcbbaac3d11b38b73d095440bdfaaa45b721de8c15fe9",
+      "type": "PartialParsing",
+      "spans": [
+        {
+          "startLine": 590,
+          "endLine": 590
+        },
+        {
+          "startLine": 595,
+          "endLine": 595
+        },
+        {
+          "startLine": 596,
+          "endLine": 596
+        },
+        {
+          "startLine": 597,
+          "endLine": 597
+        },
+        {
+          "startLine": 599,
+          "endLine": 599
+        },
+        {
+          "startLine": 603,
+          "endLine": 603
+        },
+        {
+          "startLine": 605,
+          "endLine": 605
+        },
+        {
+          "startLine": 606,
+          "endLine": 606
+        },
+        {
+          "startLine": 617,
+          "endLine": 617
+        }
+      ],
+      "assessment": "Prior independent warning-context assessment reused for identical bytes; parser coverage gap retained.",
+      "securityClearance": false,
+      "priorBaselineUnchanged": true,
+      "currentSourceUnchangedSinceRC7": true,
+      "freshWarningPayloadAndSpansMatch": true
+    },
+    {
+      "path": "Sources/HostwrightDistribution/TrustedReleaseSupport.swift",
+      "sha256": "2c08d288df46293a2c50700a6fe6222ade1bae35519672cbaafa8aefe60e0eab",
+      "type": "PartialParsing",
+      "spans": [
+        {
+          "startLine": 11,
+          "endLine": 21
+        }
+      ],
+      "assessment": "Prior independent warning-context assessment reused for identical bytes; parser coverage gap retained.",
+      "securityClearance": false,
+      "priorBaselineUnchanged": true,
+      "currentSourceUnchangedSinceRC7": true,
+      "freshWarningPayloadAndSpansMatch": true
+    },
+    {
+      "path": "Sources/HostwrightObservability/OSLogSink.swift",
+      "sha256": "b61a2e6c392b3a168950950fb4591ea119feb3ffe8ca708abf5794202b38b7ef",
+      "type": "PartialParsing",
+      "spans": [
+        {
+          "startLine": 140,
+          "endLine": 140
+        },
+        {
+          "startLine": 140,
+          "endLine": 140
+        }
+      ],
+      "assessment": "Prior independent warning-context assessment reused for identical bytes; parser coverage gap retained.",
+      "securityClearance": false,
+      "priorBaselineUnchanged": true,
+      "currentSourceUnchangedSinceRC7": true,
+      "freshWarningPayloadAndSpansMatch": true
+    },
+    {
+      "path": "Sources/HostwrightReconciler/ManifestRuntimeMapper.swift",
+      "sha256": "2bfa9be87387190305ce90cfc0648d4a0ecd66d1b3dfd08842245c99278389a2",
+      "type": "PartialParsing",
+      "spans": [
+        {
+          "startLine": 584,
+          "endLine": 584
+        },
+        {
+          "startLine": 585,
+          "endLine": 585
+        },
+        {
+          "startLine": 587,
+          "endLine": 587
+        }
+      ],
+      "assessment": "Prior independent warning-context assessment reused for identical bytes; parser coverage gap retained.",
+      "securityClearance": false,
+      "priorBaselineUnchanged": true,
+      "currentSourceUnchangedSinceRC7": true,
+      "freshWarningPayloadAndSpansMatch": true
+    },
+    {
+      "path": "Sources/HostwrightReleaseQualification/ReleaseQualificationRegistry.swift",
+      "sha256": "cc3da682854139556f3e420a58dec78b290624ca3103b25ef7bccb73ba9e88ae",
+      "type": "PartialParsing",
+      "spans": [
+        {
+          "startLine": 1135,
+          "endLine": 1135
+        },
+        {
+          "startLine": 1136,
+          "endLine": 1136
+        },
+        {
+          "startLine": 1136,
+          "endLine": 1136
+        },
+        {
+          "startLine": 1139,
+          "endLine": 1139
+        }
+      ],
+      "assessment": "Prior independent warning-context assessment reused for identical bytes; parser coverage gap retained.",
+      "securityClearance": false,
+      "priorBaselineUnchanged": true,
+      "currentSourceUnchangedSinceRC7": true,
+      "freshWarningPayloadAndSpansMatch": true
+    },
+    {
+      "path": "Sources/HostwrightRuntime/ContainerizationHelperClient.swift",
+      "sha256": "47a5ba9b979744526c99be972ab964e43746b8870411bcff3fba3b262ddb5ab6",
+      "type": "PartialParsing",
+      "spans": [
+        {
+          "startLine": 6,
+          "endLine": 6
+        },
+        {
+          "startLine": 7,
+          "endLine": 7
+        },
+        {
+          "startLine": 8,
+          "endLine": 8
+        }
+      ],
+      "assessment": "Prior independent warning-context assessment reused for identical bytes; parser coverage gap retained.",
+      "securityClearance": false,
+      "priorBaselineUnchanged": true,
+      "currentSourceUnchangedSinceRC7": true,
+      "freshWarningPayloadAndSpansMatch": true
+    },
+    {
+      "path": "Sources/HostwrightRuntimeConformanceTool/RuntimeQualificationLiveDriver.swift",
+      "sha256": "96ee5bcb0603059380498a8da3cd8d00a001ff026bd5bc88e90e248993e959d9",
+      "type": "PartialParsing",
+      "spans": [
+        {
+          "startLine": 610,
+          "endLine": 610
+        },
+        {
+          "startLine": 611,
+          "endLine": 611
+        },
+        {
+          "startLine": 612,
+          "endLine": 612
+        },
+        {
+          "startLine": 613,
+          "endLine": 613
+        },
+        {
+          "startLine": 629,
+          "endLine": 629
+        },
+        {
+          "startLine": 630,
+          "endLine": 630
+        },
+        {
+          "startLine": 636,
+          "endLine": 636
+        },
+        {
+          "startLine": 642,
+          "endLine": 642
+        }
+      ],
+      "assessment": "Prior independent warning-context assessment reused for identical bytes; parser coverage gap retained.",
+      "securityClearance": false,
+      "priorBaselineUnchanged": true,
+      "currentSourceUnchangedSinceRC7": true,
+      "freshWarningPayloadAndSpansMatch": true
+    },
+    {
+      "path": "Sources/HostwrightRuntimeConformanceTool/RuntimeQualificationRecoveryDriver.swift",
+      "sha256": "9786fc0ad39ae38090c9ecf6a103b54748312ea5fe2bfe3ec24b046e799c9c1d",
+      "type": "PartialParsing",
+      "spans": [
+        {
+          "startLine": 344,
+          "endLine": 377
+        },
+        {
+          "startLine": 385,
+          "endLine": 387
+        },
+        {
+          "startLine": 1506,
+          "endLine": 1506
+        },
+        {
+          "startLine": 1508,
+          "endLine": 1508
+        },
+        {
+          "startLine": 1511,
+          "endLine": 1511
+        },
+        {
+          "startLine": 1511,
+          "endLine": 1511
+        },
+        {
+          "startLine": 1513,
+          "endLine": 1513
+        },
+        {
+          "startLine": 1516,
+          "endLine": 1516
+        },
+        {
+          "startLine": 1522,
+          "endLine": 1522
+        },
+        {
+          "startLine": 1525,
+          "endLine": 1525
+        },
+        {
+          "startLine": 1531,
+          "endLine": 1532
+        },
+        {
+          "startLine": 1534,
+          "endLine": 1534
+        },
+        {
+          "startLine": 1668,
+          "endLine": 1668
+        }
+      ],
+      "assessment": "Prior independent warning-context assessment reused for identical bytes; parser coverage gap retained.",
+      "securityClearance": false,
+      "priorBaselineUnchanged": true,
+      "currentSourceUnchangedSinceRC7": true,
+      "freshWarningPayloadAndSpansMatch": true
+    },
+    {
+      "path": "Sources/HostwrightStorage/LocalStorageProvider.swift",
+      "sha256": "aa91db067f7900d94e3839144f44bcc554d139516f648f51e378ec9b491068d3",
+      "type": "PartialParsing",
+      "spans": [
+        {
+          "startLine": 2332,
+          "endLine": 2332
+        },
+        {
+          "startLine": 2333,
+          "endLine": 2333
+        },
+        {
+          "startLine": 2335,
+          "endLine": 2335
+        },
+        {
+          "startLine": 2336,
+          "endLine": 2336
+        },
+        {
+          "startLine": 2337,
+          "endLine": 2337
+        },
+        {
+          "startLine": 2339,
+          "endLine": 2339
+        },
+        {
+          "startLine": 2340,
+          "endLine": 2340
+        },
+        {
+          "startLine": 2342,
+          "endLine": 2342
+        },
+        {
+          "startLine": 2344,
+          "endLine": 2344
+        },
+        {
+          "startLine": 2346,
+          "endLine": 2346
+        },
+        {
+          "startLine": 2348,
+          "endLine": 2348
+        },
+        {
+          "startLine": 2349,
+          "endLine": 2349
+        },
+        {
+          "startLine": 2350,
+          "endLine": 2350
+        },
+        {
+          "startLine": 2352,
+          "endLine": 2352
+        },
+        {
+          "startLine": 2354,
+          "endLine": 2354
+        },
+        {
+          "startLine": 2359,
+          "endLine": 2359
+        },
+        {
+          "startLine": 2360,
+          "endLine": 2360
+        },
+        {
+          "startLine": 2362,
+          "endLine": 2362
+        },
+        {
+          "startLine": 2362,
+          "endLine": 2362
+        },
+        {
+          "startLine": 2364,
+          "endLine": 2364
+        },
+        {
+          "startLine": 2365,
+          "endLine": 2365
+        },
+        {
+          "startLine": 2366,
+          "endLine": 2366
+        },
+        {
+          "startLine": 2367,
+          "endLine": 2367
+        },
+        {
+          "startLine": 2369,
+          "endLine": 2369
+        },
+        {
+          "startLine": 2371,
+          "endLine": 2371
+        },
+        {
+          "startLine": 2373,
+          "endLine": 2373
+        },
+        {
+          "startLine": 2375,
+          "endLine": 2375
+        },
+        {
+          "startLine": 2375,
+          "endLine": 2375
+        },
+        {
+          "startLine": 2377,
+          "endLine": 2377
+        },
+        {
+          "startLine": 2378,
+          "endLine": 2378
+        },
+        {
+          "startLine": 2379,
+          "endLine": 2379
+        },
+        {
+          "startLine": 2380,
+          "endLine": 2380
+        },
+        {
+          "startLine": 2381,
+          "endLine": 2381
+        },
+        {
+          "startLine": 2382,
+          "endLine": 2382
+        },
+        {
+          "startLine": 2614,
+          "endLine": 2614
+        },
+        {
+          "startLine": 2615,
+          "endLine": 2615
+        },
+        {
+          "startLine": 2616,
+          "endLine": 2616
+        },
+        {
+          "startLine": 2617,
+          "endLine": 2617
+        },
+        {
+          "startLine": 2618,
+          "endLine": 2618
+        },
+        {
+          "startLine": 2619,
+          "endLine": 2619
+        },
+        {
+          "startLine": 2620,
+          "endLine": 2620
+        },
+        {
+          "startLine": 2621,
+          "endLine": 2621
+        },
+        {
+          "startLine": 2622,
+          "endLine": 2622
+        },
+        {
+          "startLine": 2623,
+          "endLine": 2623
+        },
+        {
+          "startLine": 2625,
+          "endLine": 2625
+        }
+      ],
+      "assessment": "Prior independent warning-context assessment reused for identical bytes; parser coverage gap retained.",
+      "securityClearance": false,
+      "priorBaselineUnchanged": true,
+      "currentSourceUnchangedSinceRC7": true,
+      "freshWarningPayloadAndSpansMatch": true
+    },
+    {
+      "path": "scripts/phase08-soak-qualification.sh",
+      "sha256": "ad743ea4c7175acf6dbd52682900d5bd0e42e14700cb4867ab282f5f3d70a121",
+      "type": "PartialParsing",
+      "spans": [
+        {
+          "startLine": 963,
+          "endLine": 963
+        },
+        {
+          "startLine": 964,
+          "endLine": 964
+        },
+        {
+          "startLine": 1211,
+          "endLine": 2705
+        }
+      ],
+      "assessment": "Prior independent warning-context assessment reused for identical bytes; parser coverage gap retained.",
+      "securityClearance": false,
+      "priorBaselineUnchanged": true,
+      "currentSourceUnchangedSinceRC7": true,
+      "freshWarningPayloadAndSpansMatch": true
+    },
+    {
+      "path": "scripts/phase09-gate05-qualification.sh",
+      "sha256": "cff37c5298d6c10eb4156b0c3a097470710313bdf3ddee4e17950317fa7e7128",
+      "type": "PartialParsing",
+      "spans": [
+        {
+          "startLine": 100,
+          "endLine": 100
+        },
+        {
+          "startLine": 174,
+          "endLine": 208
+        }
+      ],
+      "assessment": "Prior independent warning-context assessment reused for identical bytes; parser coverage gap retained.",
+      "securityClearance": false,
+      "priorBaselineUnchanged": true,
+      "currentSourceUnchangedSinceRC7": true,
+      "freshWarningPayloadAndSpansMatch": true
+    },
+    {
+      "path": "scripts/phase09-gate06-qualification.sh",
+      "sha256": "cffb571235fadc3d5ab6cd644b317709e3918b49f0b26d9fc2a2f90277864e6e",
+      "type": "PartialParsing",
+      "spans": [
+        {
+          "startLine": 266,
+          "endLine": 267
+        }
+      ],
+      "assessment": "Prior independent warning-context assessment reused for identical bytes; parser coverage gap retained.",
+      "securityClearance": false,
+      "priorBaselineUnchanged": true,
+      "currentSourceUnchangedSinceRC7": true,
+      "freshWarningPayloadAndSpansMatch": true
+    },
+    {
+      "path": "scripts/phase09-gate07-qualification.sh",
+      "sha256": "58aaabbac68054f5aa3d922f6264d901dd1bcda38cec3a1845fde7140cff286d",
+      "type": "PartialParsing",
+      "spans": [
+        {
+          "startLine": 17,
+          "endLine": 17
+        },
+        {
+          "startLine": 54,
+          "endLine": 54
+        },
+        {
+          "startLine": 61,
+          "endLine": 61
+        },
+        {
+          "startLine": 66,
+          "endLine": 66
+        },
+        {
+          "startLine": 75,
+          "endLine": 76
+        }
+      ],
+      "assessment": "Prior independent warning-context assessment reused for identical bytes; parser coverage gap retained.",
+      "securityClearance": false,
+      "priorBaselineUnchanged": true,
+      "currentSourceUnchangedSinceRC7": true,
+      "freshWarningPayloadAndSpansMatch": true
+    },
+    {
+      "path": "scripts/phase09-gate08-qualification.sh",
+      "sha256": "fc05909d03b7a4a9142a7c1718540ea3ce69090b38562e1632f0508e8133cf6d",
+      "type": "PartialParsing",
+      "spans": [
+        {
+          "startLine": 19,
+          "endLine": 19
+        },
+        {
+          "startLine": 59,
+          "endLine": 59
+        },
+        {
+          "startLine": 63,
+          "endLine": 63
+        },
+        {
+          "startLine": 109,
+          "endLine": 109
+        },
+        {
+          "startLine": 137,
+          "endLine": 137
+        },
+        {
+          "startLine": 138,
+          "endLine": 138
+        },
+        {
+          "startLine": 159,
+          "endLine": 159
+        },
+        {
+          "startLine": 160,
+          "endLine": 160
+        },
+        {
+          "startLine": 161,
+          "endLine": 161
+        },
+        {
+          "startLine": 204,
+          "endLine": 214
+        }
+      ],
+      "assessment": "Prior independent warning-context assessment reused for identical bytes; parser coverage gap retained.",
+      "securityClearance": false,
+      "priorBaselineUnchanged": true,
+      "currentSourceUnchangedSinceRC7": true,
+      "freshWarningPayloadAndSpansMatch": true
+    },
+    {
+      "path": "scripts/phase09-gate09-qualification.sh",
+      "sha256": "44a769102e989a2dc62f80977e5a8d773e4739fa3e7fc7285e64f23c031b56dc",
+      "type": "PartialParsing",
+      "spans": [
+        {
+          "startLine": 17,
+          "endLine": 17
+        },
+        {
+          "startLine": 53,
+          "endLine": 53
+        },
+        {
+          "startLine": 92,
+          "endLine": 92
+        },
+        {
+          "startLine": 92,
+          "endLine": 92
+        },
+        {
+          "startLine": 93,
+          "endLine": 93
+        },
+        {
+          "startLine": 93,
+          "endLine": 93
+        },
+        {
+          "startLine": 94,
+          "endLine": 94
+        },
+        {
+          "startLine": 94,
+          "endLine": 94
+        },
+        {
+          "startLine": 94,
+          "endLine": 94
+        },
+        {
+          "startLine": 296,
+          "endLine": 312
+        }
+      ],
+      "assessment": "Prior independent warning-context assessment reused for identical bytes; parser coverage gap retained.",
+      "securityClearance": false,
+      "priorBaselineUnchanged": true,
+      "currentSourceUnchangedSinceRC7": true,
+      "freshWarningPayloadAndSpansMatch": true
+    },
+    {
+      "path": "scripts/phase09-gate10-qualification.sh",
+      "sha256": "4de182e17517771bd800abb70a3a10a283c3300ec1861fd8a144aef3c7999aaa",
+      "type": "PartialParsing",
+      "spans": [
+        {
+          "startLine": 23,
+          "endLine": 23
+        },
+        {
+          "startLine": 202,
+          "endLine": 202
+        },
+        {
+          "startLine": 203,
+          "endLine": 203
+        },
+        {
+          "startLine": 204,
+          "endLine": 204
+        },
+        {
+          "startLine": 324,
+          "endLine": 324
+        }
+      ],
+      "assessment": "Prior independent warning-context assessment reused for identical bytes; parser coverage gap retained.",
+      "securityClearance": false,
+      "priorBaselineUnchanged": true,
+      "currentSourceUnchangedSinceRC7": true,
+      "freshWarningPayloadAndSpansMatch": true
+    },
+    {
+      "path": "scripts/phase09-gate11-qualification.sh",
+      "sha256": "67430f20a4c54d8c5ae42a653b6576ac6e5936fd543d92fef08478d194c906bc",
+      "type": "PartialParsing",
+      "spans": [
+        {
+          "startLine": 19,
+          "endLine": 19
+        },
+        {
+          "startLine": 304,
+          "endLine": 304
+        }
+      ],
+      "assessment": "Prior independent warning-context assessment reused for identical bytes; parser coverage gap retained.",
+      "securityClearance": false,
+      "priorBaselineUnchanged": true,
+      "currentSourceUnchangedSinceRC7": true,
+      "freshWarningPayloadAndSpansMatch": true
+    },
+    {
+      "path": "scripts/phase09-gate12-qualification.sh",
+      "sha256": "91d2abe625fbabcae8ab2722217116f3454c1b9a36229ea675d9661218de931c",
+      "type": "PartialParsing",
+      "spans": [
+        {
+          "startLine": 16,
+          "endLine": 16
+        },
+        {
+          "startLine": 260,
+          "endLine": 260
+        }
+      ],
+      "assessment": "Prior independent warning-context assessment reused for identical bytes; parser coverage gap retained.",
+      "securityClearance": false,
+      "priorBaselineUnchanged": true,
+      "currentSourceUnchangedSinceRC7": true,
+      "freshWarningPayloadAndSpansMatch": true
+    },
+    {
+      "path": "scripts/phase09-gate13-qualification.sh",
+      "sha256": "4a73ae9acbfffb6e65d12ffe51223b35f2f8ee2883042a5210aef32f55b881e4",
+      "type": "PartialParsing",
+      "spans": [
+        {
+          "startLine": 1005,
+          "endLine": 1005
+        }
+      ],
+      "assessment": "Prior independent warning-context assessment reused for identical bytes; parser coverage gap retained.",
+      "securityClearance": false,
+      "priorBaselineUnchanged": true,
+      "currentSourceUnchangedSinceRC7": true,
+      "freshWarningPayloadAndSpansMatch": true
+    },
+    {
+      "path": "scripts/phase09-gate15-live.sh",
+      "sha256": "b2550357635b56b7237195ce1795976c147ff28b4ff52c2304d781a8fa221d83",
+      "type": "PartialParsing",
+      "spans": [
+        {
+          "startLine": 340,
+          "endLine": 987
+        }
+      ],
+      "assessment": "Prior independent warning-context assessment reused for identical bytes; parser coverage gap retained.",
+      "securityClearance": false,
+      "priorBaselineUnchanged": true,
+      "currentSourceUnchangedSinceRC7": true,
+      "freshWarningPayloadAndSpansMatch": true
+    },
+    {
+      "path": "scripts/release/prepare-containerization-assets.sh",
+      "sha256": "cec5f6b14714c595c319e2abdbaa14cb6e9b90d9ab94cf1f609ee80d76127fca",
+      "type": "PartialParsing",
+      "spans": [
+        {
+          "startLine": 70,
+          "endLine": 71
+        },
+        {
+          "startLine": 71,
+          "endLine": 71
+        },
+        {
+          "startLine": 71,
+          "endLine": 76
+        },
+        {
+          "startLine": 99,
+          "endLine": 100
+        },
+        {
+          "startLine": 100,
+          "endLine": 100
+        },
+        {
+          "startLine": 101,
+          "endLine": 101
+        },
+        {
+          "startLine": 101,
+          "endLine": 101
+        },
+        {
+          "startLine": 101,
+          "endLine": 101
+        },
+        {
+          "startLine": 103,
+          "endLine": 103
+        },
+        {
+          "startLine": 104,
+          "endLine": 104
+        },
+        {
+          "startLine": 105,
+          "endLine": 105
+        },
+        {
+          "startLine": 106,
+          "endLine": 106
+        },
+        {
+          "startLine": 106,
+          "endLine": 106
+        },
+        {
+          "startLine": 107,
+          "endLine": 110
+        },
+        {
+          "startLine": 110,
+          "endLine": 111
+        },
+        {
+          "startLine": 111,
+          "endLine": 118
+        },
+        {
+          "startLine": 118,
+          "endLine": 118
+        },
+        {
+          "startLine": 118,
+          "endLine": 119
+        }
+      ],
+      "assessment": "Prior independent warning-context assessment reused for identical bytes; parser coverage gap retained.",
+      "securityClearance": false,
+      "priorBaselineUnchanged": true,
+      "currentSourceUnchangedSinceRC7": true,
+      "freshWarningPayloadAndSpansMatch": true
+    },
+    {
+      "path": "scripts/release/qualify-vendor-tap.sh",
+      "sha256": "50604da06e37a7c807a893cbf56d51be3b58af9a41805c701eb861e4a1d06035",
+      "type": "PartialParsing",
+      "spans": [
+        {
+          "startLine": 530,
+          "endLine": 530
+        }
+      ],
+      "assessment": "Prior independent warning-context assessment reused for identical bytes; parser coverage gap retained.",
+      "securityClearance": false,
+      "priorBaselineUnchanged": true,
+      "currentSourceUnchangedSinceRC7": true,
+      "freshWarningPayloadAndSpansMatch": true
+    }
+  ],
+  "advisoryGroups": [
+    {
+      "id": "GO-2025-3503",
+      "package": {
+        "name": "golang.org/x/net",
+        "version": "0.33.0",
+        "ecosystem": "Go"
+      },
+      "aliases": [
+        "CVE-2025-22870",
+        "GHSA-qxp5-gwg8-xv66",
+        "GO-2025-3503"
+      ],
+      "calledFalse": true,
+      "summary": "HTTP Proxy bypass using IPv6 Zone IDs in golang.org/x/net",
+      "modified": "2026-04-16T22:45:11.580296Z",
+      "affectedImports": [
+        "golang.org/x/net/http/httpproxy",
+        "golang.org/x/net/proxy",
+        "net/http"
+      ],
+      "newSinceRC6": false,
+      "disposition": "affected-package-excluded-from-retained-producer",
+      "assessment": "All module affected imports are absent from the 124-package compiled trace and retained loader function names. The stdlib net/http counterpart is absent; Go 1.26.5 is beyond the listed 1.24.1 fix.",
+      "priorReportSHA256": "4a0a7fb6e7365cb3f288ad961ad9856fca63dccfc7714267446e0a46755f7da3",
+      "signedArtifactDisposition": "pending exact staged inventory and actual binary/SBOM scan"
+    },
+    {
+      "id": "GO-2025-3595",
+      "package": {
+        "name": "golang.org/x/net",
+        "version": "0.33.0",
+        "ecosystem": "Go"
+      },
+      "aliases": [
+        "CVE-2025-22872",
+        "GHSA-vvgc-356p-c3xw",
+        "GO-2025-3595"
+      ],
+      "calledFalse": true,
+      "summary": "Incorrect Neutralization of Input During Web Page Generation in x/net in golang.org/x/net",
+      "modified": "2026-02-05T02:43:52.511643Z",
+      "affectedImports": [
+        "golang.org/x/net/html"
+      ],
+      "newSinceRC6": false,
+      "disposition": "affected-package-excluded-from-retained-producer",
+      "assessment": "All module affected imports are absent from the 124-package compiled trace and retained loader function names.",
+      "priorReportSHA256": "4a0a7fb6e7365cb3f288ad961ad9856fca63dccfc7714267446e0a46755f7da3",
+      "signedArtifactDisposition": "pending exact staged inventory and actual binary/SBOM scan"
+    },
+    {
+      "id": "GO-2026-4440",
+      "package": {
+        "name": "golang.org/x/net",
+        "version": "0.33.0",
+        "ecosystem": "Go"
+      },
+      "aliases": [
+        "CVE-2025-47911",
+        "GHSA-w4gw-w5jq-g9jh",
+        "GO-2026-4440"
+      ],
+      "calledFalse": true,
+      "summary": "Quadratic parsing complexity in golang.org/x/net/html",
+      "modified": "2026-05-15T10:59:23.883331519Z",
+      "affectedImports": [
+        "golang.org/x/net/html"
+      ],
+      "newSinceRC6": false,
+      "disposition": "affected-package-excluded-from-retained-producer",
+      "assessment": "All module affected imports are absent from the 124-package compiled trace and retained loader function names.",
+      "priorReportSHA256": "4a0a7fb6e7365cb3f288ad961ad9856fca63dccfc7714267446e0a46755f7da3",
+      "signedArtifactDisposition": "pending exact staged inventory and actual binary/SBOM scan"
+    },
+    {
+      "id": "GO-2026-4441",
+      "package": {
+        "name": "golang.org/x/net",
+        "version": "0.33.0",
+        "ecosystem": "Go"
+      },
+      "aliases": [
+        "CVE-2025-58190",
+        "GO-2026-4441"
+      ],
+      "calledFalse": true,
+      "summary": "Infinite parsing loop in golang.org/x/net",
+      "modified": "2026-05-15T10:59:23.510056268Z",
+      "affectedImports": [
+        "golang.org/x/net/html"
+      ],
+      "newSinceRC6": false,
+      "disposition": "affected-package-excluded-from-retained-producer",
+      "assessment": "All module affected imports are absent from the 124-package compiled trace and retained loader function names.",
+      "priorReportSHA256": "4a0a7fb6e7365cb3f288ad961ad9856fca63dccfc7714267446e0a46755f7da3",
+      "signedArtifactDisposition": "pending exact staged inventory and actual binary/SBOM scan"
+    },
+    {
+      "id": "GO-2026-4918",
+      "package": {
+        "name": "golang.org/x/net",
+        "version": "0.33.0",
+        "ecosystem": "Go"
+      },
+      "aliases": [
+        "BIT-golang-2026-33814",
+        "CVE-2026-33814",
+        "GO-2026-4918"
+      ],
+      "calledFalse": true,
+      "summary": "Infinite loop in HTTP/2 transport when given bad SETTINGS_MAX_FRAME_SIZE in net/http/internal/http2 in golang.org/x/net",
+      "modified": "2026-10-07T10:41:46.070042506Z",
+      "affectedImports": [
+        "golang.org/x/net/http2",
+        "net/http"
+      ],
+      "newSinceRC6": false,
+      "disposition": "affected-package-excluded-from-retained-producer",
+      "assessment": "All module affected imports are absent from the 124-package compiled trace and retained loader function names. The stdlib net/http counterpart is absent; Go 1.26.5 is beyond the listed 1.26.3 fix.",
+      "priorReportSHA256": "4a0a7fb6e7365cb3f288ad961ad9856fca63dccfc7714267446e0a46755f7da3",
+      "signedArtifactDisposition": "pending exact staged inventory and actual binary/SBOM scan"
+    },
+    {
+      "id": "GO-2026-5025",
+      "package": {
+        "name": "golang.org/x/net",
+        "version": "0.33.0",
+        "ecosystem": "Go"
+      },
+      "aliases": [
+        "CVE-2026-42506",
+        "GO-2026-5025"
+      ],
+      "calledFalse": true,
+      "summary": "Invoking incorrect handling of namespaced elements in foreign content in golang.org/x/net/html",
+      "modified": "2026-05-30T05:14:17.563517047Z",
+      "affectedImports": [
+        "golang.org/x/net/html"
+      ],
+      "newSinceRC6": false,
+      "disposition": "affected-package-excluded-from-retained-producer",
+      "assessment": "All module affected imports are absent from the 124-package compiled trace and retained loader function names.",
+      "priorReportSHA256": "4a0a7fb6e7365cb3f288ad961ad9856fca63dccfc7714267446e0a46755f7da3",
+      "signedArtifactDisposition": "pending exact staged inventory and actual binary/SBOM scan"
+    },
+    {
+      "id": "GO-2026-5026",
+      "package": {
+        "name": "golang.org/x/net",
+        "version": "0.33.0",
+        "ecosystem": "Go"
+      },
+      "aliases": [
+        "CVE-2026-39821",
+        "GO-2026-5026"
+      ],
+      "calledFalse": true,
+      "summary": "Invoking failure to reject ASCII-only Punycode-encoded labels in golang.org/x/net/idna",
+      "modified": "2026-10-07T10:41:45.942803600Z",
+      "affectedImports": [
+        "golang.org/x/net/idna",
+        "net/http",
+        "net/http/internal/http2"
+      ],
+      "newSinceRC6": false,
+      "disposition": "affected-package-excluded-from-retained-producer",
+      "assessment": "All module affected imports are absent from the 124-package compiled trace and retained loader function names. Go 1.26.5 is in the stdlib affected range, but net/http and net/http/internal/http2 are absent from this loader; numeric-address policy does not invoke IDNA.",
+      "priorReportSHA256": "4a0a7fb6e7365cb3f288ad961ad9856fca63dccfc7714267446e0a46755f7da3",
+      "signedArtifactDisposition": "pending exact staged inventory and actual binary/SBOM scan"
+    },
+    {
+      "id": "GO-2026-5027",
+      "package": {
+        "name": "golang.org/x/net",
+        "version": "0.33.0",
+        "ecosystem": "Go"
+      },
+      "aliases": [
+        "CVE-2026-42502",
+        "GO-2026-5027"
+      ],
+      "calledFalse": true,
+      "summary": "Invoking incorrect handling of HTML elements in foreign content in golang.org/x/net/html",
+      "modified": "2026-09-22T10:41:48.597564594Z",
+      "affectedImports": [
+        "golang.org/x/net/html"
+      ],
+      "newSinceRC6": false,
+      "disposition": "affected-package-excluded-from-retained-producer",
+      "assessment": "All module affected imports are absent from the 124-package compiled trace and retained loader function names.",
+      "priorReportSHA256": "4a0a7fb6e7365cb3f288ad961ad9856fca63dccfc7714267446e0a46755f7da3",
+      "signedArtifactDisposition": "pending exact staged inventory and actual binary/SBOM scan"
+    },
+    {
+      "id": "GO-2026-5028",
+      "package": {
+        "name": "golang.org/x/net",
+        "version": "0.33.0",
+        "ecosystem": "Go"
+      },
+      "aliases": [
+        "CVE-2026-25680",
+        "GHSA-5cv4-jp36-h3mw",
+        "GO-2026-5028"
+      ],
+      "calledFalse": true,
+      "summary": "Invoking denial of service when parsing arbitrary HTML in golang.org/x/net/html",
+      "modified": "2026-07-01T18:26:19.971496251Z",
+      "affectedImports": [
+        "golang.org/x/net/html"
+      ],
+      "newSinceRC6": false,
+      "disposition": "affected-package-excluded-from-retained-producer",
+      "assessment": "All module affected imports are absent from the 124-package compiled trace and retained loader function names.",
+      "priorReportSHA256": "4a0a7fb6e7365cb3f288ad961ad9856fca63dccfc7714267446e0a46755f7da3",
+      "signedArtifactDisposition": "pending exact staged inventory and actual binary/SBOM scan"
+    },
+    {
+      "id": "GO-2026-5029",
+      "package": {
+        "name": "golang.org/x/net",
+        "version": "0.33.0",
+        "ecosystem": "Go"
+      },
+      "aliases": [
+        "CVE-2026-25681",
+        "GO-2026-5029"
+      ],
+      "calledFalse": true,
+      "summary": "Invoking incorrect handling of character references in DOCTYPE nodes in golang.org/x/net/html",
+      "modified": "2026-09-22T10:41:48.499970547Z",
+      "affectedImports": [
+        "golang.org/x/net/html"
+      ],
+      "newSinceRC6": false,
+      "disposition": "affected-package-excluded-from-retained-producer",
+      "assessment": "All module affected imports are absent from the 124-package compiled trace and retained loader function names.",
+      "priorReportSHA256": "4a0a7fb6e7365cb3f288ad961ad9856fca63dccfc7714267446e0a46755f7da3",
+      "signedArtifactDisposition": "pending exact staged inventory and actual binary/SBOM scan"
+    },
+    {
+      "id": "GO-2026-5030",
+      "package": {
+        "name": "golang.org/x/net",
+        "version": "0.33.0",
+        "ecosystem": "Go"
+      },
+      "aliases": [
+        "CVE-2026-27136",
+        "GO-2026-5030"
+      ],
+      "calledFalse": true,
+      "summary": "Invoking duplicate attributes can cause XSS in golang.org/x/net/html",
+      "modified": "2026-09-22T10:41:47.813482433Z",
+      "affectedImports": [
+        "golang.org/x/net/html"
+      ],
+      "newSinceRC6": false,
+      "disposition": "affected-package-excluded-from-retained-producer",
+      "assessment": "All module affected imports are absent from the 124-package compiled trace and retained loader function names.",
+      "priorReportSHA256": "4a0a7fb6e7365cb3f288ad961ad9856fca63dccfc7714267446e0a46755f7da3",
+      "signedArtifactDisposition": "pending exact staged inventory and actual binary/SBOM scan"
+    },
+    {
+      "id": "GO-2026-5942",
+      "package": {
+        "name": "golang.org/x/net",
+        "version": "0.33.0",
+        "ecosystem": "Go"
+      },
+      "aliases": [
+        "BIT-golang-2026-46600",
+        "CVE-2026-46600",
+        "GO-2026-5942"
+      ],
+      "calledFalse": true,
+      "summary": "Parsing an invalid SVCB or HTTPS RR can panic in golang.org/x/net/dns/dnsmessage",
+      "modified": "2026-08-17T12:25:32.471119200Z",
+      "affectedImports": [
+        "golang.org/x/net/dns/dnsmessage",
+        "net"
+      ],
+      "newSinceRC6": false,
+      "disposition": "no-affected-call-path-identified-in-retained-producer",
+      "assessment": "Direct module dnsmessage package is absent. Vendored stdlib DNS source was compiled, but only dnsmessage.init survives in the retained loader function-name table. LookupCNAME, cgoResSearch, SVCB/HTTPS parser and Resolver names are absent. CGO_ENABLED=0 excludes the affected Unix C resolver route; no host DNS request API is called by the loader.",
+      "priorReportSHA256": "4a0a7fb6e7365cb3f288ad961ad9856fca63dccfc7714267446e0a46755f7da3",
+      "signedArtifactDisposition": "pending exact staged inventory and actual binary/SBOM scan"
+    },
+    {
+      "id": "GO-2026-6603",
+      "package": {
+        "name": "golang.org/x/net",
+        "version": "0.33.0",
+        "ecosystem": "Go"
+      },
+      "aliases": [
+        "CVE-2026-78659",
+        "GO-2026-6603"
+      ],
+      "calledFalse": true,
+      "summary": "HTTP/2 server memory exhaustion due to Trailer headers in net/http",
+      "modified": "2026-10-08T22:45:07.896248218Z",
+      "affectedImports": [
+        "golang.org/x/net/http2",
+        "net/http",
+        "net/http/internal/http2"
+      ],
+      "newSinceRC6": true,
+      "disposition": "affected-HTTP2-packages-absent-from-retained-producer",
+      "assessment": "All affected packages are absent from exact retained Go package inventory and compiled package trace; no matching function names in retained loader. Netfilter uses AF_NETLINK and numeric addresses, no HTTP/2 path. called=false is only corroboration, not clearance.",
+      "packageMatches": [],
+      "compiledPackageMatches": [],
+      "symbolMatches": [],
+      "fixedVersions": {
+        "stdlib": [
+          "1.26.9",
+          "1.27.2"
+        ],
+        "golang.org/x/net": [
+          "0.60.0"
+        ]
+      },
+      "sourceURL": "https://pkg.go.dev/vuln/GO-2026-6603",
+      "signedArtifactDisposition": "pending exact staged inventory and actual binary/SBOM scan"
+    },
+    {
+      "id": "GO-2026-6610",
+      "package": {
+        "name": "golang.org/x/net",
+        "version": "0.33.0",
+        "ecosystem": "Go"
+      },
+      "aliases": [
+        "CVE-2026-78660",
+        "GO-2026-6610"
+      ],
+      "calledFalse": true,
+      "summary": "HTTP/2 transport accepts malformed framing-related headers in net/http",
+      "modified": "2026-10-08T23:00:13.120370808Z",
+      "affectedImports": [
+        "golang.org/x/net/http2",
+        "net/http",
+        "net/http/internal/http2"
+      ],
+      "newSinceRC6": true,
+      "disposition": "affected-HTTP2-packages-absent-from-retained-producer",
+      "assessment": "All affected packages are absent from exact retained Go package inventory and compiled package trace; no matching function names in retained loader. Netfilter uses AF_NETLINK and numeric addresses, no HTTP/2 path. called=false is only corroboration, not clearance.",
+      "packageMatches": [],
+      "compiledPackageMatches": [],
+      "symbolMatches": [],
+      "fixedVersions": {
+        "stdlib": [
+          "1.26.9",
+          "1.27.2"
+        ],
+        "golang.org/x/net": [
+          "0.60.0"
+        ]
+      },
+      "sourceURL": "https://pkg.go.dev/vuln/GO-2026-6610",
+      "signedArtifactDisposition": "pending exact staged inventory and actual binary/SBOM scan"
+    },
+    {
+      "id": "GO-2026-6611",
+      "package": {
+        "name": "golang.org/x/net",
+        "version": "0.33.0",
+        "ecosystem": "Go"
+      },
+      "aliases": [
+        "CVE-2026-78669",
+        "GO-2026-6611"
+      ],
+      "calledFalse": true,
+      "summary": "Excessive CPU consumption from repeated initial window changes in net/http",
+      "modified": "2026-10-08T22:45:08.418707742Z",
+      "affectedImports": [
+        "golang.org/x/net/http2",
+        "net/http",
+        "net/http/internal/http2"
+      ],
+      "newSinceRC6": true,
+      "disposition": "affected-HTTP2-packages-absent-from-retained-producer",
+      "assessment": "All affected packages are absent from exact retained Go package inventory and compiled package trace; no matching function names in retained loader. Netfilter uses AF_NETLINK and numeric addresses, no HTTP/2 path. called=false is only corroboration, not clearance.",
+      "packageMatches": [],
+      "compiledPackageMatches": [],
+      "symbolMatches": [],
+      "fixedVersions": {
+        "stdlib": [
+          "1.26.9",
+          "1.27.2"
+        ],
+        "golang.org/x/net": [
+          "0.60.0"
+        ]
+      },
+      "sourceURL": "https://pkg.go.dev/vuln/GO-2026-6611",
+      "signedArtifactDisposition": "pending exact staged inventory and actual binary/SBOM scan"
+    },
+    {
+      "id": "GO-2026-6612",
+      "package": {
+        "name": "golang.org/x/net",
+        "version": "0.33.0",
+        "ecosystem": "Go"
+      },
+      "aliases": [
+        "CVE-2026-78663",
+        "GO-2026-6612"
+      ],
+      "calledFalse": true,
+      "summary": "Double flow control refund on HTTP/2 server streams in net/http",
+      "modified": "2026-10-08T23:00:13.121765309Z",
+      "affectedImports": [
+        "golang.org/x/net/http2",
+        "net/http",
+        "net/http/internal/http2"
+      ],
+      "newSinceRC6": true,
+      "disposition": "affected-HTTP2-packages-absent-from-retained-producer",
+      "assessment": "All affected packages are absent from exact retained Go package inventory and compiled package trace; no matching function names in retained loader. Netfilter uses AF_NETLINK and numeric addresses, no HTTP/2 path. called=false is only corroboration, not clearance.",
+      "packageMatches": [],
+      "compiledPackageMatches": [],
+      "symbolMatches": [],
+      "fixedVersions": {
+        "stdlib": [
+          "1.26.9",
+          "1.27.2"
+        ],
+        "golang.org/x/net": [
+          "0.60.0"
+        ]
+      },
+      "sourceURL": "https://pkg.go.dev/vuln/GO-2026-6612",
+      "signedArtifactDisposition": "pending exact staged inventory and actual binary/SBOM scan"
+    },
+    {
+      "id": "GO-2026-6617",
+      "package": {
+        "name": "golang.org/x/net",
+        "version": "0.33.0",
+        "ecosystem": "Go"
+      },
+      "aliases": [
+        "CVE-2026-97032",
+        "GO-2026-6617"
+      ],
+      "calledFalse": true,
+      "summary": "HTTP/2 server crash due to HPACK encoder race in net/http",
+      "modified": "2026-10-08T22:45:07.914682376Z",
+      "affectedImports": [
+        "golang.org/x/net/http2",
+        "net/http",
+        "net/http/internal/http2"
+      ],
+      "newSinceRC6": true,
+      "disposition": "affected-HTTP2-packages-absent-from-retained-producer",
+      "assessment": "All affected packages are absent from exact retained Go package inventory and compiled package trace; no matching function names in retained loader. Netfilter uses AF_NETLINK and numeric addresses, no HTTP/2 path. called=false is only corroboration, not clearance.",
+      "packageMatches": [],
+      "compiledPackageMatches": [],
+      "symbolMatches": [],
+      "fixedVersions": {
+        "stdlib": [
+          "1.26.9",
+          "1.27.2"
+        ],
+        "golang.org/x/net": [
+          "0.60.0"
+        ]
+      },
+      "sourceURL": "https://pkg.go.dev/vuln/GO-2026-6617",
+      "signedArtifactDisposition": "pending exact staged inventory and actual binary/SBOM scan"
+    },
+    {
+      "id": "GO-2026-5024",
+      "package": {
+        "name": "golang.org/x/sys",
+        "version": "0.28.0",
+        "ecosystem": "Go"
+      },
+      "aliases": [
+        "CVE-2026-39824",
+        "GO-2026-5024"
+      ],
+      "calledFalse": true,
+      "summary": "Invoking integer overflow in NewNTUnicodeString in golang.org/x/sys/windows",
+      "modified": "2026-06-09T18:59:22.740765220Z",
+      "affectedImports": [
+        "golang.org/x/sys/windows"
+      ],
+      "newSinceRC6": false,
+      "disposition": "affected-package-excluded-from-retained-producer",
+      "assessment": "Windows-only affected package is excluded from the Linux/arm64 compiled source and linked symbols; production uses x/sys/unix.",
+      "priorReportSHA256": "4a0a7fb6e7365cb3f288ad961ad9856fca63dccfc7714267446e0a46755f7da3",
+      "signedArtifactDisposition": "pending exact staged inventory and actual binary/SBOM scan"
+    }
+  ],
+  "calledFalseUsedAsClearance": false,
+  "resolvedFindings": [
+    {
+      "id": "RC6-SOURCE-001",
+      "severity": "P2",
+      "status": "resolved in reviewed source; fresh regression passed",
+      "summary": "Unsafe initial executable/working-directory or ancestor ACLs are rejected using the existing access-grant policy. Post-capture ACL changes were already rejected through ctime. No root escalation was established.",
+      "regressions": [
+        "SecureExecutableACLTests:6",
+        "LocalPathsTests:5",
+        "SecureLocalPathTests:13",
+        "SecureSubprocessTests:27"
+      ]
+    },
+    {
+      "id": "RC7-INTEGRATION-ERREXIT-001",
+      "severity": "P1",
+      "status": "resolved in reviewed source; fresh shell/doctor and complete integration passed",
+      "summary": "Mandatory macOS Bash3.2 compound assertions now exit explicitly. Negative actual-shell tests, scoped assertion lint and doctor expectation validation pass. Intentional predicates remain unchanged. Raw prior false-positive integration success and actual later failures remain historical evidence."
+    },
+    {
+      "id": "RC7-MACOS27-COMPILER",
+      "status": "source correction reviewed; latest-head hosted CI binding will be retained separately",
+      "summary": "Removed nonisolated from synchronous Docker proxy main. Existing loop/cancellation design retained. Whole package built in the fresh local source run; five real process cases passed. Prior hosted current-compiler result is supporting history, not relabeled final-head CI."
+    },
+    {
+      "id": "SDK-LINT-RUNNER-001",
+      "severity": "P2",
+      "status": "resolved; fresh negative regressions passed",
+      "summary": "Named Linux workflow exception validates every canonical job and exact static ubuntu-24.04-arm runner; rejects dynamic/list/multiline/missing/quoted/inline forms. Authenticated SDK compiler recipe and verifier remain unchanged."
+    },
+    {
+      "id": "PUBLICATION-LOCAL-IDENTIFIERS",
+      "severity": "P2",
+      "status": "resolved for reviewed44 public derivatives",
+      "summary": "Actual account and temporary-directory identifiers normalized;67 console lines in two logs also have trailing horizontal whitespace removed. All original/intermediate/public hashes and exact declared transformations verified; original private evidence, outcomes and line order preserved."
+    }
+  ],
+  "hardeningFollowups": [
+    {
+      "id": "RC7-HARDENING-001",
+      "priority": "P3",
+      "source": "Sources/HostwrightRuntime/AppleContainerCodec.swift:277",
+      "disposition": "Explicit depth/node bounds recommended. No demonstrated legitimate workload-controlled production output path, root escalation or unauthorized mutation; not an established release blocker.",
+      "furtherExecutableProbesPerformed": false
+    }
+  ],
+  "limits": [
+    "Focused selected-range source review and tested boundaries, not exhaustive security certification or whole-repository proof.",
+    "No new full-product malformed-input probes were executed after the recorded tool safety limitation. The Apple provider nesting concern remains scoped P3 hardening; a workload-controlled production trigger, privilege crossing or production exploit was not established.",
+    "Compose import lacks a dedicated byte limit on arbitrarily large operator-selected local files; this assessment does not establish bounded-memory behavior there.",
+    "All32 SAST parser warnings remain coverage gaps. No zero-vulnerability or full parser-coverage claim follows from zero SAST findings.",
+    "Dependency dispositions apply only to unchanged corresponding source and exact retained netfilter producer/package/function evidence. called=false alone is not clearance; signed bundles may contain other binaries.",
+    "The original failed long-checkout run and later incomplete full run with10 attended skips remain unchanged. Fresh focused results satisfy the source-security boundary only.",
+    "Product hashes were independently observed after completed execution; no pre-execution product hash capture is invented. Source snapshots, test-binary bindings and actual raw build/command evidence are retained.",
+    "Final artifact/SBOM inventory, installed lifecycle, supported sanitizers/attended lanes, Homebrew/release acceptance and publication remain separate gates. qualificationAccepted and artifactBoundReleaseApproval are false."
+  ],
+  "cleanup": {
+    "scope": "Read-only assessment collector plus exact supporting test-owned teardown",
+    "tracedIntegrationRootAbsent": true,
+    "matchingProductOrRootProcesses": 0,
+    "proxyCasesRequireChildExitAndSocketRemoval": true,
+    "systemWideBaselineClaimed": false,
+    "privatePostRunReceiptSHA256": "e4b85a8a55ab2ea0f4d407f60d9e259d82cb27bea17e8279a279523991119a1b"
+  },
+  "historicalEvidence": {
+    "longCheckoutFailedCases": 6,
+    "shortCheckoutFullPassedCases": 3533,
+    "shortCheckoutFullSkippedCases": 10,
+    "shortCheckoutFullStatus": "incomplete",
+    "priorRecordsRetainedUnchanged": true
+  },
+  "publication": {
+    "reviewedManifestSHA256": "4e9f2bbecf9c7c2a46bae7e2b92d39d86d2d68ca103e4fe67e0b8328f3d52867",
+    "reviewedDerivativeFiles": 44,
+    "changedByDeclaredPathSubstitutions": 25,
+    "secretScanContexts": 69,
+    "credentialFindings": 0,
+    "newFinalFilesRequireAdditionalManifestEntries": true,
+    "consoleWhitespaceNormalization": {
+      "files": 2,
+      "lines": 67,
+      "operation": "remove trailing spaces and tabs before line endings",
+      "intermediateAndFinalHashesRetained": true
+    },
+    "totalFilesChangedFromPrivateOriginals": 26
+  },
+  "retainedEvidenceSHA256": {
+    "issue272-source-and-scan-refresh.json": "1427eddccef6e8d0f659ce898b651133ebb33a9e62db0a0611df188b07d2d72d",
+    "issue272-focused-evidence-verification.json": "4ee96152606e4f6f32d9147d755fdb08905d0427ac004361948900c5c22b9fce",
+    "issue272-focused-raw-cases.json": "a3c8cfd3b10d91dc60420189a63b37b0951b76f5fff22a007644d5ed6a61c5e2",
+    "issue272-publication-safety-sanitized-review.json": "9d4bdc51e3785b3a83bdd04483a91cb543a20e58d5008d805d5c0aa51eb87f21",
+    "pr377-recipe-preserving-final-review.json": "489944903b0de07fcf33dee5e84fba5c4732483656da7371f4d98e5c13d875b4"
+  }
+}

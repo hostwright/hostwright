@@ -105,7 +105,8 @@ trap cleanup EXIT
 
 version="$("$hostwright_cli" --version)"
 golden_version="$(plutil -extract productVersion raw contracts/v0.0.2/versions.json)"
-[[ "$version" == "$golden_version" ]]
+printf 'Integration version: binary=%s contract=%s\n' "$version" "$golden_version"
+[[ "$version" == "$golden_version" ]] || exit 1
 
 export HOSTWRIGHT_APPLICATION_SUPPORT_DIR="$application_support"
 export HOSTWRIGHT_CACHE_DIR="$cache_directory"
@@ -115,17 +116,17 @@ set +e
 env -u HOSTWRIGHT_STATE_DB "$hostwright_cli" paths --json >"$missing_stdout" 2>"$missing_stderr"
 daemonless_paths_exit=$?
 set -e
-[[ "$daemonless_paths_exit" -eq 66 ]]
-[[ ! -s "$missing_stdout" ]]
+[[ "$daemonless_paths_exit" -eq 66 ]] || exit 1
+[[ ! -s "$missing_stdout" ]] || exit 1
 plutil -convert json -o /dev/null "$missing_stderr"
 grep -q '"code":"HW-API-002"' "$missing_stderr"
-[[ ! -e "$application_support" ]]
+[[ ! -e "$application_support" ]] || exit 1
 
 env -u HOSTWRIGHT_STATE_DB "$hostwright" paths --json >"$default_paths_json"
 plutil -convert json -o /dev/null "$default_paths_json"
 grep -q '"statePathOrigin":"application-support-default"' "$default_paths_json"
 grep -Fq "Application Support\/Hostwright\/state\/state.sqlite" "$default_paths_json"
-[[ ! -e "$application_support" ]]
+[[ ! -e "$application_support" ]] || exit 1
 
 mkdir "$state_directory"
 chmod 700 "$state_directory"
@@ -134,13 +135,13 @@ export HOSTWRIGHT_STATE_DB="$state_database"
 plutil -convert json -o /dev/null "$paths_before_json"
 grep -q '"statePathOrigin":"environment"' "$paths_before_json"
 grep -q '"readiness":"needs-creation"' "$paths_before_json"
-[[ ! -e "$state_database" ]]
+[[ ! -e "$state_database" ]] || exit 1
 
 (
   cd "$workdir"
   "$hostwright" init >/dev/null
 )
-[[ -f "$manifest" ]]
+[[ -f "$manifest" ]] || exit 1
 
 before_checksum="$(shasum -a 256 "$manifest" | awk '{print $1}')"
 set +e
@@ -150,9 +151,9 @@ set +e
 )
 overwrite_exit=$?
 set -e
-[[ "$overwrite_exit" -eq 64 ]]
+[[ "$overwrite_exit" -eq 64 ]] || exit 1
 after_checksum="$(shasum -a 256 "$manifest" | awk '{print $1}')"
-[[ "$before_checksum" == "$after_checksum" ]]
+[[ "$before_checksum" == "$after_checksum" ]] || exit 1
 
 "$hostwright" validate "$manifest" >/dev/null
 "$hostwright" plan "$manifest" --output json >"$plan_json"
@@ -163,33 +164,33 @@ set +e
 )
 doctor_exit=$?
 set -e
-[[ "$doctor_exit" -eq 0 || "$doctor_exit" -eq 69 ]]
+python3 scripts/integration_doctor.py "$doctor_json" "$doctor_exit"
 
 for json_file in "$plan_json" "$doctor_json"; do
   plutil -convert json -o /dev/null "$json_file"
 done
 grep -q '"planHash"' "$plan_json"
 grep -q '"checks"' "$doctor_json"
-[[ "$(plutil -extract schemaVersion raw "$doctor_json")" == "2" ]]
-[[ "$(plutil -extract checks.7.identifier raw "$doctor_json")" == "stateIntegrity" ]]
-[[ "$(plutil -extract checks.7.status raw "$doctor_json")" == "degraded" ]]
-[[ ! -e "$state_database" ]]
+[[ "$(plutil -extract schemaVersion raw "$doctor_json")" == "2" ]] || exit 1
+[[ "$(plutil -extract checks.7.identifier raw "$doctor_json")" == "stateIntegrity" ]] || exit 1
+[[ "$(plutil -extract checks.7.status raw "$doctor_json")" == "degraded" ]] || exit 1
+[[ ! -e "$state_database" ]] || exit 1
 if [[ "$doctor_exit" -eq 69 ]]; then
-  [[ "$(plutil -extract hasExternalConstraints raw "$doctor_json")" == "true" ]]
+  [[ "$(plutil -extract hasExternalConstraints raw "$doctor_json")" == "true" ]] || exit 1
 fi
 
 if command -v container >/dev/null 2>&1; then
   "$hostwright" status "$manifest" --output json >"$status_json"
   plutil -convert json -o /dev/null "$status_json"
   grep -q '"observed":true' "$status_json"
-  [[ "$(plutil -extract stateDatabasePath raw "$status_json")" == "$state_database" ]]
+  [[ "$(plutil -extract stateDatabasePath raw "$status_json")" == "$state_database" ]] || exit 1
 else
   set +e
   "$hostwright" status "$manifest" --output json >"$status_json" 2>"$missing_stderr"
   status_exit=$?
   set -e
-  [[ "$status_exit" -eq 69 ]]
-  [[ ! -s "$status_json" ]]
+  [[ "$status_exit" -eq 69 ]] || exit 1
+  [[ ! -s "$status_json" ]] || exit 1
   plutil -convert json -o /dev/null "$missing_stderr"
   grep -q '"code":"HW-RUNTIME-001"' "$missing_stderr"
   grep -q '"exitCode":69' "$missing_stderr"
@@ -198,9 +199,9 @@ fi
 "$hostwright" paths --json >"$paths_after_json"
 plutil -convert json -o /dev/null "$paths_after_json"
 grep -q '"readiness":"ready"' "$paths_after_json"
-[[ -f "$state_database" ]]
-[[ "$(stat -f '%Lp' "$state_directory")" == "700" ]]
-[[ "$(stat -f '%Lp' "$state_database")" == "600" ]]
+[[ -f "$state_database" ]] || exit 1
+[[ "$(stat -f '%Lp' "$state_directory")" == "700" ]] || exit 1
+[[ "$(stat -f '%Lp' "$state_database")" == "600" ]] || exit 1
 
 state_files_before_doctor="$(find "$state_directory" -type f | LC_ALL=C sort)"
 state_hashes_before_doctor="$(find "$state_directory" -type f -exec shasum -a 256 {} \; | LC_ALL=C sort)"
@@ -211,12 +212,12 @@ set +e
 )
 doctor_state_exit=$?
 set -e
-[[ "$doctor_state_exit" -eq 0 || "$doctor_state_exit" -eq 69 ]]
+python3 scripts/integration_doctor.py "$doctor_state_json" "$doctor_state_exit"
 plutil -convert json -o /dev/null "$doctor_state_json"
-[[ "$(plutil -extract checks.7.identifier raw "$doctor_state_json")" == "stateIntegrity" ]]
-[[ "$(plutil -extract checks.7.status raw "$doctor_state_json")" == "ready" ]]
-[[ "$(find "$state_directory" -type f | LC_ALL=C sort)" == "$state_files_before_doctor" ]]
-[[ "$(find "$state_directory" -type f -exec shasum -a 256 {} \; | LC_ALL=C sort)" == "$state_hashes_before_doctor" ]]
+[[ "$(plutil -extract checks.7.identifier raw "$doctor_state_json")" == "stateIntegrity" ]] || exit 1
+[[ "$(plutil -extract checks.7.status raw "$doctor_state_json")" == "ready" ]] || exit 1
+[[ "$(find "$state_directory" -type f | LC_ALL=C sort)" == "$state_files_before_doctor" ]] || exit 1
+[[ "$(find "$state_directory" -type f -exec shasum -a 256 {} \; | LC_ALL=C sort)" == "$state_hashes_before_doctor" ]] || exit 1
 
 "$hostwright" state integrity --state-db "$state_database" --json >"$state_integrity_json"
 "$hostwright" state backup --state-db "$state_database" --json >"$state_backup_json"
@@ -229,13 +230,13 @@ grep -q '"health":"healthy"' "$state_integrity_json"
 grep -q '"kind":"stateBackupRecord"' "$state_backup_json"
 grep -q '"restorable":true' "$state_backup_json"
 state_backup_id="$(plutil -extract backupID raw "$state_backup_json")"
-[[ "$state_backup_id" == backup-* ]]
+[[ "$state_backup_id" == backup-* ]] || exit 1
 grep -Fq "\"backupID\":\"$state_backup_id\"" "$state_catalog_json"
 
 "$hostwright" state restore --backup "$state_backup_id" --dry-run --state-db "$state_database" --json >"$state_restore_plan_json"
 plutil -convert json -o /dev/null "$state_restore_plan_json"
 state_restore_token="$(plutil -extract confirmationToken raw "$state_restore_plan_json")"
-[[ "$state_restore_token" =~ ^[a-f0-9]{64}$ ]]
+[[ "$state_restore_token" =~ ^[a-f0-9]{64}$ ]] || exit 1
 "$hostwright" state restore --backup "$state_backup_id" --confirm-restore "$state_restore_token" --state-db "$state_database" --json >"$state_restore_result_json"
 plutil -convert json -o /dev/null "$state_restore_result_json"
 grep -q '"health":"healthy"' "$state_restore_result_json"
@@ -243,13 +244,13 @@ grep -Fq "\"backupID\":\"$state_backup_id\"" "$state_restore_result_json"
 "$hostwright" state recover --state-db "$state_database" --json >"$state_recovery_json"
 plutil -convert json -o /dev/null "$state_recovery_json"
 grep -q '"recovered":false' "$state_recovery_json"
-[[ "$(stat -f '%Lp' "$state_backups")" == "700" ]]
-[[ "$(stat -f '%Lp' "$state_backups/$state_backup_id/state.sqlite")" == "600" ]]
+[[ "$(stat -f '%Lp' "$state_backups")" == "700" ]] || exit 1
+[[ "$(stat -f '%Lp' "$state_backups/$state_backup_id/state.sqlite")" == "600" ]] || exit 1
 
 printf '%s\n' '{"apiVersion":2,"requestID":"integration-plan-1","operation":"plan"}' >"$control_request"
 "$hostwright_control" --manifest "$manifest" <"$control_request" >"$control_response" 2>"$missing_stderr"
-[[ ! -s "$missing_stderr" ]]
-[[ "$(wc -l <"$control_response" | tr -d ' ')" -eq 1 ]]
+[[ ! -s "$missing_stderr" ]] || exit 1
+[[ "$(wc -l <"$control_response" | tr -d ' ')" -eq 1 ]] || exit 1
 plutil -convert json -o /dev/null "$control_response"
 grep -q '"apiVersion":2' "$control_response"
 grep -q '"requestID":"integration-plan-1"' "$control_response"
@@ -261,9 +262,9 @@ set +e
 "$hostwright_control" --manifest "$manifest" <"$control_rejected_request" >"$control_rejected_response" 2>"$missing_stderr"
 control_rejected_exit=$?
 set -e
-[[ "$control_rejected_exit" -eq 65 ]]
-[[ ! -s "$missing_stderr" ]]
-[[ "$(wc -l <"$control_rejected_response" | tr -d ' ')" -eq 1 ]]
+[[ "$control_rejected_exit" -eq 65 ]] || exit 1
+[[ ! -s "$missing_stderr" ]] || exit 1
+[[ "$(wc -l <"$control_rejected_response" | tr -d ' ')" -eq 1 ]] || exit 1
 plutil -convert json -o /dev/null "$control_rejected_response"
 grep -q '"code":"HW-API-001"' "$control_rejected_response"
 grep -q '"success":false' "$control_rejected_response"
@@ -309,8 +310,8 @@ set +e
 "$hostwright" plan "$manifest" --team-profile "$invalid_profile" --output json >"$missing_stdout" 2>"$missing_stderr"
 invalid_profile_exit=$?
 set -e
-[[ "$invalid_profile_exit" -eq 65 ]]
-[[ ! -s "$missing_stdout" ]]
+[[ "$invalid_profile_exit" -eq 65 ]] || exit 1
+[[ ! -s "$missing_stdout" ]] || exit 1
 plutil -convert json -o /dev/null "$missing_stderr"
 grep -q '"code":"HW-TEAM-001"' "$missing_stderr"
 if grep -q 'must-not-leak' "$missing_stderr"; then
@@ -322,9 +323,9 @@ set +e
 "$hostwright" apply "$manifest" --state-db "$workdir/unexpected.sqlite" --confirm-plan unused --team-profile "$team_profile" >"$missing_stdout" 2>"$missing_stderr"
 missing_approval_exit=$?
 set -e
-[[ "$missing_approval_exit" -eq 64 ]]
+[[ "$missing_approval_exit" -eq 64 ]] || exit 1
 grep -q -- '--approval-record' "$missing_stderr"
-[[ ! -e "$workdir/unexpected.sqlite" ]]
+[[ ! -e "$workdir/unexpected.sqlite" ]] || exit 1
 
 set +e
 "$hostwright" benchmark \
@@ -337,9 +338,9 @@ set +e
   >"$missing_stdout" 2>"$missing_stderr"
 benchmark_confirmation_exit=$?
 set -e
-[[ "$benchmark_confirmation_exit" -eq 64 ]]
+[[ "$benchmark_confirmation_exit" -eq 64 ]] || exit 1
 grep -q -- '--confirm-live' "$missing_stderr"
-[[ ! -e "$benchmark_absent_report" ]]
+[[ ! -e "$benchmark_absent_report" ]] || exit 1
 
 printf 'sentinel benchmark report\n' >"$benchmark_existing_report"
 benchmark_before_checksum="$(shasum -a 256 "$benchmark_existing_report" | awk '{print $1}')"
@@ -355,10 +356,10 @@ set +e
   >"$missing_stdout" 2>"$missing_stderr"
 benchmark_overwrite_exit=$?
 set -e
-[[ "$benchmark_overwrite_exit" -eq 64 ]]
+[[ "$benchmark_overwrite_exit" -eq 64 ]] || exit 1
 grep -q 'HW-CLI-002' "$missing_stderr"
 benchmark_after_checksum="$(shasum -a 256 "$benchmark_existing_report" | awk '{print $1}')"
-[[ "$benchmark_before_checksum" == "$benchmark_after_checksum" ]]
+[[ "$benchmark_before_checksum" == "$benchmark_after_checksum" ]] || exit 1
 
 "$hostwright_dist" --help >"$missing_stdout" 2>"$missing_stderr"
 grep -q 'trusted and developer distribution tool' "$missing_stdout"
@@ -372,18 +373,18 @@ for trusted_release_command in release verify-release homebrew-formula; do
   "$hostwright_dist" "$trusted_release_command" --format json >"$missing_stdout" 2>"$missing_stderr"
   trusted_release_error_exit=$?
   set -e
-  [[ "$trusted_release_error_exit" -eq 64 ]]
-  [[ ! -s "$missing_stdout" ]]
+  [[ "$trusted_release_error_exit" -eq 64 ]] || exit 1
+  [[ ! -s "$missing_stdout" ]] || exit 1
   plutil -convert json -o /dev/null "$missing_stderr"
-  [[ "$(plutil -extract kind raw "$missing_stderr")" == "distributionToolError" ]]
-  [[ "$(plutil -extract exitCode raw "$missing_stderr")" == "64" ]]
+  [[ "$(plutil -extract kind raw "$missing_stderr")" == "distributionToolError" ]] || exit 1
+  [[ "$(plutil -extract exitCode raw "$missing_stderr")" == "64" ]] || exit 1
 done
 
 set +e
 "$hostwright_dist" homebrew-formula --output json >"$missing_stdout" 2>"$missing_stderr"
 formula_path_error_exit=$?
 set -e
-[[ "$formula_path_error_exit" -eq 64 ]]
+[[ "$formula_path_error_exit" -eq 64 ]] || exit 1
 grep -q '^HW-DIST-001:' "$missing_stderr"
 
 /usr/bin/swiftc "$root/Tests/HostwrightExtensionsTests/Fixtures/ExtensionFixture.swift" -o "$extension_fixture"
@@ -420,8 +421,8 @@ set +e
 "$hostwright" extension check --declaration "$extension_failure_declaration" --executable "$extension_fixture" --output json >"$missing_stdout" 2>"$missing_stderr"
 extension_failure_exit=$?
 set -e
-[[ "$extension_failure_exit" -eq 72 ]]
-[[ ! -s "$missing_stdout" ]]
+[[ "$extension_failure_exit" -eq 72 ]] || exit 1
+[[ ! -s "$missing_stdout" ]] || exit 1
 plutil -convert json -o /dev/null "$missing_stderr"
 grep -q '"code":"HW-EXT-003"' "$missing_stderr"
 if grep -q 'fixture-secret-must-not-leak' "$missing_stderr"; then
@@ -438,16 +439,16 @@ set +e
   >"$missing_stdout" 2>"$missing_stderr"
 distribution_prefix_exit=$?
 set -e
-[[ "$distribution_prefix_exit" -eq 64 ]]
+[[ "$distribution_prefix_exit" -eq 64 ]] || exit 1
 grep -q 'temporary directory' "$missing_stderr"
-[[ ! -e "$unexpected_distribution_report" ]]
+[[ ! -e "$unexpected_distribution_report" ]] || exit 1
 
 set +e
 "$hostwright" plan "$workdir/missing.yaml" --output json >"$missing_stdout" 2>"$missing_stderr"
 missing_exit=$?
 set -e
-[[ "$missing_exit" -eq 65 ]]
-[[ ! -s "$missing_stdout" ]]
+[[ "$missing_exit" -eq 65 ]] || exit 1
+[[ ! -s "$missing_stdout" ]] || exit 1
 plutil -convert json -o /dev/null "$missing_stderr"
 grep -q '"code":"HW-MANIFEST-004"' "$missing_stderr"
 
@@ -455,8 +456,8 @@ set +e
 "$hostwright" import-stack "$workdir/missing-compose.yaml" --output json >"$missing_stdout" 2>"$missing_stderr"
 missing_exit=$?
 set -e
-[[ "$missing_exit" -eq 64 ]]
-[[ ! -s "$missing_stdout" ]]
+[[ "$missing_exit" -eq 64 ]] || exit 1
+[[ ! -s "$missing_stdout" ]] || exit 1
 plutil -convert json -o /dev/null "$missing_stderr"
 grep -q '"code":"HW-CLI-005"' "$missing_stderr"
 
@@ -470,8 +471,8 @@ set +e
 readonly_exit=$?
 set -e
 chmod 700 "$readonly_dir"
-[[ "$readonly_exit" -eq 64 ]]
-[[ ! -s "$missing_stdout" ]]
+[[ "$readonly_exit" -eq 64 ]] || exit 1
+[[ ! -s "$missing_stdout" ]] || exit 1
 grep -q 'HW-CLI-005' "$missing_stderr"
 
 while IFS= read -r sqlite_path; do
@@ -480,7 +481,7 @@ while IFS= read -r sqlite_path; do
   fi
   case "$sqlite_path" in
     "$state_database-wal"|"$state_database-shm")
-      [[ "$(stat -f '%Lp' "$sqlite_path")" == "600" ]]
+      [[ "$(stat -f '%Lp' "$sqlite_path")" == "600" ]] || exit 1
       ;;
     "$state_backups"/backup-*/state.sqlite)
       ;;
@@ -490,6 +491,6 @@ while IFS= read -r sqlite_path; do
       ;;
   esac
 done < <(find "$workdir" -name '*.sqlite*' -print)
-[[ ! -e "$state_database-journal" ]]
+[[ ! -e "$state_database-journal" ]] || exit 1
 
 echo "local-integration passed: production CLI daemonless refusal, isolated direct-core qualification, private state creation, verified online backup/restore/recovery, one-shot control API, and distribution tool; reviewed-local extension subprocess handshake, team-profile/benchmark/distribution gates, JSON output/errors, real file failures, overwrite refusal, rejected control mutation, and no unexpected state writes"

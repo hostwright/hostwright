@@ -38,8 +38,8 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_REPOSITORY" = hostwright/hostwright
-          [[ "$RELEASE_COMMIT" =~ ^[a-f0-9]{40}$ ]]
-          [[ "$INVENTORY_SHA256" =~ ^[a-f0-9]{64}$ ]]
+          [[ "$RELEASE_COMMIT" =~ ^[a-f0-9]{40}$ ]] || exit 1
+          [[ "$INVENTORY_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
           git fetch --no-tags origin main
           git merge-base --is-ancestor "$RELEASE_COMMIT" origin/main
           test -z "$(git status --porcelain=v1 --untracked-files=all)"

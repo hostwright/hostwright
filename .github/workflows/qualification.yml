@@ -35,8 +35,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$QUALIFICATION_COMMIT" =~ ^[a-f0-9]{40}$ ]]
-          [[ "$QUALIFICATION_RUNNER" == macos-26 || "$QUALIFICATION_RUNNER" == xcode-27 ]]
+          [[ "$QUALIFICATION_COMMIT" =~ ^[a-f0-9]{40}$ ]] || exit 1
+          [[ "$QUALIFICATION_RUNNER" == macos-26 || "$QUALIFICATION_RUNNER" == xcode-27 ]] || exit 1
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.QUALIFICATION_COMMIT }}

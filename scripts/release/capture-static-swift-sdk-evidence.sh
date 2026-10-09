@@ -19,10 +19,10 @@ while (( $# )); do
 done
 [[ "$root" == /* && "$repo_root" == /* && "$build_dir" == /* && "$records" == /* && "$temporary_root" == /* ]] || usage
 [[ -d "$root" && -d "$build_dir" && -d "$records" && -d "$temporary_root" ]] || usage
-[[ "$(cat "$records/build-exit-status")" == 0 ]]
-[[ ! -e "$records/build-inputs" && ! -L "$records/build-inputs" ]]
+[[ "$(cat "$records/build-exit-status")" == 0 ]] || exit 1
+[[ ! -e "$records/build-inputs" && ! -L "$records/build-inputs" ]] || exit 1
 build_working_directory=$(cat "$records/build-working-directory")
-[[ "$build_working_directory" == /* ]]
+[[ "$build_working_directory" == /* ]] || exit 1
 printf '%s Capturing SDK source and build inputs\n' "$(date -u +%FT%TZ)"
 python3 "$repo_root/scripts/release/capture-swift-sdk-build-inputs.py" \
   --sources "$root" --build "$build_dir" --sdk-archive "$records/swift-static-sdk.tar.gz" \

@@ -5,7 +5,7 @@ import HostwrightDockerEngine
 
 @main
 enum HostwrightDockerProxyMain {
-    nonisolated static func main() {
+    static func main() {
         do {
             let options = try options(arguments: Array(CommandLine.arguments.dropFirst()))
             if options.help {

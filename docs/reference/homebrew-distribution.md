@@ -73,6 +73,15 @@ release bytes. Casks must work on the latest major macOS version; the declared
 macOS 26 matrix alone does not establish that requirement at submission time.
 See [cask policy](https://docs.brew.sh/Acceptable-Casks).
 
+For source compatibility checks before package installation, the existing
+**Qualification tests** workflow accepts an exact merged `source_commit` and
+`runner=xcode-27`. GitHub's [runner announcement](https://github.com/actions/runner-images/issues/14404)
+records that this preview image uses macOS 27. The workflow verifies the actual
+OS/architecture and retains source, image and tool versions with each shard.
+Its default remains macOS 26. These hosted source tests do not establish cask
+installation, desktop interaction, live VM/provider behavior or Homebrew acceptance;
+the signed-package lifecycle checks below remain required.
+
 Both routes require public interest and maintainer review. The
 [shared acceptance policy](https://docs.brew.sh/Package-Acceptance-Policy), checked
 October 8, 2026, normally requires 30 forks, 30 watchers or 75 stars; for an owner

@@ -11,7 +11,32 @@ ROOT = Path(__file__).resolve().parent.parent
 INTEGRATION = ROOT / "scripts/integration.sh"
 
 
+def uses_pinned_linux_runners(text):
+    sections = text.split("\njobs:\n")
+    if len(sections) != 2:
+        return False
+    jobs = list(re.finditer(r"^  [A-Za-z0-9_-]+:\s*$", sections[1], re.M))
+    if not jobs:
+        return False
+    for index, job in enumerate(jobs):
+        end = jobs[index + 1].start() if index + 1 < len(jobs) else len(sections[1])
+        block = sections[1][job.end():end]
+        runners = re.findall(r"^    runs-on:[^\n]*$", block, re.M)
+        if [line.strip() for line in runners] != ["runs-on: ubuntu-24.04-arm"]:
+            return False
+    return True
+
+
 class ShellAssertionTests(unittest.TestCase):
+    def test_linux_exception_requires_every_job_to_have_a_static_runner(self):
+        workflow = "name: SDK\njobs:\n  first:\n    runs-on: ubuntu-24.04-arm\n  second:\n    runs-on: ubuntu-24.04-arm\n"
+        self.assertTrue(uses_pinned_linux_runners(workflow))
+        for runner in ("${{ inputs.runner }}", "macos-26", "[ubuntu-24.04-arm]", "\n      group: hosted", ""):
+            with self.subTest(runner=runner):
+                changed = workflow.rsplit("runs-on: ubuntu-24.04-arm", 1)[0] + "runs-on: " + runner + "\n"
+                self.assertFalse(uses_pinned_linux_runners(changed))
+        self.assertFalse(uses_pinned_linux_runners(workflow.rsplit("    runs-on:", 1)[0]))
+
     def test_integration_version_mismatch_stops_before_success(self):
         self.check_version("unexpected-version", 1, "")
 
@@ -38,8 +63,7 @@ class ShellAssertionTests(unittest.TestCase):
         for path in paths:
             if path.name == "runtime-ingredients.yml":
                 # Preserve the pinned SDK recipe; its Linux runners use modern Bash.
-                runners = re.findall(r"^\s*runs-on:\s*(\S+)\s*$", path.read_text(), re.M)
-                self.assertTrue(runners and all(r.startswith("ubuntu-") for r in runners))
+                self.assertTrue(uses_pinned_linux_runners(path.read_text()))
                 continue
             # Join continued shell lines before checking standalone assertions.
             text = re.sub(r"\\\n\s*", " ", path.read_text())

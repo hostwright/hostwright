@@ -18,6 +18,12 @@ def uses_pinned_linux_runners(text):
     jobs = list(re.finditer(r"^  [A-Za-z0-9_-]+:\s*$", sections[1], re.M))
     if not jobs:
         return False
+    prefix = sections[1][:jobs[0].start()]
+    if any(line.strip() and not line.lstrip().startswith("#") for line in prefix.splitlines()):
+        return False
+    for line in sections[1].splitlines():
+        if re.match(r"^  [^ \t#]", line) and not re.fullmatch(r"  [A-Za-z0-9_-]+:\s*", line):
+            return False
     for index, job in enumerate(jobs):
         end = jobs[index + 1].start() if index + 1 < len(jobs) else len(sections[1])
         block = sections[1][job.end():end]
@@ -36,6 +42,9 @@ class ShellAssertionTests(unittest.TestCase):
                 changed = workflow.rsplit("runs-on: ubuntu-24.04-arm", 1)[0] + "runs-on: " + runner + "\n"
                 self.assertFalse(uses_pinned_linux_runners(changed))
         self.assertFalse(uses_pinned_linux_runners(workflow.rsplit("    runs-on:", 1)[0]))
+        self.assertFalse(uses_pinned_linux_runners(workflow.replace("  first:", '  "first":')))
+        self.assertFalse(uses_pinned_linux_runners(workflow.replace("  second:", '  "second":')))
+        self.assertFalse(uses_pinned_linux_runners(workflow.replace("  first:\n    runs-on: ubuntu-24.04-arm", "  first: {runs-on: macos-26}")))
 
     def test_integration_version_mismatch_stops_before_success(self):
         self.check_version("unexpected-version", 1, "")

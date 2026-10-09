@@ -49,6 +49,7 @@ run_cheap_checks() {
 run_full() {
   run_cheap_checks
   swift build --jobs 1
+  python3 scripts/test-docker-proxy.py "$(swift build --show-bin-path)/hostwright-docker-proxy"
   swift_test full
   scripts/integration.sh
   scripts/check-docs.sh
@@ -57,6 +58,7 @@ run_full() {
 run_pr() {
   run_cheap_checks
   swift build --jobs 1
+  python3 scripts/test-docker-proxy.py "$(swift build --show-bin-path)/hostwright-docker-proxy"
   scripts/integration.sh
   swift_test pr-fast --skip "$qualification_filter"
   swift_test pr-durable-lifecycle-sentinels --filter "$durable_lifecycle_sentinel_filter"

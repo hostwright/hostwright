@@ -9,6 +9,30 @@ on:
 permissions: {}
 
 jobs:
+  latest-macos-proxy:
+    runs-on: xcode-27
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify latest macOS toolchain environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(sw_vers -productVersion)" == 27.* ]]
+          [[ "$(uname -m)" == arm64 ]]
+          xcodebuild -version
+          swift --version
+      - name: Build and exercise the Docker proxy process
+        shell: bash
+        run: |
+          set -euo pipefail
+          swift build --jobs 1 --product hostwright-docker-proxy
+          python3 scripts/test-docker-proxy.py "$(swift build --show-bin-path)/hostwright-docker-proxy"
+
   test:
     runs-on: macos-26
     timeout-minutes: 60

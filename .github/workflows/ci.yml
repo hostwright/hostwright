@@ -9,7 +9,7 @@ on:
 permissions: {}
 
 jobs:
-  latest-macos-proxy:
+  latest-macos-build:
     runs-on: xcode-27
     timeout-minutes: 40
     permissions:
@@ -26,11 +26,11 @@ jobs:
           [[ "$(uname -m)" == arm64 ]]
           xcodebuild -version
           swift --version
-      - name: Build and exercise the Docker proxy process
+      - name: Build the package and exercise the Docker proxy process
         shell: bash
         run: |
           set -euo pipefail
-          swift build --jobs 1 --product hostwright-docker-proxy
+          swift build --jobs 1
           python3 scripts/test-docker-proxy.py "$(swift build --show-bin-path)/hostwright-docker-proxy"
 
   test:

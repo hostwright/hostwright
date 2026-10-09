@@ -321,39 +321,6 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Download the authenticated source-built Swift SDK
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: ${{ needs.swift-sdk-evidence.outputs.artifact-name }}
-          run-id: ${{ needs.swift-sdk-evidence.outputs.run-id }}
-          github-token: ${{ github.token }}
-          path: ${{ runner.temp }}/swift-sdk-records
-      - name: Verify the source-built SDK attestation
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SDK_PRODUCER_ATTEMPT: ${{ needs.swift-sdk-evidence.outputs.producer-attempt }}
-          SDK_PRODUCER_COMMIT: ${{ needs.swift-sdk-evidence.outputs.source-commit }}
-          SDK_PRODUCER_RUN: ${{ needs.swift-sdk-evidence.outputs.run-id }}
-        run: |
-          set -euo pipefail
-          for subject in swift-static-sdk.tar.gz checksums.sha256; do
-            python3 scripts/release/authenticate-runtime-subject.py \
-              --file "$RUNNER_TEMP/swift-sdk-records/$subject" \
-              --source-commit "$SDK_PRODUCER_COMMIT" --run-id "$SDK_PRODUCER_RUN" --attempt "$SDK_PRODUCER_ATTEMPT"
-          done
-          (cd "$RUNNER_TEMP/swift-sdk-records" && sha256sum --check checksums.sha256)
-          python3 scripts/release/verify-sdk-reuse.py \
-            --repo-root "$GITHUB_WORKSPACE" --producer-commit "$SDK_PRODUCER_COMMIT" \
-            --source-commit "$GITHUB_SHA" --records "$RUNNER_TEMP/swift-sdk-records" \
-            --output "$RUNNER_TEMP/sdk-reuse.json"
-          python3 - "$RUNNER_TEMP/sdk-producer.json" <<'PYSDK'
-          import json, os, sys
-          with open(sys.argv[1], "x") as stream:
-              json.dump({"commit": os.environ["SDK_PRODUCER_COMMIT"],
-                         "runID": int(os.environ["SDK_PRODUCER_RUN"]),
-                         "attempt": int(os.environ["SDK_PRODUCER_ATTEMPT"])}, stream, sort_keys=True)
-          PYSDK
       - name: Verify complete source capture
         run: |
           python3 scripts/release/test-capture-runtime-source.py
@@ -374,6 +341,15 @@ jobs:
             fi
             df -B1 /
           } | tee "$RUNNER_TEMP/runtime-disk-preflight.txt"
+      - name: Download the authenticated source-built Swift SDK
+        id: runtime-sdk-download
+        background: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.swift-sdk-evidence.outputs.artifact-name }}
+          run-id: ${{ needs.swift-sdk-evidence.outputs.run-id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/swift-sdk-records
       - name: Install and record build prerequisites
         shell: bash
         run: |
@@ -385,14 +361,6 @@ jobs:
             bc bison clang cpio dwarves flex gcc gcc-aarch64-linux-gnu git gpg jq libcurl4-openssl-dev libelf-dev libssl-dev \
             lld make pkg-config rsync strace xz-utils
           test "$(uname -m)" = aarch64
-      - name: Recover retained SDK source evidence
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 scripts/release/recover-sdk-object-sources.py \
-            --records "$RUNNER_TEMP/swift-sdk-records" \
-            --output "$RUNNER_TEMP/swift-sdk-records/build-inputs/sdk-object-sources.recovered.json" \
-            --work-dir "$RUNNER_TEMP/sdk-source-recovery-work"
       - name: Set up the pinned Go toolchain
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -453,6 +421,42 @@ jobs:
             d42cfc8e2edea41feb14e28dbc6b962da59a4fc0808b25b1157e1063be6984b3 "$root/linux-6.18.15.tar.sign" \
             d3494056bb1a9726366499d790dfd44555d9f6e354cd4549143bf9c0b7ccb99c "$root/gregkh-pinned-public-key.asc" \
             | sha256sum --check --status
+      - name: Wait for the authenticated SDK download
+        wait: runtime-sdk-download
+      - name: Verify the source-built SDK attestation
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SDK_PRODUCER_ATTEMPT: ${{ needs.swift-sdk-evidence.outputs.producer-attempt }}
+          SDK_PRODUCER_COMMIT: ${{ needs.swift-sdk-evidence.outputs.source-commit }}
+          SDK_PRODUCER_RUN: ${{ needs.swift-sdk-evidence.outputs.run-id }}
+        run: |
+          set -euo pipefail
+          for subject in swift-static-sdk.tar.gz checksums.sha256; do
+            python3 scripts/release/authenticate-runtime-subject.py \
+              --file "$RUNNER_TEMP/swift-sdk-records/$subject" \
+              --source-commit "$SDK_PRODUCER_COMMIT" --run-id "$SDK_PRODUCER_RUN" --attempt "$SDK_PRODUCER_ATTEMPT"
+          done
+          (cd "$RUNNER_TEMP/swift-sdk-records" && sha256sum --check checksums.sha256)
+          python3 scripts/release/verify-sdk-reuse.py \
+            --repo-root "$GITHUB_WORKSPACE" --producer-commit "$SDK_PRODUCER_COMMIT" \
+            --source-commit "$GITHUB_SHA" --records "$RUNNER_TEMP/swift-sdk-records" \
+            --output "$RUNNER_TEMP/sdk-reuse.json"
+          python3 - "$RUNNER_TEMP/sdk-producer.json" <<'PYSDK'
+          import json, os, sys
+          with open(sys.argv[1], "x") as stream:
+              json.dump({"commit": os.environ["SDK_PRODUCER_COMMIT"],
+                         "runID": int(os.environ["SDK_PRODUCER_RUN"]),
+                         "attempt": int(os.environ["SDK_PRODUCER_ATTEMPT"])}, stream, sort_keys=True)
+          PYSDK
+      - name: Recover retained SDK source evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/release/recover-sdk-object-sources.py \
+            --records "$RUNNER_TEMP/swift-sdk-records" \
+            --output "$RUNNER_TEMP/swift-sdk-records/build-inputs/sdk-object-sources.recovered.json" \
+            --work-dir "$RUNNER_TEMP/sdk-source-recovery-work"
       - name: Rebuild deterministic runtime ingredients
         shell: bash
         run: |

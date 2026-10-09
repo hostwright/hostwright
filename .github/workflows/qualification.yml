@@ -26,7 +26,6 @@ jobs:
     env:
       QUALIFICATION_COMMIT: ${{ inputs.source_commit || github.sha }}
       QUALIFICATION_RUNNER: ${{ inputs.runner || 'macos-26' }}
-      HOSTWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/hostwright-test-results
     strategy:
       fail-fast: false
       matrix:
@@ -45,6 +44,8 @@ jobs:
           persist-credentials: false
       - name: Bind source and actual host environment
         shell: bash
+        env:
+          HOSTWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/hostwright-test-results
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$QUALIFICATION_COMMIT"
@@ -84,6 +85,7 @@ jobs:
         shell: bash
         env:
           HOSTWRIGHT_TEST_SHARD: ${{ matrix.shard }}
+          HOSTWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/hostwright-test-results
         run: |
           set -euo pipefail
           mkdir -p "$HOSTWRIGHT_TEST_RESULTS_DIR"

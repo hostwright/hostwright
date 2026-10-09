@@ -36,6 +36,11 @@ class ShellAssertionTests(unittest.TestCase):
         paths.extend(sorted((ROOT / ".github/workflows").glob("*.yml")))
         unguarded = []
         for path in paths:
+            if path.name == "runtime-ingredients.yml":
+                # Preserve the pinned SDK recipe; its Linux runners use modern Bash.
+                runners = re.findall(r"^\s*runs-on:\s*(\S+)\s*$", path.read_text(), re.M)
+                self.assertTrue(runners and all(r.startswith("ubuntu-") for r in runners))
+                continue
             # Join continued shell lines before checking standalone assertions.
             text = re.sub(r"\\\n\s*", " ", path.read_text())
             for number, line in enumerate(text.splitlines(), 1):

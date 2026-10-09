@@ -87,9 +87,9 @@ jobs:
           . "$SWIFTLY_HOME_DIR/env.sh"
           swiftly install --assume-yes 6.3.0
           swift_toolchain=$(swiftly use --print-location 2>"$RUNNER_TEMP/swiftly-use.stderr")
-          [[ -x "$swift_toolchain/usr/bin/swiftc" ]] || exit 1
-          [[ "$("$swift_toolchain/usr/bin/swiftc" --version | head -1)" == "Swift version 6.3"* ]] || exit 1
-          [[ "$(swift --version | head -1)" == "Swift version 6.3"* ]] || exit 1
+          [[ -x "$swift_toolchain/usr/bin/swiftc" ]]
+          [[ "$("$swift_toolchain/usr/bin/swiftc" --version | head -1)" == "Swift version 6.3"* ]]
+          [[ "$(swift --version | head -1)" == "Swift version 6.3"* ]]
           printf '%s\n' "$SWIFTLY_BIN_DIR" "$swift_toolchain/usr/bin" >> "$GITHUB_PATH"
           printf 'SWIFTLY_HOME_DIR=%s\nSWIFTLY_BIN_DIR=%s\n' "$SWIFTLY_HOME_DIR" "$SWIFTLY_BIN_DIR" >> "$GITHUB_ENV"
           printf '%s\n' "$swift_toolchain" > "$RUNNER_TEMP/swift-toolchain-location"
@@ -400,9 +400,9 @@ jobs:
           . "$SWIFTLY_HOME_DIR/env.sh"
           swiftly install --assume-yes 6.3.0
           swift_toolchain=$(swiftly use --print-location)
-          [[ -x "$swift_toolchain/usr/bin/swiftc" ]] || exit 1
-          [[ "$("$swift_toolchain/usr/bin/swiftc" --version | head -1)" == "Swift version 6.3"* ]] || exit 1
-          [[ "$(swift --version | head -1)" == "Swift version 6.3"* ]] || exit 1
+          [[ -x "$swift_toolchain/usr/bin/swiftc" ]]
+          [[ "$("$swift_toolchain/usr/bin/swiftc" --version | head -1)" == "Swift version 6.3"* ]]
+          [[ "$(swift --version | head -1)" == "Swift version 6.3"* ]]
           printf '%s\n' "$SWIFTLY_BIN_DIR" "$swift_toolchain/usr/bin" >> "$GITHUB_PATH"
           printf 'SWIFTLY_HOME_DIR=%s\nSWIFTLY_BIN_DIR=%s\n' "$SWIFTLY_HOME_DIR" "$SWIFTLY_BIN_DIR" >> "$GITHUB_ENV"
       - name: Retain authenticated kernel inputs
@@ -463,7 +463,7 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
-          [[ "$(swift --version | head -1)" == "Swift version 6.3"* ]] || exit 1
+          [[ "$(swift --version | head -1)" == "Swift version 6.3"* ]]
           scripts/release/build-runtime-ingredients.sh \
             --work-dir /workspace/runtime-build \
             --kernel-inputs "$RUNNER_TEMP/kernel-signature-inputs" \

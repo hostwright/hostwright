@@ -2,7 +2,15 @@
 
 Hostwright manages Apple container workloads on one Apple silicon Mac. Declare services in a YAML manifest, review a plan, and confirm it through the CLI or native desktop app. Hostwright tracks resource ownership and operations in a local SQLite database.
 
-**Status:** `0.0.2-rc.6` candidate preparation. The `v0.0.2` release is still undergoing qualification; no supported RC or GA channel has been published.
+**Release status:** `0.0.2-rc.7` is in preparation for the `v0.0.2` release. No supported RC or GA channel has been published. The launch requires qualified signed artifacts and official Homebrew acceptance; a GA date is not confirmed.
+
+| Channel | Current availability |
+| --- | --- |
+| Current source | RC.7 preparation, with Manifest v3, Control API 2.2, Runtime Provider API v2, and SQLite schema v24. |
+| Vendor Homebrew tap | Signed dev.12 qualification prerelease; unsupported and based on older contracts. |
+| Official Homebrew | Pending. `brew install hostwright` is the launch goal and is not available yet. |
+
+Phase 15 covers compatibility, security, signed installation and recovery, live quickstarts, and release promotion. See the [GA readiness snapshot](docs/release/ga-readiness-2026-10-08.md) for remaining work and the [release plan](docs/roadmap/v0.0.2/IMPLEMENTATION_PLAN.md) for acceptance requirements.
 
 ## Requirements
 
@@ -14,16 +22,18 @@ See [compatibility](docs/reference/compatibility.md) for provider differences an
 
 ## Installation
 
-The vendor tap installs an unsupported qualification prerelease:
+### Unsupported qualification release
+
+The vendor tap installs the immutable dev.12 prerelease. It is available for evaluating the older release; it does not provide the current-source quickstart below.
 
 ```bash
 brew install hostwright/tap/hostwright
 hostwright --version
 ```
 
-The unqualified `brew install hostwright` command is not available. For package installation, upgrades, and removal, see [installation](docs/reference/install.md).
+Official distribution is being prepared as a Homebrew cask for the signed package and desktop app. Once accepted into Homebrew's official repository, it will provide the no-tap `brew install hostwright` command. Package qualification and upstream acceptance remain open; the vendor tap does not satisfy that requirement. See [Homebrew distribution](docs/reference/homebrew-distribution.md) and [installation, upgrades, and removal](docs/reference/install.md).
 
-To build from source:
+### Build current source
 
 ```bash
 git clone https://github.com/hostwright/hostwright.git
@@ -32,11 +42,11 @@ swift build --jobs 1
 swift run hostwright --version
 ```
 
-Source builds are useful for development. Runtime mutations require the signed CLI, daemon, and companion identities described in [daemon setup](docs/architecture/daemon.md).
+Source builds can run local help/version commands and development tests. Authenticated commands—including `validate`, planning, `capabilities`, and `doctor`—require the CLI and daemon from the same signed installation, bootstrapped local identities, and a running daemon. See [daemon setup](docs/architecture/daemon.md). A source build alone is not an installed release.
 
 ## Quick start
 
-This quickstart requires a signed candidate built from current source, using Manifest v3. The public tap currently installs dev.12, which uses older contracts and cannot run these commands. Candidate installation is part of the [release process](docs/release/RELEASE_PROCESS.md).
+This quickstart targets Manifest v3 and requires a signed candidate built from current source. The public dev.12 tap release uses older contracts and cannot run these commands. Current-candidate live qualification is still pending; the commands below are not a claim of completed GA validation. Candidate installation is part of the [release process](docs/release/RELEASE_PROCESS.md).
 
 Start Apple `container` and save this file as `hostwright.yaml`:
 

@@ -1,6 +1,6 @@
 # Security And Safety Notes
 
-Hostwright `0.0.2-rc.6` is in candidate preparation. RC and final `v0.0.2` acceptance remain pending; earlier development evidence does not qualify these bytes.
+Hostwright `0.0.2-rc.7` is in candidate preparation. RC and final `v0.0.2` acceptance remain pending; earlier development evidence does not qualify these bytes.
 
 The accepted release scope is one Apple silicon Mac, explicit local workload lifecycle, CPU/memory admission, narrow Compose import, and the desktop console. Multi-Mac, Kubernetes, Docker-client compatibility, Homebrew-core, and team/MDM/cloud claims are deferred under [ADR 0015](../design/adr-0015-reduced-local-release.md). The exact implemented capabilities are emitted by `hostwright capabilities --json`; support requires passing conformance and release evidence for the declared provider/version cell.
 
@@ -146,7 +146,7 @@ The trusted path requires exact non-ambiguous Developer ID Application and Insta
 
 The protected release workflow separates build/sign, attestation, and publication. Repository code runs with read-only contents permission and no OIDC or publication authority. A GitHub-hosted no-checkout job receives only OIDC/attestation authority for the retained signed files. Only the final no-checkout publication job receives contents write permission. Actions are commit-pinned, tags are immutable, published bytes are downloaded and compared, GitHub attestations are verified, and a failure after tag creation removes the release/tag.
 
-Current public Hostwright releases nevertheless remain source-only. Local unsigned artifacts are non-publishable, and no trusted artifact is called supported until real Developer ID identities, notarization, Gatekeeper, signed `.pkg`, system lifecycle, vendor-tap publication/install, and clean-Mac evidence pass. No usable identities or release variables are configured on the reviewed machine/repository. The vendor-tap repository exists, but it has no qualified formula until immutable signed public artifacts are available.
+Immutable dev.11/dev.12 releases provide signed/notarized archives and packages; the vendor tap installs dev.12 as an unsupported qualification prerelease. Current RC and final-version bytes require their own signing, Gatekeeper, full lifecycle, and protected acceptance evidence. Local unsigned artifacts cannot satisfy those gates.
 
 ## Control Surface Boundary
 

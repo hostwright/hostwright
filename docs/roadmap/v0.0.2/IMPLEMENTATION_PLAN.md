@@ -1,7 +1,7 @@
 # Hostwright v0.0.2 Local Release Plan
 
 The active release target is `v0.0.2`: a reliable single-Mac CLI, native desktop app,
-and narrow Compose conversion workflow. The current source prepares `0.0.2-rc.6`; RC and GA publication
+and narrow Compose conversion workflow. The current source prepares `0.0.2-rc.7`; RC and GA publication
 remain gated on exact-source and artifact qualification. Scope decision: [ADR 0015](../../design/adr-0015-reduced-local-release.md).
 
 The ledger preserves one master issue, 15 phase epics, and 167 child workstreams.

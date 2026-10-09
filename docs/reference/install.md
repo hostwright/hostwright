@@ -1,6 +1,6 @@
 # Install and Upgrade
 
-Status: source candidate preparation (`0.0.2-rc.7`) and the Hostwright-controlled unsupported dev.12 qualification channel are available. The `v0.0.2` release is not GA or production ready.
+Status: source candidate preparation (`0.0.2-rc.8`) and the Hostwright-controlled unsupported dev.12 qualification channel are available. The `v0.0.2` release is not GA or production ready.
 
 ## Package Manager Truth
 

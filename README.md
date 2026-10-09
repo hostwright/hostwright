@@ -2,11 +2,11 @@
 
 Hostwright manages Apple container workloads on one Apple silicon Mac. Declare services in a YAML manifest, review a plan, and confirm it through the CLI or native desktop app. Hostwright tracks resource ownership and operations in a local SQLite database.
 
-**Release status:** `0.0.2-rc.7` failed qualification. Corrections are being verified before the next candidate for `v0.0.2`. No supported RC or GA channel has been published. The launch requires qualified signed artifacts and official Homebrew acceptance; a GA date is not confirmed.
+**Release status:** `0.0.2-rc.8` is in preparation with the reviewed compiler and qualification corrections. The rejected RC.7 remains recorded; RC.8 requires fresh qualification before the `v0.0.2` release. No supported RC or GA channel has been published. The launch requires qualified signed artifacts and official Homebrew acceptance; a GA date is not confirmed.
 
 | Channel | Current availability |
 | --- | --- |
-| Current source | Post-RC.7 corrections, with Manifest v3, Control API 2.2, Runtime Provider API v2, and SQLite schema v24. |
+| Current source | RC.8 preparation, with Manifest v3, Control API 2.2, Runtime Provider API v2, and SQLite schema v24. |
 | Vendor Homebrew tap | Signed dev.12 qualification prerelease; unsupported and based on older contracts. |
 | Official Homebrew | Pending. `brew install hostwright` is the launch goal and is not available yet. |
 

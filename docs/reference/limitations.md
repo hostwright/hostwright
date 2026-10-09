@@ -1,6 +1,6 @@
 # Limitations
 
-Hostwright targets one Apple silicon Mac running macOS 26. The `0.0.2-rc.7` candidate CLI, desktop, and Compose-import features remain under release qualification. Use the [compatibility matrix](compatibility.md) and `hostwright capabilities --json` to check a particular build.
+Hostwright targets one Apple silicon Mac running macOS 26. The `0.0.2-rc.8` candidate CLI, desktop, and Compose-import features remain under release qualification. Use the [compatibility matrix](compatibility.md) and `hostwright capabilities --json` to check a particular build.
 
 ## Release scope
 

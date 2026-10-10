@@ -830,6 +830,7 @@ public struct DistributionCleanBuilder: Sendable {
         let prefixMap = "\(scratch.path)=/hostwright-build"
         return [
             "build",
+            "--build-system", "native",
             "--package-path", sourceRoot.path,
             "--scratch-path", scratch.path,
             "-c", "release",

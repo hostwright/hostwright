@@ -461,6 +461,7 @@ final class TrustedReleaseTests: XCTestCase {
             productArguments,
             [
                 "build",
+                "--build-system", "native",
                 "--package-path", source.path,
                 "--scratch-path", scratch.path,
                 "-c", "release",
@@ -630,7 +631,7 @@ final class TrustedReleaseTests: XCTestCase {
         )
         XCTAssertEqual(
             command,
-            "SWIFT_DETERMINISTIC_HASHING=1 /usr/bin/swift build " +
+            "SWIFT_DETERMINISTIC_HASHING=1 /usr/bin/swift build --build-system native " +
                 "--package-path '/private/tmp/source with space' " +
                 "--scratch-path '/private/tmp/scratch with space' -c release " +
                 "--jobs 1 -debug-info-format none -Xlinker -reproducible " +

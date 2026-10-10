@@ -101,7 +101,7 @@ jobs:
             /usr/bin/env -i LANG=C LC_ALL=C PATH=/usr/bin:/bin:/usr/sbin:/sbin \
               HOME="$current_user_home" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
               GIT_PAGER=cat GIT_TERMINAL_PROMPT=0 PAGER=cat TERM=dumb \
-              SWIFT_DETERMINISTIC_HASHING=1 /usr/bin/swift build \
+              SWIFT_DETERMINISTIC_HASHING=1 /usr/bin/swift build --build-system native \
             --package-path "$source_root" --scratch-path "$scratch" \
             -c release --jobs 1 -debug-info-format none \
             -Xlinker -reproducible \

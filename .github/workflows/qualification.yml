@@ -1,10 +1,10 @@
-name: Qualification tests
+name: Native release builder regression
 
 on:
   workflow_dispatch:
     inputs:
       source_commit:
-        description: Exact merged source commit (empty uses the workflow commit)
+        description: Exact reviewed PR380 source commit
         required: false
         type: string
       runner:
@@ -51,7 +51,9 @@ jobs:
           test "$(git rev-parse HEAD)" = "$QUALIFICATION_COMMIT"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
           git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
-          git merge-base --is-ancestor "$QUALIFICATION_COMMIT" origin/main
+          test "$QUALIFICATION_COMMIT" = d0fd985234fea96534201595de179f764db157ee || exit 1
+          test "$(git rev-parse HEAD^)" = 10484084cb9f01e42a6078c2cb1449a560f7d580 || exit 1
+          git merge-base --is-ancestor 10484084cb9f01e42a6078c2cb1449a560f7d580 origin/main
           mkdir -p "$HOSTWRIGHT_TEST_RESULTS_DIR"
           python3 - <<'PY'
           import json, os, pathlib, subprocess
@@ -74,6 +76,7 @@ jobs:
               'swift': output('swift', '--version'),
               'homebrew': output('brew', '--version'),
               'qualificationAccepted': False,
+              'preMergeRegressionOnly': True,
               'homebrewInstallQualified': False,
           }
           path = pathlib.Path(os.environ['HOSTWRIGHT_TEST_RESULTS_DIR']) / 'environment.json'
@@ -89,38 +92,15 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$HOSTWRIGHT_TEST_RESULTS_DIR"
-          # Diagnostic branch only: retain the failing clean-builder subprocess output.
-          test "$QUALIFICATION_COMMIT" = 10484084cb9f01e42a6078c2cb1449a560f7d580
-          scratch="$RUNNER_TEMP/hostwright-dist-clean-scratch-diagnostic"
-          test ! -e "$scratch"
-          prefix_map="$scratch=/hostwright-build"
-          source_root="$PWD"
-          current_user_home="$(/usr/bin/swift -e 'import Foundation; print(FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path)')"
-          (
-            cd /
-            /usr/bin/env -i LANG=C LC_ALL=C PATH=/usr/bin:/bin:/usr/sbin:/sbin \
-              HOME="$current_user_home" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
-              GIT_PAGER=cat GIT_TERMINAL_PROMPT=0 PAGER=cat TERM=dumb \
-              SWIFT_DETERMINISTIC_HASHING=1 /usr/bin/swift build --build-system native \
-            --package-path "$source_root" --scratch-path "$scratch" \
-            -c release --jobs 1 -debug-info-format none \
-            -Xlinker -reproducible \
-            -Xswiftc -num-threads -Xswiftc 1 \
-            -Xswiftc -no-whole-module-optimization -Xswiftc -disable-cmo \
-            -Xswiftc -file-prefix-map -Xswiftc "$prefix_map" \
-            -Xcc "-ffile-prefix-map=$prefix_map" \
-            -Xcc "-fmacro-prefix-map=$prefix_map" \
-            -Xcxx "-ffile-prefix-map=$prefix_map" \
-            -Xcxx "-fmacro-prefix-map=$prefix_map" \
-            --product hostwright
-          ) 2>&1 | tee "$HOSTWRIGHT_TEST_RESULTS_DIR/clean-release-build.log"
+          scripts/test.sh qualification "$HOSTWRIGHT_TEST_SHARD" 2>&1 \
+            | tee "$HOSTWRIGHT_TEST_RESULTS_DIR/qualification.log"
           test "$(git rev-parse HEAD)" = "$QUALIFICATION_COMMIT"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
       - name: Retain qualification logs and results
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: diagnostic-clean-release-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: regression-native-release-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/hostwright-test-results
           retention-days: 7
           if-no-files-found: warn

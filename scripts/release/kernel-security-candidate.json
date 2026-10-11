@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "version": "6.18.55",
+  "commit": "725bd2f3c81d54edccb66fead01d4c0c222e2231",
+  "downloads": [
+    {
+      "name": "linux-6.18.55.tar.xz",
+      "url": "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.55.tar.xz",
+      "sha256": "f410638061a165c12f42ab871d2f3fcd525515359b5faeee80969cff84524df9",
+      "sizeBytes": 154779312
+    },
+    {
+      "name": "linux-6.18.55.tar.sign",
+      "url": "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.55.tar.sign",
+      "sha256": "aa93b6e27580a1c9abb15fe97c4bbe9d0b5f997c92a0b7682e9dae7654494cda",
+      "sizeBytes": 991
+    }
+  ],
+  "publicKeySHA256": "d3494056bb1a9726366499d790dfd44555d9f6e354cd4549143bf9c0b7ccb99c",
+  "seedConfig": "ThirdPartyLicenses/runtime-build-recipes/kernel-actual-config-6.18.15-186",
+  "seedConfigSHA256": "e9b8e2498a2075ed1488863f49696217bdb79c737f17cdf54182f1c3a512ad27",
+  "patches": [
+    {
+      "path": "scripts/release/patches/kernel-security/0001-conntrack-expectation-lifetime.patch",
+      "sha256": "0f623a1cd2d3c46d190070dbc33ab41dd5168b976f9847dde88da102623ecb8d",
+      "stableCommit": "7ec786f4230c2a9b2eaf97a2d45368933b49d2b2",
+      "adaptation": "Preserve master_help warning; fold helper-pointer signature and call adjustment into the complete nine-file correction."
+    },
+    {
+      "path": "scripts/release/patches/kernel-security/0002-bpf-backtracking-frame.patch",
+      "sha256": "1b433bcf7b94bae73f677fc95a737d3d2f140d8652a9ac63728b48dbc6b29c64",
+      "stableCommit": "671b7b9a660ef15b25faa3df161205b9dc8d1eb2",
+      "adaptation": "target path changed to verifier.c"
+    }
+  ],
+  "requiredDisabled": [
+    "CONFIG_ATA",
+    "CONFIG_CIFS",
+    "CONFIG_DRM",
+    "CONFIG_SCSI_FC_ATTRS",
+    "CONFIG_BT",
+    "CONFIG_INFINIBAND"
+  ],
+  "requiredEnabled": [
+    "CONFIG_INET",
+    "CONFIG_IPV6",
+    "CONFIG_BPF_SYSCALL",
+    "CONFIG_NETFILTER",
+    "CONFIG_NF_CONNTRACK",
+    "CONFIG_NFT_CT",
+    "CONFIG_VIRTIO",
+    "CONFIG_VIRTIO_NET",
+    "CONFIG_VSOCKETS"
+  ],
+  "excludedObjectDirectories": [
+    "drivers/ata/",
+    "fs/smb/client/",
+    "drivers/gpu/drm/",
+    "drivers/scsi/qla2xxx/",
+    "net/bluetooth/",
+    "drivers/bluetooth/",
+    "drivers/infiniband/"
+  ],
+  "scope": "Candidate builds only; shipping pins and release acceptance are unchanged.",
+  "sourceChecks": {
+    "fs/dax.c": "54ecbd2961f1f8e1c8d51ff9df43414350f68410389fa0f72d6ae34b1f5faeee"
+  },
+  "upstreamDAXFix": "The authenticated 6.18.55 fs/dax.c already contains the zero/empty-entry checks before folio conversion from the previous downstream patch."
+}

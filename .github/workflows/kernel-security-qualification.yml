@@ -1,0 +1,74 @@
+name: Kernel security remediation
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/kernel-security-qualification.yml'
+      - 'scripts/release/qualify-kernel-candidate.py'
+      - 'scripts/release/compare-kernel-candidates.py'
+      - 'scripts/release/test-kernel-candidate.py'
+      - 'scripts/release/kernel-security-candidate.json'
+      - 'scripts/release/patches/kernel-security/**'
+      - 'scripts/release/verify-kernel-source-signature.py'
+      - 'scripts/release/keys/gregkh-pinned-public-key.asc'
+      - 'ThirdPartyLicenses/runtime-build-recipes/kernel-actual-config-6.18.15-186'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Kernel rebuild ${{ matrix.pass }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        pass: [first, second]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Install kernel build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential flex bison libelf-dev libssl-dev bc gnupg
+      - name: Verify candidate evidence guards
+        run: python3 scripts/release/test-kernel-candidate.py
+      - name: Build the authenticated patched candidate
+        run: |
+          python3 scripts/release/qualify-kernel-candidate.py \
+            --work "$RUNNER_TEMP/kernel-security-work" \
+            --output "$RUNNER_TEMP/kernel-security-result"
+      - name: Preserve result and raw failure logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kernel-security-${{ matrix.pass }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/kernel-security-result/
+          retention-days: 30
+          if-no-files-found: error
+  compare:
+    name: Compare independent kernel rebuilds
+    needs: build
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: kernel-security-*-${{ github.run_id }}-${{ github.run_attempt }}
+          path: kernels
+      - name: Require identical images and configurations
+        env:
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          SOURCE_COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          first="kernels/kernel-security-first-$RUN_ID-$RUN_ATTEMPT"
+          second="kernels/kernel-security-second-$RUN_ID-$RUN_ATTEMPT"
+          python3 scripts/release/compare-kernel-candidates.py \
+            --first "$first" --second "$second" --source-commit "$SOURCE_COMMIT"

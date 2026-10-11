@@ -3,6 +3,10 @@
 import argparse,hashlib,json,lzma,os,pathlib,re,stat,subprocess,sys,tempfile
 FINGERPRINT='647F28654894E3BD457199BE38DBBDC86092693E'
 ARCHIVE_SHA='7c716216c3c4134ed0de69195701e677577bbcdd3979f331c182acd06bf2f170'
+SOURCE_PINS={
+ '6.18.15':ARCHIVE_SHA,
+ '6.18.55':'f410638061a165c12f42ab871d2f3fcd525515359b5faeee80969cff84524df9',
+}
 def sha(path):
  h=hashlib.sha256()
  with path.open('rb') as stream:
@@ -35,13 +39,14 @@ def trusted_executable(path,expected_sha256=None):
  if expected_sha256 is not None and sha(resolved)!=expected_sha256:raise ValueError('GPG executable differs from the exact toolchain pin')
  return str(resolved)
 def main():
- p=argparse.ArgumentParser();p.add_argument('--inputs',type=pathlib.Path,required=True);p.add_argument('--output',type=pathlib.Path,required=True);p.add_argument('--gpg');p.add_argument('--gpg-sha256');a=p.parse_args()
+ p=argparse.ArgumentParser();p.add_argument('--inputs',type=pathlib.Path,required=True);p.add_argument('--output',type=pathlib.Path,required=True);p.add_argument('--gpg');p.add_argument('--gpg-sha256');p.add_argument('--kernel-version',choices=sorted(SOURCE_PINS),default='6.18.15');a=p.parse_args()
  if (a.gpg is None)!=(a.gpg_sha256 is None):raise ValueError('GPG path and SHA256 must be supplied together')
  a.gpg=trusted_executable(select_executable(sys.platform,a.gpg),a.gpg_sha256)
- source=a.inputs/'linux-6.18.15.tar.xz';signature=a.inputs/'linux-6.18.15.tar.sign';key=a.inputs/'gregkh-pinned-public-key.asc'
+ archive_sha=SOURCE_PINS[a.kernel_version]
+ source=a.inputs/('linux-'+a.kernel_version+'.tar.xz');signature=a.inputs/('linux-'+a.kernel_version+'.tar.sign');key=a.inputs/'gregkh-pinned-public-key.asc'
  for f in [source,signature,key]:
   if f.is_symlink() or not f.is_file():raise ValueError('unsafe signature input')
- if sha(source)!=ARCHIVE_SHA:raise ValueError('kernel source checksum differs from qualified source pin')
+ if sha(source)!=archive_sha:raise ValueError('kernel source checksum differs from qualified source pin')
  if a.output.exists():raise ValueError('signature receipt output already exists')
  with tempfile.TemporaryDirectory(prefix='hw-gpg-',dir='/tmp') as home:
   subprocess.run([a.gpg,'--batch','--no-autostart','--homedir',home,'--import',str(key)],check=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
@@ -55,7 +60,7 @@ def main():
    except BaseException:
     process.kill();process.wait();raise
   valid_status(status,code)
-  receipt=dict(kind='hostwright.kernel-source-signature.v1',archiveSHA256=ARCHIVE_SHA,signatureSHA256=sha(signature),publicKeySHA256=sha(key),fingerprint=FINGERPRINT,signatureVerified=True,status=status,diagnostics=diagnostics,exitStatus=code,identitySource='https://www.kernel.org/signature.html',verificationExecutable=a.gpg,verificationExecutableSHA256=sha(pathlib.Path(a.gpg)))
+  receipt=dict(kind='hostwright.kernel-source-signature.v1',archiveSHA256=archive_sha,signatureSHA256=sha(signature),publicKeySHA256=sha(key),fingerprint=FINGERPRINT,signatureVerified=True,status=status,diagnostics=diagnostics,exitStatus=code,identitySource='https://www.kernel.org/signature.html',verificationExecutable=a.gpg,verificationExecutableSHA256=sha(pathlib.Path(a.gpg)))
   with a.output.open('x') as output:output.write(json.dumps(receipt,sort_keys=True,separators=(',',':'))+'\n')
   print(json.dumps(dict(signatureVerified=True,fingerprint=FINGERPRINT,receipt=str(a.output)),sort_keys=True))
 if __name__=='__main__':main()

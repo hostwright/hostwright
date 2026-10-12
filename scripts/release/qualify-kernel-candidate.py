@@ -40,6 +40,25 @@ def check_objects(objects, profile):
             raise ValueError(f'Excluded kernel subsystem produced an object: {name}')
 
 
+def source_data_filter(member, destination):
+    filtered = tarfile.data_filter(member, destination)
+    if member.issym():
+        # Git authenticates the literal link target, including redundant './'.
+        target = (Path(destination) / member.name).parent / member.linkname
+        if not target.resolve().is_relative_to(Path(destination).resolve()):
+            raise tarfile.LinkOutsideDestinationError(member, str(target))
+        filtered = filtered.replace(linkname=member.linkname)
+    return filtered
+
+
+def extract_source(source_archive, destination, prefix):
+    with tarfile.open(source_archive, 'r:xz') as archive:
+        for member in archive:
+            if member.name != prefix and not member.name.startswith(prefix + '/'):
+                raise ValueError('Kernel source member escapes version root')
+        archive.extractall(destination, filter=source_data_filter)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--output', type=Path, required=True)
@@ -97,11 +116,7 @@ def main():
     prefix = 'linux-' + profile['version']
     run('patch-source-contract', [sys.executable, str(ROOT / 'scripts/release/test-kernel-patch-replay.py'),
                                  '--source-archive', str(inputs / (prefix + '.tar.xz'))])
-    with tarfile.open(inputs / (prefix + '.tar.xz'), 'r:xz') as archive:
-        for member in archive:
-            if member.name != prefix and not member.name.startswith(prefix + '/'):
-                raise ValueError('Kernel source member escapes version root')
-        archive.extractall(args.work, filter='data')
+    extract_source(inputs / (prefix + '.tar.xz'), args.work, prefix)
     tree = args.work / prefix
     for name, expected in profile['sourceChecks'].items():
         if sha(tree / name) != expected:

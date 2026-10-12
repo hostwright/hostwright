@@ -8,6 +8,7 @@ on:
       - 'scripts/release/compare-kernel-candidates.py'
       - 'scripts/release/test-kernel-candidate.py'
       - 'scripts/release/test-kernel-patch-replay.py'
+      - 'scripts/release/test-kernel-source-extraction.py'
       - 'scripts/release/verify-runtime-provenance.py'
       - 'scripts/release/kernel-security-candidate.json'
       - 'scripts/release/patches/kernel-security/**'
@@ -37,7 +38,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends build-essential flex bison libelf-dev libssl-dev bc gnupg
       - name: Verify candidate evidence guards
-        run: python3 scripts/release/test-kernel-candidate.py
+        run: |
+          python3 scripts/release/test-kernel-candidate.py
+          python3 scripts/release/test-kernel-source-extraction.py
       - name: Build the authenticated patched candidate
         run: |
           python3 scripts/release/qualify-kernel-candidate.py \

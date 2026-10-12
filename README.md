@@ -2,11 +2,11 @@
 
 Hostwright manages Apple container workloads on one Apple silicon Mac. Declare services in a YAML manifest, review a plan, and confirm it through the CLI or native desktop app. Hostwright tracks resource ownership and operations in a local SQLite database.
 
-**Release status:** `0.0.2-rc.9` is in preparation with an explicit native SwiftPM release build. RC.8 failed its macOS 27 distribution check; RC.9 requires fresh qualification before the `v0.0.2` release. No supported RC or GA channel has been published. The launch requires qualified signed artifacts and official Homebrew acceptance; a GA date is not confirmed.
+**Release status:** `0.0.2-rc.10` is in preparation with a rebuilt Linux 6.18.55 kernel and reviewed security backports. RC.9 was held by the kernel security review; RC.10 requires fresh source, runtime, and signed-artifact qualification before the `v0.0.2` release. No supported RC or GA channel has been published. The launch requires qualified signed artifacts and official Homebrew acceptance; a GA date is not confirmed.
 
 | Channel | Current availability |
 | --- | --- |
-| Current source | RC.9 preparation, with Manifest v3, Control API 2.2, Runtime Provider API v2, and SQLite schema v24. |
+| Current source | RC.10 preparation, with Manifest v3, Control API 2.2, Runtime Provider API v2, and SQLite schema v24. |
 | Vendor Homebrew tap | Signed dev.12 qualification prerelease; unsupported and based on older contracts. |
 | Official Homebrew | Pending. `brew install hostwright` is the launch goal and is not available yet. |
 
@@ -106,7 +106,7 @@ hostwright rm hostwright.yaml --dry-run --runtime-provider apple-cli
 hostwright rm hostwright.yaml --confirm-plan <rm-plan-hash> --runtime-provider apple-cli
 ```
 
-The [Compose import guide](docs/guides/stack-import.md) covers conversion of existing stack files. The [manifest reference](docs/reference/manifest.md) documents supported fields.
+The [Compose import guide](docs/guides/stack-import.md) covers conversion of existing stack files. The [desktop quickstart](docs/guides/desktop-quickstart.md) runs the service through the app's confirmed controls. The [manifest reference](docs/reference/manifest.md) documents supported fields.
 
 ## Commands and surfaces
 

@@ -105,7 +105,7 @@ class BoundaryTests(unittest.TestCase):
         self.receipt['memory'] = {'rssBudgetBytes': 1024*1024, 'processPaths': [str(self.tool)], 'processSHA256': {str(self.tool): q.sha(self.tool)}}
         self.receipt['soakSchedulingToleranceSeconds'] = 1
         marker = 'f'*32
-        self.manifest.write_text(json.dumps({'version': 3, 'project': 'qualification', 'services': {'web': {'command': ['serve', marker], 'ports': ['127.0.0.1:18080:8080'], 'probes': {k: {'http': {'port': 8080, 'path': '/'}} for k in ('startup', 'readiness', 'liveness')}}}}))
+        self.manifest.write_text(json.dumps({'version': 3, 'project': 'qualification', 'services': {'web': {'command': ['serve', marker], 'ports': [{'bind': '127.0.0.1', 'host': 18080, 'target': 8080, 'protocol': 'tcp'}], 'probes': {k: {'http': {'port': 8080, 'path': '/'}} for k in ('startup', 'readiness', 'liveness')}}}}))
         self.args.manifest_sha256 = q.sha(self.manifest); self.args.health_url = 'http://127.0.0.1:18080/'
         self.receipt['health'] = {'manifestSHA256': q.sha(self.manifest), 'service': 'web', 'marker': marker, 'hostPort': 18080, 'containerPort': 8080, 'bodySHA256': hashlib.sha256(marker.encode()).hexdigest()}
         self.write_receipt()
@@ -261,6 +261,20 @@ class BoundaryTests(unittest.TestCase):
     def test_wrong_manifest_owned_port_is_rejected(self):
         self.receipt['health']['hostPort'] = 18081
         with self.assertRaisesRegex(q.Rejected, 'publication'): q.validate_health_manifest(self.args, self.receipt)
+
+    def test_health_uses_supported_structured_loopback_publication(self):
+        self.assertEqual(q.validate_health_manifest(self.args, self.receipt), self.receipt['health'])
+        manifest = json.loads(self.manifest.read_text())
+        valid = manifest['services']['web']['ports'][0]
+        for publication in ('127.0.0.1:18080:8080', {**valid, 'bind': '0.0.0.0'},
+                            {**valid, 'target': 8081}, {**valid, 'protocol': 'udp'}):
+            with self.subTest(publication=publication):
+                manifest['services']['web']['ports'] = [publication]
+                self.manifest.write_text(json.dumps(manifest))
+                self.args.manifest_sha256 = q.sha(self.manifest)
+                self.receipt['health']['manifestSHA256'] = self.args.manifest_sha256
+                with self.assertRaisesRegex(q.Rejected, 'publication'):
+                    q.validate_health_manifest(self.args, self.receipt)
 
     def test_memory_missing_scope_or_over_budget_rejected(self):
         raw = '100 1 1024 Sun Sep 13 12:00:00 2026 /daemon\n101 1 1024 Sun Sep 13 12:00:00 2026 /runtime\n'

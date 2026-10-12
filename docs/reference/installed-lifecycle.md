@@ -1,6 +1,6 @@
 # Installed Distribution Lifecycle
 
-Status: implemented for an explicit local install prefix and a verifier-produced trusted, developer, or staged Apple Installer artifact. Historical development artifacts retain their original signing, publication, and clean-Mac evidence. The current `0.0.2-rc.9` candidate still requires its complete signed VM lifecycle and protected qualification acceptance. Published development channels remain unsupported; no supported RC or `v0.0.2` GA has been published.
+Status: implemented for an explicit local install prefix and a verifier-produced trusted, developer, or staged Apple Installer artifact. Historical development artifacts retain their original signing, publication, and clean-Mac evidence. The current `0.0.2-rc.10` candidate still requires its complete signed VM lifecycle and protected qualification acceptance. Published development channels remain unsupported; no supported RC or `v0.0.2` GA has been published.
 
 ## Boundary
 
@@ -29,6 +29,9 @@ standard `/usr/local` package installation, launch it with
 executable, Info.plist, and code-resource seal are exact manifest-owned files,
 so upgrade, rollback, repair, and uninstall apply the same modification and
 unmanaged-file safeguards as the CLI payload.
+
+Follow the [desktop quickstart](../guides/desktop-quickstart.md) for identity
+bootstrap, manifest selection, confirmed Start/Stop actions, logs and cleanup.
 
 ## Artifact Sources
 

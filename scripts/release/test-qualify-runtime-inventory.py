@@ -113,6 +113,19 @@ class RuntimeInventoryQualificationTests(unittest.TestCase):
         self.assertIn("kernel.tar.gz#sha256=" + "b" * 64 + "&sizeBytes=300", pinned_ref)
         self.assertNotIn("manifest.json", host_ref + pinned_ref)
 
+    def test_kernel_references_bind_current_source_and_recipe_without_checkout_commit(self):
+        kernel_commit = "725bd2f3c81d54edccb66fead01d4c0c222e2231"
+        recipe_revision = Q.V.git_object("blob", b"exact reviewed recipe\n")
+        refs = Q.kernel_source_references(kernel_commit, recipe_revision)
+        self.assertEqual(refs[0], "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.55.tar.xz")
+        self.assertTrue(refs[1].endswith("?id=" + kernel_commit))
+        self.assertEqual(refs[2], "git-blob:hostwright:" + recipe_revision + ":" + Q.KERNEL_RECIPE_PATH)
+        self.assertNotIn("6.18.15", "\n".join(refs))
+        self.assertNotIn("kata-containers", "\n".join(refs))
+        for kernel, recipe in [("bad", recipe_revision), (kernel_commit, "bad")]:
+            with self.assertRaisesRegex(ValueError, "invalid kernel source or recipe revision"):
+                Q.kernel_source_references(kernel, recipe)
+
     def test_qualified_loader_build_settings_require_authenticated_target(self):
         def loader(lines):
             def string(data):
@@ -165,6 +178,42 @@ class RuntimeInventoryQualificationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "differs from its indexed bytes"):
             Q.remove_generated_runtime_documents(tampered, rebuilt_records)
 
+    def test_kernel_configuration_migration_preserves_other_notices_and_is_idempotent(self):
+        original = bytearray(b"host notices\n")
+        records = []
+        Q.add_document(original, records, "runtime-kernel-config", Q.PREVIOUS_CONFIG_DOC_PATH,
+                       b"CONFIG_ARM64=y\n", ["old-configuration"])
+        Q.add_document(original, records, "runtime-license", "other/LICENSE", b"preserved license\n", ["other"])
+        before = bytes(original)
+        updated_config = b"CONFIG_ARM64=y\nCONFIG_IPV6=y\n"
+        result = Q.replace_kernel_configuration(original, records, updated_config, "a" * 64)
+        self.assertEqual(bytes(original), before)
+        self.assertNotIn(Q.PREVIOUS_CONFIG_DOC_PATH.encode(), result)
+        self.assertIn(Q.CONFIG_DOC_PATH.encode(), result)
+        self.assertEqual(records[0]["sourcePath"], Q.CONFIG_DOC_PATH)
+        for record in records:
+            data = result[record["offsetBytes"]:record["offsetBytes"] + record["sizeBytes"]]
+            self.assertEqual(Q.sha(data), record["sha256"])
+        other = records[1]
+        self.assertEqual(result[other["offsetBytes"]:other["offsetBytes"] + other["sizeBytes"]],
+                         b"preserved license\n")
+        self.assertEqual(Q.replace_kernel_configuration(result, records, updated_config, "a" * 64), result)
+
+    def test_kernel_configuration_migration_rejects_ambiguous_or_corrupt_records(self):
+        for corruption in ("header", "contents", "duplicate"):
+            notices = bytearray(b"host notices\n")
+            records = []
+            Q.add_document(notices, records, "runtime-kernel-config", Q.PREVIOUS_CONFIG_DOC_PATH,
+                           b"CONFIG_ARM64=y\n", ["old-configuration"])
+            if corruption == "duplicate":
+                Q.add_document(notices, records, "runtime-kernel-config", Q.CONFIG_DOC_PATH,
+                               b"CONFIG_ARM64=y\n", ["current-configuration"])
+            else:
+                offset = records[0]["offsetBytes"] - 3 if corruption == "header" else records[0]["offsetBytes"]
+                notices[offset] ^= 1
+            with self.subTest(corruption=corruption), self.assertRaises(ValueError):
+                Q.replace_kernel_configuration(notices, records, b"CONFIG_ARM64=y\n", "a" * 64)
+
     def test_committed_inventory_and_public_outputs_must_match_fresh_proof(self):
         source = self.root / "source"
         source.mkdir()
@@ -176,7 +225,7 @@ class RuntimeInventoryQualificationTests(unittest.TestCase):
             "THIRD_PARTY_NOTICES": b"qualified notices\n",
             "third-party-license-inventory.json": b"qualified dependency inventory\n",
             "ThirdPartyLicenses/runtime-build-recipes/source-documents.json": b"qualified source docs\n",
-            "ThirdPartyLicenses/runtime-build-recipes/kernel-actual-config-6.18.15-186": b"CONFIG_ARM64=y\n",
+            "ThirdPartyLicenses/runtime-build-recipes/kernel-actual-config-6.18.55-186": b"CONFIG_ARM64=y\n",
         }
         committed = Q.V.parse(generated["runtime-license-inventory.json"])
         committed["retainedLoaderSourceRevision"] = historical
@@ -185,7 +234,7 @@ class RuntimeInventoryQualificationTests(unittest.TestCase):
             "THIRD_PARTY_NOTICES",
             "third-party-license-inventory.json",
             "ThirdPartyLicenses/runtime-build-recipes/source-documents.json",
-            "ThirdPartyLicenses/runtime-build-recipes/kernel-actual-config-6.18.15-186",
+            "ThirdPartyLicenses/runtime-build-recipes/kernel-actual-config-6.18.55-186",
         ):
             path = source / relative
             path.parent.mkdir(parents=True, exist_ok=True)

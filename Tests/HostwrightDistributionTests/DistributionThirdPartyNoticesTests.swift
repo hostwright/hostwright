@@ -104,6 +104,30 @@ final class DistributionThirdPartyNoticesTests: XCTestCase {
             paths: Set(DistributionLayout.legacyPayloadModesV4.keys)))
     }
 
+    func testKernelRecipeMetadataSurvivesPackagingAndRejectsChangedSource() throws {
+        let runtimeData = try DistributionThirdPartyNotices.read(root().appendingPathComponent("runtime-license-inventory.json"))
+        let runtime = try DistributionThirdPartyNotices.decode(RuntimeLicenseInventory.self, data: runtimeData)
+        XCTAssertEqual(try DistributionThirdPartyNotices.encode(runtime), runtimeData)
+        XCTAssertEqual(runtime.kernelSourceEvidence.recipePath, "scripts/release/qualify-kernel-candidate.py")
+        XCTAssertEqual(runtime.kernelSourceEvidence.recipeRevisionKind, "git-blob-sha1")
+        XCTAssertNoThrow(try DistributionThirdPartyNotices.validateKernelRecipe(root: root(), evidence: runtime.kernelSourceEvidence))
+        try withTemporaryRoot { temporary in
+            let recipe = temporary.appendingPathComponent(runtime.kernelSourceEvidence.recipePath)
+            try FileManager.default.createDirectory(at: recipe.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data("changed recipe\n".utf8).write(to: recipe)
+            XCTAssertThrowsError(try DistributionThirdPartyNotices.validateKernelRecipe(root: temporary, evidence: runtime.kernelSourceEvidence))
+        }
+        var document = try XCTUnwrap(JSONSerialization.jsonObject(with: runtimeData) as? [String: Any])
+        var evidence = try XCTUnwrap(document["kernelSourceEvidence"] as? [String: Any])
+        for key in ["recipePath", "recipeRevisionKind"] {
+            let original = evidence.removeValue(forKey: key)
+            document["kernelSourceEvidence"] = evidence
+            let changed = try JSONSerialization.data(withJSONObject: document, options: [.sortedKeys, .withoutEscapingSlashes]) + Data("\n".utf8)
+            XCTAssertThrowsError(try DistributionThirdPartyNotices.decode(RuntimeLicenseInventory.self, data: changed))
+            evidence[key] = original
+        }
+    }
+
     private func withTemporaryRoot(_ body: (URL) throws -> Void) throws {
         let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(
             "hostwright-runtime-qualification-\(UUID().uuidString)", isDirectory: true)

@@ -346,7 +346,8 @@ def validate_health_manifest(args, binding):
     service = manifest['services'][health['service']]
     require(health['marker'] in json.dumps(service.get('command', [])), 'marker must be embedded in exact workload command')
     require(all(service.get('probes', {}).get(kind) for kind in ('startup', 'readiness', 'liveness')), 'all real workload probes required')
-    publication = f"127.0.0.1:{health['hostPort']}:{health['containerPort']}"
+    publication = {'bind': '127.0.0.1', 'host': health['hostPort'],
+                   'target': health['containerPort'], 'protocol': 'tcp'}
     require(publication in service.get('ports', []), 'health URL must match explicit manifest loopback publication')
     url = urllib.parse.urlsplit(args.health_url)
     require(url.hostname == '127.0.0.1' and url.port == health['hostPort'] and HEX.fullmatch(health['bodySHA256']), 'health URL/body binding mismatch')
@@ -422,7 +423,7 @@ def validate_sdk_inputs(args, binding, fresh=False):
     require(metadata['sha256'] == spec['configSHA256'], 'SDK config input changed')
     config = sdk.decode(raw)
     require(config.get('schema') == 1 and config.get('framework') == '0.35.0'
-            and config.get('initImageReference') == 'untagged@sha256:15a70c63c9ca254020d8bdbe1b6e48332db0629881f563624bfd319412a37ea3', 'SDK config framework/image reference mismatch')
+            and config.get('initImageReference') == 'untagged@' + SDK_INIT_VARIANT_DIGEST, 'SDK config framework/image reference mismatch')
     data = Path(config['dataRootPath'])
     state = Path(args.state_root)
     require(data.is_absolute() and data.resolve() == data and data.parent.is_dir() and data != state and state not in data.parents and data not in state.parents, 'unsafe/overlapping SDK data root')
@@ -436,8 +437,8 @@ def validate_sdk_inputs(args, binding, fresh=False):
     if fresh: require(not data.exists() and not data.is_symlink(), 'SDK data root must be fresh before seeding')
     require(spec.get('frameworkRevision') == '44bec8b9933bc491d0cbf44abac90a1f6aaebf6b', 'SDK source revision mismatch')
     for path, digest in spec['assetSHA256'].items(): bound(path, digest)
-    require(config['kernelPath'] in spec['assetSHA256'] and config['kernelSHA256'] == spec['assetSHA256'][config['kernelPath']] == '55f86b8394c1d46551836f5c1d3525cdc8d505aeb9bb630c608edb564674239d'
-            and Path(config['kernelPath']).stat().st_size == 16148992, 'SDK kernel not pinned byte bound')
+    require(config['kernelPath'] in spec['assetSHA256'] and config['kernelSHA256'] == spec['assetSHA256'][config['kernelPath']] == '18afc95bd6d478d928b30b3230486ce4f1628e86779463aacfd364e2535b513a'
+            and Path(config['kernelPath']).stat().st_size == 16216576, 'SDK kernel not pinned byte bound')
     require(not config.get('guestNetworkPolicyLoaderPath') and not config.get('guestNetworkPolicyLoaderSHA256'), 'qualification workload does not admit guest policy loader')
     init_digests = ('15a70c63c9ca254020d8bdbe1b6e48332db0629881f563624bfd319412a37ea3','7812fb606774f30d8b6d36c2a37a6e12ae719ece3fc34775f9b87ee94639e257','3c6b087fc41b30d44dac2951f0ee798b242fac8e00db9b6375e25ef48765418d')
     init_root = Path(config['initImageLayoutPath'])

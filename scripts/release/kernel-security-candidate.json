@@ -28,7 +28,7 @@
     },
     {
       "path": "scripts/release/patches/kernel-security/0002-bpf-backtracking-frame.patch",
-      "sha256": "1b433bcf7b94bae73f677fc95a737d3d2f140d8652a9ac63728b48dbc6b29c64",
+      "sha256": "c5b5d51fcfd49edd3d741898c5a188a1004c1e8197d7ce26fded6b2aa9138cb0",
       "stableCommit": "671b7b9a660ef15b25faa3df161205b9dc8d1eb2",
       "adaptation": "target path changed to verifier.c"
     }

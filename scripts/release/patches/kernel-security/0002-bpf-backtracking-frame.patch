@@ -2,7 +2,7 @@ diff --git a/kernel/bpf/verifier.c b/kernel/bpf/verifier.c
 index 2e4ae0ef08609..ac7341f003b02 100644
 --- a/kernel/bpf/verifier.c
 +++ b/kernel/bpf/verifier.c
-@@ -583,16 +583,29 @@ static int backtrack_insn(struct bpf_verifier_env *env, int idx, int subseq_idx,
+@@ -4554,16 +4554,29 @@ static int backtrack_insn(struct bpf_verifier_env *env, int idx, int subseq_idx,
  			  */
  		}
  	} else if (class == BPF_LD) {

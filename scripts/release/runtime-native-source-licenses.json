@@ -891,7 +891,7 @@
     }
   ],
   "kernel": {
-    "commit": "df0dc1b06fb6b6461f9838694bf84079eca7562a",
+    "commit": "725bd2f3c81d54edccb66fead01d4c0c222e2231",
     "destination": "source-trees/linux",
     "documents": [
       {

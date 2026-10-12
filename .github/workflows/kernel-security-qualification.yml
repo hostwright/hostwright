@@ -7,6 +7,8 @@ on:
       - 'scripts/release/qualify-kernel-candidate.py'
       - 'scripts/release/compare-kernel-candidates.py'
       - 'scripts/release/test-kernel-candidate.py'
+      - 'scripts/release/test-kernel-patch-replay.py'
+      - 'scripts/release/verify-runtime-provenance.py'
       - 'scripts/release/kernel-security-candidate.json'
       - 'scripts/release/patches/kernel-security/**'
       - 'scripts/release/verify-kernel-source-signature.py'

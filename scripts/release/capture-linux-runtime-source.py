@@ -10,9 +10,9 @@ import tarfile
 import tempfile
 
 
-COMMIT = "df0dc1b06fb6b6461f9838694bf84079eca7562a"
-ARCHIVE_SHA256 = "7c716216c3c4134ed0de69195701e677577bbcdd3979f331c182acd06bf2f170"
-ARCHIVE_PREFIX = "linux-6.18.15"
+COMMIT = "725bd2f3c81d54edccb66fead01d4c0c222e2231"
+ARCHIVE_SHA256 = "f410638061a165c12f42ab871d2f3fcd525515359b5faeee80969cff84524df9"
+ARCHIVE_PREFIX = "linux-6.18.55"
 SPEC = importlib.util.spec_from_file_location("runtime_source_capture", Path(__file__).with_name("capture-runtime-source.py"))
 SOURCE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(SOURCE)

@@ -50,7 +50,14 @@ closure. The guest OCI layout contains a direct image manifest. Its descriptor,
 configuration and layer are locked to rebuilt bytes; it is not the previously
 published GHCR image.
 
-Dispatch `runtime-ingredients.yml` on the reviewed `main` commit. A successful
+When changing native runtime inputs, first dispatch `runtime-ingredients.yml` on
+the reviewed `main` commit with `ingredients_only=true`. This retains attested
+native and loader ingredients for the pin review and skips final bundle assembly.
+Verify their actual bytes, source and patch inventories, then update the committed
+runtime pins and notices. This preparation run is not release qualification.
+
+For release qualification, dispatch `runtime-ingredients.yml` on the reviewed
+`main` commit with `ingredients_only=false` (the default). A successful
 loader-only push run is insufficient. The manual run must complete SDK evidence
 selection, native runtime, loader and final provenance jobs. The SDK may come from
 a new compilation or an authenticated retained producer. The final artifact is

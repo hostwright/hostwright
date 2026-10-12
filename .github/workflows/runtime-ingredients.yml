@@ -5,6 +5,11 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
+      ingredients_only:
+        description: Retain attested ingredients for review before updating committed runtime pins
+        required: false
+        default: false
+        type: boolean
       sdk_checkpoint_run:
         description: Optional original run containing an authenticated SDK artifact or build checkpoint
         required: false
@@ -412,13 +417,13 @@ jobs:
           root="$RUNNER_TEMP/kernel-signature-inputs"
           mkdir -m 700 "$root"
           cp scripts/release/keys/gregkh-pinned-public-key.asc "$root/"
-          for name in linux-6.18.15.tar.xz linux-6.18.15.tar.sign; do
+          for name in linux-6.18.55.tar.xz linux-6.18.55.tar.sign; do
             curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' --tlsv1.2 \
               --output "$root/$name" "https://cdn.kernel.org/pub/linux/kernel/v6.x/$name"
           done
           printf '%s  %s\n' \
-            7c716216c3c4134ed0de69195701e677577bbcdd3979f331c182acd06bf2f170 "$root/linux-6.18.15.tar.xz" \
-            d42cfc8e2edea41feb14e28dbc6b962da59a4fc0808b25b1157e1063be6984b3 "$root/linux-6.18.15.tar.sign" \
+            f410638061a165c12f42ab871d2f3fcd525515359b5faeee80969cff84524df9 "$root/linux-6.18.55.tar.xz" \
+            aa93b6e27580a1c9abb15fe97c4bbe9d0b5f997c92a0b7682e9dae7654494cda "$root/linux-6.18.55.tar.sign" \
             d3494056bb1a9726366499d790dfd44555d9f6e354cd4549143bf9c0b7ccb99c "$root/gregkh-pinned-public-key.asc" \
             | sha256sum --check --status
       - name: Wait for the authenticated SDK download
@@ -562,6 +567,7 @@ jobs:
             /workspace/runtime-build/evidence/linker-invocations-first/**
             /workspace/runtime-build/evidence/linker-invocations-second/**
             /workspace/runtime-build/evidence/rebuilds/**
+            /workspace/runtime-build/evidence/kernel-candidate-*/**
             /workspace/runtime-build/kernel-*.Image
             /workspace/runtime-build/vminitd-first
             /workspace/runtime-build/vminitd-second
@@ -584,6 +590,7 @@ jobs:
             ${{ runner.temp }}/runtime-build-ingredients/evidence/linker-invocations-first/**
             ${{ runner.temp }}/runtime-build-ingredients/evidence/linker-invocations-second/**
             ${{ runner.temp }}/runtime-build-ingredients/evidence/rebuilds/**
+            ${{ runner.temp }}/runtime-build-ingredients/evidence/kernel-candidate-*/**
             ${{ runner.temp }}/runtime-build-ingredients/kernel-*.Image
             ${{ runner.temp }}/runtime-build-ingredients/vminitd-first
             ${{ runner.temp }}/runtime-build-ingredients/vminitd-second
@@ -704,7 +711,7 @@ jobs:
 
   runtime-provenance:
     name: Assemble and attest the authenticated runtime provenance bundle
-    if: ${{ always() && needs.runtime-build-ingredients.result == 'success' && needs.guest-loader.result == 'success' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' }}
+    if: ${{ always() && needs.runtime-build-ingredients.result == 'success' && needs.guest-loader.result == 'success' && inputs.ingredients_only != true && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' }}
     needs: [runtime-build-ingredients, guest-loader]
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 120

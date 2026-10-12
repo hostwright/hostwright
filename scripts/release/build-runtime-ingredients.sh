@@ -9,11 +9,10 @@ readonly linux_capture="$(dirname -- "$source_capture")/capture-linux-runtime-so
 readonly patch_capture="$(dirname -- "$source_capture")/capture-native-patches.py"
 
 readonly containerization_commit=44bec8b9933bc491d0cbf44abac90a1f6aaebf6b
-readonly kata_commit=660e3bb6535b141c84430acb25b159857278d596
-readonly kernel_version=6.18.15
-readonly kernel_commit=df0dc1b06fb6b6461f9838694bf84079eca7562a
+readonly kernel_version=6.18.55
+readonly kernel_commit=725bd2f3c81d54edccb66fead01d4c0c222e2231
 readonly kernel_config_version=186
-readonly kernel_source_sha=7c716216c3c4134ed0de69195701e677577bbcdd3979f331c182acd06bf2f170
+readonly kernel_source_sha=f410638061a165c12f42ab871d2f3fcd525515359b5faeee80969cff84524df9
 readonly build_time=2026-01-01T00:00:00Z
 
 die() { printf '%s\n' "$1" >&2; exit "${2:-70}"; }
@@ -65,10 +64,10 @@ for real in "$swift_real" "$swiftc_real"; do
     || die "Swift entrypoint resolves outside the verified toolchain"
 done
 
-for name in linux-6.18.15.tar.xz linux-6.18.15.tar.sign gregkh-pinned-public-key.asc; do
+for name in linux-6.18.55.tar.xz linux-6.18.55.tar.sign gregkh-pinned-public-key.asc; do
   [[ -f "$kernel_inputs/$name" && ! -L "$kernel_inputs/$name" ]] || die "missing retained kernel input: $name"
 done
-[[ "$(sha256sum "$kernel_inputs/linux-6.18.15.tar.xz" | awk '{print $1}')" == "$kernel_source_sha" ]] \
+[[ "$(sha256sum "$kernel_inputs/linux-6.18.55.tar.xz" | awk '{print $1}')" == "$kernel_source_sha" ]] \
   || die "kernel source differs from the exact pin"
 
 parent=$(dirname "$output")
@@ -100,21 +99,13 @@ mkdir -m 700 "$work/evidence" "$work/payloads" "$work/sources"
 mkdir -m 700 "$work/evidence/source-trees"
 
 python3 scripts/release/verify-kernel-source-signature.py \
-  --inputs "$kernel_inputs" --output "$work/evidence/kernel-source-signature.json"
+  --kernel-version "$kernel_version" --inputs "$kernel_inputs" --output "$work/evidence/kernel-source-signature.json"
 git clone --depth 1 --single-branch --branch "v$kernel_version" \
   https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git "$work/sources/linux"
 test "$(git -C "$work/sources/linux" rev-parse HEAD)" = "$kernel_commit"
 python3 "$linux_capture" --repository "$work/sources/linux" \
   --source-archive "$kernel_inputs/linux-$kernel_version.tar.xz" \
   --output "$work/evidence/source-trees/linux"
-
-git clone --filter=blob:none https://github.com/kata-containers/kata-containers.git "$work/sources/kata"
-git -C "$work/sources/kata" checkout --detach "$kata_commit"
-test "$(git -C "$work/sources/kata" rev-parse HEAD)" = "$kata_commit"
-test "$(cat "$work/sources/kata/tools/packaging/kernel/kata_config_version")" = "$kernel_config_version"
-git -C "$work/sources/kata" archive --format=tar "$kata_commit" | gzip -n > "$work/evidence/kata-source.tar.gz"
-python3 "$source_capture" --repository "$work/sources/kata" --commit "$kata_commit" \
-  --output "$work/evidence/source-trees/kata"
 
 export RUSTC=/bin/false PAHOLE=/dev/null
 export MAKEFLAGS="${MAKEFLAGS:+$MAKEFLAGS }RUSTC=/bin/false PAHOLE=/dev/null"
@@ -127,26 +118,23 @@ for pass in first second; do
     [[ -d "$root" && ! -L "$root" ]] || die "unsafe previous kernel build tree"
     find "$root" -depth -delete
   fi
-  mkdir -m 700 "$root"
-  cp -a "$work/sources/kata" "$root/kata"
-  (
-    cd "$root/kata/tools/packaging/kernel"
-    bash -x ./build-kernel.sh -a aarch64 -v "$kernel_version" -u "file://$kernel_inputs/" -f setup \
-      >"$work/evidence/kernel-$pass.setup.log" 2>&1
-    test -d "kata-linux-$kernel_version-$kernel_config_version"
-    python3 "$patch_capture" --repository "$work/sources/linux" \
-      --source-capture "$work/evidence/source-trees/linux" \
-      --tree "$PWD/kata-linux-$kernel_version-$kernel_config_version" --root "$work/evidence" --project linux \
-      --kernel-setup-log "$work/evidence/kernel-$pass.setup.log" --kernel-patches-dir "$PWD/patches/6.18.x" \
-      --output "$work/evidence/native-patches-linux-$pass.json"
-    cp "kata-linux-$kernel_version-$kernel_config_version/.config" "$work/evidence/kernel-$pass.config"
-    bash -x ./build-kernel.sh -a aarch64 -v "$kernel_version" build
-    cp "kata-linux-$kernel_version-$kernel_config_version/arch/arm64/boot/Image" "$work/kernel-$pass.Image"
-    python3 "$native_capture" retain-build --kind kernel --root "$work/evidence" \
-      --tree "$PWD/kata-linux-$kernel_version-$kernel_config_version" \
-      --metadata "$work/evidence/native-kernel-$pass.json"
-  ) >"$work/evidence/kernel-$pass.log" 2>&1
+  python3 scripts/release/qualify-kernel-candidate.py \
+    --work "$root" --output "$work/evidence/kernel-candidate-$pass"
+  tree="$root/linux-$kernel_version"
+  python3 "$patch_capture" --repository "$work/sources/linux" \
+    --source-capture "$work/evidence/source-trees/linux" \
+    --tree "$tree" --root "$work/evidence" --project linux \
+    --patch "$PWD/scripts/release/patches/kernel-security/0001-conntrack-expectation-lifetime.patch" \
+    --patch "$PWD/scripts/release/patches/kernel-security/0002-bpf-backtracking-frame.patch" \
+    --output "$work/evidence/native-patches-linux-$pass.json"
+  cp "$tree/.config" "$work/evidence/kernel-$pass.config"
+  cp "$tree/arch/arm64/boot/Image" "$work/kernel-$pass.Image"
+  python3 "$native_capture" retain-build --kind kernel --root "$work/evidence" \
+    --tree "$tree" --metadata "$work/evidence/native-kernel-$pass.json"
 done
+python3 scripts/release/compare-kernel-candidates.py \
+  --first "$work/evidence/kernel-candidate-first" \
+  --second "$work/evidence/kernel-candidate-second" --source-commit "$(git rev-parse HEAD)"
 cmp "$work/kernel-first.Image" "$work/kernel-second.Image"
 mkdir -m 700 "$work/evidence/rebuilds"
 cp "$work/kernel-first.Image" "$work/kernel-second.Image" "$work/evidence/rebuilds/"
@@ -164,7 +152,7 @@ swift_sdks="$work/swift-sdks"
 swift sdk install "$work/swift-static-sdk.tar.gz" --checksum "$swift_sdk_sha" --swift-sdks-path "$swift_sdks"
 mv "$work/swift-static-sdk.tar.gz" "$work/evidence/swift-static-sdk.tar.gz"
 mkdir -m 700 "$work/evidence/kernel-inputs"
-cp "$kernel_inputs/linux-6.18.15.tar.xz" "$kernel_inputs/linux-6.18.15.tar.sign" \
+cp "$kernel_inputs/linux-6.18.55.tar.xz" "$kernel_inputs/linux-6.18.55.tar.sign" \
   "$kernel_inputs/gregkh-pinned-public-key.asc" "$work/evidence/kernel-inputs/"
 
 export GIT_COMMIT="$containerization_commit" GIT_TAG=0.35.0 BUILD_TIME="$build_time" SOURCE_DATE_EPOCH=1767225600

@@ -95,6 +95,8 @@ def main():
                      '--kernel-version', profile['version'], '--inputs', str(inputs),
                      '--output', str(args.output / 'signature.json')])
     prefix = 'linux-' + profile['version']
+    run('patch-source-contract', [sys.executable, str(ROOT / 'scripts/release/test-kernel-patch-replay.py'),
+                                 '--source-archive', str(inputs / (prefix + '.tar.xz'))])
     with tarfile.open(inputs / (prefix + '.tar.xz'), 'r:xz') as archive:
         for member in archive:
             if member.name != prefix and not member.name.startswith(prefix + '/'):

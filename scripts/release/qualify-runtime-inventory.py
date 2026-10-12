@@ -175,6 +175,39 @@ def qualified_loader_build_settings(loader_data):
     return settings
 
 
+def kernel_tool_versions(manifest, config, fetch):
+    compilers = [tool for tool in manifest["toolchain"]
+                 if tool["executable"] == manifest["kernel"]["compiler"]]
+    V.require(len(compilers) == 1, "missing or ambiguous kernel compiler evidence")
+    options = {}
+    for line in config.decode("utf-8").splitlines():
+        if line.startswith("CONFIG_") and "=" in line:
+            key, value = line.split("=", 1)
+            V.require(key not in options, "duplicate kernel configuration option")
+            options[key] = value
+    families = [family for family in ("BFD", "LLD") if options.get("CONFIG_LD_IS_" + family) == "y"]
+    V.require(len(families) == 1, "missing or ambiguous kernel linker family")
+    family = families[0]
+    version_key = "CONFIG_LD_VERSION" if family == "BFD" else "CONFIG_LLD_VERSION"
+    encoded_version = options.get(version_key, "")
+    V.require(encoded_version.isdecimal() and int(encoded_version) > 0, "missing kernel linker version")
+    pattern = (r"^GNU ld (?:\([^\n]*\) )?(\d+)\.(\d+)(?:\.(\d+))?(?:\s|$)" if family == "BFD" else
+               r"^LLD (\d+)\.(\d+)(?:\.(\d+))?(?:\s|$)")
+    names = {"ld", "ld.bfd"} if family == "BFD" else {"ld.lld", "lld"}
+    linkers = []
+    for tool in manifest["toolchain"]:
+        if Path(tool["executablePath"]).name not in names:
+            continue
+        version = V.substantive(tool["version"], fetch).decode("utf-8").strip()
+        match = V.re.match(pattern, version)
+        if match and sum(int(part or 0) * scale for part, scale in
+                         zip(match.groups(), (10000, 100, 1))) == int(encoded_version):
+            linkers.append(version)
+    V.require(len(linkers) == 1, "missing or ambiguous kernel linker version evidence")
+    return dict(compiler=V.substantive(compilers[0]["version"], fetch).decode("utf-8").strip(),
+                linker=linkers[0])
+
+
 def remove_generated_runtime_documents(notices, records):
     """Remove prior generated runtime-source sections before rebuilding them."""
     generated = [record for record in records if record["sourcePath"].startswith("runtime-source/")]
@@ -448,9 +481,7 @@ def regenerate(prepared_root, source_root):
     V.require(len(linked) == 6, "Go runtime metadata lacks its exact six linked modules")
     runtime["retainedLoaderLinkedModules"] = sorted(linked, key=lambda item: item["module"])
     runtime["retainedLoaderBuildSettings"] = qualified_loader_build_settings(loader_data)
-    tool_versions = {tool["identity"]: V.substantive(tool["version"], fetch).decode("utf-8").strip()
-                     for tool in manifest["toolchain"] if tool["identity"] in ("compiler", "linker")}
-    V.require(set(tool_versions) == {"compiler", "linker"}, "kernel compiler or linker version evidence is missing")
+    tool_versions = kernel_tool_versions(manifest, config, fetch)
     kernel_evidence = runtime["kernelSourceEvidence"]
     recipe_revision = V.git_object("blob", regular(source_root, KERNEL_RECIPE_PATH).read_bytes())
     kernel_evidence.update(

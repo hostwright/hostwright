@@ -146,6 +146,37 @@ class RuntimeInventoryQualificationTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "authenticated target environment"):
                 Q.qualified_loader_build_settings(loader(lines))
 
+    def test_kernel_linker_uses_configuration_and_bound_tool_version_not_swift_identity(self):
+        records = {}
+
+        def tool(identity, path, version):
+            data = version.encode()
+            records[identity] = data
+            return dict(identity=identity, executablePath=path, executable=dict(sha256=identity),
+                        version=dict(path=identity, sha256=Q.sha(data), sizeBytes=len(data)))
+
+        compiler = tool("kernel-compiler", "/usr/bin/gcc", "gcc 13.3.0")
+        bfd = tool("native-ld", "/usr/bin/ld", "GNU ld (GNU Binutils for Ubuntu) 2.42\nCopyright GNU\n")
+        lld = tool("linker", "/swift/usr/bin/ld.lld", "LLD 21.0.0 (compatible with GNU linkers)")
+        manifest = dict(kernel=dict(compiler=compiler["executable"]), toolchain=[compiler, lld, bfd])
+        config = b"CONFIG_LD_IS_BFD=y\nCONFIG_LD_VERSION=24200\nCONFIG_LLD_VERSION=0\n"
+        self.assertEqual(Q.kernel_tool_versions(manifest, config, records.__getitem__),
+                         dict(compiler="gcc 13.3.0", linker=records["native-ld"].decode().strip()))
+        llvm_config = b"CONFIG_LD_IS_LLD=y\nCONFIG_LD_VERSION=0\nCONFIG_LLD_VERSION=210000\n"
+        self.assertEqual(Q.kernel_tool_versions(manifest, llvm_config, records.__getitem__)["linker"],
+                         records["linker"].decode())
+        for invalid in (b"", config.replace(b"24200", b"24300"), config + b"CONFIG_LD_IS_LLD=y\n",
+                        config + b"CONFIG_LD_VERSION=24200\n"):
+            with self.subTest(config=invalid), self.assertRaises(ValueError):
+                Q.kernel_tool_versions(manifest, invalid, records.__getitem__)
+        for tools in ([compiler, lld], [compiler, lld, bfd, dict(bfd, executablePath="/other/ld")],
+                      [lld, bfd], [compiler, dict(compiler), lld, bfd]):
+            with self.subTest(tools=tools), self.assertRaises(ValueError):
+                Q.kernel_tool_versions(dict(manifest, toolchain=tools), config, records.__getitem__)
+        records["native-ld"] += b"tampered"
+        with self.assertRaisesRegex(ValueError, "evidence bytes mismatch"):
+            Q.kernel_tool_versions(manifest, config, records.__getitem__)
+
     def test_regeneration_replaces_prior_runtime_notice_sections_idempotently(self):
         base = bytearray(b"host notices\n")
         records = []

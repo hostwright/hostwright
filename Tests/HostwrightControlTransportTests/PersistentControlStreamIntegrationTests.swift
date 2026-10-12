@@ -848,6 +848,7 @@ final class PersistentControlStreamIntegrationTests: XCTestCase {
   }
 
   func testFullDuplexInputUsesBoundedCreditsAndServerAcknowledgements() throws {
+    let permitAcknowledgement = DispatchSemaphore(value: 0)
     let fixture = try StreamITRawClientFixture { descriptor in
       let deadline = try ControlTransportDeadline(timeoutMilliseconds: 2_000)
       _ = try ControlFrameCodec.read(kind: .request, descriptor: descriptor, deadline: deadline)
@@ -871,6 +872,9 @@ final class PersistentControlStreamIntegrationTests: XCTestCase {
         XCTAssertEqual(input.kind, .data)
         XCTAssertEqual(input.sequence, UInt64(expectedSequence))
       }
+      guard permitAcknowledgement.wait(timeout: .now() + 2) == .success else {
+        throw POSIXError(.ETIMEDOUT)
+      }
       try ControlFrameCodec.write(
         try ControlPlaneCanonicalJSON.encode(StreamFrame(
           streamID: "exec-input", sequence: 2, kind: .ack, credit: 1
@@ -892,7 +896,10 @@ final class PersistentControlStreamIntegrationTests: XCTestCase {
         kind: .frame, descriptor: descriptor, deadline: deadline
       )
     }
-    defer { fixture.close() }
+    defer {
+      permitAcknowledgement.signal()
+      fixture.close()
+    }
 
     let session = fixture.session
     try session.openStream(
@@ -908,6 +915,7 @@ final class PersistentControlStreamIntegrationTests: XCTestCase {
     XCTAssertThrowsError(try session.sendStreamInput(streamID: "exec-input", payload: input)) {
       XCTAssertEqual($0 as? PersistentControlClientError, .invalidResponse)
     }
+    permitAcknowledgement.signal()
     XCTAssertEqual(try session.nextFrame(streamID: "exec-input").kind, .ack)
     try session.sendStreamInput(streamID: "exec-input", payload: input)
     try session.finishStreamInput(streamID: "exec-input")

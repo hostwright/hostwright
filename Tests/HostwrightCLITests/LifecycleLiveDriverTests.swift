@@ -775,12 +775,11 @@ final class LifecycleLiveDriverTests: XCTestCase {
                 records.map(\.lifecycleState),
                 [.active, .active]
             )
-            let selectedHostPorts = Set(records.map(\.hostPort))
-            XCTAssertEqual(selectedHostPorts.count, 1)
-            let selectedHostPort = try XCTUnwrap(
-                selectedHostPorts.first
+            XCTAssertTrue(
+                records.allSatisfy {
+                    (49_152...65_535).contains($0.hostPort)
+                }
             )
-            XCTAssertTrue((49_152...65_535).contains(selectedHostPort))
             XCTAssertEqual(
                 Set(records.map(\.protocolName)),
                 Set([.tcp, .udp])

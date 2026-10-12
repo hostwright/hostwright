@@ -192,7 +192,7 @@ def prepare(native_root, loader_root, source_commit, run_id, attempt, output, so
     receipt_data = fetch("native/upstream/kernel-source-signature.json")
     receipt = V.parse(receipt_data)
     V.require(receipt.get("kind") == "hostwright.kernel-source-signature.v1" and
-              receipt.get("archiveSHA256") == "7c716216c3c4134ed0de69195701e677577bbcdd3979f331c182acd06bf2f170" and
+              receipt.get("archiveSHA256") == "f410638061a165c12f42ab871d2f3fcd525515359b5faeee80969cff84524df9" and
               receipt.get("fingerprint") == "647F28654894E3BD457199BE38DBBDC86092693E" and
               receipt.get("signatureVerified") is True and receipt.get("exitStatus") == 0,
               "kernel upstream signature receipt is not qualified")

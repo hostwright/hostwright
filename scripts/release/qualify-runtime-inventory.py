@@ -30,10 +30,13 @@ ASSETS = ("kata-linux-kernel", "apple-vminit-oci", "hostwright-netfilter-loader"
 RUNTIME_INVENTORY = "runtime-license-inventory.json"
 THIRD_PARTY_INVENTORY = "third-party-license-inventory.json"
 NOTICES_FILE = "THIRD_PARTY_NOTICES"
-CONFIG_PATH = "ThirdPartyLicenses/runtime-build-recipes/kernel-actual-config-6.18.15-186"
-CONFIG_DOC_PATH = "runtime-build-recipe/kernel-actual-config-6.18.15-186"
+CONFIG_PATH = "ThirdPartyLicenses/runtime-build-recipes/kernel-actual-config-6.18.55-186"
+CONFIG_DOC_PATH = "runtime-build-recipe/kernel-actual-config-6.18.55-186"
 SOURCE_DOCUMENTS = "ThirdPartyLicenses/runtime-build-recipes/source-documents.json"
-SOURCE_CONFIG_PATH = "kernel-actual-config-6.18.15-186"
+SOURCE_CONFIG_PATH = "kernel-actual-config-6.18.55-186"
+PREVIOUS_CONFIG_DOC_PATH = "runtime-build-recipe/kernel-actual-config-6.18.15-186"
+PREVIOUS_SOURCE_CONFIG_PATH = "kernel-actual-config-6.18.15-186"
+KERNEL_RECIPE_PATH = "scripts/release/qualify-kernel-candidate.py"
 
 
 def regular(root, relative):
@@ -154,12 +157,55 @@ def stable_source_reference(project, hostwright_source_sha256):
             "#sha256=" + archive["sha256"] + "&sizeBytes=" + str(archive["sizeBytes"]))
 
 
+def kernel_source_references(kernel_commit, recipe_revision):
+    V.require(all(V.re.fullmatch("[a-f0-9]{40}", value)
+                  for value in (kernel_commit, recipe_revision)), "invalid kernel source or recipe revision")
+    return [
+        "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.55.tar.xz",
+        "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/commit/?id=" + kernel_commit,
+        "git-blob:hostwright:" + recipe_revision + ":" + KERNEL_RECIPE_PATH,
+    ]
+
+
 def qualified_loader_build_settings(loader_data):
     settings = V.go_build_settings(loader_data)
     V.require(settings.get("GOOS") == "linux" and settings.get("GOARCH") == "arm64" and
               settings.get("CGO_ENABLED") == "0",
               "Go binary build settings differ from the authenticated target environment")
     return settings
+
+
+def kernel_tool_versions(manifest, config, fetch):
+    compilers = [tool for tool in manifest["toolchain"]
+                 if tool["executable"] == manifest["kernel"]["compiler"]]
+    V.require(len(compilers) == 1, "missing or ambiguous kernel compiler evidence")
+    options = {}
+    for line in config.decode("utf-8").splitlines():
+        if line.startswith("CONFIG_") and "=" in line:
+            key, value = line.split("=", 1)
+            V.require(key not in options, "duplicate kernel configuration option")
+            options[key] = value
+    families = [family for family in ("BFD", "LLD") if options.get("CONFIG_LD_IS_" + family) == "y"]
+    V.require(len(families) == 1, "missing or ambiguous kernel linker family")
+    family = families[0]
+    version_key = "CONFIG_LD_VERSION" if family == "BFD" else "CONFIG_LLD_VERSION"
+    encoded_version = options.get(version_key, "")
+    V.require(encoded_version.isdecimal() and int(encoded_version) > 0, "missing kernel linker version")
+    pattern = (r"^GNU ld (?:\([^\n]*\) )?(\d+)\.(\d+)(?:\.(\d+))?(?:\s|$)" if family == "BFD" else
+               r"^LLD (\d+)\.(\d+)(?:\.(\d+))?(?:\s|$)")
+    names = {"ld", "ld.bfd"} if family == "BFD" else {"ld.lld", "lld"}
+    linkers = []
+    for tool in manifest["toolchain"]:
+        if Path(tool["executablePath"]).name not in names:
+            continue
+        version = V.substantive(tool["version"], fetch).decode("utf-8").strip()
+        match = V.re.match(pattern, version)
+        if match and sum(int(part or 0) * scale for part, scale in
+                         zip(match.groups(), (10000, 100, 1))) == int(encoded_version):
+            linkers.append(version)
+    V.require(len(linkers) == 1, "missing or ambiguous kernel linker version evidence")
+    return dict(compiler=V.substantive(compilers[0]["version"], fetch).decode("utf-8").strip(),
+                linker=linkers[0])
 
 
 def remove_generated_runtime_documents(notices, records):
@@ -260,6 +306,31 @@ def payload_file_records(manifest, payloads, loader_path):
     return records
 
 
+def replace_kernel_configuration(notices, records, config, kernel_sha256):
+    config_records = [record for record in records
+                      if record["sourcePath"] in {CONFIG_DOC_PATH, PREVIOUS_CONFIG_DOC_PATH}]
+    V.require(len(config_records) == 1, "existing runtime notice inventory lacks one kernel configuration")
+    config_record = config_records[0]
+    start = config_record["offsetBytes"]
+    end = start + config_record["sizeBytes"]
+    old_header = ("\n--- " + config_record["sourcePath"] + " ---\n").encode()
+    new_header = ("\n--- " + CONFIG_DOC_PATH + " ---\n").encode()
+    header_start = start - len(old_header)
+    V.require(header_start >= 0 and notices[header_start:start] == old_header and
+              sha(notices[start:end]) == config_record["sha256"],
+              "existing kernel configuration notice does not match its inventory")
+    notices = notices[:header_start] + bytearray(new_header) + bytearray(config) + notices[end:]
+    delta = len(new_header) + len(config) - (end - header_start)
+    config_record.update(sourcePath=CONFIG_DOC_PATH, offsetBytes=header_start + len(new_header),
+                         sha256=sha(config), sizeBytes=len(config),
+                         sourcePaths=["embedded-IKCFG_ST:sha256:" + kernel_sha256])
+    for record in records:
+        if record is not config_record and record["offsetBytes"] >= end:
+            record["offsetBytes"] += delta
+
+    return notices
+
+
 def regenerate(prepared_root, source_root):
     manifest, prepared_inventory, manifest_data, payloads, fetch, verification = verify_prepared_evidence(prepared_root)
     third_party = read_json(source_root, THIRD_PARTY_INVENTORY)
@@ -273,20 +344,8 @@ def regenerate(prepared_root, source_root):
     # Replace only the stale embedded kernel configuration document; retain all
     # host and pre-existing runtime notice bytes and their source attribution.
     config = V.substantive(manifest["kernel"]["config"], fetch)
-    config_record = next((record for record in third_party["runtimeDocuments"]
-                          if record["sourcePath"] == CONFIG_DOC_PATH), None)
-    V.require(config_record is not None, "existing runtime notice inventory lacks the kernel configuration")
-    start = config_record["offsetBytes"]
-    end = start + config_record["sizeBytes"]
-    V.require(sha(notices[start:end]) == config_record["sha256"],
-              "existing kernel configuration notice does not match its inventory")
-    notices = notices[:start] + bytearray(config) + notices[end:]
-    delta = len(config) - config_record["sizeBytes"]
-    config_record.update(sha256=sha(config), sizeBytes=len(config),
-                         sourcePaths=["embedded-IKCFG_ST:sha256:" + manifest["kernel"]["outputSHA256"]])
-    for record in third_party["runtimeDocuments"]:
-        if record is not config_record and record["offsetBytes"] >= end:
-            record["offsetBytes"] += delta
+    notices = replace_kernel_configuration(notices, third_party["runtimeDocuments"], config,
+                                           manifest["kernel"]["outputSHA256"])
 
     projects = {project["identity"]: project for project in manifest["sourceProjects"]}
     license_documents = {}
@@ -360,8 +419,7 @@ def regenerate(prepared_root, source_root):
     signature_data = regular(prepared_root, signature_path).read_bytes()
     signature = V.parse(signature_data)
     V.require(signature.get("signatureVerified") is True and signature.get("exitStatus") == 0 and
-              signature.get("archiveSHA256") == runtime["kernelSourceEvidence"]["sourceArchiveSHA256"] and
-              signature.get("archiveSHA256") == "7c716216c3c4134ed0de69195701e677577bbcdd3979f331c182acd06bf2f170" and
+              signature.get("archiveSHA256") == "f410638061a165c12f42ab871d2f3fcd525515359b5faeee80969cff84524df9" and
               signature.get("fingerprint") == "647F28654894E3BD457199BE38DBBDC86092693E",
               "retained kernel source signature does not bind the recorded upstream archive")
     for identity in ASSETS:
@@ -423,24 +481,32 @@ def regenerate(prepared_root, source_root):
     V.require(len(linked) == 6, "Go runtime metadata lacks its exact six linked modules")
     runtime["retainedLoaderLinkedModules"] = sorted(linked, key=lambda item: item["module"])
     runtime["retainedLoaderBuildSettings"] = qualified_loader_build_settings(loader_data)
-    tool_versions = {tool["identity"]: V.substantive(tool["version"], fetch).decode("utf-8").strip()
-                     for tool in manifest["toolchain"] if tool["identity"] in ("compiler", "linker")}
-    V.require(set(tool_versions) == {"compiler", "linker"}, "kernel compiler or linker version evidence is missing")
+    tool_versions = kernel_tool_versions(manifest, config, fetch)
     kernel_evidence = runtime["kernelSourceEvidence"]
+    recipe_revision = V.git_object("blob", regular(source_root, KERNEL_RECIPE_PATH).read_bytes())
     kernel_evidence.update(
         actualConfigurationSHA256=sha(config), actualConfigurationSizeBytes=len(config),
+        sourceArchiveSHA256="f410638061a165c12f42ab871d2f3fcd525515359b5faeee80969cff84524df9",
+        sourceArchiveSizeBytes=154779312,
+        sourceArchiveURL="https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.55.tar.xz",
+        recipeRevision=recipe_revision,
+        recipePath=KERNEL_RECIPE_PATH,
+        recipeRevisionKind="git-blob-sha1",
         compiler=tool_versions["compiler"], linker=tool_versions["linker"],
     )
+    current_assets["kata-linux-kernel"]["sourceReferences"] = kernel_source_references(
+        projects[manifest["kernel"]["project"]]["commit"], recipe_revision)
     runtime.pop("kernelArchiveURL", None)
     runtime.pop("kernelArchiveSHA256", None)
     runtime["payloadFiles"] = payload_file_records(manifest, payloads, loader_path)
     V.require(len(runtime["payloadFiles"]) == 7, "runtime manifest does not contain the exact seven shipped payloads")
 
     source_documents = read_json(source_root, SOURCE_DOCUMENTS)
-    source_config = next((record for record in source_documents
-                          if record["path"] == SOURCE_CONFIG_PATH), None)
-    V.require(source_config is not None, "kernel source document index lacks the configuration record")
-    source_config.update(sha256=sha(config), sizeBytes=len(config),
+    source_configs = [record for record in source_documents
+                      if record["path"] in {SOURCE_CONFIG_PATH, PREVIOUS_SOURCE_CONFIG_PATH}]
+    V.require(len(source_configs) == 1, "kernel source document index lacks one configuration record")
+    source_config = source_configs[0]
+    source_config.update(path=SOURCE_CONFIG_PATH, sha256=sha(config), sizeBytes=len(config),
                          url="embedded-IKCFG_ST:sha256:" + manifest["kernel"]["outputSHA256"])
 
     outputs = {

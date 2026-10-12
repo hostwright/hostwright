@@ -131,14 +131,19 @@ control and lifecycle boundaries.
 ## Execute an imported local service
 
 Install the signed CLI, control companion and daemon using the
-[installation guide](install.md). Select a supported local runtime from
-`hostwright runtime providers --json`, ensure it is available, and follow the
-[daemon bootstrap procedure](cli.md#hostwright-daemon-action-options). For an
-isolated foreground daemon, use identical documented local path environment
-settings for every command and `hostwrightd` invocation. Establish identities
-through `hostwright daemon bootstrap-identities --json`; start the signed daemon
-with `hostwrightd --foreground --config <absolute-manifest-path>`. Keep its
-process identifier so it can be stopped after cleanup.
+[installation guide](install.md). First complete the
+[CLI quickstart](../../README.md#quick-start), including its stop and remove
+commands, and leave its foreground daemon running in its terminal. Keep that
+quickstart's existing `hostwright.yaml` as the daemon configuration. This gives
+the importer an authenticated connection before the new Compose manifest exists.
+Use a separate directory and project for the Compose example below.
+
+With the daemon running, execute `hostwright runtime providers --json` and require
+`providerID: apple-container-cli` to be available; its CLI selection value is
+`apple-cli`. Import, validation and provider discovery
+all use the authenticated API. If using isolated local paths, keep the identical
+documented environment settings for bootstrap, `hostwrightd` and every command;
+see [daemon setup](../architecture/daemon.md).
 
 Save this example to a new Compose file after choosing a unique project and
 available host port:
@@ -189,7 +194,9 @@ exact owned provider resource and verify 1 CPU and 536870912 memory bytes; the
 converted YAML alone does not establish runtime enforcement. After `down`, CPU
 and memory reservations must be released; after `rm`, the exact resource and its
 port reservations must be absent or released, with unmanaged inventory unchanged.
-Stop only the recorded task-owned foreground daemon after cleanup.
+After both projects are removed, press Control-C in the foreground daemon's
+terminal if it was started for these quickstarts. Keep an existing shared daemon
+running.
 
 Repeated import/export is deterministic. `plan-stack-update` reports capacity
 changes as `deploy.resources` and never applies them. Unsupported fields or

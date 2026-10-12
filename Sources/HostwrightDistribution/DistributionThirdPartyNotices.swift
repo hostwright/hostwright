@@ -64,6 +64,8 @@ struct RuntimeKernelSourceEvidence: Codable, Equatable {
     let actualConfigurationSizeBytes: Int
     let configurationVersion: String
     let recipeRevision: String
+    let recipePath: String
+    let recipeRevisionKind: String
     let compiler: String
     let linker: String
     let sourceDistributionRoute: String
@@ -111,6 +113,7 @@ enum DistributionThirdPartyNotices {
         let inventory = try decode(ThirdPartyLicenseInventory.self, data: inventoryData)
         var runtime = try decode(RuntimeLicenseInventory.self, data: runtimeData)
         try validate(notices: notices, inventory: inventory, runtime: runtime)
+        try validateKernelRecipe(root: root, evidence: runtime.kernelSourceEvidence)
         let resolved = try read(root.appendingPathComponent("Package.resolved"))
         guard hash(resolved) == inventory.resolvedSHA256,
               let document = try JSONSerialization.jsonObject(with: resolved) as? [String: Any],
@@ -230,12 +233,15 @@ enum DistributionThirdPartyNotices {
             throw DistributionError.invalidArtifact("Retained loader binary inventory is incomplete or inconsistent.")
         }
         guard runtime.kernelSourceEvidence.configurationVersion == "186",
-              runtime.kernelSourceEvidence.sourceArchiveURL.hasPrefix("https://"),
-              isHash(runtime.kernelSourceEvidence.sourceArchiveSHA256),
-              runtime.kernelSourceEvidence.sourceArchiveSizeBytes > 0,
+              runtime.kernelSourceEvidence.sourceArchiveURL == "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.55.tar.xz",
+              runtime.kernelSourceEvidence.sourceArchiveSHA256 == "f410638061a165c12f42ab871d2f3fcd525515359b5faeee80969cff84524df9",
+              runtime.kernelSourceEvidence.sourceArchiveSizeBytes == 154_779_312,
+              runtime.kernelSourceEvidence.recipePath == "scripts/release/qualify-kernel-candidate.py",
+              runtime.kernelSourceEvidence.recipeRevisionKind == "git-blob-sha1",
+              runtime.kernelSourceEvidence.recipeRevision.range(of: "^[a-f0-9]{40}$", options: .regularExpression) != nil,
               isHash(runtime.kernelSourceEvidence.actualConfigurationSHA256),
               inventory.runtimeDocuments.contains(where: {
-                  $0.sourcePath == "runtime-build-recipe/kernel-actual-config-6.18.15-186" &&
+                  $0.sourcePath == "runtime-build-recipe/kernel-actual-config-6.18.55-186" &&
                   $0.sha256 == runtime.kernelSourceEvidence.actualConfigurationSHA256 &&
                   $0.sizeBytes == runtime.kernelSourceEvidence.actualConfigurationSizeBytes
               }) else {
@@ -265,6 +271,19 @@ enum DistributionThirdPartyNotices {
                   hash(notices.subdata(in: document.offsetBytes..<(document.offsetBytes + document.sizeBytes))) == document.sha256 else {
                 throw DistributionError.invalidArtifact("A third-party license or attribution text is missing or changed.")
             }
+        }
+    }
+
+    static func validateKernelRecipe(root: URL, evidence: RuntimeKernelSourceEvidence) throws {
+        guard evidence.recipePath == "scripts/release/qualify-kernel-candidate.py",
+              evidence.recipeRevisionKind == "git-blob-sha1" else {
+            throw DistributionError.invalidArtifact("Kernel recipe inventory has an unsupported path or revision kind.")
+        }
+        let recipe = try read(root.appendingPathComponent(evidence.recipePath))
+        let object = Data("blob \(recipe.count)\0".utf8) + recipe
+        let revision = Insecure.SHA1.hash(data: object).map { String(format: "%02x", $0) }.joined()
+        guard revision == evidence.recipeRevision else {
+            throw DistributionError.invalidArtifact("Kernel recipe inventory differs from the exact source recipe.")
         }
     }
 

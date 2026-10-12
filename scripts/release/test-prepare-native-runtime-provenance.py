@@ -77,7 +77,7 @@ class NativePreparationTests(unittest.TestCase):
             self.swift["links"].append(dict(map=self.record(map_path), selectedInputs=link["selectedInputs"]))
         self.write_captures()
         self.write(self.ingredients / "evidence", "kernel-source-signature.json", V.canonical(dict(
-            kind="hostwright.kernel-source-signature.v1", archiveSHA256="7c716216c3c4134ed0de69195701e677577bbcdd3979f331c182acd06bf2f170",
+            kind="hostwright.kernel-source-signature.v1", archiveSHA256="f410638061a165c12f42ab871d2f3fcd525515359b5faeee80969cff84524df9",
             fingerprint="647F28654894E3BD457199BE38DBBDC86092693E", signatureVerified=True, exitStatus=0)))
 
     def write(self, root, name, data):

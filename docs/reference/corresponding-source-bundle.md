@@ -1,5 +1,14 @@
 # Corresponding-source bundle preparation
 
+Current releases use the authenticated new-runtime archive described below. Its
+kernel is Linux 6.18.55 plus the two reviewed backports in
+`scripts/release/kernel-security-candidate.json`. The archive retains the exact
+upstream source, applied patches, embedded configuration, compiler inputs and
+build records. The original Kata configuration is retained as a build seed;
+`scripts/release/qualify-kernel-candidate.py` is the current build recipe.
+
+## Historical source preparation
+
 `scripts/release/corresponding-source.py prepare` writes a unique directory outside
 its checkout. It packages the exact Linux 6.18.15 source archive, verified source
 signature/key evidence, the shipped kernel's embedded configuration, all 175 Kata
@@ -9,8 +18,8 @@ kernel builder and CI helper files, and the 20 real guest loader source files.
 The bundle includes project/dependency licenses, exact source inventories and its
 verification scripts. Its canonical manifest binds every file's digest, size, type
 and mode, release version, preparation HEAD and source cleanliness/status digest.
-The selected publication route is this source bundle alongside signed binaries in
-the same GitHub release. It supplies no written offer or blanket legal conclusion.
+This historical preparation route supplies no written offer or blanket legal
+conclusion; current release staging requires the new-runtime archive.
 
 Preparation verifies pinned input hashes, kernel source archive paths/links, Kata
 Git blob hashes, actual configuration hash and guest source hashes before and after
@@ -20,6 +29,8 @@ independently re-verifies the kernel source signature using the host reviewed
 verifier, never a script extracted from the bundle. Promotion
 must obtain the expected archive and manifest digests from authenticated staged
 inventory and acceptance evidence; an editable local receipt is not authority.
+
+## Current release source archive
 
 The trusted release workflow consumes a prepared
 `hostwright.corresponding-source.new-runtime.v1` archive through
@@ -40,6 +51,12 @@ the exact
 containing `runtime-provenance.tar.gz`. Signing requires that successful final
 artifact; successful ingredient jobs alone are insufficient.
 
+For a runtime update, dispatch with `ingredients_only=true` to retain attested
+native and loader ingredients for the pin and license review. This mode skips
+the final archive job. After the generated inventories and payload pins are
+reviewed and merged, dispatch the default workflow again on the exact release
+candidate to produce its authenticated final archive.
+
 The complete new-runtime source bundle permits up to 8 GiB of member data. The
 legacy source bundle retains its 4 GiB limit. Both paths verify the complete
 member inventory, types, sizes and hashes before accepting the source bundle.
@@ -47,8 +64,9 @@ Repeated evidence reads use a private temporary TAR, decoded once with an 8 GiB
 expanded-archive limit and removed when verification finishes or fails. The
 original compressed bytes remain the archive hash and authentication subject.
 
-Use `verify-kernel-source-signature.py --inputs <kernel-input-directory> --output
-<new-receipt-path>` to independently verify the source's detached signature against
+Use `verify-kernel-source-signature.py --kernel-version 6.18.55 --inputs
+<kernel-input-directory> --output <new-receipt-path>` to independently verify
+the current source's detached signature against
 the kernel.org stable signing fingerprint. The script disables key retrieval and
 agent autostart and checks cryptographic `VALIDSIG`, not just a `signatureVerified`
 JSON field. The public key's expected fingerprint is pinned in reviewed source.

@@ -112352,10 +112352,10 @@ clean:
 	@"$(MAKE)" -C vminitd clean
 
 
---- runtime-build-recipe/kernel-actual-config-6.18.15-186 ---
+--- runtime-build-recipe/kernel-actual-config-6.18.55-186 ---
 #
 # Automatically generated file; DO NOT EDIT.
-# Linux/arm64 6.18.15 Kernel Configuration
+# Linux/arm64 6.18.55 Kernel Configuration
 #
 CONFIG_CC_VERSION_TEXT="gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0"
 CONFIG_CC_IS_GCC=y
@@ -112368,6 +112368,7 @@ CONFIG_LD_VERSION=24200
 CONFIG_LLD_VERSION=0
 CONFIG_RUSTC_VERSION=0
 CONFIG_RUSTC_LLVM_VERSION=0
+CONFIG_CC_CAN_LINK=y
 CONFIG_CC_HAS_ASM_GOTO_OUTPUT=y
 CONFIG_CC_HAS_ASM_GOTO_TIED_OUTPUT=y
 CONFIG_CC_HAS_ASM_INLINE=y
@@ -112751,6 +112752,7 @@ CONFIG_ARM64_ERRATUM_1463225=y
 # CONFIG_ARM64_ERRATUM_2966298 is not set
 # CONFIG_ARM64_ERRATUM_3117295 is not set
 # CONFIG_ARM64_ERRATUM_3194386 is not set
+CONFIG_ARM64_ERRATUM_4118414=y
 # CONFIG_CAVIUM_ERRATUM_22375 is not set
 # CONFIG_CAVIUM_ERRATUM_23144 is not set
 # CONFIG_CAVIUM_ERRATUM_23154 is not set
@@ -113129,6 +113131,7 @@ CONFIG_ARCH_HAS_GCOV_PROFILE_ALL=y
 CONFIG_HAVE_GCC_PLUGINS=y
 CONFIG_FUNCTION_ALIGNMENT_4B=y
 CONFIG_FUNCTION_ALIGNMENT=4
+CONFIG_HAVE_ARCH_GET_SECUREBOOT=y
 # end of General architecture-dependent options
 
 CONFIG_RT_MUTEXES=y
@@ -115915,7 +115918,6 @@ CONFIG_LOCK_DEBUGGING_SUPPORT=y
 
 # CONFIG_DEBUG_IRQFLAGS is not set
 CONFIG_STACKTRACE=y
-# CONFIG_WARN_ALL_UNSEEDED_RANDOM is not set
 # CONFIG_DEBUG_KOBJECT is not set
 
 #
@@ -118612,7 +118614,7 @@ This product uses derivations of apple/swift-openapi-generator 'StructuredSwiftR
 
 
 
---- runtime-source/linux@df0dc1b06fb6b6461f9838694bf84079eca7562a/COPYING ---
+--- runtime-source/linux@725bd2f3c81d54edccb66fead01d4c0c222e2231/COPYING ---
 The Linux Kernel is provided under:
 
 	SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note
@@ -118635,7 +118637,7 @@ for more details.
 All contributions to the Linux Kernel are subject to this COPYING file.
 
 
---- runtime-source/linux@df0dc1b06fb6b6461f9838694bf84079eca7562a/LICENSES/exceptions/Linux-syscall-note ---
+--- runtime-source/linux@725bd2f3c81d54edccb66fead01d4c0c222e2231/LICENSES/exceptions/Linux-syscall-note ---
 SPDX-Exception-Identifier: Linux-syscall-note
 SPDX-URL: https://spdx.org/licenses/Linux-syscall-note.html
 SPDX-Licenses: GPL-2.0, GPL-2.0+, GPL-1.0+, LGPL-2.0, LGPL-2.0+, LGPL-2.1, LGPL-2.1+, GPL-2.0-only, GPL-2.0-or-later
@@ -118663,7 +118665,7 @@ License-Text:
 
 
 
---- runtime-source/linux@df0dc1b06fb6b6461f9838694bf84079eca7562a/LICENSES/preferred/GPL-2.0 ---
+--- runtime-source/linux@725bd2f3c81d54edccb66fead01d4c0c222e2231/LICENSES/preferred/GPL-2.0 ---
 Valid-License-Identifier: GPL-2.0
 Valid-License-Identifier: GPL-2.0-only
 Valid-License-Identifier: GPL-2.0+

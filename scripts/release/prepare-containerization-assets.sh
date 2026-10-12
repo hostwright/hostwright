@@ -3,9 +3,9 @@ set -euo pipefail
 umask 077
 
 readonly framework_version="0.35.0"
-readonly kernel_name="vmlinux-6.18.15-186"
-readonly kernel_size="16148992"
-readonly kernel_sha256="55f86b8394c1d46551836f5c1d3525cdc8d505aeb9bb630c608edb564674239d"
+readonly kernel_name="vmlinux-6.18.55-186"
+readonly kernel_size="16216576"
+readonly kernel_sha256="18afc95bd6d478d928b30b3230486ce4f1628e86779463aacfd364e2535b513a"
 readonly manifest_digest="15a70c63c9ca254020d8bdbe1b6e48332db0629881f563624bfd319412a37ea3"
 readonly manifest_size="406"
 readonly configuration_digest="7812fb606774f30d8b6d36c2a37a6e12ae719ece3fc34775f9b87ee94639e257"

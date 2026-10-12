@@ -18,4 +18,4 @@ Keep installation, versions, support claims, and limitations consistent across b
 
 Run the website root and documentation project's typecheck, build, link checks, and dependency audit. Execute the CLI, Compose, and desktop quickstarts. Review changed pages at desktop and mobile sizes, then verify deployed content after publication.
 
-The root site uses GitHub Pages; the documentation site uses its existing Cloudflare Pages project. Keep their deployment configuration in the website repository. Access or deployment failures remain explicit release blockers when they prevent public documentation from matching the qualified product.
+The production root site uses the existing Cloudflare Worker `hostwrightdev` for `hostwright.dev` and `www.hostwright.dev`; the documentation site uses the Cloudflare Pages project `hostwright-docs`. The website repository also retains its GitHub Pages publication workflow. Keep deployment configuration and verification commands in that repository's README. Access or deployment failures remain explicit release blockers when they prevent public documentation from matching the qualified product.

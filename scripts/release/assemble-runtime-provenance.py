@@ -129,7 +129,7 @@ def assemble(input_root, output, version, prepared_source_state, signature_recei
     if prepared_source_state != expected_state:
         fail("runtime producer source state is not the exact clean source commit")
     if not (signature_receipt.get("kind") == "hostwright.kernel-source-signature.v1"
-            and signature_receipt.get("archiveSHA256") == "7c716216c3c4134ed0de69195701e677577bbcdd3979f331c182acd06bf2f170"
+            and signature_receipt.get("archiveSHA256") == "f410638061a165c12f42ab871d2f3fcd525515359b5faeee80969cff84524df9"
             and signature_receipt.get("fingerprint") == "647F28654894E3BD457199BE38DBBDC86092693E"
             and signature_receipt.get("signatureVerified") is True
             and signature_receipt.get("exitStatus") == 0):
@@ -247,6 +247,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="runtime-kernel-signature-") as temporary:
         verified_receipt = pathlib.Path(temporary) / "kernel-source-signature.json"
         command = ["python3", str(HERE / "verify-kernel-source-signature.py"),
+                   "--kernel-version", "6.18.55",
                    "--inputs", str(args.kernel_signature_inputs), "--output", str(verified_receipt)]
         if args.gpg is not None:
             command += ["--gpg", args.gpg, "--gpg-sha256", args.gpg_sha256]

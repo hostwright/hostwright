@@ -26,10 +26,10 @@ public enum ContainerizationRuntimeAssetContract {
         "untagged@sha256:\(initImageManifestDigest)"
     }
 
-    public static let kernelFileName = "vmlinux-6.18.15-186"
+    public static let kernelFileName = "vmlinux-6.18.55-186"
     public static let kernelSHA256 =
-        "55f86b8394c1d46551836f5c1d3525cdc8d505aeb9bb630c608edb564674239d"
-    public static let kernelSize: Int64 = 16_148_992
+        "18afc95bd6d478d928b30b3230486ce4f1628e86779463aacfd364e2535b513a"
+    public static let kernelSize: Int64 = 16_216_576
 
     public static let guestNetworkPolicyLoaderSHA256 =
         "a411dbcf1efaaf0ea0da17d76e3376a92b99037a8cb00af6588e8ecc6f3f7e99"

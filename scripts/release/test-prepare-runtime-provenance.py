@@ -41,7 +41,7 @@ class RuntimePreparationTests(unittest.TestCase):
         self.loader_fragment = dict(status="prepared-not-release-qualified", sourceCommit=self.commit,
             sourceProjects=copy.deepcopy(self.manifest["sourceProjects"]), loader=copy.deepcopy(self.manifest["loader"]))
         self.receipt = dict(kind="hostwright.kernel-source-signature.v1",
-            archiveSHA256="7c716216c3c4134ed0de69195701e677577bbcdd3979f331c182acd06bf2f170",
+            archiveSHA256="f410638061a165c12f42ab871d2f3fcd525515359b5faeee80969cff84524df9",
             fingerprint="647F28654894E3BD457199BE38DBBDC86092693E", signatureVerified=True, exitStatus=0)
         for name, data in evidence.items():
             self.write(self.native, name, data)
@@ -94,7 +94,7 @@ class RuntimePreparationTests(unittest.TestCase):
             "THIRD_PARTY_NOTICES": b"qualified notices\n",
             "third-party-license-inventory.json": b"qualified dependency inventory\n",
             "ThirdPartyLicenses/runtime-build-recipes/source-documents.json": b"qualified source docs\n",
-            "ThirdPartyLicenses/runtime-build-recipes/kernel-actual-config-6.18.15-186": b"CONFIG_ARM64=y\n",
+            "ThirdPartyLicenses/runtime-build-recipes/kernel-actual-config-6.18.55-186": b"CONFIG_ARM64=y\n",
         }
 
         def regenerate(_prepared, source_root):

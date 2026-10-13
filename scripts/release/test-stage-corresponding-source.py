@@ -1,10 +1,23 @@
 #!/usr/bin/env python3
-import copy,importlib.util,pathlib,tempfile,unittest
+import copy,importlib.util,pathlib,subprocess,tempfile,unittest
 from unittest import mock
 spec=importlib.util.spec_from_file_location('fixtures',pathlib.Path(__file__).with_name('test-staged-release.py'));fixtures=importlib.util.module_from_spec(spec);spec.loader.exec_module(fixtures)
 source=fixtures.stage.source_stage
 spec=importlib.util.spec_from_file_location('signature',pathlib.Path(__file__).with_name('verify-kernel-source-signature.py'));signature=importlib.util.module_from_spec(spec);spec.loader.exec_module(signature)
 class SourceTests(unittest.TestCase):
+ def test_verifier_failure_reports_stderr_and_removes_incomplete_stage(self):
+  with tempfile.TemporaryDirectory() as temporary:
+   root=pathlib.Path(temporary);prepared=root/'prepared';prepared.mkdir();fixtures.source_fixture(prepared)
+   stage=root/'stage';stage.mkdir();(stage/'historic').write_bytes(b'preserve')
+   for diagnostic,expected in [(b'archive checksum mismatch', 'archive checksum mismatch'),(b'', '(no stderr)'),(b'x'*9000+b'\xffsignature rejected','[stderr truncated to final 8192 bytes]')]:
+    error=subprocess.CalledProcessError(17,['verifier'],stderr=diagnostic)
+    with mock.patch.object(source.subprocess,'run',side_effect=error):
+     with self.assertRaises(ValueError) as failure:source.install(stage,prepared/'source','a'*40,'0.0.2')
+    message=str(failure.exception)
+    self.assertIn('independent source verifier failed with exit 17:',message);self.assertIn(expected,message)
+    self.assertLess(len(message),8300)
+    if diagnostic.endswith(b'signature rejected'):self.assertIn('\ufffdsignature rejected',message)
+    self.assertFalse((stage/'source').exists());self.assertEqual((stage/'historic').read_bytes(),b'preserve')
  def test_dirty_wrong_source_version_and_signature_refused(self):
   with tempfile.TemporaryDirectory() as temporary:
    root=pathlib.Path(temporary);fixtures.source_fixture(root)

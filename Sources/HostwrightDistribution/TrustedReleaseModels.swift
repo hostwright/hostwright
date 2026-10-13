@@ -156,7 +156,7 @@ public struct TrustedReleaseManifest: Codable, Equatable, Sendable {
     public let packageNotarization: TrustedNotarizationRecord
 
     public init(
-        schemaVersion: Int = 3,
+        schemaVersion: Int = 4,
         artifactID: String,
         packageVersion: String,
         releaseTag: String,
@@ -200,7 +200,7 @@ public struct TrustedReleaseManifest: Codable, Equatable, Sendable {
     }
 
     public func validate() throws {
-        guard schemaVersion == 1 || schemaVersion == 2 || schemaVersion == 3,
+        guard (1...4).contains(schemaVersion),
               packageVersion.range(
                 of: "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$",
                 options: .regularExpression
@@ -292,8 +292,8 @@ public struct TrustedReleaseBuildMetadata: Equatable, Sendable {
         self.toolVersions = toolVersions
     }
 
-    public func validate(manifestSchemaVersion: Int = 3) throws {
-        guard manifestSchemaVersion == 1 || manifestSchemaVersion == 2 || manifestSchemaVersion == 3,
+    public func validate(manifestSchemaVersion: Int = 4) throws {
+        guard (1...4).contains(manifestSchemaVersion),
               packageLicenseSPDX == "Apache-2.0",
               reproducibilityBuildCount == 2,
               byteIdenticalUnsignedPayloads else {

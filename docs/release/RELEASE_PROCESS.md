@@ -50,6 +50,8 @@ All of the following are required:
 
 ## Artifact and Package Policy
 
+New artifact and trusted release manifests use schema 4. Their SPDX inventories identify the desktop executable, kernel and guest loader as binaries, and the compressed OCI layer as an archive. Historical schemas 1–3 retain their original verification policy.
+
 The reviewed staging workflow builds from an exact clean commit already merged to `main`. It produces signed/notarized Apple-silicon archive and package payloads, checksums, SPDX SBOMs, signed provenance, corresponding source, verification metadata, and a vendor-tap formula bound to the archive digest.
 
 Staging requires an authenticated runtime-provenance archive from the exact source commit. It verifies the `hostwright.corresponding-source.new-runtime.v1` manifest and payloads against the shipped runtime bytes. Ingredient-only runs and legacy source bundles cannot satisfy this input.

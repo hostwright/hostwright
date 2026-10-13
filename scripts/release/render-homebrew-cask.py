@@ -35,8 +35,8 @@ def validate_manifest(manifest, commit, version, team, allow_prerelease=False):
     require(version == '0.0.2' or (allow_prerelease and '-rc.' in version),
             'official cask requires stable 0.0.2; --allow-prerelease permits RC qualification only')
     require(re.fullmatch('[A-Z0-9]{10}', team), 'expected Developer ID team required')
-    require(manifest.get('schemaVersion') == 3 and manifest.get('sourceDirty') is False,
-            'clean schema-3 trusted release required')
+    require(type(manifest.get('schemaVersion')) is int and manifest['schemaVersion'] in (3, 4) and manifest.get('sourceDirty') is False,
+            'clean schema-3 or schema-4 trusted release required')
     require((manifest.get('sourceCommit'), manifest.get('packageVersion'), manifest.get('releaseTag'))
             == (commit, version, 'v' + version), 'release source/version/tag mismatch')
     require((manifest.get('platform'), manifest.get('architecture'), manifest.get('minimumMacOSMajorVersion'))

@@ -137,7 +137,7 @@ public enum DistributionLayout {
         case 2:
             return [legacyPayloadModesV4, legacyPayloadModesV5]
                 .first { Set($0.keys) == paths }
-        case 3:
+        case 3, 4:
             return Set(payloadModes.keys) == paths ? payloadModes : nil
         default:
             return nil
@@ -156,7 +156,7 @@ public enum DistributionLayout {
         case 2:
             [legacyPayloadModesV4, legacyPayloadModesV5]
                 .first { Set($0.keys) == paths }
-        case 3:
+        case 3, 4:
             Set(payloadModes.keys) == paths ? payloadModes : nil
         default:
             nil
@@ -484,7 +484,7 @@ public struct DistributionArtifactManifest: Codable, Equatable, Sendable {
     public let files: [DistributionFileRecord]
 
     public init(
-        schemaVersion: Int = 3,
+        schemaVersion: Int = 4,
         artifactID: String,
         packageVersion: String,
         sourceCommit: String,
@@ -506,7 +506,7 @@ public struct DistributionArtifactManifest: Codable, Equatable, Sendable {
     }
 
     public func validate() throws {
-        guard schemaVersion == 1 || schemaVersion == 2 || schemaVersion == 3 else {
+        guard (1...4).contains(schemaVersion) else {
             throw DistributionError.invalidManifest("unsupported schema version \(schemaVersion)")
         }
         guard sourceCommit.range(of: "^[a-f0-9]{40}$", options: .regularExpression) != nil,
@@ -697,6 +697,23 @@ public struct SPDXPackageRecord: Codable, Equatable, Sendable {
     public let copyrightText: String
 }
 
+enum DistributionSPDXFileType {
+    static func forPayloadPath(_ path: String, schemaVersion: Int) -> String {
+        guard schemaVersion >= 4 else {
+            return path.hasPrefix("bin/") ? "BINARY" : "TEXT"
+        }
+        if DistributionLayout.shippedBinaryPaths.contains(path) ||
+            path == ContainerizationRuntimeAssetContract.kernelInstallationRelativePath ||
+            path == DistributionContainerizationAssets.guestNetworkPolicyLoaderPayloadPath {
+            return "BINARY"
+        }
+        if path == "share/hostwright/containerization/vminit/blobs/sha256/\(DistributionContainerizationAssets.initLayerDigest)" {
+            return "ARCHIVE"
+        }
+        return "TEXT"
+    }
+}
+
 public struct SPDXFileRecord: Codable, Equatable, Sendable {
     public let fileName: String
     public let SPDXID: String
@@ -775,7 +792,7 @@ public struct DistributionSPDXDocument: Codable, Equatable, Sendable {
                   let path = String(file.fileName.dropFirst(2))
                   return expectedFiles[path] == file.checksums.first?.checksumValue &&
                     file.checksums == [SPDXChecksum(algorithm: "SHA256", checksumValue: expectedFiles[path] ?? "")] &&
-                    file.fileTypes == [path.hasPrefix("bin/") ? "BINARY" : "TEXT"] &&
+                    file.fileTypes == [DistributionSPDXFileType.forPayloadPath(path, schemaVersion: manifest.schemaVersion)] &&
                     file.licenseConcluded == (isTrustedRelease && manifest.schemaVersion >= 3 && path == ContainerizationRuntimeAssetContract.kernelInstallationRelativePath ? "GPL-2.0-only" : expectedLicense) &&
                     file.copyrightText == "NOASSERTION"
               }) else {

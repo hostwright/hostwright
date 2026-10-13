@@ -442,7 +442,7 @@ final class DistributionModelsTests: XCTestCase {
                 fileName: "./\(file.path)",
                 SPDXID: "SPDXRef-File-\(index + 1)",
                 checksums: [SPDXChecksum(algorithm: "SHA256", checksumValue: file.sha256)],
-                fileTypes: [file.path.hasPrefix("bin/") ? "BINARY" : "TEXT"],
+                fileTypes: [DistributionSPDXFileType.forPayloadPath(file.path, schemaVersion: manifest.schemaVersion)],
                 licenseConcluded: "NOASSERTION",
                 copyrightText: "NOASSERTION"
             )

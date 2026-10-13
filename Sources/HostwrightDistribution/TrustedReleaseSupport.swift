@@ -337,7 +337,7 @@ public enum TrustedReleaseSPDXFactory {
                 fileName: "./\(file.path)",
                 SPDXID: "SPDXRef-File-\(index + 1)",
                 checksums: [SPDXChecksum(algorithm: "SHA256", checksumValue: file.sha256)],
-                fileTypes: [file.path.hasPrefix("bin/") ? "BINARY" : "TEXT"],
+                fileTypes: [DistributionSPDXFileType.forPayloadPath(file.path, schemaVersion: payloadManifest.schemaVersion)],
                 licenseConcluded: payloadManifest.schemaVersion >= 3 && file.path == ContainerizationRuntimeAssetContract.kernelInstallationRelativePath ? "GPL-2.0-only" : concludedLicense,
                 copyrightText: "NOASSERTION"
             )

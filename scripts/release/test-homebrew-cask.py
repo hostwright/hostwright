@@ -46,6 +46,17 @@ class HomebrewCaskTests(unittest.TestCase):
             with self.subTest(version=version), self.assertRaises(ValueError):
                 cask.validate_manifest(fixture(version), COMMIT, version, TEAM, True)
 
+    def test_corrected_schema4_and_retained_schema3_are_supported(self):
+        for schema in (3, 4):
+            manifest = fixture()
+            manifest['schemaVersion'] = schema
+            cask.validate_manifest(manifest, COMMIT, '0.0.2', TEAM)
+        for schema in (0, 1, 2, 5, True, '4', 4.0):
+            manifest = fixture()
+            manifest['schemaVersion'] = schema
+            with self.assertRaises(ValueError):
+                cask.validate_manifest(manifest, COMMIT, '0.0.2', TEAM)
+
     def test_rejects_wrong_source_signer_platform_or_dirty_payload(self):
         original = fixture()
         changes = [('sourceCommit', 'c' * 40), ('releaseTag', 'v0.0.2-rc.6'),

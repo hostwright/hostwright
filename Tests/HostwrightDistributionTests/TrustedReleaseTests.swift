@@ -916,8 +916,9 @@ final class TrustedReleaseTests: XCTestCase {
     }
 
     func testTrustedSPDXInventoriesArchiveAndPackageWithLicense() throws {
-        let trusted = makeManifest()
+        let trusted = makeManifest(schemaVersion: 3)
         let payload = DistributionArtifactManifest(
+            schemaVersion: trusted.schemaVersion,
             artifactID: trusted.artifactID,
             packageVersion: trusted.packageVersion,
             sourceCommit: trusted.sourceCommit,
@@ -939,11 +940,72 @@ final class TrustedReleaseTests: XCTestCase {
             expectedCreator: "Tool: hostwright-dist-2"
         ))
         XCTAssertThrowsError(try archive.validate(manifest: payload, archive: trusted.archive))
+        XCTAssertEqual(archive.files.first {
+            $0.fileName == "./" + DistributionLayout.desktopExecutablePath
+        }?.fileTypes, ["TEXT"])
         XCTAssertEqual(archive.packages.first?.licenseDeclared, "Apache-2.0")
         XCTAssertEqual(archive.packages.first?.licenseConcluded, "NOASSERTION")
         XCTAssertTrue(archive.files.allSatisfy {
             $0.licenseConcluded == ($0.fileName == "./" + ContainerizationRuntimeAssetContract.kernelInstallationRelativePath ? "GPL-2.0-only" : "NOASSERTION")
         })
+    }
+
+    func testSchema4TrustedProvenanceAndBuildMetadataRemainBoundAndRejectUnknownSchemas() throws {
+        let manifest = makeManifest(schemaVersion: 4)
+        let provenance = makeProvenance(manifest: manifest)
+        let parameters = provenance.predicate.buildDefinition.internalParameters
+        let metadata = TrustedReleaseBuildMetadata(
+            externalSwiftPMDependencies: try XCTUnwrap(parameters.externalSwiftPMDependencies),
+            packageLicenseSPDX: try XCTUnwrap(parameters.packageLicenseSPDX),
+            reproducibilityBuildCount: try XCTUnwrap(parameters.reproducibilityBuildCount),
+            byteIdenticalUnsignedPayloads: try XCTUnwrap(parameters.byteIdenticalUnsignedPayloads),
+            toolVersions: try XCTUnwrap(parameters.toolVersions)
+        )
+        XCTAssertNoThrow(try metadata.validate(manifestSchemaVersion: 4))
+        XCTAssertNoThrow(try provenance.validate(manifest: manifest, expectedBuildMetadata: metadata))
+        XCTAssertThrowsError(try metadata.validate(manifestSchemaVersion: 5))
+        XCTAssertThrowsError(try makeManifest(schemaVersion: 5).validate())
+    }
+
+    func testSchema4SPDXClassifiesRuntimeAndDesktopFilesAndRejectsFalseTextLabels() throws {
+        let trusted = makeManifest(schemaVersion: 4)
+        let payload = DistributionArtifactManifest(
+            schemaVersion: 4,
+            artifactID: trusted.artifactID,
+            packageVersion: trusted.packageVersion,
+            sourceCommit: trusted.sourceCommit,
+            sourceDirty: false,
+            architecture: trusted.architecture,
+            createdAt: trusted.createdAt,
+            files: trusted.payloadFiles
+        )
+        let expected = [
+            "./" + DistributionLayout.desktopExecutablePath: "BINARY",
+            "./" + ContainerizationRuntimeAssetContract.kernelInstallationRelativePath: "BINARY",
+            "./" + DistributionContainerizationAssets.guestNetworkPolicyLoaderPayloadPath: "BINARY",
+            "./share/hostwright/containerization/vminit/blobs/sha256/\(DistributionContainerizationAssets.initLayerDigest)": "ARCHIVE",
+            "./share/hostwright/containerization/vminit/blobs/sha256/\(DistributionContainerizationAssets.initConfigurationDigest)": "TEXT",
+            "./share/hostwright/containerization/vminit/blobs/sha256/\(DistributionContainerizationAssets.initManifestDigest)": "TEXT"
+        ]
+        for artifact in [trusted.archive, trusted.package] {
+            let document = TrustedReleaseSPDXFactory.make(payloadManifest: payload, artifact: artifact)
+            XCTAssertNoThrow(try document.validate(manifest: payload, archive: artifact,
+                                                  expectedCreator: "Tool: hostwright-dist-2"))
+            let byPath = Dictionary(uniqueKeysWithValues: document.files.map { ($0.fileName, $0.fileTypes) })
+            for (path, type) in expected {
+                XCTAssertEqual(byPath[path], [type], path)
+                guard type != "TEXT" else { continue }
+                var altered = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(document)) as? [String: Any])
+                var files = try XCTUnwrap(altered["files"] as? [[String: Any]])
+                let index = try XCTUnwrap(files.firstIndex { $0["fileName"] as? String == path })
+                files[index]["fileTypes"] = ["TEXT"]
+                altered["files"] = files
+                let invalid = try JSONDecoder().decode(DistributionSPDXDocument.self,
+                    from: JSONSerialization.data(withJSONObject: altered))
+                XCTAssertThrowsError(try invalid.validate(manifest: payload, archive: artifact,
+                                                         expectedCreator: "Tool: hostwright-dist-2"), path)
+            }
+        }
     }
 
     func testHomebrewFormulaUsesImmutableArtifactAndCompleteInstalledSurface() throws {
@@ -1537,7 +1599,7 @@ final class TrustedReleaseTests: XCTestCase {
     }
 
     private func makeManifest(
-        schemaVersion: Int = 3,
+        schemaVersion: Int = 4,
         payloadModes: [String: Int] = DistributionLayout.payloadModes
     ) -> TrustedReleaseManifest {
         let version = "0.0.2-dev"

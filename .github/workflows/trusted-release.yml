@@ -88,6 +88,7 @@ jobs:
       actions: read
     env:
       GH_TOKEN: ${{ github.token }}
+      PYTHONDONTWRITEBYTECODE: "1"
       RELEASE_COMMIT: ${{ inputs.commit }}
       RELEASE_VERSION: ${{ inputs.version }}
       RELEASE_TAG: ${{ inputs.tag }}

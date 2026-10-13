@@ -81,7 +81,7 @@ jobs:
     needs: validate
     runs-on: [self-hosted, macOS, ARM64, hostwright-release]
     environment: release
-    timeout-minutes: 180
+    timeout-minutes: 240
     permissions:
       contents: read
       attestations: read

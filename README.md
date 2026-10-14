@@ -2,7 +2,7 @@
 
 Hostwright manages Apple container workloads on one Apple silicon Mac. Declare services in a YAML manifest, review a plan, and confirm it through the CLI or native desktop app. Hostwright tracks resource ownership and operations in a local SQLite database.
 
-**Release status:** `0.0.2-rc.11` is in preparation with the rebuilt Linux 6.18.55 kernel and reviewed security backports. RC.10 qualification found a host-dependent test assertion and a clean release-build timeout. The assertion is corrected; RC.11 requires complete source, runtime, and signed-artifact qualification before the `v0.0.2` release. No supported RC or GA channel has been published. The launch requires qualified signed artifacts and official Homebrew acceptance; a GA date is not confirmed.
+**Release status:** `0.0.2-rc.11` qualification uses the rebuilt Linux 6.18.55 kernel and reviewed security backports. Its supported source, ASan and TSan matrices each passed 3,544 unique cases with no failures or skips; six timed fuzz targets also completed. Signed-artifact provider, installation and recovery checks remain before the `v0.0.2` release. No supported RC or GA channel has been published. The launch requires qualified signed artifacts and official Homebrew acceptance; a GA date is not confirmed.
 
 | Channel | Current availability |
 | --- | --- |
@@ -10,7 +10,7 @@ Hostwright manages Apple container workloads on one Apple silicon Mac. Declare s
 | Vendor Homebrew tap | Signed dev.12 qualification prerelease; unsupported and based on older contracts. |
 | Official Homebrew | Pending. `brew install hostwright` is the launch goal and is not available yet. |
 
-Phase 15 covers compatibility, security, signed installation and recovery, live quickstarts, and release promotion. See the [GA readiness snapshot](docs/release/ga-readiness-2026-10-09.md) for remaining work and the [release plan](docs/roadmap/v0.0.2/IMPLEMENTATION_PLAN.md) for acceptance requirements.
+Phase 15 covers compatibility, security, signed installation and recovery, live quickstarts, and release promotion. See the [GA readiness snapshot](docs/release/ga-readiness-2026-10-14.md) for completed checks and remaining work and the [release plan](docs/roadmap/v0.0.2/IMPLEMENTATION_PLAN.md) for acceptance requirements.
 
 ## Requirements
 

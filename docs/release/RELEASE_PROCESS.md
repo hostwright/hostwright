@@ -1,6 +1,6 @@
 # Release process
 
-The active target is `v0.0.2`. The current source prepares `0.0.2-rc.7`; candidate and final publication require exact-source qualification. Immutable `v0.0.2-dev.11` and `v0.0.2-dev.12` prereleases supply upgrade baselines; they remain unsupported and are not promoted in place.
+The active target is `v0.0.2`. The frozen candidate is `0.0.2-rc.11`; candidate and final publication require exact-source qualification. See the [current readiness snapshot](ga-readiness-2026-10-14.md) for completed source checks and pending signed-artifact work. Immutable `v0.0.2-dev.11` and `v0.0.2-dev.12` prereleases supply upgrade baselines; they remain unsupported and are not promoted in place.
 
 ## Tag Policy
 

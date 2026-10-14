@@ -800,7 +800,7 @@ let package = Package(
             name: "HostwrightCoreTests",
             dependencies: ["HostwrightCore"],
             resources: [
-                .process("Fixtures")
+                .copy("Fixtures/SecureSubprocessFixture.swift")
             ]
         ),
         .testTarget(
@@ -833,7 +833,7 @@ let package = Package(
                 "HostwrightWASIProviderRuntime"
             ],
             resources: [
-                .process("Fixtures")
+                .copy("Fixtures/ExtensionFixture.swift")
             ]
         ),
         .testTarget(

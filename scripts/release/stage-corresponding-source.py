@@ -65,7 +65,12 @@ def gpg_arguments(path=None,digest=None):
 def verify_contract(root,commit,version,gpg=None,gpg_sha256=None):
  binding=descriptor(root,commit,version);source=root/'source';archive=source/binding['archive']['fileName']
  command=['python3',str(pathlib.Path(__file__).with_name('corresponding-source.py')),'verify','--archive',str(archive),'--expected-archive-sha256',binding['archive']['sha256'],'--expected-manifest-sha256',binding['manifest']['sha256'],'--expected-source',commit,'--expected-version',version]+gpg_arguments(gpg,gpg_sha256)
- result=subprocess.run(command,check=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE);verified=parse(result.stdout)
+ try:result=subprocess.run(command,check=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+ except subprocess.CalledProcessError as error:
+  diagnostic=(error.stderr or b'')[-8192:].decode('utf-8',errors='replace').strip() or '(no stderr)'
+  if len(error.stderr or b'')>8192:diagnostic='[stderr truncated to final 8192 bytes]\n'+diagnostic
+  raise ValueError('independent source verifier failed with exit '+str(error.returncode)+':\n'+diagnostic) from None
+ verified=parse(result.stdout)
  if verified.get('archiveSHA256')!=binding['archive']['sha256'] or verified.get('manifestSHA256')!=binding['manifest']['sha256'] or verified.get('releaseSourceRevision')!=commit or verified.get('version')!=version:raise ValueError('independent source verifier returned different bindings')
  with runtime_verifier().open_source_archive(archive) as bundle:
   manifests=[m for m in bundle.getmembers() if m.name=='source-manifest.json'];runtimes=[m for m in bundle.getmembers() if m.name=='licenses/runtime-license-inventory.json']

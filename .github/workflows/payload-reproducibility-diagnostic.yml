@@ -1,0 +1,64 @@
+name: Payload reproducibility diagnostic
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_commit:
+        description: Exact merged source commit to investigate
+        required: true
+        type: string
+  pull_request:
+    paths:
+      - .github/workflows/payload-reproducibility-diagnostic.yml
+      - scripts/release/diagnose-payload-reproducibility.py
+      - scripts/release/test-diagnose-payload-reproducibility.py
+
+permissions:
+  contents: read
+
+jobs:
+  compare-payload:
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      SOURCE_COMMIT: ${{ inputs.source_commit || github.event.pull_request.base.sha }}
+    steps:
+      - name: Validate source selection
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_COMMIT" =~ ^[a-f0-9]{40}$ ]] || exit 1
+          [[ "$(sw_vers -productVersion)" == 26.* ]] || exit 1
+          [[ "$(uname -m)" == arm64 ]] || exit 1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          path: tooling
+          persist-credentials: false
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ env.SOURCE_COMMIT }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify diagnostic boundaries
+        run: python3 tooling/scripts/release/test-diagnose-payload-reproducibility.py
+      - name: Build twice and retain exact differing inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tooling/scripts/release/diagnose-payload-reproducibility.py \
+            --source "$GITHUB_WORKSPACE/candidate" \
+            --commit "$SOURCE_COMMIT" \
+            --output "$RUNNER_TEMP/payload-reproducibility"
+      - name: Retain diagnostic bytes and raw logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: payload-reproducibility-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/payload-reproducibility/result.json
+            ${{ runner.temp }}/payload-reproducibility/*.log
+            ${{ runner.temp }}/payload-reproducibility/hostwright-network-provider-worker-*
+            ${{ runner.temp }}/payload-reproducibility/objects-*.tar.gz
+          retention-days: 7
+          if-no-files-found: warn

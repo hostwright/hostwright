@@ -570,6 +570,39 @@ public struct StateUpgradeService: Sendable {
                 catch { throw StateMaintenanceError.recoveryFailed("uninstall sanitized publication failed: \(String(describing: error))") }
             }
             let currentVersion = try store.schemaVersion()
+            if currentVersion < 18,
+               snapshot.stateSchemaVersion == MigrationRunner.latestSchemaVersion {
+                guard try keyStore.loadHead() == nil,
+                      try keyStore.configuredActiveKey() == nil else {
+                    throw AuditTrailError.anchorMismatch
+                }
+                let connection = try SQLiteConnection(path: snapshot.snapshotPath,
+                    createIfNeeded: false, readOnly: true, profile: .nonMutatingInspection)
+                do {
+                    try MigrationRunner().validateAppliedSchema(on: connection)
+                    for table in [
+                        "audit_key_metadata", "audit_segments", "audit_records", "audit_retention_anchors",
+                        "peer_identities", "control_sessions", "identity_revocations",
+                        "control_requests", "idempotency_records"
+                    ] {
+                        guard try connection.query("SELECT COUNT(*) FROM \(table)") == [["0"]] else {
+                            throw StateMaintenanceError.recoveryFailed(
+                                "legacy compensation snapshot contains audit or identity authority"
+                            )
+                        }
+                    }
+                    try connection.close()
+                } catch {
+                    try? connection.close()
+                    throw error
+                }
+                try verify(snapshot)
+                guard try keyStore.loadHead() == nil,
+                      try keyStore.configuredActiveKey() == nil else {
+                    throw AuditTrailError.anchorMismatch
+                }
+                return try restoreVerifiedSnapshot(snapshot, operationID: operationID)
+            }
             if snapshot.stateSchemaVersion < 19 && currentVersion < 19 {
                 if currentVersion >= 18 {
                     let identityCount = try store.withConnection(readOnly: true) {

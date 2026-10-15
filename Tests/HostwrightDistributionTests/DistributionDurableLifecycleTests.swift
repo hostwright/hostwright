@@ -11,6 +11,66 @@ final class DistributionDurableLifecycleTests: XCTestCase {
     private let baselineCommit = String(repeating: "a", count: 40)
     private let candidateCommit = String(repeating: "b", count: 40)
 
+    func testLegacyRollbackPostRestoreCancellationAndInterruptionRecoverCurrentGeneration() throws {
+        try withTemporaryRoot { root in
+            let baseline = try makeVerifiedArtifact(root: root, name: "observational-dev11",
+                version: "0.0.2-dev.11", commit: "7d97d6c9ff878ec567c88e6993d4543ab8f0ad95",
+                observationalDaemon: true)
+            let candidate = try makeVerifiedArtifact(root: root, name: "rollback-current",
+                version: "0.0.2-rc.12", commit: candidateCommit)
+            for checkpoint in [DistributionLifecycleCheckpoint.stateMigrated, .verifying] {
+                for interruption in [false, true] {
+                    let name = "legacy-\(checkpoint.rawValue)-\(interruption)"
+                    let prefix = root.appendingPathComponent(name + "-prefix")
+                    let stateDirectory = root.appendingPathComponent(name + "-state")
+                    try FileManager.default.createDirectory(at: prefix, withIntermediateDirectories: false)
+                    try FileManager.default.createDirectory(at: stateDirectory, withIntermediateDirectories: false,
+                        attributes: [.posixPermissions: 0o700])
+                    let state = SQLiteStateStore(path: stateDirectory.appendingPathComponent("state.sqlite").path)
+                    try MigrationRunner().apply(to: state, throughVersion: 7)
+                    let lifecycle = DistributionInstalledLifecycle()
+                    _ = try installWithPreparedState(lifecycle: lifecycle, artifact: baseline,
+                        prefix: prefix, stateDatabasePath: state.path)
+                    _ = try installWithPreparedState(lifecycle: lifecycle, artifact: candidate,
+                        prefix: prefix, stateDatabasePath: state.path)
+                    try state.withConnection {
+                        try $0.run("INSERT INTO projects (id,name,manifest_hash,created_at,updated_at) VALUES ('candidate-only','current','current','2026-10-15T05:00:00Z','2026-10-15T05:00:00Z')")
+                    }
+                    _ = try lifecycle.prepareStateBinding(prefix: prefix, configuration: state.configuration)
+                    let before = try XCTUnwrap(lifecycle.inspect(prefix: prefix).status)
+                    let cancellation = SecureSubprocessCancellation()
+                    let failing = interruption
+                        ? DistributionInstalledLifecycle(interruptAfter: checkpoint)
+                        : DistributionInstalledLifecycle(cancelAfter: checkpoint)
+                    XCTAssertThrowsError(try failing.rollback(prefix: prefix, cancellation: cancellation)) { error in
+                        if interruption {
+                            XCTAssertEqual(error as? DistributionLifecycleInterruption, .after(checkpoint))
+                        } else {
+                            self.assertCommandCancelled(error, checkpoint: checkpoint)
+                        }
+                    }
+                    if interruption {
+                        XCTAssertEqual(try state.schemaVersion(), 7)
+                        XCTAssertEqual(try lifecycle.inspect(prefix: prefix).readiness, .recoveryRequired)
+                        let recovered = try lifecycle.recover(prefix: prefix)
+                        XCTAssertEqual(recovered.action, .restoredPriorGeneration)
+                    }
+                    let inspection = try lifecycle.inspect(prefix: prefix)
+                    XCTAssertEqual(inspection.readiness, .ready)
+                    XCTAssertEqual(inspection.status, before)
+                    XCTAssertEqual(try state.schemaVersion(), MigrationRunner.latestSchemaVersion)
+                    XCTAssertEqual(try state.withConnection(readOnly: true) {
+                        try $0.query("SELECT id FROM projects WHERE id='candidate-only'")
+                    }, [["candidate-only"]])
+                    XCTAssertEqual(try runInstalled(prefix.appendingPathComponent("bin/hostwright"),
+                        arguments: ["--version"]), "0.0.2-rc.12\n")
+                    _ = try lifecycle.uninstall(prefix: prefix, dataPolicy: .preserve)
+                    XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: prefix.path), [])
+                }
+            }
+        }
+    }
+
     func testTerminalCleanupProofBindsCompletedGenerationAndExactDispositions() throws {
         try withTemporaryRoot { root in
             let artifact = try makeVerifiedArtifact(root: root, name: "terminal-cleanup", version: "0.0.1", commit: baselineCommit)
@@ -3172,21 +3232,23 @@ final class DistributionDurableLifecycleTests: XCTestCase {
         root: URL,
         name: String,
         version: String,
-        commit: String
+        commit: String,
+        observationalDaemon: Bool = false
     ) throws -> VerifiedDistributionArtifact {
         let fixture = root.appendingPathComponent("fixture-\(name)", isDirectory: true)
         try FileManager.default.createDirectory(at: fixture, withIntermediateDirectories: false)
         let source = fixture.appendingPathComponent("main.swift")
         let binary = fixture.appendingPathComponent("hostwright-fixture")
+        let daemonHelp = observationalDaemon
+            ? "hostwrightd --foreground --config <hostwright.yaml>\nThis phase observes, plans, and records daemon loop attempts only.\nIt does not install a launch agent and does not perform unattended runtime mutation."
+            : "hostwrightd --foreground --config <hostwright.yaml>\nhostwrightd --service --config <absolute-hostwright.yaml>\nMutations require exact provider capability, ownership, plan confirmation, and durable fencing."
         let program = """
         import Foundation
         let arguments = Array(CommandLine.arguments.dropFirst())
         if arguments.contains("--version") {
             print("\(version)")
         } else if arguments.contains("--help") {
-            print("hostwrightd --foreground --config <hostwright.yaml>")
-            print("hostwrightd --service --config <absolute-hostwright.yaml>")
-            print("Mutations require exact provider capability, ownership, plan confirmation, and durable fencing.")
+            print(\(String(reflecting: daemonHelp)))
         } else if arguments.count == 3,
                   arguments[0] == "--foreground",
                   arguments[1] == "--config" {

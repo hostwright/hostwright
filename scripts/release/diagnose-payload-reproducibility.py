@@ -75,19 +75,19 @@ def validate_output(source, output):
         raise ValueError('Output must be a fresh canonical directory outside source')
 
 
-def run_command(command, label, *, source, environment, output, record, timeout=60):
+def run_command(command, label, *, source, environment, output, record, timeout=60, working_directory=None, accepted_exit_codes=(0,)):
     log = output / (label + '.log')
     child = None
     started = time.monotonic()
     try:
         with log.open('xb') as stream:
-            child = subprocess.Popen(command, cwd=source, env=environment, stdout=stream,
+            child = subprocess.Popen(command, cwd=working_directory or source, env=environment, stdout=stream,
                                      stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
             while child.poll() is None:
                 if time.monotonic() - started > timeout or log.stat().st_size > 32 * 1024**2 or shutil.disk_usage(output).free < 1024**3:
                     raise RuntimeError('Diagnostic command exceeded its time, output or disk budget')
                 time.sleep(0.2)
-            if child.returncode != 0:
+            if child.returncode not in accepted_exit_codes:
                 raise RuntimeError('Diagnostic command failed: ' + label)
     finally:
         if child is not None:
@@ -121,7 +121,7 @@ def run_command(command, label, *, source, environment, output, record, timeout=
             except BaseException as error:
                 cleanup_error = repr(error)
             finally:
-                record['commands'].append(dict(command=command, log=log.name, pid=child.pid, processGroup=child.pid,
+                record['commands'].append(dict(command=command, workingDirectory=str(working_directory or source), acceptedExitCodes=list(accepted_exit_codes), log=log.name, pid=child.pid, processGroup=child.pid,
                                                 exitCode=child.poll(), logSHA256=sha(log), cleanupError=cleanup_error,
                                                 cleanupSignals=cleanup_signals, processGroupRemaining=remaining))
             if remaining is not False or cleanup_signals or cleanup_error:

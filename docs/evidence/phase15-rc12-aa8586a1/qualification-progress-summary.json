@@ -1,0 +1,80 @@
+{
+  "kind": "hostwright.rc12.qualification-progress-public-summary.v1",
+  "sourceCommit": "aa8586a1ccc7887f7ae09dcccdc32bf13c27c705",
+  "version": "0.0.2-rc.12",
+  "scope": "Derived progress summary. Original failed attempts, diagnostic records and raw artifacts remain retained separately. No diagnostic result substitutes for required qualification.",
+  "addressSanitizer": {
+    "executionAttempt": 3,
+    "status": "failed",
+    "exitCode": 1,
+    "sourceCleanBefore": true,
+    "sourceCleanAfter": true,
+    "binarySHA256": "f7664f4cb9c4a10118100d2403713974ecec041631be6ee44fa183e28f93d307",
+    "actualXCTestPasses": 3482,
+    "actualXCTestFailures": 1,
+    "routedSelectorsExcluded": 10,
+    "actualSwiftTestingPasses": 61,
+    "failedSelector": "-[HostwrightCLITests.LifecycleLiveDriverTests testFailedCompletionExitCannotSatisfyDependencyOrRecoveryObservation]",
+    "failedAssertions": [
+      {
+        "expected": "[true]",
+        "actual": "[]",
+        "context": "Completion-aware start requirements"
+      },
+      {
+        "expected": "[started, failed]",
+        "actual": "[]",
+        "context": "Persisted completion-checkpoint statuses"
+      }
+    ],
+    "sanitizerMemoryErrorReported": false,
+    "rootCauseEstablished": false,
+    "failedReceiptSHA256": "da65df748603982cca4e8730458441fa12022b725a4a5ea1eb6f764d24b220f6",
+    "rawLogSHA256": "39b56f1e2d1e8b64e707e1797f299daa9bb534d780b6fc8d6fa2e5da39ed48e3",
+    "serviceRestorationSHA256": "3022be4ded40e58ea189619c1882812b071db17e1c8880eaa34ee8148e9f7d08",
+    "qualificationAccepted": false
+  },
+  "productionBuilderDiagnostic": {
+    "run": 38779685934,
+    "attempt": 1,
+    "toolingCommit": "30928739c11d3edfa2cf201eec216f28a2db0c99",
+    "runtimeProducerRun": 38697512336,
+    "status": "identical",
+    "actualNativePayloadPairs": 9,
+    "actualDifferentBytes": {
+      "hostwright-storage-helper": 0,
+      "hostwright-desktop": 0,
+      "hostwright-network-provider-worker": 0,
+      "hostwrightd": 0,
+      "hostwright": 0,
+      "hostwright-network-helper": 0,
+      "hostwright-control": 0,
+      "hostwright-containerization-helper": 0,
+      "hostwright-dist": 0
+    },
+    "artifactBytes": 608008447,
+    "artifactSHA256": "4cefe3535fc866f5d771d7e93d81a395aefa0f56ed1f989ae921adee3036b7c0",
+    "retentionReceiptSHA256": "5d369ae8f86010a5ee08bc561b86f203f6c6cedfe829549b308e365f74f584f3",
+    "independentReviewSHA256": "bbb0c00d648dd5a14dfa6a49465757b66989fc67fbed34046d4802f2b91b9613",
+    "scope": "Two actual unsigned CLI builder executions, each using its production working directory. Full raw ZIP, output archives, manifests and all nine retained native payload pairs verified independently. This diagnostic does not clear the original qualification failure.",
+    "qualificationAccepted": false
+  },
+  "originalHostedMac26Qualification": {
+    "run": 38697524899,
+    "attempt": 1,
+    "status": "failed",
+    "failure": "Six same-size executable payloads differed in the clean-builder comparison.",
+    "originalAttemptURL": "https://github.com/hostwright/hostwright/actions/runs/38697524899/attempts/1",
+    "retry": {
+      "attempt": 2,
+      "scope": "Only the original failed distribution job; passing release/live jobs left untouched.",
+      "status": "running",
+      "qualificationAccepted": false
+    }
+  },
+  "qualificationAccepted": false,
+  "releaseStaged": false,
+  "gaPublished": false,
+  "officialHomebrewAvailable": false,
+  "observedAt": "2026-10-15T20:09:50.928807+00:00"
+}

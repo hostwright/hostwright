@@ -5,6 +5,10 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
+import shutil
+import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -60,9 +64,44 @@ class RetainedBuilderOutputs(unittest.TestCase):
         authenticated = M.runtime_environment(base, parent)
         self.assertEqual(authenticated['GH_TOKEN'], 'unit-test-sentinel')
         self.assertEqual(authenticated['PATH'], parent['PATH'])
+        self.assertEqual(authenticated['PYTHONDONTWRITEBYTECODE'], '1')
         self.assertNotIn('SDKROOT', authenticated)
         self.assertNotIn('GH_TOKEN', base)
         self.assertNotIn('GITHUB_TOKEN', base)
+
+    def source_fixture(self, runtime_scripts=False):
+        (self.root / '.gitignore').write_text('__pycache__/\n')
+        (self.root / 'fixture.py').write_text('value = 42\n')
+        if runtime_scripts:
+            for name in ['materialize-runtime-assets.py', 'verify-runtime-provenance.py', 'authenticate-runtime-subject.py']:
+                shutil.copyfile(HERE / name, self.root / name)
+        environment = dict(os.environ, GIT_CONFIG_GLOBAL='/dev/null', GIT_CONFIG_NOSYSTEM='1')
+        def git(*args):
+            return subprocess.check_output(['git', '-C', str(self.root), *args], env=environment,
+                                           stderr=subprocess.PIPE, text=True).strip()
+        git('init', '--quiet')
+        git('add', '.')
+        git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+            '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null', 'commit', '--quiet', '-m', 'fixture')
+        git('update-ref', 'refs/remotes/origin/main', 'HEAD')
+        return git('rev-parse', 'HEAD')
+
+    def test_ignored_bytecode_fails_before_expensive_builds(self):
+        commit = self.source_fixture()
+        M.clean_source(self.root, commit)
+        (self.root / '__pycache__').mkdir()
+        (self.root / '__pycache__/fixture.pyc').write_bytes(b'ignored-bytecode')
+        with self.assertRaisesRegex(ValueError, 'ignored source entries'):
+            M.clean_source(self.root, commit)
+
+    def test_runtime_import_preserves_strict_fresh_source_inventory(self):
+        commit = self.source_fixture(runtime_scripts=True)
+        environment = M.runtime_environment(dict(LANG='C'), dict(PATH='/usr/bin:/bin', GH_TOKEN='unit-test-sentinel'))
+        result = subprocess.run([sys.executable, str(self.root / 'materialize-runtime-assets.py'), '--help'],
+                                cwd=self.root, env=environment, check=True, capture_output=True, timeout=30)
+        self.assertIn(b'--source-commit', result.stdout)
+        self.assertFalse((self.root / '__pycache__').exists())
+        M.clean_source(self.root, commit)
 
     def test_missing_runtime_token_is_rejected(self):
         with self.assertRaisesRegex(ValueError, 'job token'):

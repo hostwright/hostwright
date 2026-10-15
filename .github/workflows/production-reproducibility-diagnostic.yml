@@ -21,6 +21,7 @@ jobs:
     env:
       SOURCE_COMMIT: aa8586a1ccc7887f7ae09dcccdc32bf13c27c705
       RUNTIME_RUN: '38697512336'
+      PYTHONDONTWRITEBYTECODE: '1'
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:

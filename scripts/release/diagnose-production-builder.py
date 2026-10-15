@@ -10,6 +10,7 @@ import os
 import re
 import shutil
 import signal
+import subprocess
 import sys
 import tarfile
 
@@ -24,12 +25,20 @@ BLOCKED_STAGES = {'developer-id-signing', 'notarization-stapling-gatekeeper', 'i
 
 
 def runtime_environment(base, parent):
-    result = dict(base, PATH=parent['PATH'])
+    result = dict(base, PATH=parent['PATH'], PYTHONDONTWRITEBYTECODE='1')
     key = 'GH_TOKEN' if parent.get('GH_TOKEN') else 'GITHUB_TOKEN'
     if not parent.get(key):
         raise ValueError('Runtime attestation verification requires the read-only job token')
     result[key] = parent[key]
     return result
+
+
+def clean_source(source, commit=SOURCE):
+    D.clean_source(source, commit)
+    ignored = subprocess.check_output(['git', '-C', str(source), 'status', '--porcelain=v1',
+                                       '--ignored', '--untracked-files=normal'], timeout=30)
+    if ignored.strip():
+        raise ValueError('Fresh diagnostic checkout contains ignored source entries: ' + ignored.decode(errors='replace'))
 
 
 def regular(path, limit):
@@ -104,7 +113,7 @@ def read_generation(output, commit, products):
 
 
 def diagnose(source, output, runtime_archive):
-    D.clean_source(source, SOURCE)
+    clean_source(source)
     D.recipe(source)
     D.validate_output(source, output)
     regular(runtime_archive, 3 * 1024**3)
@@ -112,6 +121,7 @@ def diagnose(source, output, runtime_archive):
         raise ValueError('Require authenticated runtime archive and sixteen GiB initial disk budget')
     output.mkdir(mode=0o700)
     environment = dict(HOME=str(Path.home()), LANG='C', LC_ALL='C', PATH='/usr/bin:/bin:/usr/sbin:/sbin',
+                       PYTHONDONTWRITEBYTECODE='1',
                        GIT_CONFIG_GLOBAL='/dev/null', GIT_CONFIG_NOSYSTEM='1', GIT_PAGER='cat',
                        GIT_TERMINAL_PROMPT='0', PAGER='cat', TERM='dumb')
     record = dict(sourceCommit=SOURCE, runtimeProducerRun=RUNTIME_RUN, runtimeProducerAttempt=1,
@@ -135,6 +145,7 @@ def diagnose(source, output, runtime_archive):
              '--output', str(assets), '--source-commit', SOURCE, '--run-id', str(RUNTIME_RUN), '--attempt', '1'],
             'authenticate-runtime', source=source, working_directory=Path('/'),
                       environment=runtime_environment(environment, os.environ), output=output, record=record, timeout=1200)
+        clean_source(source)
         scratch = output / 'driver-build'
         bootstrap_env = dict(environment, SWIFT_DETERMINISTIC_HASHING='1')
         D.run_command(['/usr/bin/swift', *D.arguments(source, scratch), '--product', 'hostwright-dist'],
@@ -144,14 +155,14 @@ def diagnose(source, output, runtime_archive):
         regular(driver, 128 * 1024**2)
         products = D.release_products(source)
         for number in [1, 2]:
-            D.clean_source(source, SOURCE)
+            clean_source(source)
             generation = output / ('generation-' + str(number))
             D.run_command([str(driver), 'build', '--source-root', str(source), '--output-dir', str(generation),
                            '--expected-commit', SOURCE], 'actual-builder-' + str(number), source=source,
                           working_directory=Path('/'), environment=dict(environment, HOSTWRIGHT_CONTAINERIZATION_ASSET_ROOT=str(assets)),
                           output=output, record=record, timeout=4500, accepted_exit_codes=(69,))
             record['builds'].append(read_generation(generation, SOURCE, products))
-            D.clean_source(source, SOURCE)
+            clean_source(source)
         left, right = record['builds']
         record['payloadDifferences'] = {name: D.difference_summary(Path(left['payloads'][name]['file']), Path(right['payloads'][name]['file'])) for name in products}
         record['status'] = 'identical' if all(item['differentBytes'] == 0 for item in record['payloadDifferences'].values()) else 'different'

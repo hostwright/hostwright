@@ -52,6 +52,16 @@ class DiagnosticBoundaries(unittest.TestCase):
             DIAGNOSTIC.recipe(self.root)
         DIAGNOSTIC.recipe(HERE.parents[1])
 
+    def test_release_order_is_bound_to_candidate_source(self):
+        products = DIAGNOSTIC.release_products(HERE.parents[1])
+        self.assertEqual(len(products), 9)
+        self.assertEqual(products[4], DIAGNOSTIC.PRODUCT)
+        path = self.root / 'Sources/HostwrightDistribution/DistributionModels.swift'
+        path.parent.mkdir(parents=True)
+        path.write_text('public static let shippedExecutableNames = [\n        "unreviewed"\n    ]')
+        with self.assertRaisesRegex(ValueError, 'order changed'):
+            DIAGNOSTIC.release_products(self.root)
+
     def test_dirty_and_wrong_source_are_rejected(self):
         subprocess.run(['git', 'init', '-q', str(self.root)], check=True)
         (self.root / 'input').write_text('source')

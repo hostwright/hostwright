@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Retain two isolated builds of the smallest payload that differed on macOS 26."""
+"""Retain reproducibility inputs for isolated-worker or actual release product order."""
 from pathlib import Path
 import argparse
 import datetime
@@ -129,19 +129,34 @@ def run_command(command, label, *, source, environment, output, record, timeout=
     return log.read_text()
 
 
-def diagnose(source, commit, output):
+def release_products(source):
+    text = (source / 'Sources/HostwrightDistribution/DistributionModels.swift').read_text()
+    match = re.search(r'public static let shippedExecutableNames = \[(.*?)\n    \]', text, re.S)
+    if match is None:
+        raise ValueError('Missing release product order')
+    products = re.findall(r'"([a-z0-9-]+)"', match.group(1))
+    expected = ['hostwright', 'hostwright-control', 'hostwright-containerization-helper',
+                'hostwright-network-helper', PRODUCT, 'hostwright-storage-helper',
+                'hostwright-dist', 'hostwrightd', 'hostwright-desktop']
+    if products != expected:
+        raise ValueError('Release product order changed; review diagnostic before using it')
+    return products
+
+
+def diagnose(source, commit, output, context='isolated-worker'):
     clean_source(source, commit)
     recipe(source)
     validate_output(source, output)
     if shutil.disk_usage(output.parent).free < 6 * 1024**3:
         raise ValueError('Diagnostic requires six GiB of free space')
+    products = release_products(source) if context == 'release-product-order' else [PRODUCT]
     output.mkdir(mode=0o700)
     scratch = output / 'scratch'
     environment = dict(HOME=str(Path.home()), LANG='C', LC_ALL='C', PATH='/usr/bin:/bin:/usr/sbin:/sbin',
                        GIT_CONFIG_GLOBAL='/dev/null', GIT_CONFIG_NOSYSTEM='1', GIT_PAGER='cat',
                        GIT_TERMINAL_PROMPT='0', PAGER='cat', TERM='dumb', SWIFT_DETERMINISTIC_HASHING='1')
     record = dict(sourceCommit=commit, product=PRODUCT, recipeSHA256=RECIPE_SHA256,
-                  startedAt=datetime.datetime.now(datetime.UTC).isoformat(), environment=environment,
+                  startedAt=datetime.datetime.now(datetime.UTC).isoformat(), environment=environment, context=context, products=products,
                   commands=[], builds=[], qualificationAccepted=False,
                   scope='Diagnostic comparison only; does not replace or accept any qualification gate.')
 
@@ -160,7 +175,14 @@ def diagnose(source, commit, output):
             clean_source(source, commit)
             assert not scratch.exists()
             scratch.mkdir(mode=0o700)
-            run(['/usr/bin/swift', *arguments(source, scratch), '--product', PRODUCT], f'build-{number}', timeout=1200)
+            if context == 'release-product-order':
+                dependency_env = {key: value for key, value in environment.items() if key != 'SWIFT_DETERMINISTIC_HASHING'}
+                run_command(['/usr/bin/swift', 'package', '--package-path', str(source), '--scratch-path', str(scratch),
+                             'show-dependencies', '--format', 'json'], f'dependencies-{number}', source=source,
+                            environment=dependency_env, output=output, record=record, timeout=600)
+            for product in products:
+                run(['/usr/bin/swift', *arguments(source, scratch), '--product', product],
+                    f'build-{number}-{product}', timeout=3600 if context == 'release-product-order' else 1200)
             bin_path = Path(run(['/usr/bin/swift', *arguments(source, scratch), '--show-bin-path'], f'bin-path-{number}').strip())
             assert bin_path.resolve() == bin_path and scratch in bin_path.parents
             binary = bin_path / PRODUCT
@@ -172,6 +194,16 @@ def diagnose(source, commit, output):
             for label, command in [('load-commands', ['/usr/bin/otool', '-l']), ('symbols', ['/usr/bin/nm', '-nm']),
                                    ('signature', ['/usr/bin/codesign', '-dvvv'])]:
                 run([*command, str(binary)], f'{label}-{number}')
+            payloads = {}
+            if context == 'release-product-order':
+                for product in products:
+                    payload = bin_path / product
+                    assert payload.is_file() and not payload.is_symlink()
+                    target = output / f'payload-{product}-{number}'
+                    shutil.copyfile(payload, target)
+                    target.chmod(0o600)
+                    assert sha(payload) == sha(target)
+                    payloads[product] = dict(binary=target.name, sha256=sha(target), bytes=target.stat().st_size)
             objects = sorted(bin_path.rglob('*.o'))
             total = sum(path.stat().st_size for path in objects)
             assert objects and total < 1024**3 and all(path.is_file() and not path.is_symlink() for path in objects)
@@ -181,12 +213,16 @@ def diagnose(source, commit, output):
                 for path in objects:
                     tar.add(path, arcname=str(path.relative_to(scratch)), recursive=False)
             record['builds'].append(dict(binary=retained.name, binarySHA256=sha(retained), objects=inventory,
-                                         objectArchive=archive.name, objectArchiveSHA256=sha(archive)))
+                                         objectArchive=archive.name, objectArchiveSHA256=sha(archive), payloads=payloads))
             clean_source(source, commit)
             shutil.rmtree(scratch)
         left, right = record['builds']
-        record['status'] = 'identical' if left['binarySHA256'] == right['binarySHA256'] else 'different'
+        record['status'] = 'identical' if (left['binarySHA256'] == right['binarySHA256'] and
+            all(item['sha256'] == right['payloads'][name]['sha256'] for name, item in left['payloads'].items())) else 'different'
         record['binaryDifference'] = difference_summary(output / left['binary'], output / right['binary'])
+        record['payloadDifferences'] = {
+            name: difference_summary(output / left['payloads'][name]['binary'], output / right['payloads'][name]['binary'])
+            for name in left['payloads']}
         record['differentObjects'] = sorted(name for name in set(left['objects']) | set(right['objects'])
                                            if left['objects'].get(name) != right['objects'].get(name))
     except BaseException as error:
@@ -204,5 +240,6 @@ if __name__ == '__main__':
     parser.add_argument('--source', type=Path, required=True)
     parser.add_argument('--commit', required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--context', choices=['isolated-worker', 'release-product-order'], default='isolated-worker')
     args = parser.parse_args()
-    diagnose(args.source, args.commit, args.output)
+    diagnose(args.source, args.commit, args.output, args.context)

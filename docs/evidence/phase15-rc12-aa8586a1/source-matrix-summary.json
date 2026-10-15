@@ -1,0 +1,125 @@
+{
+  "kind": "hostwright.public-source-matrix-summary.v1",
+  "sourceCommit": "aa8586a1ccc7887f7ae09dcccdc32bf13c27c705",
+  "version": "0.0.2-rc.12",
+  "lane": "source",
+  "status": "passed",
+  "counts": {
+    "xctestCases": 3493,
+    "swiftTestingCases": 61,
+    "passedCases": 3554,
+    "failedCases": 0,
+    "skippedCases": 0
+  },
+  "binarySHA256": "729b07136e96fcfe016d448056e39c3a01eaebb131c6d82a86210f984305cbb0",
+  "compiledInventorySHA256": "ef2d3b9f37c9b119dfb3dad34609dca66d8f141405df97f28c24d1f4823c097b",
+  "verifierSHA256": "678141f9c759370373ea4c0f38d20bec3ac757ae5f06041ee78b886f34f692ce",
+  "verifiedAt": "2026-10-15T09:30:44.189614+00:00",
+  "baseSkippedResultsCountedAsPassing": false,
+  "completeSupportedSuite": true,
+  "protectedQualificationAccepted": false,
+  "scope": "Derived public summary of the completed supported SOURCE matrix. Original verifier output, independent review and raw execution records remain retained in the qualification packet; their hashes bind this summary. It does not establish sanitizer, signed-artifact, RC, GA or Homebrew acceptance.",
+  "sourceVerificationReceiptSHA256": "ecf31a73dfcd6affcf31cee77d80d681b6458d66618678b81672aeb0c5d8b2a6",
+  "independentReviewReceiptSHA256": "12eeb0fdf47c4cf1013595223bf694a172633034ac9daf1f68879e67875b63c9",
+  "baseReceiptSHA256": "a296213308751c8e11f26f400a0b6ee44750807310462cfc23ce744471b78974",
+  "baseRawLogSHA256": "8e8d34e0856d132b6598deb46f159f516ec775a25bbb44baf1bd543d47e12358",
+  "baseSwiftTestingXMLSHA256": "d25204b7dd854d5ffe1d63f152b06da5b322ffd9cceb1d44bbbb10dc68e10f28",
+  "sourceReviewVerdict": "verified-complete-source-supported-suite",
+  "accounting": {
+    "baseXCTestPassed": 3483,
+    "baseXCTestRoutedSkips": 10,
+    "baseSwiftTestingPassed": 61,
+    "freshUniqueRoutedPasses": 10,
+    "restoredPermissionDuplicateCounted": false,
+    "originalFailedTLSCounted": false
+  },
+  "freshUniqueLiveCases": [
+    {
+      "selector": "HostwrightRegistryTests.RegistryAuthenticationTests/testLiveDockerHubBearerScopeWhenExplicitlyEnabled",
+      "status": "passed",
+      "exitCode": 0,
+      "receiptSHA256": "0cb7ab2fb8628ff87832dd87338e442261cd5a6deb8bcad4a0a89764c0682ecd",
+      "rawLogSHA256": "fec2164167dc80453dfc9e9879f7a0e5cda7a15ece90ca85025b2df16a49f45a",
+      "binarySHA256": "729b07136e96fcfe016d448056e39c3a01eaebb131c6d82a86210f984305cbb0"
+    },
+    {
+      "selector": "HostwrightSchedulerTests.Phase10SchedulerQualificationTests/testPhase10SchedulerQualificationPerformanceCell",
+      "status": "passed",
+      "exitCode": 0,
+      "receiptSHA256": "dd83cf2dec06db8f7c6b062d85cb31eeaf8915a840c3336bb6b0e90ae5c37e86",
+      "rawLogSHA256": "165efd23f9d447a5f71f05f6ddde0f457f0af1edf44fb71c57dc62eb39e1a514",
+      "binarySHA256": "729b07136e96fcfe016d448056e39c3a01eaebb131c6d82a86210f984305cbb0"
+    },
+    {
+      "selector": "HostwrightRuntimeTests.LifecycleGate05LiveTests/testAppleCLIConfirmedCreateAndDeleteThroughSecureBoundary",
+      "status": "passed",
+      "exitCode": 0,
+      "receiptSHA256": "03feada657c3a95106bcf7106586333572a7451ae396880e0fdceb421884fb17",
+      "rawLogSHA256": "90ff60e9916be22efbe8ce4896f1664e18aed75eda6a43de24484a0334ee43ab",
+      "binarySHA256": "729b07136e96fcfe016d448056e39c3a01eaebb131c6d82a86210f984305cbb0"
+    },
+    {
+      "selector": "HostwrightRuntimeTests.Phase07NetworkGate01LiveTests/testAppleCLIProjectNetworksIsolateAndExplicitDualAttachmentConnects",
+      "status": "passed",
+      "exitCode": 0,
+      "receiptSHA256": "58f57052053e916e230f164796ffdc79dc3b7ef721b31e5afbf14aba4e2bb89c",
+      "rawLogSHA256": "70fa1f26ac035b226440e9cebd58e00da99142c5e53abf6d7bf1393a93ac78b1",
+      "binarySHA256": "729b07136e96fcfe016d448056e39c3a01eaebb131c6d82a86210f984305cbb0"
+    },
+    {
+      "selector": "HostwrightContainerizationHelperTests.Phase07ContainerizationNetworkLiveTests/testRealContainerizationNetworksIsolateAndDualAttachmentConnects",
+      "status": "passed",
+      "exitCode": 0,
+      "receiptSHA256": "ebe0a463c858c87901d3274e82a983889b13acb2bca1dabce520338ca95b56dc",
+      "rawLogSHA256": "16cc31f1466cde1767769151e0a54301b9c2f352c2b2dac980a3c7ad17405eca",
+      "binarySHA256": "729b07136e96fcfe016d448056e39c3a01eaebb131c6d82a86210f984305cbb0"
+    },
+    {
+      "selector": "HostwrightNetworkHelperTests.Phase07LANExposureLiveTests/testExplicitLANPolicyServesTahoeVMAndFailsClosed",
+      "status": "passed",
+      "exitCode": 0,
+      "receiptSHA256": "0c3717fda5c14d4186a4baf5126933d82df284a95980d5eda6e0325f422ea8ff",
+      "rawLogSHA256": "1290aa75cfe237b80c39d4fe9eb1dfbfb3041dfa1b02cf8bb428f176cb7e8821",
+      "binarySHA256": "729b07136e96fcfe016d448056e39c3a01eaebb131c6d82a86210f984305cbb0"
+    },
+    {
+      "selector": "HostwrightNetworkHelperTests.ServiceTunnelTahoeVMHarnessTests/testQualificationConfigurationUsesCanonicalHelperFrame",
+      "status": "passed",
+      "exitCode": 0,
+      "receiptSHA256": "ba7dfdb68f7b7a789e743946810ccc9139fcff67883ab3bb6da757f0358a42eb",
+      "rawLogSHA256": "7cc4e01cda8f5d039acc4fb24b43a4aa8838323e7bcd2a5fd5074e98ce6616ce",
+      "binarySHA256": "729b07136e96fcfe016d448056e39c3a01eaebb131c6d82a86210f984305cbb0"
+    },
+    {
+      "selector": "HostwrightRuntimeTests.Phase07LocalNetworkForwardingLiveTests/testAuthorizedLocalhostForwardingSurvivesCancellationRestartAndConflict",
+      "status": "passed",
+      "exitCode": 0,
+      "receiptSHA256": "a74f326dcd5fa5237d70b1c5e0e8e32bfbdbff0f506c378f0e89c7a30b7c45dc",
+      "rawLogSHA256": "f7ab138c6a6b0a2acdab38e9b38135a19ec0c5923de2f2a6c3cfcea8b80c1380",
+      "binarySHA256": "729b07136e96fcfe016d448056e39c3a01eaebb131c6d82a86210f984305cbb0"
+    },
+    {
+      "selector": "HostwrightRuntimeTests.Phase07LocalNetworkForwardingLiveTests/testDeniedLocalNetworkPermissionFailsClosedAndCleansUpExactly",
+      "status": "passed",
+      "exitCode": 0,
+      "receiptSHA256": "cd478d315bc123cd7ecd9826aa577f747c69b4a7deecbeaab2a87f92c0134f5b",
+      "rawLogSHA256": "5c1090f4e2684af86fc528862a670d78875d32177e0f987a9c29e2b3ec7b4783",
+      "binarySHA256": "729b07136e96fcfe016d448056e39c3a01eaebb131c6d82a86210f984305cbb0"
+    },
+    {
+      "selector": "HostwrightNetworkHelperTests.ServiceTunnelTahoeVMHarnessTests/testExistingTahoeVMEchoesAuthenticatedFrame",
+      "status": "passed",
+      "exitCode": 0,
+      "receiptSHA256": "2e711539061d0576da99122736b6d46620d7c765c9b785011ebf4c74cb4e0545",
+      "rawLogSHA256": "5015965a36c7b70e90ce3098219b18f02ccffe405d8936eba6c005311cb1a582",
+      "binarySHA256": "729b07136e96fcfe016d448056e39c3a01eaebb131c6d82a86210f984305cbb0"
+    }
+  ],
+  "priorFailedTLSAttempt": {
+    "status": "failed-not-counted-as-passing",
+    "receiptSHA256": "c93634ec76459fa7d3dad1ea23a0793625e4b615b2b8b9b5d7b89c745111a846",
+    "successfulRetryReceiptSHA256": "2e711539061d0576da99122736b6d46620d7c765c9b785011ebf4c74cb4e0545",
+    "oldFailureRetainedUnchanged": true
+  },
+  "qualificationAccepted": false
+}

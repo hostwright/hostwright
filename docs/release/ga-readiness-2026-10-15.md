@@ -1,18 +1,41 @@
 # GA readiness — October 15, 2026
 
-The frozen candidate is `0.0.2-rc.11`, source
-[`0b894d2e0fe84a8c57dde8af31b8dd3f1bff23a2`](https://github.com/hostwright/hostwright/commit/0b894d2e0fe84a8c57dde8af31b8dd3f1bff23a2).
-Its supported source, sanitizer and timed fuzz checks have completed. Signed
-staging passed on attempt 9, and the authenticated package installed successfully
-over dev.11 in the qualification VM. The subsequent rollback failed; this is not
-a clean RC. No supported RC or GA has been published; the signed dev.12
-vendor-tap build remains unsupported.
-Official `brew install hostwright` is still a launch requirement.
-Current source prepares `0.0.2-rc.12` with the rollback corrections. It requires
-a fresh source freeze, runtime producer and candidate qualification; prior
-RC.11 results do not qualify RC.12.
+The frozen candidate is `0.0.2-rc.12`, source
+[`aa8586a1ccc7887f7ae09dcccdc32bf13c27c705`](https://github.com/hostwright/hostwright/commit/aa8586a1ccc7887f7ae09dcccdc32bf13c27c705).
+Its completed supported source matrix passed **3,554 unique cases**, with zero
+failures and zero skips in the aggregate. The runtime producer completed.
+Candidate acceptance remains open: the hosted macOS 26 payload comparison failed,
+fresh sanitizer/fuzz and signed installed-artifact checks remain required.
+No supported RC or GA has been published; the signed dev.12 vendor-tap build
+remains unsupported. Official `brew install hostwright` is still a launch requirement.
 
-## Completed candidate checks
+## Current RC.12 evidence
+
+- The [source matrix summary](../evidence/phase15-rc12-aa8586a1/README.md) binds
+  3,493 XCTest and 61 Swift Testing passes, including ten fresh live/platform
+  executions. Its independent review verified exact binary and receipt bindings.
+  The original failed TLS attempt remains retained and is not counted as passing.
+- [Runtime producer 38697512336](https://github.com/hostwright/hostwright/actions/runs/38697512336),
+  attempt 1, completed successfully. Local archive retention/authentication is
+  still required before staging; producer success alone is not acceptance.
+- Hosted [macOS 27 qualification](https://github.com/hostwright/hostwright/actions/runs/38697533714)
+  passed its release and distribution shards. [macOS 26 qualification](https://github.com/hostwright/hostwright/actions/runs/38697524899)
+  passed release checks but failed byte reproducibility for six same-size payload
+  binaries. Their skipped hosted live cells receive no live-coverage credit.
+- [PR #394](https://github.com/hostwright/hostwright/pull/394) retains reproducibility
+  diagnostics. Two isolated worker builds matched each other and the first worker
+  in the original failed comparison. This does not resolve the full release build
+  mismatch. [PR #395](https://github.com/hostwright/hostwright/pull/395) adds the
+  actual release product sequence and retains both payload/object sets.
+- Fresh RC.12 sanitizer, fuzz, signed staging, installation, recovery and final
+  artifact-security evidence remain pending. Prior RC.11 checks do not qualify RC.12.
+
+## Historical RC.11 evidence
+
+The following results apply only to `0.0.2-rc.11`, source
+[`0b894d2e`](https://github.com/hostwright/hostwright/commit/0b894d2e0fe84a8c57dde8af31b8dd3f1bff23a2).
+That candidate completed signed staging and its first dev.11 upgrade, then failed
+rollback. Its source and signed bytes remain unchanged.
 
 - The supported source matrix passed **3,544 unique cases, zero failures and zero
   skips**, including the ten separately executed live/platform cases. See the
@@ -57,8 +80,9 @@ the current executable check rejected the historical observation-only daemon,
 and compensation also failed. The raw failed cycle, protected journals and
 paired state snapshots are retained unchanged. See the
 [public failure record](https://github.com/hostwright/hostwright/issues/278#issuecomment-6185484144).
-Source corrections and regression tests are under review; the frozen RC.11
-source and signed bytes remain unchanged. No re-upgrade or complete installed
+[PR #393](https://github.com/hostwright/hostwright/pull/393) merged the source
+corrections and regression coverage. The frozen RC.11 source and signed bytes
+remain unchanged; the correction still needs a subsequent signed lifecycle run. No re-upgrade or complete installed
 lifecycle result is claimed.
 
 ## Reviewed release corrections
@@ -76,7 +100,7 @@ new artifact metadata requires verification against the subsequent build bytes.
 
 | Issue | Required evidence still pending |
 | --- | --- |
-| [#271](https://github.com/hostwright/hostwright/issues/271) | Ten signed-artifact lifecycle cycles per supported provider and the checkpointed 30-minute physical-host soak. |
+| [#271](https://github.com/hostwright/hostwright/issues/271) | Complete clean RC.12 sanitizer/fuzz and hosted reproducibility, ten signed-artifact lifecycle cycles per supported provider and the checkpointed 30-minute physical-host soak. |
 | [#275](https://github.com/hostwright/hostwright/issues/275) | Final evidence assembly with the authenticated artifact/security review, explicit schema-3 P2 disposition and independently verified subsequent schema-4 bytes. |
 | [#277](https://github.com/hostwright/hostwright/issues/277) | Signed backup, restore and interruption-recovery execution with cleanup and unmanaged-data preservation. |
 | [#278](https://github.com/hostwright/hostwright/issues/278) | Resolve the genuine dev.11 rollback/compensation failure, then complete historical upgrades, rollback, repair, interruption recovery and uninstall on a subsequent signed candidate. |

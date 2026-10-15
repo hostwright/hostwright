@@ -23,6 +23,15 @@ RUNTIME_SHA256 = '00b2a8810840392cffee8a8e4da0a2be1ea870b3837c042b34502cf9ee940c
 BLOCKED_STAGES = {'developer-id-signing', 'notarization-stapling-gatekeeper', 'installer-package', 'host-environment'}
 
 
+def runtime_environment(base, parent):
+    result = dict(base, PATH=parent['PATH'])
+    key = 'GH_TOKEN' if parent.get('GH_TOKEN') else 'GITHUB_TOKEN'
+    if not parent.get(key):
+        raise ValueError('Runtime attestation verification requires the read-only job token')
+    result[key] = parent[key]
+    return result
+
+
 def regular(path, limit):
     if path.resolve() != path or not path.is_file() or path.is_symlink() or not 0 < path.stat().st_size <= limit:
         raise ValueError('Expected bounded canonical regular file: ' + str(path))
@@ -125,7 +134,7 @@ def diagnose(source, output, runtime_archive):
         D.run_command([sys.executable, str(source / 'scripts/release/materialize-runtime-assets.py'), '--archive', str(runtime_archive),
              '--output', str(assets), '--source-commit', SOURCE, '--run-id', str(RUNTIME_RUN), '--attempt', '1'],
             'authenticate-runtime', source=source, working_directory=Path('/'),
-                      environment=dict(environment, PATH=os.environ['PATH']), output=output, record=record, timeout=1200)
+                      environment=runtime_environment(environment, os.environ), output=output, record=record, timeout=1200)
         scratch = output / 'driver-build'
         bootstrap_env = dict(environment, SWIFT_DETERMINISTIC_HASHING='1')
         D.run_command(['/usr/bin/swift', *D.arguments(source, scratch), '--product', 'hostwright-dist'],

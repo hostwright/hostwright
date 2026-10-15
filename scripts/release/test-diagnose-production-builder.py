@@ -54,6 +54,20 @@ class RetainedBuilderOutputs(unittest.TestCase):
     def save_report(self, report):
         (self.root / 'distribution-evidence.json').write_text(json.dumps(report))
 
+    def test_runtime_token_is_scoped_to_authentication_environment(self):
+        base = dict(PATH='/usr/bin', LANG='C')
+        parent = dict(PATH='/tools:/usr/bin', GH_TOKEN='unit-test-sentinel', SDKROOT='untrusted')
+        authenticated = M.runtime_environment(base, parent)
+        self.assertEqual(authenticated['GH_TOKEN'], 'unit-test-sentinel')
+        self.assertEqual(authenticated['PATH'], parent['PATH'])
+        self.assertNotIn('SDKROOT', authenticated)
+        self.assertNotIn('GH_TOKEN', base)
+        self.assertNotIn('GITHUB_TOKEN', base)
+
+    def test_missing_runtime_token_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, 'job token'):
+            M.runtime_environment(dict(PATH='/usr/bin'), dict(PATH='/tools'))
+
     def test_all_nine_actual_payloads_are_read_and_hashed(self):
         self.fixture()
         result = M.read_generation(self.root, M.SOURCE, self.products)

@@ -2,7 +2,7 @@
 
 Hostwright manages Apple container workloads on one Apple silicon Mac. Declare services in a YAML manifest, review a plan, and confirm it through the CLI or native desktop app. Hostwright tracks resource ownership and operations in a local SQLite database.
 
-**Release status:** The frozen candidate is `0.0.2-rc.12`. Its supported source matrix passed **3,554 unique tests** with no failures or skips in the completed aggregate; see the [source evidence summary](docs/evidence/phase15-rc12-aa8586a1/README.md). Its runtime producer completed successfully. Release qualification remains open: macOS 26 payload reproducibility failed, fresh sanitizer/fuzz coverage and signed installation/recovery checks remain required. No supported RC or GA channel has been published. A GA date is not confirmed; official Homebrew acceptance remains required.
+**Release status:** The frozen candidate is `0.0.2-rc.12`. Its supported source matrix passed **3,554 unique tests** with no failures or skips in the completed aggregate; see the [source evidence summary](docs/evidence/phase15-rc12-aa8586a1/README.md). Its runtime archive is authenticated, and all six fresh fuzz targets passed five minutes plus corpus replay; see the [runtime and fuzz summary](docs/evidence/phase15-rc12-aa8586a1/runtime-and-fuzz-summary.json). Release qualification remains open: macOS 26 payload reproducibility failed, and complete sanitizer coverage and signed installation/recovery checks remain required. No supported RC or GA channel has been published. A GA date is not confirmed; official Homebrew acceptance remains required.
 
 | Channel | Current availability |
 | --- | --- |

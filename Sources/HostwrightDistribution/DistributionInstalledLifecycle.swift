@@ -2302,6 +2302,12 @@ public struct DistributionInstalledLifecycle: Sendable {
             try writeJournal(journal, prefix: prefix)
             try checkpointReached(.payloadPublished, cancellation: cancellation)
 
+            try verifyInstalledExecutableContracts(
+                prefix: prefix,
+                manifest: toManifest,
+                cancellation: cancellation
+            )
+
             journal = journal.replacing(checkpoint: .stateMigrating)
             try writeJournal(journal, prefix: prefix)
             try checkpointReached(.stateMigrating, cancellation: cancellation)
@@ -2332,11 +2338,7 @@ public struct DistributionInstalledLifecycle: Sendable {
             try writeJournal(journal, prefix: prefix)
             try checkpointReached(.verifying, cancellation: cancellation)
 
-            try verifyInstalledExecutableContracts(
-                prefix: prefix,
-                manifest: toManifest,
-                cancellation: cancellation
-            )
+            try verifyOwnedFiles(toManifest, prefix: prefix, cancellation: cancellation)
             if operation != .install, serviceBefore != .notInstalled, ownerSession == nil {
                 try restoreManagedService(
                     to: serviceBefore,
@@ -3336,19 +3338,11 @@ public struct DistributionInstalledLifecycle: Sendable {
             timeoutSeconds: 30,
             cancellation: cancellation
         )
-        guard daemon.standardOutput.contains(
-            "hostwrightd --foreground --config <hostwright.yaml>"
-        ),
-        daemon.standardOutput.contains(
-            "hostwrightd --service --config <absolute-hostwright.yaml>"
-        ),
-        daemon.standardOutput.contains(
-            "Mutations require exact provider capability, ownership, plan confirmation, and durable fencing."
-        ) else {
-            throw DistributionError.lifecycleFailed(
-                "installed hostwrightd help did not preserve its safety boundary"
-            )
-        }
+        try DistributionDaemonSafetyContract.validate(
+            daemon.standardOutput,
+            packageVersion: manifest.packageVersion,
+            sourceCommit: manifest.sourceCommit
+        )
     }
 
     private func fileMatches(_ file: DistributionFileRecord, at url: URL) throws -> Bool {

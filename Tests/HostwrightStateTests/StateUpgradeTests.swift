@@ -7,6 +7,73 @@ import XCTest
 @testable import HostwrightState
 
 final class StateUpgradeTests: XCTestCase {
+    func testLegacyRollbackCanCompensateToItsUnanchoredCurrentSchemaSnapshot() throws {
+        try withTemporaryStateStore(prefix: "hostwright-state-upgrade", throughVersion: 7) { store, directory in
+            let keys = InMemoryAuditSigningKeyStore()
+            let service = StateUpgradeService(store: store)
+            let legacy = try service.createVerifiedSnapshot(at: directory.appendingPathComponent("legacy.sqlite").path)
+            _ = try service.migrateToLatest()
+            try store.withConnection {
+                try $0.run("INSERT INTO projects (id,name,manifest_hash,created_at,updated_at) VALUES ('current','current','current','2026-10-15T05:00:00Z','2026-10-15T05:00:00Z')")
+            }
+            let current = try service.createVerifiedSnapshot(at: directory.appendingPathComponent("current.sqlite").path)
+            let currentBytes = try Data(contentsOf: URL(fileURLWithPath: current.snapshotPath))
+            _ = try service.restoreVerifiedSnapshotPreservingAudit(legacy,
+                operationID: UUID().uuidString.lowercased(), keyStore: keys)
+            XCTAssertEqual(try store.schemaVersion(), 7)
+            _ = try service.restoreVerifiedSnapshotPreservingAudit(current,
+                operationID: UUID().uuidString.lowercased(), keyStore: keys)
+            XCTAssertEqual(try store.schemaVersion(), MigrationRunner.latestSchemaVersion)
+            XCTAssertEqual(try store.withConnection(readOnly: true) {
+                try $0.query("SELECT id FROM projects WHERE id='current'")
+            }, [["current"]])
+            XCTAssertEqual(TamperEvidentAuditTrail(store: store, keyStore: keys).verify().health, .healthy)
+            XCTAssertNil(try keys.loadHead())
+            XCTAssertNil(try keys.configuredActiveKey())
+            XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: current.snapshotPath)), currentBytes)
+        }
+    }
+
+    func testLegacyCompensationRejectsRetainedExternalAuthorityWithoutChangingState() throws {
+        try withTemporaryStateStore(prefix: "hostwright-state-upgrade", throughVersion: 7) { store, directory in
+            let keys = InMemoryAuditSigningKeyStore()
+            let service = StateUpgradeService(store: store)
+            let legacy = try service.createVerifiedSnapshot(at: directory.appendingPathComponent("legacy.sqlite").path)
+            _ = try service.migrateToLatest()
+            let current = try service.createVerifiedSnapshot(at: directory.appendingPathComponent("current.sqlite").path)
+            _ = try service.restoreVerifiedSnapshotPreservingAudit(legacy,
+                operationID: UUID().uuidString.lowercased(), keyStore: keys)
+            let before = try service.verifiedRevision()
+            _ = try keys.activeKey()
+            XCTAssertThrowsError(try service.restoreVerifiedSnapshotPreservingAudit(current,
+                operationID: UUID().uuidString.lowercased(), keyStore: keys))
+            XCTAssertEqual(try service.verifiedRevision(), before)
+            XCTAssertNotNil(try keys.configuredActiveKey())
+        }
+    }
+
+    func testLegacyCompensationRejectsSnapshotAuthorityWithoutChangingState() throws {
+        try withTemporaryStateStore(prefix: "hostwright-state-upgrade", throughVersion: 7) { store, directory in
+            let keys = InMemoryAuditSigningKeyStore()
+            let service = StateUpgradeService(store: store)
+            let legacy = try service.createVerifiedSnapshot(at: directory.appendingPathComponent("legacy.sqlite").path)
+            _ = try service.migrateToLatest()
+            let trail = TamperEvidentAuditTrail(store: store, keyStore: keys)
+            _ = try trail.append(AuditAppendInput(subjectID: "owner", requestID: "retained-audit",
+                action: .authentication, outcome: "accepted", reasonCode: "accepted",
+                payloadDigest: "sha256:" + String(repeating: "a", count: 64)))
+            let anchored = try service.createVerifiedSnapshot(at: directory.appendingPathComponent("anchored.sqlite").path)
+            let emptyKeys = InMemoryAuditSigningKeyStore()
+            _ = try service.restoreVerifiedSnapshot(legacy, operationID: UUID().uuidString.lowercased())
+            let before = try service.verifiedRevision()
+            XCTAssertThrowsError(try service.restoreVerifiedSnapshotPreservingAudit(anchored,
+                operationID: UUID().uuidString.lowercased(), keyStore: emptyKeys))
+            XCTAssertEqual(try service.verifiedRevision(), before)
+            XCTAssertNil(try emptyKeys.loadHead())
+            XCTAssertNil(try emptyKeys.configuredActiveKey())
+        }
+    }
+
     func testBootstrapContinuityRejectsRetainedExternalAuthorityBeforeLegacyMigration() throws {
         try withTemporaryStateStore(prefix: "hostwright-state-upgrade", throughVersion: 7) { store, _ in
             let keys = InMemoryAuditSigningKeyStore()

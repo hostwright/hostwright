@@ -36,8 +36,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$(sw_vers -productVersion)" == 26.* ]]
-          [[ "$(uname -m)" == arm64 ]]
+          [[ "$(sw_vers -productVersion)" == 26.* ]] || exit 1
+          [[ "$(uname -m)" == arm64 ]] || exit 1
           test "$(git -C candidate rev-parse HEAD)" = "$SOURCE_COMMIT"
           test -z "$(git -C candidate status --porcelain=v1 --untracked-files=all)"
           git -C candidate merge-base --is-ancestor "$SOURCE_COMMIT" origin/main

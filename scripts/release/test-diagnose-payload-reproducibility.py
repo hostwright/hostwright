@@ -87,6 +87,17 @@ class DiagnosticBoundaries(unittest.TestCase):
         self.assertEqual(self.record['commands'][0]['exitCode'], 0)
         self.assertFalse(self.record['commands'][0]['processGroupRemaining'])
 
+    def test_command_uses_explicit_cwd_and_accepts_only_selected_exit(self):
+        record = dict(commands=[])
+        output = DIAGNOSTIC.run_command(
+            [sys.executable, '-c', 'import os; print(os.getcwd()); raise SystemExit(69)'],
+            'blocked', source=self.root, working_directory=Path('/'),
+            accepted_exit_codes=(69,), environment=dict(os.environ), output=self.root, record=record)
+        self.assertEqual(output, '/\n')
+        self.assertEqual(record['commands'][0]['exitCode'], 69)
+        self.assertEqual(record['commands'][0]['workingDirectory'], '/')
+        self.assertFalse(record['commands'][0]['processGroupRemaining'])
+
     def test_command_failure_retains_raw_output(self):
         with self.assertRaisesRegex(RuntimeError, 'command failed'):
             self.run_command('print("before failure"); raise SystemExit(7)')

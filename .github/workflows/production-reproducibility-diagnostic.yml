@@ -1,0 +1,93 @@
+name: Production builder reproducibility diagnostic
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/production-reproducibility-diagnostic.yml
+      - scripts/release/diagnose-production-builder.py
+      - scripts/release/test-diagnose-production-builder.py
+      - scripts/release/diagnose-payload-reproducibility.py
+      - scripts/release/test-diagnose-payload-reproducibility.py
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  actual-builder-pair:
+    runs-on: macos-26
+    timeout-minutes: 180
+    env:
+      SOURCE_COMMIT: aa8586a1ccc7887f7ae09dcccdc32bf13c27c705
+      RUNTIME_RUN: '38697512336'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          path: tooling
+          persist-credentials: false
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ env.SOURCE_COMMIT }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify host, frozen source and diagnostic boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(sw_vers -productVersion)" == 26.* ]] || exit 1
+          [[ "$(uname -m)" == arm64 ]] || exit 1
+          test "$(git -C candidate rev-parse HEAD)" = "$SOURCE_COMMIT"
+          test -z "$(git -C candidate status --porcelain=v1 --untracked-files=all)"
+          git -C candidate merge-base --is-ancestor "$SOURCE_COMMIT" origin/main
+          python3 tooling/scripts/release/test-diagnose-payload-reproducibility.py
+          python3 tooling/scripts/release/test-diagnose-production-builder.py
+      - name: Download the exact previously authenticated runtime producer
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, pathlib, subprocess
+          run_id = int(os.environ['RUNTIME_RUN'])
+          run = json.loads(subprocess.check_output(['gh', 'api', f'repos/hostwright/hostwright/actions/runs/{run_id}']))
+          if (run['id'] != run_id or run['head_sha'] != os.environ['SOURCE_COMMIT']
+                  or run['run_attempt'] != 1 or run['head_branch'] != 'main'
+                  or run['path'] != '.github/workflows/runtime-ingredients.yml'
+                  or run['status'] != 'completed' or run['conclusion'] != 'success'
+                  or run['repository']['full_name'] != 'hostwright/hostwright'):
+              raise SystemExit('Runtime producer binding differs from the reviewed run')
+          destination = pathlib.Path(os.environ['RUNNER_TEMP']) / 'production-diagnostic-runtime'
+          destination.mkdir(mode=0o700)
+          (destination / 'producer-run.json').write_text(json.dumps(run, indent=2) + '\n')
+          subprocess.run(['gh', 'run', 'download', str(run_id), '--repo', 'hostwright/hostwright',
+                          '--name', f"runtime-provenance-{os.environ['SOURCE_COMMIT']}-{run_id}-1",
+                          '--dir', str(destination)], check=True, timeout=900)
+          if {p.name for p in destination.iterdir()} != {'producer-run.json', 'runtime-provenance.tar.gz'}:
+              raise SystemExit('Unexpected runtime download contents')
+          PY
+      - name: Run the actual unsigned CLI builder twice and preserve both outputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tooling/scripts/release/diagnose-production-builder.py \
+            --source "$GITHUB_WORKSPACE/candidate" \
+            --output "$RUNNER_TEMP/production-builder-reproducibility" \
+            --runtime-archive "$RUNNER_TEMP/production-diagnostic-runtime/runtime-provenance.tar.gz"
+      - name: Retain raw reports, archives and exact executable bytes
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: production-builder-reproducibility-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/production-builder-reproducibility/result.json
+            ${{ runner.temp }}/production-builder-reproducibility/*.log
+            ${{ runner.temp }}/production-builder-reproducibility/generation-*
+            ${{ runner.temp }}/production-diagnostic-runtime/producer-run.json
+          retention-days: 7
+          if-no-files-found: warn

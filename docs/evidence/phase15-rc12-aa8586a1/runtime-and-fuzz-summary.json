@@ -1,0 +1,70 @@
+{
+  "kind": "hostwright.rc12.runtime-and-fuzz-public-summary.v1",
+  "scope": "Derived summary. Original raw records and recovery artifacts remain retained in the qualification packet. This is not installed-artifact or release acceptance.",
+  "sourceCommit": "aa8586a1ccc7887f7ae09dcccdc32bf13c27c705",
+  "version": "0.0.2-rc.12",
+  "runtime": {
+    "producerRun": 38697512336,
+    "attempt": 1,
+    "archiveBytes": 1674356133,
+    "archiveSHA256": "00b2a8810840392cffee8a8e4da0a2be1ea870b3837c042b34502cf9ee940cda",
+    "manifestSHA256": "fd0cfd8f88ad51722b00ab42828ffec95fbeaf1688c96f6321c6337cd85019fe",
+    "exactProducerAuthenticated": true,
+    "completionReceiptSHA256": "c593b6773a596d811bce9fc09b2b600ee4fad8e94a2a72f1065b0ce1c6e3a478",
+    "independentReviewSHA256": "9dcb7482720c245139bfc5d78a9dd756315cb968a8d436220335d7666e8c51ec"
+  },
+  "fuzz": {
+    "status": "passed",
+    "executionMode": "real",
+    "sourceCleanBefore": true,
+    "sourceCleanAfter": true,
+    "durationSecondsPerTarget": 300,
+    "targets": [
+      {
+        "elapsedSeconds": 301.08951470800093,
+        "status": "passed",
+        "target": "manifest-v3"
+      },
+      {
+        "elapsedSeconds": 301.2560959169932,
+        "status": "passed",
+        "target": "compose-import"
+      },
+      {
+        "elapsedSeconds": 301.26749187498353,
+        "status": "passed",
+        "target": "control-stream-v2.1"
+      },
+      {
+        "elapsedSeconds": 301.11965291699744,
+        "status": "passed",
+        "target": "containerization-helper-v1"
+      },
+      {
+        "elapsedSeconds": 301.1105027500016,
+        "status": "passed",
+        "target": "apple-container-json"
+      },
+      {
+        "elapsedSeconds": 301.1190296249988,
+        "status": "passed",
+        "target": "release-qualification-json"
+      }
+    ],
+    "initialAndFinalCorpusReplayPassed": true,
+    "historicalAndCurrentSeedInputCount": 8516,
+    "historicalTimedRunsReused": false,
+    "fuzzerBinarySHA256": "216ac25d334eb25c7d073f70928904a3cc1c2aeacb15e81c590c4a68dc8907d9",
+    "attachmentCount": 17771,
+    "completionReceiptSHA256": "11c273ffb9dde0db131e2c15dac639282f95d6cdde1f36fee069d70cada336ee",
+    "independentReviewSHA256": "0774c135e0d88b42d06b703fb4d479e803fc10a07e3ea1019812229b1501d7c1",
+    "cleanupSignals": [],
+    "ownedProcessGroupRemaining": false,
+    "releaseRunnerServiceRestored": true
+  },
+  "sanitizersAccepted": false,
+  "signedArtifactAccepted": false,
+  "qualificationAccepted": false,
+  "gaPublished": false,
+  "officialHomebrewAvailable": false
+}

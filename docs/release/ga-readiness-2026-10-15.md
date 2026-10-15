@@ -3,9 +3,10 @@
 The frozen candidate is `0.0.2-rc.12`, source
 [`aa8586a1ccc7887f7ae09dcccdc32bf13c27c705`](https://github.com/hostwright/hostwright/commit/aa8586a1ccc7887f7ae09dcccdc32bf13c27c705).
 Its completed supported source matrix passed **3,554 unique cases**, with zero
-failures and zero skips in the aggregate. The runtime producer completed.
+failures and zero skips in the aggregate. The exact runtime archive is locally
+authenticated, and six fresh fuzz targets passed five minutes plus corpus replay.
 Candidate acceptance remains open: the hosted macOS 26 payload comparison failed,
-fresh sanitizer/fuzz and signed installed-artifact checks remain required.
+complete sanitizer and signed installed-artifact checks remain required.
 No supported RC or GA has been published; the signed dev.12 vendor-tap build
 remains unsupported. Official `brew install hostwright` is still a launch requirement.
 
@@ -16,8 +17,15 @@ remains unsupported. Official `brew install hostwright` is still a launch requir
   executions. Its independent review verified exact binary and receipt bindings.
   The original failed TLS attempt remains retained and is not counted as passing.
 - [Runtime producer 38697512336](https://github.com/hostwright/hostwright/actions/runs/38697512336),
-  attempt 1, completed successfully. Local archive retention/authentication is
-  still required before staging; producer success alone is not acceptance.
+  attempt 1, completed successfully. Its complete archive was retained and
+  authenticated against that exact producer, with independent review. The
+  [runtime and fuzz summary](../evidence/phase15-rc12-aa8586a1/runtime-and-fuzz-summary.json)
+  publishes the archive, manifest, completion and review hashes. This is not
+  signed-artifact or release acceptance.
+- Six fresh critical fuzz targets each passed at least 300 seconds, plus initial
+  and final corpus replay, with no crashes. Independent review verified all
+  17,771 attachments and clean process/service restoration. The 8,516 historical
+  and current seed inputs were reused as inputs; earlier timed runs were not credited.
 - Hosted [macOS 27 qualification](https://github.com/hostwright/hostwright/actions/runs/38697533714)
   passed its release and distribution shards. [macOS 26 qualification](https://github.com/hostwright/hostwright/actions/runs/38697524899)
   passed release checks but failed byte reproducibility for six same-size payload
@@ -25,9 +33,13 @@ remains unsupported. Official `brew install hostwright` is still a launch requir
 - [PR #394](https://github.com/hostwright/hostwright/pull/394) retains reproducibility
   diagnostics. Two isolated worker builds matched each other and the first worker
   in the original failed comparison. This does not resolve the full release build
-  mismatch. [PR #395](https://github.com/hostwright/hostwright/pull/395) adds the
-  actual release product sequence and retains both payload/object sets.
-- Fresh RC.12 sanitizer, fuzz, signed staging, installation, recovery and final
+  mismatch. [PR #395](https://github.com/hostwright/hostwright/pull/395) merged the
+  full product-sequence diagnostic: all nine raw payloads and 3,239 object entries
+  matched in its two builds. It uses the source working directory; the actual
+  distribution builder uses `/`. [PR #397](https://github.com/hostwright/hostwright/pull/397)
+  runs that unsigned CLI builder directly and retains both output sets. These
+  diagnostics do not accept the original qualification failure.
+- Complete RC.12 sanitizer, signed staging, installation, recovery and final
   artifact-security evidence remain pending. Prior RC.11 checks do not qualify RC.12.
 
 ## Historical RC.11 evidence
@@ -100,7 +112,7 @@ new artifact metadata requires verification against the subsequent build bytes.
 
 | Issue | Required evidence still pending |
 | --- | --- |
-| [#271](https://github.com/hostwright/hostwright/issues/271) | Complete clean RC.12 sanitizer/fuzz and hosted reproducibility, ten signed-artifact lifecycle cycles per supported provider and the checkpointed 30-minute physical-host soak. |
+| [#271](https://github.com/hostwright/hostwright/issues/271) | Complete clean RC.12 sanitizers and hosted reproducibility, ten signed-artifact lifecycle cycles per supported provider and the checkpointed 30-minute physical-host soak. |
 | [#275](https://github.com/hostwright/hostwright/issues/275) | Final evidence assembly with the authenticated artifact/security review, explicit schema-3 P2 disposition and independently verified subsequent schema-4 bytes. |
 | [#277](https://github.com/hostwright/hostwright/issues/277) | Signed backup, restore and interruption-recovery execution with cleanup and unmanaged-data preservation. |
 | [#278](https://github.com/hostwright/hostwright/issues/278) | Resolve the genuine dev.11 rollback/compensation failure, then complete historical upgrades, rollback, repair, interruption recovery and uninstall on a subsequent signed candidate. |

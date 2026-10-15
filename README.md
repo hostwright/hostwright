@@ -2,11 +2,11 @@
 
 Hostwright manages Apple container workloads on one Apple silicon Mac. Declare services in a YAML manifest, review a plan, and confirm it through the CLI or native desktop app. Hostwright tracks resource ownership and operations in a local SQLite database.
 
-**Release status:** Current source prepares `0.0.2-rc.12`, which requires fresh candidate qualification. The frozen `0.0.2-rc.11` completed signed staging and its first dev.11 VM upgrade. Its subsequent rollback failed, so installed-artifact qualification remains blocked; see [the retained result](https://github.com/hostwright/hostwright/issues/278#issuecomment-6185484144). RC.11’s supported source, ASan and TSan matrices each passed 3,544 unique cases with no failures or skips, and six timed fuzz targets completed. No supported RC or GA channel has been published. A GA date is not confirmed; official Homebrew acceptance remains required.
+**Release status:** The frozen candidate is `0.0.2-rc.12`. Its supported source matrix passed **3,554 unique tests** with no failures or skips in the completed aggregate; see the [source evidence summary](docs/evidence/phase15-rc12-aa8586a1/README.md). Its runtime producer completed successfully. Release qualification remains open: macOS 26 payload reproducibility failed, fresh sanitizer/fuzz coverage and signed installation/recovery checks remain required. No supported RC or GA channel has been published. A GA date is not confirmed; official Homebrew acceptance remains required.
 
 | Channel | Current availability |
 | --- | --- |
-| Current source | RC.12 preparation, with Manifest v3, Control API 2.2, Runtime Provider API v2, and SQLite schema v24. |
+| Current source | Frozen RC.12 qualification, with Manifest v3, Control API 2.2, Runtime Provider API v2, and SQLite schema v24. |
 | Vendor Homebrew tap | Signed dev.12 qualification prerelease; unsupported and based on older contracts. |
 | Official Homebrew | Pending. `brew install hostwright` is the launch goal and is not available yet. |
 

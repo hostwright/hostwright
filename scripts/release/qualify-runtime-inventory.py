@@ -75,7 +75,8 @@ def verify_prepared_evidence(prepared_root):
     return manifest, runtime, manifest_data, payloads, fetch, result
 
 
-def source_project_data(project, fetch):
+def source_project_data(project, fetch, project_commits=None):
+    verified = V.source_project(project, fetch, project_commits)
     record = project["archive"]
     archive_data = V.bound(record, fetch)
     inventory = V.parse(V.bound(project["inventory"], fetch), limit=V.MAX_SOURCE_INVENTORY)
@@ -92,7 +93,66 @@ def source_project_data(project, fetch):
                       "captured source leaf differs from its exact inventory")
             result[name] = data
         V.require(set(result) == set(members), "captured source archive/inventory coverage mismatch")
-        return result
+    for patch in project["patches"]:
+        V.apply_patch_bytes(V.bound(patch, fetch), result)
+    V.require(set(result) == set(verified) and all(
+        sha(data) == verified[name]["sha256"] and len(data) == verified[name]["sizeBytes"]
+        for name, data in result.items()), "effective source leaves differ from verified patched inventory")
+    return result
+
+
+def effective_guest_dependencies(framework, projects, fetch, baseline_dependencies=()):
+    commits = {name: project["commit"] for name, project in projects.items()}
+    resolved_data = source_project_data(framework, fetch, commits)["vminitd/Package.resolved"]
+    resolved = V.parse(resolved_data)
+    dependencies = []
+    for pin in resolved["pins"]:
+        identity, revision = pin["identity"], pin["state"]["revision"]
+        V.require(V.re.fullmatch("[a-f0-9]{40}", revision) is not None and
+                  pin["location"].startswith("https://github.com/"), "invalid effective guest pin")
+        dependency = dict(identity=identity, location=pin["location"], revision=revision,
+                          version=pin["state"].get("version", ""))
+        if identity in projects:
+            V.require(projects[identity]["commit"] == revision,
+                      "effective guest pin differs from captured source project: " + identity)
+        else:
+            V.require(dependency in baseline_dependencies,
+                      "resolved-only guest pin lacks its exact retained baseline: " + identity)
+        dependencies.append(dependency)
+    identities = [item["identity"] for item in dependencies]
+    V.require(dependencies and len(set(identities)) == len(identities), "duplicate or empty effective guest pins")
+    return resolved_data, sorted(dependencies, key=lambda item: item["identity"])
+
+
+def refresh_guest_documents(notices, records, dependencies, projects, fetch, loader_source):
+    prefixes = {"guest-swift/" + item["identity"] + "@" + item["revision"] + "/"
+                for item in dependencies}
+    for record in records:
+        if record["category"] == "runtime-guest-license" and not any(
+                record["sourcePath"].startswith(prefix) for prefix in prefixes):
+            record["category"] = "runtime-upstream-guest-license"
+    for dependency in dependencies:
+        if dependency["identity"] not in projects:
+            prefix = "guest-swift/" + dependency["identity"] + "@" + dependency["revision"] + "/"
+            V.require(any(record["category"] == "runtime-guest-license" and record["sourcePath"].startswith(prefix)
+                          for record in records), "resolved-only guest pin lacks an exact license receipt")
+            continue
+        project = projects[dependency["identity"]]
+        licenses = [item for item in project["licenses"] if "sourceProject" not in item]
+        V.require(licenses, "effective guest source lacks its own license records")
+        for item in licenses:
+            source_path = ("guest-swift/" + dependency["identity"] + "@" + dependency["revision"] +
+                           "/" + V.path(item["sourcePath"]))
+            data = V.substantive(item, fetch)
+            existing = [record for record in records if record["category"] == "runtime-guest-license"
+                        and record["sourcePath"] == source_path]
+            if existing:
+                V.require(len(existing) == 1 and existing[0]["sha256"] == sha(data) and
+                          existing[0]["sizeBytes"] == len(data), "effective guest license receipt differs from captured source")
+                continue
+            add_document(notices, records, "runtime-guest-license", source_path, data,
+                         ["git-object:" + project["identity"] + "@" + project["commit"] + ":" + item["sourcePath"],
+                          stable_source_reference(project, loader_source)])
 
 
 def loader_source_closure_digest(files):
@@ -122,7 +182,8 @@ def verify_root_guest_bindings(source_root, third_party, runtime, manifest, fetc
               "prepared loader source revision differs from the accepted source commit")
     retained = runtime["retainedLoaderSourceFiles"]
     V.require(len(retained) == 20, "retained loader source inventory is incomplete")
-    source_leaves = source_project_data(hostwright, fetch)
+    source_leaves = source_project_data(hostwright, fetch,
+                                       {project["identity"]: project["commit"] for project in manifest["sourceProjects"]})
     loader_source_bytes = {}
     for name, digest in retained.items():
         data = regular(source_root, name).read_bytes()
@@ -348,6 +409,11 @@ def regenerate(prepared_root, source_root):
                                            manifest["kernel"]["outputSHA256"])
 
     projects = {project["identity"]: project for project in manifest["sourceProjects"]}
+    framework = projects["containerization"]
+    resolved_data, guest_dependencies = effective_guest_dependencies(framework, projects, fetch,
+                                                                     runtime["guestDependencies"])
+    refresh_guest_documents(notices, third_party["runtimeDocuments"], guest_dependencies,
+                            projects, fetch, guest_bindings["loaderSourceSHA256"])
     license_documents = {}
     for identity in ASSETS:
         V.require(identity in manifest["licensing"], "runtime manifest lacks a licensed asset: " + identity)
@@ -449,18 +515,12 @@ def regenerate(prepared_root, source_root):
 
     # Refresh root build identities from the exact verified payloads and retained
     # compiler/build records after full offline source and license verification.
-    framework = next(project for project in manifest["sourceProjects"] if project["identity"] == "containerization")
-    framework_leaves = source_project_data(framework, fetch)
-    resolved_data = framework_leaves["vminitd/Package.resolved"]
-    resolved = V.parse(resolved_data)
     runtime.update(
         frameworkVersion=runtime["frameworkVersion"], frameworkRevision=framework["commit"],
         initImageReference="untagged@sha256:" + sha(payloads[oci_manifest_path]),
         initImageConfigurationSHA256=config_digest, initImageLayerSHA256=layer_digest,
         guestResolvedSHA256=sha(resolved_data),
-        guestDependencies=[dict(identity=pin["identity"], location=pin["location"],
-                                revision=pin["state"]["revision"], version=pin["state"].get("version", ""))
-                           for pin in resolved["pins"]],
+        guestDependencies=guest_dependencies,
         retainedLoaderSourceRevision=manifest["loader"]["moduleRevisions"].get(
             manifest["loader"]["project"], manifest["sourceCommit"]),
         retainedLoaderBinarySHA256=sha(loader_data),

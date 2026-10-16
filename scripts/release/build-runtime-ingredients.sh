@@ -126,6 +126,8 @@ for pass in first second; do
     --tree "$tree" --root "$work/evidence" --project linux \
     --patch "$PWD/scripts/release/patches/kernel-security/0001-conntrack-expectation-lifetime.patch" \
     --patch "$PWD/scripts/release/patches/kernel-security/0002-bpf-backtracking-frame.patch" \
+    --patch "$PWD/scripts/release/patches/kernel-security/0003-ipvs-inner-header-revalidation.patch" \
+    --patch "$PWD/scripts/release/patches/kernel-security/0004-serial-registration-pointer-cleanup.patch" \
     --output "$work/evidence/native-patches-linux-$pass.json"
   cp "$tree/.config" "$work/evidence/kernel-$pass.config"
   cp "$tree/arch/arm64/boot/Image" "$work/kernel-$pass.Image"

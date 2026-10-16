@@ -5,8 +5,10 @@ The frozen candidate is `0.0.2-rc.12`, source
 Its completed supported source matrix passed **3,554 unique cases**, with zero
 failures and zero skips in the aggregate. The exact runtime archive is locally
 authenticated, and six fresh fuzz targets passed five minutes plus corpus replay.
-Candidate acceptance remains open: the hosted macOS 26 payload comparison failed,
-complete sanitizer and signed installed-artifact checks remain required.
+The macOS 26 distribution retry passed all 54 tests; the original failed
+comparison remains retained. Candidate acceptance remains open: the ASan base
+failed one lifecycle test. Complete sanitizer and signed installed-artifact
+checks remain required.
 No supported RC or GA has been published; the signed dev.12 vendor-tap build
 remains unsupported. Official `brew install hostwright` is still a launch requirement.
 
@@ -27,9 +29,13 @@ remains unsupported. Official `brew install hostwright` is still a launch requir
   17,771 attachments and clean process/service restoration. The 8,516 historical
   and current seed inputs were reused as inputs; earlier timed runs were not credited.
 - Hosted [macOS 27 qualification](https://github.com/hostwright/hostwright/actions/runs/38697533714)
-  passed its release and distribution shards. [macOS 26 qualification](https://github.com/hostwright/hostwright/actions/runs/38697524899)
+  passed its release and distribution shards. [macOS 26 qualification, attempt 1](https://github.com/hostwright/hostwright/actions/runs/38697524899/attempts/1)
   passed release checks but failed byte reproducibility for six same-size payload
-  binaries. Their skipped hosted live cells receive no live-coverage credit.
+  binaries. Its [distribution retry, attempt 2](https://github.com/hostwright/hostwright/actions/runs/38697524899/attempts/2)
+  passed all 54 cases on the same frozen source, macOS 26.6.2, Xcode 26.6 and
+  Swift 6.3.3. Only the failed distribution job executed again; the successful
+  release/live executions from attempt 1 are carried forward. Their skipped
+  hosted live cells receive no live-coverage credit.
 - [PR #394](https://github.com/hostwright/hostwright/pull/394) retains reproducibility
   diagnostics. Two isolated worker builds matched each other and the first worker
   in the original failed comparison. This does not resolve the full release build
@@ -37,8 +43,21 @@ remains unsupported. Official `brew install hostwright` is still a launch requir
   full product-sequence diagnostic: all nine raw payloads and 3,239 object entries
   matched in its two builds. It uses the source working directory; the actual
   distribution builder uses `/`. [PR #397](https://github.com/hostwright/hostwright/pull/397)
-  runs that unsigned CLI builder directly and retains both output sets. These
-  diagnostics do not accept the original qualification failure.
+  is merged. Its [actual unsigned CLI builder run](https://github.com/hostwright/hostwright/actions/runs/38779685934)
+  matched all nine executable payload pairs. Independent review verified the
+  complete raw artifact, both archives, manifests and retained executable bytes.
+  The separately retained original distribution retry passed all 54 tests. The
+  initial failed attempt remains retained, and the reason for its payload
+  mismatch remains unexplained. Diagnostic passes do not establish overall
+  qualification acceptance.
+- The physical-host ASan base completed 3,482 passing XCTest cases, one failed
+  lifecycle test and 61 passing Swift Testing cases; ten live cells remain
+  excluded from that base. No sanitizer memory error was reported. The failure
+  expected a completion-aware start and its persisted checkpoint rows, but both
+  arrays were empty. Its root cause remains unexplained. The
+  [qualification progress summary](../evidence/phase15-rc12-aa8586a1/qualification-progress-summary.json)
+  retains the exact failed selector and original receipt/log/restoration hashes.
+  Focused diagnostics are separate observations and do not qualify the failed base.
 - Complete RC.12 sanitizer, signed staging, installation, recovery and final
   artifact-security evidence remain pending. Prior RC.11 checks do not qualify RC.12.
 

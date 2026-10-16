@@ -1,5 +1,5 @@
 diff --git a/vminitd/Package.resolved b/vminitd/Package.resolved
-index e37bc3ad..3bde48b6 100644
+index e37bc3ad..2160e87f 100644
 --- a/vminitd/Package.resolved
 +++ b/vminitd/Package.resolved
 @@ -105,8 +105,7 @@
@@ -9,6 +9,17 @@ index e37bc3ad..3bde48b6 100644
 -        "revision" : "e8d6eba1fef23ae5b359c46b03f7d94be2f41fed",
 -        "version" : "3.12.3"
 +        "revision" : "da9d28d69ebe3894b18376c8f2395c2f37b8448f"
+       }
+     },
+     {
+@@ -150,8 +149,8 @@
+       "kind" : "remoteSourceControl",
+       "location" : "https://github.com/apple/swift-nio.git",
+       "state" : {
+-        "revision" : "4e8f4b1c9adaa59315c523540c1ff2b38adc20a9",
+-        "version" : "2.87.0"
++        "revision" : "0b18836bd8b0162e7e17a995a3fbee20ed8f3b2b",
++        "version" : "2.101.3"
        }
      },
      {
@@ -24,15 +35,16 @@ index e37bc3ad..3bde48b6 100644
      },
      {
 diff --git a/vminitd/Package.swift b/vminitd/Package.swift
-index 673a48c6..572e67b5 100644
+index 673a48c6..6af6c862 100644
 --- a/vminitd/Package.swift
 +++ b/vminitd/Package.swift
-@@ -35,6 +35,8 @@ let package = Package(
+@@ -35,6 +35,9 @@
          .package(url: "https://github.com/apple/swift-argument-parser", from: "1.7.0"),
          .package(url: "https://github.com/apple/swift-log.git", from: "1.10.1"),
          .package(url: "https://github.com/apple/swift-system.git", from: "1.6.4"),
 +        .package(url: "https://github.com/apple/swift-crypto.git", revision: "da9d28d69ebe3894b18376c8f2395c2f37b8448f"),
 +        .package(url: "https://github.com/apple/swift-nio-http2.git", exact: "1.45.0"),
++        .package(url: "https://github.com/apple/swift-nio.git", exact: "2.101.3"),
          .package(name: "containerization", path: "../"),
      ],
      targets: [

@@ -515,7 +515,7 @@
       "allowedSourcePrefixes": [
         "Sources/"
       ],
-      "commit": "4e8f4b1c9adaa59315c523540c1ff2b38adc20a9",
+      "commit": "0b18836bd8b0162e7e17a995a3fbee20ed8f3b2b",
       "destination": "swift-nio",
       "documents": [
         {
@@ -543,10 +543,10 @@
           "sizeBytes": 1105
         },
         {
-          "gitBlobSHA1": "73af9a813d4787f485b08ba61ab44b5ceeee958d",
+          "gitBlobSHA1": "eb6fbc2dfa86e64046bf27aed62fd56816c849b3",
           "path": "Sources/CNIOSHA1/c_nio_sha1.c",
-          "sha256": "4bfa571cde07ba5f1ddf262f0f70291911753c3d2b1e9d00243cee9fbdf3e5c7",
-          "sizeBytes": 9610
+          "sha256": "67b5830b93c592a5f6bc08fef3673d8d80cd37170e528124b3f14fb401ac84a1",
+          "sizeBytes": 9658
         },
         {
           "gitBlobSHA1": "b4d8c9524d7f4b4914cbea1313f95e4bbc0a3448",

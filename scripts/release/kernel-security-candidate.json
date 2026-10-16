@@ -31,6 +31,20 @@
       "sha256": "c5b5d51fcfd49edd3d741898c5a188a1004c1e8197d7ce26fded6b2aa9138cb0",
       "stableCommit": "671b7b9a660ef15b25faa3df161205b9dc8d1eb2",
       "adaptation": "target path changed to verifier.c"
+    },
+    {
+      "path": "scripts/release/patches/kernel-security/0003-ipvs-inner-header-revalidation.patch",
+      "sha256": "535ca76b99f20a2e750dff5946b76a7ced2c95a2a445db23c58a555be076e334",
+      "stableCommit": "eb81c8e758f49e04391f77d9470a6232bb5f1c7a",
+      "advisory": "CVE-2026-74747",
+      "adaptation": "Exact upstream stable 6.18 backport; no local hunk adaptation."
+    },
+    {
+      "path": "scripts/release/patches/kernel-security/0004-serial-registration-pointer-cleanup.patch",
+      "sha256": "84eeb576b7cc1cf6adedcea2fb305d96a34b64d3fa9f38ea0ffb3826ef9b2b17",
+      "stableCommit": "ddf51d74ee9f9857c99477329d80408cedebda61",
+      "advisory": "CVE-2026-90336",
+      "adaptation": "Adjust only the hunk start from 2810 to 2809 for the authenticated 6.18.55 source; preserve the complete upstream semantic change."
     }
   ],
   "requiredDisabled": [
@@ -63,7 +77,11 @@
   ],
   "scope": "Candidate builds only; shipping pins and release acceptance are unchanged.",
   "sourceChecks": {
-    "fs/dax.c": "54ecbd2961f1f8e1c8d51ff9df43414350f68410389fa0f72d6ae34b1f5faeee"
+    "fs/dax.c": "54ecbd2961f1f8e1c8d51ff9df43414350f68410389fa0f72d6ae34b1f5faeee",
+    "include/net/ip_vs.h": "2fc032558c800a4041c7166e7dd6da052b291a00b9563be42ef97cbd78caedfb",
+    "net/netfilter/ipvs/ip_vs_core.c": "7000bac2e9e5bc22b73edba6608f0517a1b51ce32509799cecac7f49dc61ced4",
+    "net/netfilter/ipvs/ip_vs_xmit.c": "f669a2df048ea734c97953ce9d688d91dece581439a3b70ec897e9a77db5d9de",
+    "drivers/tty/serial/serial_core.c": "061ceeae0a5c6a723ef3374a81d1977bac454985621bf602d7c816ff9752284c"
   },
   "upstreamDAXFix": "The authenticated 6.18.55 fs/dax.c already contains the zero/empty-entry checks before folio conversion from the previous downstream patch."
 }

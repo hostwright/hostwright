@@ -5,9 +5,10 @@ The frozen candidate is `0.0.2-rc.12`, source
 Its completed supported source matrix passed **3,554 unique cases**, with zero
 failures and zero skips in the aggregate. The exact runtime archive is locally
 authenticated, and six fresh fuzz targets passed five minutes plus corpus replay.
-Candidate acceptance remains open: the initial hosted macOS 26 payload comparison
-failed, and the ASan base failed one lifecycle test. Complete sanitizer and
-signed installed-artifact checks remain required.
+The macOS 26 distribution retry passed all 54 tests; the original failed
+comparison remains retained. Candidate acceptance remains open: the ASan base
+failed one lifecycle test. Complete sanitizer and signed installed-artifact
+checks remain required.
 No supported RC or GA has been published; the signed dev.12 vendor-tap build
 remains unsupported. Official `brew install hostwright` is still a launch requirement.
 
@@ -30,7 +31,11 @@ remains unsupported. Official `brew install hostwright` is still a launch requir
 - Hosted [macOS 27 qualification](https://github.com/hostwright/hostwright/actions/runs/38697533714)
   passed its release and distribution shards. [macOS 26 qualification, attempt 1](https://github.com/hostwright/hostwright/actions/runs/38697524899/attempts/1)
   passed release checks but failed byte reproducibility for six same-size payload
-  binaries. Their skipped hosted live cells receive no live-coverage credit.
+  binaries. Its [distribution retry, attempt 2](https://github.com/hostwright/hostwright/actions/runs/38697524899/attempts/2)
+  passed all 54 cases on the same frozen source, macOS 26.6.2, Xcode 26.6 and
+  Swift 6.3.3. Only the failed distribution job executed again; the successful
+  release/live executions from attempt 1 are carried forward. Their skipped
+  hosted live cells receive no live-coverage credit.
 - [PR #394](https://github.com/hostwright/hostwright/pull/394) retains reproducibility
   diagnostics. Two isolated worker builds matched each other and the first worker
   in the original failed comparison. This does not resolve the full release build
@@ -41,9 +46,10 @@ remains unsupported. Official `brew install hostwright` is still a launch requir
   is merged. Its [actual unsigned CLI builder run](https://github.com/hostwright/hostwright/actions/runs/38779685934)
   matched all nine executable payload pairs. Independent review verified the
   complete raw artifact, both archives, manifests and retained executable bytes.
-  Only the original failed distribution job is being retried in attempt 2; its
-  passing release/live jobs remain untouched. The original failed attempt is
-  retained, and diagnostic passes do not establish qualification acceptance.
+  The separately retained original distribution retry passed all 54 tests. The
+  initial failed attempt remains retained, and the reason for its payload
+  mismatch remains unexplained. Diagnostic passes do not establish overall
+  qualification acceptance.
 - The physical-host ASan base completed 3,482 passing XCTest cases, one failed
   lifecycle test and 61 passing Swift Testing cases; ten live cells remain
   excluded from that base. No sanitizer memory error was reported. The failure

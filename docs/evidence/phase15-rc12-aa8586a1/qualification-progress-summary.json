@@ -67,14 +67,22 @@
     "originalAttemptURL": "https://github.com/hostwright/hostwright/actions/runs/38697524899/attempts/1",
     "retry": {
       "attempt": 2,
-      "scope": "Only the original failed distribution job; passing release/live jobs left untouched.",
-      "status": "running",
-      "qualificationAccepted": false
+      "scope": "Only the failed distribution job executed again; successful release/live executions from attempt1 are carried forward by GitHub with new API job IDs and unchanged original execution timestamps. Original failed attempt1 remains retained.",
+      "status": "distribution-shard-passed",
+      "qualificationAccepted": false,
+      "actualXCTestPasses": 54,
+      "failedCases": [],
+      "skippedCases": [],
+      "artifactSHA256": "96a257222fc1fc782d85b45c81d2e59b7c93f27333f69d4bc10571b5fc2d69ef",
+      "retentionReceiptSHA256": "dc0b6aa2aa990a28314c29c1320849782cc3c1955f2ae1092815ffb4ce056cd7",
+      "rawLogSHA256": "cde4228967e2390ed13505d275572390e2153eb7fcdce1c86632dfbf33b587af",
+      "passingReleaseAndLiveJobsExecutedInAttempt": 1,
+      "independentReviewSHA256": "f91a3ba8d99224dd334bbf178cb6f68fbbfc78190ab2b2689753e977a22fa238"
     }
   },
   "qualificationAccepted": false,
   "releaseStaged": false,
   "gaPublished": false,
   "officialHomebrewAvailable": false,
-  "observedAt": "2026-10-15T20:09:50.928807+00:00"
+  "observedAt": "2026-10-16T00:32:01.042183+00:00"
 }

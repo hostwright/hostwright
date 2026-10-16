@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import importlib.util
+import copy
 from pathlib import Path
 import tempfile
 import unittest
@@ -39,6 +40,101 @@ class RuntimeInventoryQualificationTests(unittest.TestCase):
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
         return target
+
+    def patched_guest_fixture(self):
+        old_revision, new_revision = "a" * 40, "b" * 40
+        def resolved(revision):
+            return Q.V.canonical(dict(pins=[dict(identity="guest-dependency",
+                location="https://github.com/example/guest-dependency", state=dict(revision=revision, version="2.0.0"))]))
+        before, after = resolved(old_revision), resolved(new_revision)
+        contents = {"LICENSE": b"Fixture license text\n", "NOTICE": b"Fixture notice text\n",
+                    "vminitd/Package.resolved": before}
+        records = {}
+        def add(name, data):
+            records[name] = data
+            return dict(path=name, sha256=Q.sha(data), sizeBytes=len(data))
+        leaves = [dict(path=name, gitMode="100644", gitBlobSHA1=Q.V.git_object("blob", data),
+                       sha256=Q.sha(data), sizeBytes=len(data)) for name, data in sorted(contents.items())]
+        child = Q.V.git_object("tree", b"100644 Package.resolved\0" +
+                              bytes.fromhex(Q.V.git_object("blob", before)))
+        tree = Q.V.git_object("tree", b"".join(
+            b"100644 " + name.encode() + b"\0" + bytes.fromhex(Q.V.git_object("blob", contents[name]))
+            for name in ["LICENSE", "NOTICE"]) + b"40000 vminitd\0" + bytes.fromhex(child))
+        commit = b"tree " + tree.encode() + b"\nauthor Fixture <fixture@example.invalid> 1 +0000\n\nFixture\n"
+        def license_record(name):
+            return dict(add("proof/" + name, contents[name]), sourcePath=name, component="containerization", spdx="MIT")
+        patch = (b"--- a/vminitd/Package.resolved\n+++ b/vminitd/Package.resolved\n@@ -1 +1 @@\n-" + before + b"+" + after)
+        effective = dict(contents, **{"vminitd/Package.resolved": after})
+        framework = dict(identity="containerization", commit=Q.V.git_object("commit", commit), tree=tree,
+            spdx="MIT", commitObject=add("proof/source.commit", commit), archive=add("proof/source.tar.gz", F.tar(contents)),
+            inventory=add("proof/inventory.json", Q.V.canonical(leaves)), licenses=[license_record("LICENSE")],
+            notices=[license_record("NOTICE")], patches=[dict(add("proof/guest.patch", patch),
+                beforeInventorySHA256=Q.sha(Q.V.canonical({p:Q.sha(d) for p,d in contents.items()})),
+                afterInventorySHA256=Q.sha(Q.V.canonical({p:Q.sha(d) for p,d in effective.items()})))])
+        return framework, dict(containerization=framework, **{"guest-dependency": dict(commit=new_revision)}), records, after
+
+    def test_guest_inventory_uses_authenticated_patched_resolved_pins(self):
+        framework, projects, records, after = self.patched_guest_fixture()
+        resolved, dependencies = Q.effective_guest_dependencies(framework, projects, records.__getitem__)
+        self.assertEqual(resolved, after)
+        self.assertEqual(dependencies[0]["revision"], "b" * 40)
+        baseline = next(item for item in Q.V.parse(records[framework["inventory"]["path"]])
+                        if item["path"] == "vminitd/Package.resolved")
+        self.assertNotEqual(Q.sha(resolved), baseline["sha256"])
+
+    def test_effective_guest_pin_requires_matching_captured_source(self):
+        framework, projects, records, _ = self.patched_guest_fixture()
+        for replacement in ({}, {"guest-dependency": dict(commit="c" * 40)}):
+            with self.subTest(replacement=replacement), self.assertRaises(ValueError):
+                Q.effective_guest_dependencies(framework, dict(containerization=framework, **replacement), records.__getitem__)
+
+    def test_resolved_only_guest_pin_requires_the_entire_retained_tuple(self):
+        framework, projects, records, _ = self.patched_guest_fixture()
+        _, dependencies = Q.effective_guest_dependencies(framework, projects, records.__getitem__)
+        projects.pop("guest-dependency")
+        _, retained = Q.effective_guest_dependencies(framework, projects, records.__getitem__, dependencies)
+        self.assertEqual(retained, dependencies)
+        for field in ["revision", "location", "version"]:
+            changed = [dict(dependencies[0], **{field: "different"})]
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "exact retained baseline"):
+                Q.effective_guest_dependencies(framework, projects, records.__getitem__, changed)
+
+    def test_resolved_only_guest_pin_cannot_create_a_license_receipt(self):
+        dependencies = [dict(identity="guest-dependency", revision="b" * 40)]
+        with self.assertRaisesRegex(ValueError, "exact license receipt"):
+            Q.refresh_guest_documents(bytearray(), [], dependencies, {}, lambda _: b"unused", "d" * 64)
+
+    def test_guest_inventory_refuses_tampered_patch_or_inventory(self):
+        framework, projects, records, _ = self.patched_guest_fixture()
+        for field in ["beforeInventorySHA256", "afterInventorySHA256", "sha256"]:
+            changed = copy.deepcopy(framework);changed["patches"][0][field] = "0" * 64
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                Q.effective_guest_dependencies(changed, dict(projects, containerization=changed), records.__getitem__)
+
+    def test_guest_license_refresh_preserves_baseline_and_is_idempotent(self):
+        notices = bytearray(b"Host license notices\n");records = []
+        Q.add_document(notices, records, "runtime-guest-license", "guest-swift/guest-dependency@" + "a" * 40 + "/LICENSE",
+                       b"Historical guest license\n", ["historical-source"])
+        original = bytes(notices)
+        license_data = b"Actual patched guest license\n"
+        project = dict(identity="guest-dependency", commit="b" * 40,
+                       archive=dict(path="source/guest.tar.gz", sha256="c" * 64, sizeBytes=123),
+                       licenses=[dict(path="proof/LICENSE", sourcePath="LICENSE", sha256=Q.sha(license_data), sizeBytes=len(license_data))])
+        dependencies = [dict(identity="guest-dependency", revision="b" * 40)]
+        for _ in range(2):
+            Q.refresh_guest_documents(notices, records, dependencies, {"guest-dependency": project},
+                                      {"proof/LICENSE": license_data}.__getitem__, "d" * 64)
+        self.assertTrue(bytes(notices).startswith(original))
+        self.assertEqual(records[0]["category"], "runtime-upstream-guest-license")
+        self.assertEqual(len(records), 2)
+        self.assertEqual(records[1]["sourcePath"], "guest-swift/guest-dependency@" + "b" * 40 + "/LICENSE")
+        Q.bind_notice_digests(notices, dict(dependencies=[], runtimeDocuments=records), {})
+        Q.add_document(notices, records, "runtime-native-license", "runtime-source/guest/LICENSE", license_data, ["source"])
+        cleaned, retained = Q.remove_generated_runtime_documents(notices, records)
+        before = bytes(cleaned)
+        Q.refresh_guest_documents(cleaned, retained, dependencies, {"guest-dependency": project},
+                                  {"proof/LICENSE": license_data}.__getitem__, "d" * 64)
+        self.assertEqual(bytes(cleaned), before)
 
     def test_full_verifier_accepts_prepared_fixture_without_auth_claim(self):
         manifest, runtime, _, _, _, result = Q.verify_prepared_evidence(self.prepared)

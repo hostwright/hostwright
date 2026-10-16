@@ -15,6 +15,21 @@ remains unsupported. Official `brew install hostwright` is still a launch requir
 
 ## Current RC.12 evidence
 
+- [Trusted stage 38912711434](https://github.com/hostwright/hostwright/actions/runs/38912711434),
+  attempt 1, passed all three jobs. Two clean builds matched their shipped payloads;
+  Developer ID signing, Apple notarization, package stapling, Gatekeeper,
+  corresponding-source verification and hosted attestations passed. The retained
+  inventory SHA-256 is `5ec799c674dbbde867824eda166554fe02fe2e4c245c1509520fe2180007b72c`.
+  Independent artifact review found a P2 inventory defect: guest dependency fields
+  describe two upstream revisions instead of the authenticated patched source.
+  Correct license texts are present, but this does not satisfy dependency-inventory
+  accuracy. The generator correction and refreshed notices require a subsequent
+  signed candidate; frozen RC.12 bytes and all original observations remain retained.
+- Fresh advisory review identified compiled kernel vulnerabilities CVE-2026-74747
+  (IPVS inner-header validation) and CVE-2026-90336 (serial registration cleanup).
+  Both require complete upstream fixes and rebuilt kernel evidence. Guest SwiftNIO
+  ByteBuffer bounds assessment also remains unresolved; inbound limits alone do
+  not establish all outbound/write bounds. No fresh security clearance is claimed.
 - The [source matrix summary](../evidence/phase15-rc12-aa8586a1/README.md) binds
   3,493 XCTest and 61 Swift Testing passes, including ten fresh live/platform
   executions. Its independent review verified exact binary and receipt bindings.
@@ -140,7 +155,7 @@ new artifact metadata requires verification against the subsequent build bytes.
 | Issue | Required evidence still pending |
 | --- | --- |
 | [#271](https://github.com/hostwright/hostwright/issues/271) | Independent final matrix assembly, ten signed-artifact lifecycle cycles per supported provider and the checkpointed 30-minute physical-host soak. |
-| [#275](https://github.com/hostwright/hostwright/issues/275) | Final evidence assembly with the authenticated artifact/security review, explicit schema-3 P2 disposition and independently verified subsequent schema-4 bytes. |
+| [#275](https://github.com/hostwright/hostwright/issues/275) | Correct the patched guest dependency inventory, independently verify subsequent signed bytes, rebuild with fixes for CVE-2026-74747 and CVE-2026-90336, and resolve the guest SwiftNIO ByteBuffer bounds assessment. The signed RC.12 stage is retained with its inventory defect. |
 | [#277](https://github.com/hostwright/hostwright/issues/277) | Signed backup, restore and interruption-recovery execution with cleanup and unmanaged-data preservation. |
 | [#278](https://github.com/hostwright/hostwright/issues/278) | Resolve the genuine dev.11 rollback/compensation failure, then complete historical upgrades, rollback, repair, interruption recovery and uninstall on a subsequent signed candidate. |
 | [#279](https://github.com/hostwright/hostwright/issues/279) | Signed CLI, Compose and desktop quickstarts, then synchronization of README, capability output, references, website, examples and supported matrix. |

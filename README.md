@@ -6,11 +6,13 @@ Hostwright manages Apple container workloads on one Apple silicon Mac. Declare s
 
 ASan and TSan each completed **3,554 unique passing test identities**, including ten fresh live/platform cases; see the [sanitizer coverage summary](docs/evidence/phase15-rc12-aa8586a1/sanitizer-coverage-summary.json). Earlier failed ASan executions remain retained separately and receive no pass credit.
 
+The [signed RC.12 stage](https://github.com/hostwright/hostwright/actions/runs/38912711434) passed reproducibility, signing, notarization, Gatekeeper, corresponding-source and hosted-attestation checks. Artifact review then found two guest dependency revisions reported from the upstream lock instead of the patched build. The corrected inventory needs qualification in a subsequent signed candidate. Fresh advisory review also identified two compiled kernel vulnerabilities requiring fixes and an unresolved guest SwiftNIO ByteBuffer bounds assessment. Frozen RC.12 remains unchanged.
+
 Release qualification remains open. The macOS 26 distribution retry passed all 54 tests, and two production-builder builds matched all nine executable payloads. The original failed comparison remains retained. See the [qualification progress and retained failure hashes](docs/evidence/phase15-rc12-aa8586a1/qualification-progress-summary.json). Signed installation/recovery checks, provider lifecycle cycles and the physical-host soak remain required. No supported RC or GA channel has been published. A GA date is not confirmed; official Homebrew acceptance remains required.
 
 | Channel | Current availability |
 | --- | --- |
-| Current source | Frozen RC.12 qualification, with Manifest v3, Control API 2.2, Runtime Provider API v2, and SQLite schema v24. |
+| Current source | Release-candidate preparation, with Manifest v3, Control API 2.2, Runtime Provider API v2, and SQLite schema v24. |
 | Vendor Homebrew tap | Signed dev.12 qualification prerelease; unsupported and based on older contracts. |
 | Official Homebrew | Pending. `brew install hostwright` is the launch goal and is not available yet. |
 

@@ -4,7 +4,9 @@ Hostwright manages Apple container workloads on one Apple silicon Mac. Declare s
 
 **Release status:** The frozen candidate is `0.0.2-rc.12`. Its supported source matrix passed **3,554 unique tests** with no failures or skips in the completed aggregate; see the [source evidence summary](docs/evidence/phase15-rc12-aa8586a1/README.md). Its runtime archive is authenticated, and all six fresh fuzz targets passed five minutes plus corpus replay; see the [runtime and fuzz summary](docs/evidence/phase15-rc12-aa8586a1/runtime-and-fuzz-summary.json).
 
-Release qualification remains open: the ASan base failed one lifecycle test. The macOS 26 distribution retry passed all 54 tests, and two production-builder builds matched all nine executable payloads. The original failed comparison remains retained. See the [qualification progress and retained failure hashes](docs/evidence/phase15-rc12-aa8586a1/qualification-progress-summary.json). Complete sanitizer coverage and signed installation/recovery checks remain required. No supported RC or GA channel has been published. A GA date is not confirmed; official Homebrew acceptance remains required.
+ASan and TSan each completed **3,554 unique passing test identities**, including ten fresh live/platform cases; see the [sanitizer coverage summary](docs/evidence/phase15-rc12-aa8586a1/sanitizer-coverage-summary.json). Earlier failed ASan executions remain retained separately and receive no pass credit.
+
+Release qualification remains open. The macOS 26 distribution retry passed all 54 tests, and two production-builder builds matched all nine executable payloads. The original failed comparison remains retained. See the [qualification progress and retained failure hashes](docs/evidence/phase15-rc12-aa8586a1/qualification-progress-summary.json). Signed installation/recovery checks, provider lifecycle cycles and the physical-host soak remain required. No supported RC or GA channel has been published. A GA date is not confirmed; official Homebrew acceptance remains required.
 
 | Channel | Current availability |
 | --- | --- |

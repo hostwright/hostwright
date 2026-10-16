@@ -1,0 +1,245 @@
+{
+  "kind": "hostwright.rc12.supported-sanitizer-coverage-summary.v1",
+  "recordedAt": "2026-10-16T05:11:11.261806+00:00",
+  "sourceCommit": "aa8586a1ccc7887f7ae09dcccdc32bf13c27c705",
+  "version": "0.0.2-rc.12",
+  "physicalHost": {
+    "hardware": "Apple M4 Pro / Mac16,8",
+    "os": "macOS 26.6.2",
+    "build": "25G83",
+    "xcode": "27.0 /27A266a"
+  },
+  "guest": {
+    "os": "macOS 26.6.2",
+    "build": "25G83"
+  },
+  "instrumentedHostTestToolchain": "Swift 6.3.3",
+  "lanes": {
+    "address": {
+      "binarySHA256": "f7664f4cb9c4a10118100d2403713974ecec041631be6ee44fa183e28f93d307",
+      "baseReceiptSHA256": "d2b56438e4942bb19f94258378d7870e4cb3acd4cabb8df5c16de751ab85163c",
+      "baseActualPassedXCTest": 3483,
+      "baseActualPassedSwiftTesting": 61,
+      "routedUniqueActualPasses": [
+        {
+          "selector": "HostwrightRegistryTests.RegistryAuthenticationTests/testLiveDockerHubBearerScopeWhenExplicitlyEnabled",
+          "status": "passed",
+          "executionMode": "real",
+          "nativeSeconds": 0.354,
+          "receiptSHA256": "151c03c18a326a95bfe47e7ecdd1928de0de3e1f9b43b4d74a3551ae2dbf0b9a",
+          "commandsLogSHA256": "4466211a46d6e8985410959bffd1b906d1ff4ce4365fc7c4b2539430c5f70596"
+        },
+        {
+          "selector": "HostwrightSchedulerTests.Phase10SchedulerQualificationTests/testPhase10SchedulerQualificationPerformanceCell",
+          "status": "passed",
+          "executionMode": "real",
+          "nativeSeconds": 62.124,
+          "receiptSHA256": "d1781f8bc4d69d0cf43183e0099e9dbed0cb5b7f8f176008a33da37aa6061a94",
+          "commandsLogSHA256": "13aa824268d7242a6e338381c570256585ea569935146c166ab78806bf16039d"
+        },
+        {
+          "selector": "HostwrightRuntimeTests.LifecycleGate05LiveTests/testAppleCLIConfirmedCreateAndDeleteThroughSecureBoundary",
+          "status": "passed",
+          "executionMode": "real",
+          "nativeSeconds": 2.566,
+          "receiptSHA256": "049a692b77cdca2d63f01b4a83bdb4efb0b4286cd507804cd107e6e95ad519da",
+          "commandsLogSHA256": "832d90a832b880fa0b33f060e1e9ce475474c9e4b6f8bde150d135b346c725ea"
+        },
+        {
+          "selector": "HostwrightRuntimeTests.Phase07NetworkGate01LiveTests/testAppleCLIProjectNetworksIsolateAndExplicitDualAttachmentConnects",
+          "status": "passed",
+          "executionMode": "real",
+          "nativeSeconds": 93.885,
+          "receiptSHA256": "0270b0bd050e9ec4931960777f0276f24900e424ee199b38adc8d65b8eed4a33",
+          "commandsLogSHA256": "f39d0719af9e1a2c7b72640856c708f09d164c530752a0452f48dcac67b4677c"
+        },
+        {
+          "selector": "HostwrightNetworkHelperTests.ServiceTunnelTahoeVMHarnessTests/testQualificationConfigurationUsesCanonicalHelperFrame",
+          "status": "passed",
+          "executionMode": "real",
+          "nativeSeconds": 0.002,
+          "receiptSHA256": "f93a469f53c5182ab08f3b49d5b5d32f0019e1cda0a6430559287564916a494f",
+          "commandsLogSHA256": "0e7f59589e32f0504fd439234f49f7683cc645d5a4f97ae17b5fded25da39b83"
+        },
+        {
+          "selector": "HostwrightContainerizationHelperTests.Phase07ContainerizationNetworkLiveTests/testRealContainerizationNetworksIsolateAndDualAttachmentConnects",
+          "status": "passed",
+          "executionMode": "real",
+          "nativeSeconds": 111.314,
+          "receiptSHA256": "2bd598521b10bb5850761fe501507caf53f160860d2b0b25f80177f70d1e6d87",
+          "commandsLogSHA256": "243ea9bcc0c94d9403f0007cba18dc03036f5ba708edb7428a7f57cf195a3ff4"
+        },
+        {
+          "selector": "HostwrightNetworkHelperTests.Phase07LANExposureLiveTests/testExplicitLANPolicyServesTahoeVMAndFailsClosed",
+          "status": "passed",
+          "executionMode": "real",
+          "nativeSeconds": 4.801,
+          "receiptSHA256": "b0886d84c98e36d53a01647a86b9476bec994bc8e2d12d860330f2cb000c2fe2",
+          "commandsLogSHA256": "f77d256b1fae9bc9879f80f072784f8a1d43fed8498f54286c6ec875aa1239df"
+        },
+        {
+          "selector": "HostwrightRuntimeTests.Phase07LocalNetworkForwardingLiveTests/testAuthorizedLocalhostForwardingSurvivesCancellationRestartAndConflict",
+          "status": "passed",
+          "executionMode": "real",
+          "nativeSeconds": 41.724,
+          "receiptSHA256": "689fa56e3db17168991d78db54fd699a6dd955bcfe9376b04ae85864d5ae4b0c",
+          "commandsLogSHA256": "45da9371f79e0625669a7398547652a5ba5a773f60957187553ce10def7809ef"
+        },
+        {
+          "selector": "HostwrightRuntimeTests.Phase07LocalNetworkForwardingLiveTests/testDeniedLocalNetworkPermissionFailsClosedAndCleansUpExactly",
+          "status": "passed",
+          "executionMode": "real",
+          "nativeSeconds": 18.183,
+          "receiptSHA256": "5ead2274652b4c5fb2c752cb628eedeea6e79ec08a7a7a6f95ef35e9cab2536a",
+          "commandsLogSHA256": "d895a98e8c7c6a4a8eb879e63b6809012a55c2bb78aa6d760544353daf9923d1"
+        },
+        {
+          "selector": "HostwrightNetworkHelperTests.ServiceTunnelTahoeVMHarnessTests/testExistingTahoeVMEchoesAuthenticatedFrame",
+          "status": "passed",
+          "executionMode": "real",
+          "nativeSeconds": 0.091,
+          "receiptSHA256": "6206b2d97d1e8672b5b7d4093b94a2e2c1a84cce7a606c7f9f137541da11028c",
+          "commandsLogSHA256": "4cecfd453ad31971eebf0bf0f106d94ed8aae9c3b2f9b08d69ee65c30dffccb5"
+        }
+      ],
+      "completedAggregateUniquePassed": 3554,
+      "completedAggregateFailed": 0,
+      "completedAggregateSkipped": 0,
+      "extraRestoredPermissionControlCountedAsUnique": false,
+      "aggregateReceiptSHA256": "1ae32def6c1670073d6691eeef6928e1ea05f59d44f33787119e17f6052ca01e",
+      "collectorSHA256": "4dc4d995bce43f29a40b3fbb7421e469566f3bf9e752e7cfef3a4ab658f8c079",
+      "compiledListingNonTestDiagnosticCount": 26,
+      "cellIndependentReviewSHA256": {
+        "address-r4-base-outcome-independent-review.json": "ce026b96b5fce71745fbdbd4467cccf6458068ad25e17c91de4556181c023e88",
+        "address-r4-four-supplement-outcome-independent-review.json": "943f7d53d339c0d4680e1ca9b092326423dd5bfd4985d854fb8f48b8cfb5806c",
+        "address-r4-canonical-outcome-independent-review.json": "061f28887b8fcd54f252da2b8985d5130751c54ed895b73852f8af09ad124a29",
+        "address-r4-containerization-outcome-independent-review.json": "45bb8e1e9b4ffab1780d3d8b6e5cdc2f794772a7c5fda20fa029d72ecfa38f28",
+        "lan-sanitizer-outcomes-independent-review.json": "384be1c7cc123bf2c8fb09836cc83dfc426136613b42217fdcdd4d16245103ff",
+        "address-r4-local-network-outcome-independent-review.json": "1d75bff2c35464595988315502f06c02e7042be87dd68256c02ba1ec633ffd03",
+        "address-r4-tunnel-outcome-independent-review.json": "12b75a45dd672c14ff683a0c71dcbd94d1b030e204b75f0a173d5e963e7fc9a5"
+      }
+    },
+    "thread": {
+      "binarySHA256": "1eb4cef0b227ed7b025d6bde8934eb685a744f30390e3e81ac1e884cf9e71969",
+      "baseReceiptSHA256": "1206623af7856bf3502ee12b13399121704a74c2d9e3d6392524521c5d3c3873",
+      "baseActualPassedXCTest": 3483,
+      "baseActualPassedSwiftTesting": 61,
+      "routedUniqueActualPasses": [
+        {
+          "selector": "HostwrightRegistryTests.RegistryAuthenticationTests/testLiveDockerHubBearerScopeWhenExplicitlyEnabled",
+          "status": "passed",
+          "executionMode": "real",
+          "nativeSeconds": 0.3,
+          "receiptSHA256": "eadce2a5de7b20b535030eb697a0d729eba6a9a53283c5e5dc1566e17426a74b",
+          "commandsLogSHA256": "5759dddc08a76c543e0a6b3e5a152efea2a7ca95571cfa6127af0ac1c484f013"
+        },
+        {
+          "selector": "HostwrightSchedulerTests.Phase10SchedulerQualificationTests/testPhase10SchedulerQualificationPerformanceCell",
+          "status": "passed",
+          "executionMode": "real",
+          "nativeSeconds": 81.934,
+          "receiptSHA256": "b0b0e343588673fc9117d346c695cb5f24df2009182fd79d2843731eae23aa6a",
+          "commandsLogSHA256": "e2cfe869d8bca02473c513bb2d8f7c44a54900fe1f6b09b5806fb03aaafc37b4"
+        },
+        {
+          "selector": "HostwrightRuntimeTests.LifecycleGate05LiveTests/testAppleCLIConfirmedCreateAndDeleteThroughSecureBoundary",
+          "status": "passed",
+          "executionMode": "real",
+          "nativeSeconds": 3.029,
+          "receiptSHA256": "bd60fccd42800ae23b9043e9978a865e2362dcd626064aeb72474bee6f787a94",
+          "commandsLogSHA256": "56fbe2180e359cda78d7975a70511d919e2631e94b274817efa426e0f9c6a54b"
+        },
+        {
+          "selector": "HostwrightRuntimeTests.Phase07NetworkGate01LiveTests/testAppleCLIProjectNetworksIsolateAndExplicitDualAttachmentConnects",
+          "status": "passed",
+          "executionMode": "real",
+          "nativeSeconds": 96.607,
+          "receiptSHA256": "4bd8a11d5218e67f2400b5839a96d6107ed98991b63381a514d3b39957fb03b2",
+          "commandsLogSHA256": "a718eac158a33c556e77b57bdb21bc0928a48df7092da520068ec7a695fef635"
+        },
+        {
+          "selector": "HostwrightNetworkHelperTests.ServiceTunnelTahoeVMHarnessTests/testQualificationConfigurationUsesCanonicalHelperFrame",
+          "status": "passed",
+          "executionMode": "real",
+          "nativeSeconds": 0.012,
+          "receiptSHA256": "2b1e6a508a7cacbd5359183bfca2c85b9fdb78027043050a529eec2d6296bd88",
+          "commandsLogSHA256": "89ca51243646df693912f278a9a7812a23f807074bbe305049fdc4d41a931875"
+        },
+        {
+          "selector": "HostwrightContainerizationHelperTests.Phase07ContainerizationNetworkLiveTests/testRealContainerizationNetworksIsolateAndDualAttachmentConnects",
+          "status": "passed",
+          "executionMode": "real",
+          "nativeSeconds": 208.975,
+          "receiptSHA256": "35d11f1b097ecd773770e4d6b9db905f406f8eae6e0e953287f2c8e833729420",
+          "commandsLogSHA256": "0c3138074ed53ef97cf1cf5ff786bdd5457d88df8f7d5bb145fa81a86e32cbec"
+        },
+        {
+          "selector": "HostwrightNetworkHelperTests.Phase07LANExposureLiveTests/testExplicitLANPolicyServesTahoeVMAndFailsClosed",
+          "status": "passed",
+          "executionMode": "real",
+          "nativeSeconds": 5.059,
+          "receiptSHA256": "b4471d114e18fb67874de463d65e51edf1df17e6d5bb6a6f759a317dfe2d70d0",
+          "commandsLogSHA256": "721a63dde5575695fd4526a6fd404974f66b2f9c280877f691247de6dfcb1957"
+        },
+        {
+          "selector": "HostwrightRuntimeTests.Phase07LocalNetworkForwardingLiveTests/testAuthorizedLocalhostForwardingSurvivesCancellationRestartAndConflict",
+          "status": "passed",
+          "executionMode": "real",
+          "nativeSeconds": 41.444,
+          "receiptSHA256": "982bc820fe48112c0d315a304780f5954d1cafdf3e25e30d2a86dfd24504f651",
+          "commandsLogSHA256": "fedf61cdc0ca9fff54bbe6e19a4668c214016daf7d63aac73fc8be7f4c6fdf4c"
+        },
+        {
+          "selector": "HostwrightRuntimeTests.Phase07LocalNetworkForwardingLiveTests/testDeniedLocalNetworkPermissionFailsClosedAndCleansUpExactly",
+          "status": "passed",
+          "executionMode": "real",
+          "nativeSeconds": 18.091,
+          "receiptSHA256": "0386d3ecdca2f3a4de3fc862db8066f264d8d086fa1b032175953b098e45fd20",
+          "commandsLogSHA256": "ca2fa3adf949d897eaa09ae311a534aa5f4acd3e7165b6c67dd7236f0964dbe5"
+        },
+        {
+          "selector": "HostwrightNetworkHelperTests.ServiceTunnelTahoeVMHarnessTests/testExistingTahoeVMEchoesAuthenticatedFrame",
+          "status": "passed",
+          "executionMode": "real",
+          "nativeSeconds": 0.133,
+          "receiptSHA256": "e466f23ebaf3d875de9639d50719a2e785f90fd9082aad86151232e7b52b1534",
+          "commandsLogSHA256": "f809446ee833acf72675cb25bd934d852266d1fe749741b269bde1ecbc9cb4db"
+        }
+      ],
+      "completedAggregateUniquePassed": 3554,
+      "completedAggregateFailed": 0,
+      "completedAggregateSkipped": 0,
+      "extraRestoredPermissionControlCountedAsUnique": false,
+      "aggregateReceiptSHA256": "a400048258385919fb142bbeea7117c9f26774595ac9541e9dd910dc3f378faf",
+      "collectorSHA256": "420fa7eaa1db6cf81f71160a13edd24c5348a017651f2825f4c72bd3354d9465",
+      "compiledListingNonTestDiagnosticCount": 26,
+      "cellIndependentReviewSHA256": {
+        "thread-r1-base-outcome-independent-review.json": "7c59a688de1cc75195f90aaba8646511a9d9906681af5fb47001c3b4646b9141",
+        "thread-r1-four-supplement-outcome-independent-review.json": "43353b255d3dd50d28dabf318b1ac6290c4715e1c9234cfce58faa943f3a89ff",
+        "thread-r1-canonical-outcome-independent-review.json": "49bd708f404622a4b53e653839637a2e54c0b63bf2a5f18410f947be6a0f967f",
+        "thread-r1-containerization-outcome-independent-review.json": "0156a70a2e29bba5243e0cab4beaeffb7b280a48460bfa753ab973a7962eac08",
+        "lan-sanitizer-outcomes-independent-review.json": "384be1c7cc123bf2c8fb09836cc83dfc426136613b42217fdcdd4d16245103ff",
+        "thread-r1-local-network-outcome-independent-review.json": "3f11e7840ccf6922adb438899b507853f7aa5570f0d1e7a6b1720fa39fd1e805",
+        "thread-r1-tunnel-outcome-independent-review.json": "bec60261817210641197ed0fc5b41127a73918b1a61d131d7447fd64406f19a8"
+      }
+    }
+  },
+  "originalFailedExecutionsRetained": [
+    {
+      "kind": "earlier-ASAN-base-lifecycle-failure",
+      "receiptSHA256": "da65df748603982cca4e8730458441fa12022b725a4a5ea1eb6f764d24b220f6",
+      "creditedAsPass": false
+    },
+    {
+      "kind": "first-ASAN-LAN-reused-fixture-failure",
+      "receiptSHA256": "bd322c7d41611fb88571d196a06f4eedcf35e10e8fd91453999bded51b9f0810",
+      "creditedAsPass": false
+    }
+  ],
+  "qualificationAccepted": false,
+  "signedArtifactQualified": false,
+  "scope": "Exact compiled instrumented host-test identity coverage. Each completed aggregate covers3493XCTest+61SwiftTesting identities using3544actualbase passes plus10fresh unique live cases. Raw failures and original receipts remain unchanged. Cell reviews retain limits on child process at-exit diagnostic coverage; no signed installed-artifact, full provider lifecycle/soak, issue closure, RC, GA or Homebrew acceptance is established.",
+  "rawEvidence": "Original execution logs and full independent reviews remain retained in the local qualification packet. This file publishes derived outcomes and hashes, not the private raw packet.",
+  "aggregateIndependentReviewSHA256": "65c16463b507f637c8f3dff3da5004077b7671bfe5d6062074d589ea76fbc015",
+  "aggregateIndependentReviewScope": "All3554requiredcompiledtestidentities ineachlane independentlyverified; strictdiagnostics clean; originalfailedexecutionsunchanged. Signedartifact/installedlifecycle/issue/GAacceptance notclaimed."
+}

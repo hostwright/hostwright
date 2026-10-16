@@ -1,4 +1,4 @@
-# GA readiness — October 15, 2026
+# GA readiness — October 15, updated October 16, 2026
 
 The frozen candidate is `0.0.2-rc.12`, source
 [`aa8586a1ccc7887f7ae09dcccdc32bf13c27c705`](https://github.com/hostwright/hostwright/commit/aa8586a1ccc7887f7ae09dcccdc32bf13c27c705).
@@ -6,9 +6,10 @@ Its completed supported source matrix passed **3,554 unique cases**, with zero
 failures and zero skips in the aggregate. The exact runtime archive is locally
 authenticated, and six fresh fuzz targets passed five minutes plus corpus replay.
 The macOS 26 distribution retry passed all 54 tests; the original failed
-comparison remains retained. Candidate acceptance remains open: the ASan base
-failed one lifecycle test. Complete sanitizer and signed installed-artifact
-checks remain required.
+comparison remains retained. ASan and TSan each completed **3,554 unique passing
+test identities**, including ten fresh live/platform cases. Earlier failed ASan
+executions remain retained separately. Signed installed-artifact checks, provider
+lifecycle cycles and the physical-host soak remain required.
 No supported RC or GA has been published; the signed dev.12 vendor-tap build
 remains unsupported. Official `brew install hostwright` is still a launch requirement.
 
@@ -50,7 +51,7 @@ remains unsupported. Official `brew install hostwright` is still a launch requir
   initial failed attempt remains retained, and the reason for its payload
   mismatch remains unexplained. Diagnostic passes do not establish overall
   qualification acceptance.
-- The physical-host ASan base completed 3,482 passing XCTest cases, one failed
+- An earlier physical-host ASan base completed 3,482 passing XCTest cases, one failed
   lifecycle test and 61 passing Swift Testing cases; ten live cells remain
   excluded from that base. No sanitizer memory error was reported. The failure
   expected a completion-aware start and its persisted checkpoint rows, but both
@@ -58,7 +59,14 @@ remains unsupported. Official `brew install hostwright` is still a launch requir
   [qualification progress summary](../evidence/phase15-rc12-aa8586a1/qualification-progress-summary.json)
   retains the exact failed selector and original receipt/log/restoration hashes.
   Focused diagnostics are separate observations and do not qualify the failed base.
-- Complete RC.12 sanitizer, signed staging, installation, recovery and final
+- The [supported sanitizer coverage summary](../evidence/phase15-rc12-aa8586a1/sanitizer-coverage-summary.json)
+  records separate ASan and TSan aggregates of 3,554 actual unique passes each.
+  Both exact compiled inventories are covered by 3,544 actual base passes plus
+  ten unique live/platform executions. Real permission denial/restoration and
+  authenticated guest TLS passed; original failed executions remain separate.
+  The extra restored-permission case is not counted twice. Child diagnostic
+  capture limits remain recorded; these results do not qualify signed artifacts.
+- RC.12 signed staging, installation, recovery and final
   artifact-security evidence remain pending. Prior RC.11 checks do not qualify RC.12.
 
 ## Historical RC.11 evidence
@@ -131,7 +139,7 @@ new artifact metadata requires verification against the subsequent build bytes.
 
 | Issue | Required evidence still pending |
 | --- | --- |
-| [#271](https://github.com/hostwright/hostwright/issues/271) | Complete clean RC.12 sanitizers and hosted reproducibility, ten signed-artifact lifecycle cycles per supported provider and the checkpointed 30-minute physical-host soak. |
+| [#271](https://github.com/hostwright/hostwright/issues/271) | Independent final matrix assembly, ten signed-artifact lifecycle cycles per supported provider and the checkpointed 30-minute physical-host soak. |
 | [#275](https://github.com/hostwright/hostwright/issues/275) | Final evidence assembly with the authenticated artifact/security review, explicit schema-3 P2 disposition and independently verified subsequent schema-4 bytes. |
 | [#277](https://github.com/hostwright/hostwright/issues/277) | Signed backup, restore and interruption-recovery execution with cleanup and unmanaged-data preservation. |
 | [#278](https://github.com/hostwright/hostwright/issues/278) | Resolve the genuine dev.11 rollback/compensation failure, then complete historical upgrades, rollback, repair, interruption recovery and uninstall on a subsequent signed candidate. |

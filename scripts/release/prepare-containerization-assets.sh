@@ -18,7 +18,7 @@ readonly layout_sha256="18f0797eab35a4597c1e9624aa4f15fd91f6254e5538c1e0d193b2a9
 readonly layout_size="30"
 readonly guest_loader_name="hostwright-netfilter"
 readonly guest_loader_size="2949246"
-readonly guest_loader_sha256="a411dbcf1efaaf0ea0da17d76e3376a92b99037a8cb00af6588e8ecc6f3f7e99"
+readonly guest_loader_sha256="eec0f5c4528f87cf89724474c48dc69fa1bec1511f42e06b3ad9e400b19a2fda"
 
 work_root=""
 die() { printf '%s\n' "$1" >&2; exit "${2:-70}"; }

@@ -32,7 +32,7 @@ public enum ContainerizationRuntimeAssetContract {
     public static let kernelSize: Int64 = 16_216_576
 
     public static let guestNetworkPolicyLoaderSHA256 =
-        "a411dbcf1efaaf0ea0da17d76e3376a92b99037a8cb00af6588e8ecc6f3f7e99"
+        "eec0f5c4528f87cf89724474c48dc69fa1bec1511f42e06b3ad9e400b19a2fda"
     public static let guestNetworkPolicyLoaderSize: Int64 = 2_949_246
 
     public static let installationRelativeRoot = "share/hostwright/containerization"

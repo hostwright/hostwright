@@ -18,7 +18,7 @@ final class ContainerizationAssetPreparationScriptTests: XCTestCase {
             XCTAssertTrue(result.output.contains("Direct OCI image manifest: sha256:279d191a42539a5ad4e4e73f396d9356cbc7fc865e335bb85efd3b2588da1212 (406 bytes)"))
             XCTAssertTrue(result.output.contains("OCI image configuration: c6decfc522bff7ccf321cde092127761fef4a34d5b07912fb8183304f13ac3ec (151 bytes)"))
             XCTAssertTrue(result.output.contains("OCI image layer: 5c64be872ab8404a80a6064adf6b0a717c5cdd7171036cf6f8ad27715b4c93e9 (67299759 bytes)"))
-            XCTAssertTrue(result.output.contains("Guest policy loader: a411dbcf1efaaf0ea0da17d76e3376a92b99037a8cb00af6588e8ecc6f3f7e99 (2949246 bytes)"))
+            XCTAssertTrue(result.output.contains("Guest policy loader: eec0f5c4528f87cf89724474c48dc69fa1bec1511f42e06b3ad9e400b19a2fda (2949246 bytes)"))
             XCTAssertTrue(result.output.contains("authenticated source \(String(repeating: "a", count: 40)) run 1234 attempt 1"))
             XCTAssertFalse(result.output.localizedCaseInsensitiveContains("kata archive"))
             XCTAssertFalse(result.output.localizedCaseInsensitiveContains("ghcr"))

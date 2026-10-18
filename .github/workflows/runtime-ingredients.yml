@@ -184,7 +184,7 @@ jobs:
 
   swift-sdk-evidence:
     name: Resolve authenticated SDK evidence without recompiling
-    if: ${{ always() && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && (needs.source-built-swift-sdk.result == 'success' || (needs.source-built-swift-sdk.result == 'skipped' && inputs.sdk_checkpoint_run != '')) }}
+    if: ${{ always() && (github.ref == 'refs/heads/main' || (github.repository == 'hostwright/hostwright' && github.event_name == 'workflow_dispatch' && inputs.ingredients_only == true)) && github.event_name == 'workflow_dispatch' && (needs.source-built-swift-sdk.result == 'success' || (needs.source-built-swift-sdk.result == 'skipped' && inputs.sdk_checkpoint_run != '')) }}
     needs: source-built-swift-sdk
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 90
@@ -307,7 +307,7 @@ jobs:
 
   runtime-build-ingredients:
     name: Rebuild pinned kernel and vminit ingredients
-    if: ${{ always() && needs.swift-sdk-evidence.result == 'success' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' }}
+    if: ${{ always() && needs.swift-sdk-evidence.result == 'success' && (github.ref == 'refs/heads/main' || (github.repository == 'hostwright/hostwright' && github.event_name == 'workflow_dispatch' && inputs.ingredients_only == true)) && github.event_name == 'workflow_dispatch' }}
     needs: swift-sdk-evidence
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 120
@@ -544,7 +544,11 @@ jobs:
         with:
           name: ${{ steps.native-artifact.outputs.artifact-name }}
           include-hidden-files: true
-          path: ${{ runner.temp }}/runtime-build-ingredients/
+          path: |
+            ${{ runner.temp }}/runtime-build-ingredients/checksums.sha256
+            ${{ runner.temp }}/runtime-build-ingredients/payloads/
+            ${{ runner.temp }}/runtime-build-ingredients/evidence/
+            ${{ runner.temp }}/runtime-build-ingredients/runtime-native-fragment/
           retention-days: 30
           if-no-files-found: error
       - name: Retain failed native build diagnostics
@@ -605,7 +609,7 @@ jobs:
 
   guest-loader:
     name: Build and attest the guest loader
-    if: ${{ github.ref == 'refs/heads/main' }}
+    if: ${{ (github.ref == 'refs/heads/main' || (github.repository == 'hostwright/hostwright' && github.event_name == 'workflow_dispatch' && inputs.ingredients_only == true)) }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     outputs:

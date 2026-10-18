@@ -7,7 +7,7 @@ remains unavailable pending the accepted stable release and Homebrew review.
 
 ## RC.13 preparation
 
-Three reviewed corrections are merged:
+Four reviewed corrections are merged:
 
 - [#401](https://github.com/hostwright/hostwright/pull/401) applies the complete
   IPVS inner-header validation and serial registration cleanup fixes to Linux
@@ -16,29 +16,46 @@ Three reviewed corrections are merged:
   inventory and license metadata from the authenticated patched source closure.
 - [#403](https://github.com/hostwright/hostwright/pull/403) updates the guest
   SwiftNIO pin to 2.101.3 and its reviewed source revision.
+- [#406](https://github.com/hostwright/hostwright/pull/406) synchronizes the
+  RC.13 preparation identity, native runtime pins, license inventory and public
+  readiness documentation.
 
-The [ingredient producer](https://github.com/hostwright/hostwright/actions/runs/38944254249),
-attempt 1, passed on source
-`bd8f154f278cb650493c2813d4ecc07cd90838d8`. Its native artifact is
-`12070778699`, 6,958,937,411 bytes, SHA-256
-`e9cac586a1e51130e4943b1de28d70175b6d3cc6392095109f01cd2617809b28`.
+The [security ingredient producer](https://github.com/hostwright/hostwright/actions/runs/39148502792),
+attempt 1, passed on preparation branch source
+`68e436dcd3d53d0844eb7f536e8357332eb6520e`. Its native artifact is
+`12146988208`, 6,961,108,728 bytes, SHA-256
+`9ae0c75d0dc212562faad944761ecede15b9f15fa57058e399c116472341ef14`.
 Local intake matched the complete ZIP digest, checked all 26,329 listed files
-and authenticated its three hosted subjects against that exact run. The
-verified native fragment and sidecars contain 9,345 files totaling
-5,738,623,455 bytes. The loader closure was retained and independently reviewed
-separately.
+and authenticated its three hosted subjects against that exact branch run.
+The independently verified native fragment and sidecars contain 9,345 files
+totaling 5,738,623,455 bytes.
 
-This ingredient-only run supplies reviewed input for the runtime-pin update.
-It does not supply the final candidate's authenticated runtime archive, signed
-artifacts or release acceptance. The original intake's file-count rejection is
-retained separately; its successful download was verified and reused without
-replacing the failure record.
+The matching loader artifact, `12144770740`, supplies the freshly rebuilt
+`hostwright-netfilter`: 2,949,246 bytes, SHA-256
+`eec0f5c4528f87cf89724474c48dc69fa1bec1511f42e06b3ad9e400b19a2fda`.
+Its six hosted subjects and extracted source closure passed independent review.
+The loader uses Go 1.26.5, `golang.org/x/net` 0.61.0 and `golang.org/x/sys`
+0.49.0. Inventory regeneration binds the actual binary, all twenty retained
+loader source files, the seven declared Go dependency tuples and corresponding
+license texts. Six linked modules have captured source/license coverage; the
+resolved-only `go-cmp` tuple retains its existing exact license receipt.
 
-The pending [repository security update](https://github.com/hostwright/hostwright/pull/405)
-also changes the guest networking dependency closure. Before freezing RC.13,
-that update needs review and passing checks, followed by fresh loader bytes and
-matching runtime, source and license pins. The retained ingredient loader does
-not qualify those newer dependencies.
+This preparation integrates the
+[repository security update](https://github.com/hostwright/hostwright/pull/405)
+with matching rebuilt loader and generated inventories. The earlier CI rejection
+of mismatched Go source checksums remains a failed result; passing checks on the
+complete updated source are required before freeze.
+
+These ingredient-only results are preparation evidence from the exact branch.
+They do not authenticate a final main-branch runtime archive or qualify signed
+RC.13 artifacts. The final merged candidate still requires its own exact-source
+producer and protected signed staging. No older source or artifact result is
+relabelled as RC.13 qualification.
+
+The earlier [native ingredient run](https://github.com/hostwright/hostwright/actions/runs/38944254249)
+on `bd8f154f278cb650493c2813d4ecc07cd90838d8` remains retained under its
+original source binding. Its initial file-count rejection and subsequent
+successful intake remain separate records.
 
 ## Remaining issue gates
 

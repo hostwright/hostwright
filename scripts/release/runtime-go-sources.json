@@ -59,7 +59,7 @@
       "version": "v0.5.0"
     },
     {
-      "commit": "dfc720dfe0cfc125116068c20efcdcb5e4eab464",
+      "commit": "c1d31df183e51b1075a2fd670d6f6f4efb871773",
       "identity": "go-golang-org-x-net",
       "licenses": [
         "LICENSE"
@@ -71,7 +71,7 @@
       ],
       "repository": "https://go.googlesource.com/net",
       "spdx": "BSD-3-Clause",
-      "version": "v0.33.0"
+      "version": "v0.61.0"
     },
     {
       "commit": "59c1ca1e4661ed4452be4069ceea3c233f4deec1",
@@ -89,7 +89,7 @@
       "version": "v0.6.0"
     },
     {
-      "commit": "fe16172d1123f5350a8c5585395465de6866de4c",
+      "commit": "b6b8557e8e2974925aec7a136ba0e323eedc5f43",
       "identity": "go-golang-org-x-sys",
       "licenses": [
         "LICENSE"
@@ -101,7 +101,7 @@
       ],
       "repository": "https://go.googlesource.com/sys",
       "spdx": "BSD-3-Clause",
-      "version": "v0.28.0"
+      "version": "v0.49.0"
     }
   ]
 }

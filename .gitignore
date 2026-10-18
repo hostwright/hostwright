@@ -7,6 +7,16 @@ DerivedData/
 __pycache__/
 *.pyc
 
+# Local credentials and signing material
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.p12
+*.pfx
+*.keychain
+*.keychain-db
+
 # Local-only project material
 site/
 .claude/

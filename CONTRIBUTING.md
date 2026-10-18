@@ -10,6 +10,8 @@ scripts/test.sh pr
 scripts/check-docs.sh
 ```
 
+The guest network-policy loader requires Go 1.26; CI and authenticated ingredient builds pin Go 1.26.5. Keep its module versions and `scripts/release/runtime-go-sources.json` source revisions in sync.
+
 `scripts/test.sh full` runs the full suite and integration checks. Expensive or attended checks also have `qualification distribution`, `qualification release`, and `qualification live` shards. Run the lanes relevant to the changed behavior; record unavailable or skipped environments as such. See [testing and evidence](docs/reference/testing-evidence.md) for release requirements.
 
 ## Code changes
@@ -23,3 +25,5 @@ Keep fixes focused. Add regression coverage for defects and update command examp
 Describe the problem, the resulting behavior, and the checks run. Link the relevant issue and state any remaining limitation. Use `Refs #NN` while work is incomplete. A final roadmap closure requires `status:verification`, clean evidence, and `Closes #NN`; see the [release process](docs/release/RELEASE_PROCESS.md).
 
 Maintainer review covers changes to dependencies, public contracts, state migrations, secrets, runtime authority, destructive operations, and distribution. Changes to release scope or architecture belong in a short design record. See [governance](GOVERNANCE.md) for release authority and [the security policy](SECURITY.md) for private reporting.
+
+After merging, complete the [repository closeout procedure](docs/reference/repository-hygiene.md) to retire integrated branches, inactive worktrees, and disposable build output while preserving unfinished work and release evidence.

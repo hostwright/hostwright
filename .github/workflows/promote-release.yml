@@ -224,7 +224,7 @@ jobs:
             gh attestation verify "$download/$(basename "$original")" --repo "$GITHUB_REPOSITORY" --signer-workflow hostwright/hostwright/.github/workflows/trusted-release.yml --signer-digest "$stage_digest" --source-ref refs/heads/main --deny-self-hosted-runners
           done
 
-      - name: Compensate a failed or cancelled publication
+      - name: Retain evidence from a failed or cancelled publication
         if: ${{ failure() || cancelled() }}
         shell: bash
         run: |
@@ -241,7 +241,7 @@ jobs:
           tag_ref="repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG"
           if ! tag_object_sha="$(gh api "$tag_ref" --jq '.object.sha' 2>/dev/null)"; then
             if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-              echo "Refusing compensation: release exists without its exact owned tag." >&2
+              echo "Retained publication requires review: release exists without its exact owned tag." >&2
               exit 70
             fi
             exit 0
@@ -253,18 +253,18 @@ jobs:
           resolved_type="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object_sha" --jq '.object.type')"
           resolved_commit="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object_sha" --jq '.object.sha')"
           if [[ "$tag_name" != "$RELEASE_TAG" || "$tag_message" != "$expected_tag_message" || "$resolved_type" != commit || "$resolved_commit" != "$RELEASE_COMMIT" ]]; then
-            echo "Refusing compensation: tag ownership differs from the exact release commit." >&2
+            echo "Retained publication requires review: tag ownership differs from the exact release commit." >&2
             exit 70
           fi
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json tagName,body,targetCommitish > "$RUNNER_TEMP/owned-release.json"
             python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); assert r["tagName"] == sys.argv[2] and r["targetCommitish"] == sys.argv[3] and r["body"].endswith("hostwright-release-ownership:" + sys.argv[4])' "$RUNNER_TEMP/owned-release.json" "$RELEASE_TAG" "$RELEASE_COMMIT" "$ownership_marker"
-            gh release delete "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --yes
           fi
           current_object_sha="$(gh api "$tag_ref" --jq '.object.sha')"
           current_commit="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$current_object_sha" --jq '.object.sha')"
           if [[ "$current_object_sha" != "$tag_object_sha" || "$current_commit" != "$RELEASE_COMMIT" ]]; then
-            echo "Refusing compensation: tag changed before deletion." >&2
+            echo "Retained publication requires review: tag identity changed." >&2
             exit 70
           fi
-          gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$RELEASE_TAG"
+          echo "Publication failed or was cancelled. The exact tag and any published assets are retained for maintainer review; automatic deletion is prohibited." >&2
+          exit 70

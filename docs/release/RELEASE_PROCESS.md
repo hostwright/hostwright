@@ -90,6 +90,8 @@ Gate receipts bind the source commit, version, clean state, and hashed raw attac
 
 RC receipts cannot promote GA: the final version requires its own source, staged bytes, and qualification.
 
+If promotion fails or is cancelled after creating a tag, retain the exact tag, ownership evidence, and any published assets for maintainer review. Promotion must not automatically delete a release or bypass version-tag protection. A new attempt normally uses a new qualified version; exceptional removal requires the separate reviewed action described above.
+
 ## Immutable Historical Releases
 
 `docs/release/IMMUTABLE_RELEASES.json` records the hashes of historical release notes. Preserve their original bytes. Current references can explain their status; Git history retains superseded planning and development narratives.

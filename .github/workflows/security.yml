@@ -1,0 +1,113 @@
+name: Security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '23 7 * * 1'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: security-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  workflow-security:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install the verified workflow scanner
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --proto '=https' --proto-redir '=https' \
+            --output "$RUNNER_TEMP/zizmor.tar.gz" \
+            https://github.com/zizmorcore/zizmor/releases/download/v1.31.1/zizmor-x86_64-unknown-linux-gnu.tar.gz
+          printf '%s  %s\n' \
+            d185f726bdaf92df78273217dfdd24ebcd6b0ef48cf3ce776ff5762b6e138c99 \
+            "$RUNNER_TEMP/zizmor.tar.gz" | sha256sum --check --status
+          mkdir "$RUNNER_TEMP/zizmor-bin"
+          tar -xzf "$RUNNER_TEMP/zizmor.tar.gz" -C "$RUNNER_TEMP/zizmor-bin" zizmor
+      - name: Audit workflow permissions, credentials, and action pins
+        run: '"$RUNNER_TEMP/zizmor-bin/zizmor" --offline --strict-collection --no-progress .github/workflows'
+
+  go-vulnerabilities:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: 1.26.5
+          cache: false
+      - name: Check the Linux guest loader's reachable dependencies
+        working-directory: Guest/HostwrightNetfilter
+        env:
+          GOOS: linux
+          GOARCH: arm64
+          GOTOOLCHAIN: local
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
+  codeql:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: actions
+            runner: ubuntu-24.04
+            build-mode: none
+          - language: python
+            runner: ubuntu-24.04
+            build-mode: none
+          - language: go
+            runner: ubuntu-24.04
+            build-mode: manual
+          - language: swift,c-cpp
+            runner: macos-26
+            build-mode: manual
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: matrix.language == 'go'
+        with:
+          go-version: 1.26.5
+          cache: false
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          queries: security-extended
+      - name: Build the Linux guest loader
+        if: matrix.language == 'go'
+        working-directory: Guest/HostwrightNetfilter
+        env:
+          GOOS: linux
+          GOARCH: arm64
+          GOTOOLCHAIN: local
+        run: go build -mod=readonly -o "$RUNNER_TEMP/hostwright-netfilter" .
+      - name: Build the native application and C boundary
+        if: matrix.language == 'swift,c-cpp'
+        run: swift build --jobs 2 --disable-automatic-resolution
+      - name: Analyze
+        uses: github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4

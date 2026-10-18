@@ -1214,6 +1214,45 @@ final class TrustedReleaseTests: XCTestCase {
         }
     }
 
+    func testFailedPublicationRetainsItsReleaseAndProtectedTag() throws {
+        let workflow = try String(
+            contentsOf: packageRoot().appendingPathComponent(".github/workflows/promote-release.yml"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(workflow.contains("failure() || cancelled()"))
+        XCTAssertTrue(workflow.contains("hostwright-release-ownership:"))
+        XCTAssertTrue(workflow.contains("current_object_sha\" != \"$tag_object_sha"))
+        XCTAssertTrue(workflow.contains("automatic deletion is prohibited"))
+        XCTAssertFalse(workflow.contains("gh release delete"))
+        XCTAssertFalse(workflow.contains("gh api --method DELETE"))
+    }
+
+    func testReleaseBuildStepsDoNotInheritGitHubTokens() throws {
+        let workflow = try String(
+            contentsOf: packageRoot().appendingPathComponent(".github/workflows/trusted-release.yml"),
+            encoding: .utf8
+        )
+        let buildJob = try XCTUnwrap(
+            workflow.components(separatedBy: "  build-sign-notarize:").dropFirst().first
+        ).components(separatedBy: "  attest:")[0]
+        let inheritedEnvironment = buildJob.components(separatedBy: "    steps:")[0]
+        XCTAssertFalse(inheritedEnvironment.contains("GH_TOKEN:"))
+        XCTAssertFalse(inheritedEnvironment.contains("GITHUB_TOKEN:"))
+
+        let buildCommands = buildJob.components(separatedBy: "\n").filter {
+            $0.contains("swift run ") || $0.contains("scripts/test.sh full")
+        }
+        XCTAssertEqual(buildCommands.count, 5)
+        for command in buildCommands {
+            XCTAssertTrue(command.contains("env -u GH_TOKEN -u GITHUB_TOKEN "))
+        }
+        let downloadStep = try XCTUnwrap(
+            buildJob.components(separatedBy: "      - name: Download runtime provenance").dropFirst().first
+        ).components(separatedBy: "      - name:")[0]
+        XCTAssertTrue(downloadStep.contains("GH_TOKEN: ${{ github.token }}"))
+        XCTAssertEqual(buildJob.components(separatedBy: "GH_TOKEN: ${{ github.token }}").count - 1, 1)
+    }
+
     func testStructuredReleaseOutputsAndRetentionPolicyAreStable() throws {
         let report = makeReport()
         XCTAssertNoThrow(try report.retentionPolicy.validate())

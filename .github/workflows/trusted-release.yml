@@ -87,7 +87,6 @@ jobs:
       attestations: read
       actions: read
     env:
-      GH_TOKEN: ${{ github.token }}
       PYTHONDONTWRITEBYTECODE: "1"
       RELEASE_COMMIT: ${{ inputs.commit }}
       RELEASE_VERSION: ${{ inputs.version }}
@@ -142,13 +141,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          scripts/test.sh full
-          test "$(swift run --jobs 1 hostwright --version)" = "$RELEASE_VERSION"
+          env -u GH_TOKEN -u GITHUB_TOKEN scripts/test.sh full
+          test "$(env -u GH_TOKEN -u GITHUB_TOKEN swift run --jobs 1 hostwright --version)" = "$RELEASE_VERSION"
           test "$(plutil -extract productVersion raw contracts/v0.0.2/versions.json)" = "$RELEASE_VERSION"
 
       - name: Download runtime provenance from the exact authenticated producer run
         id: runtime-source
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           [[ "$RELEASE_RUNTIME_PROVENANCE_RUN" =~ ^[1-9][0-9]*$ ]] || exit 1
@@ -219,7 +220,7 @@ jobs:
           formula_dir="$bundle/Formula"
           test ! -e "$bundle"
           mkdir -m 700 "$bundle"
-          swift run --jobs 1 hostwright-dist release \
+          env -u GH_TOKEN -u GITHUB_TOKEN swift run --jobs 1 hostwright-dist release \
             --source-root "$GITHUB_WORKSPACE" \
             --output-dir "$release_dir" \
             --expected-commit "$RELEASE_COMMIT" \
@@ -229,13 +230,13 @@ jobs:
             --installer-identity "$RELEASE_INSTALLER_IDENTITY" \
             --team-id "$RELEASE_TEAM_ID" \
             --notary-keychain-profile "$RELEASE_NOTARY_PROFILE"
-          swift run --jobs 1 hostwright-dist verify-release \
+          env -u GH_TOKEN -u GITHUB_TOKEN swift run --jobs 1 hostwright-dist verify-release \
             --release-dir "$release_dir" \
             --team-id "$RELEASE_TEAM_ID"
           archive_name="$(plutil -extract archive.fileName raw "$release_dir/release-manifest.json")"
           mkdir -p "$formula_dir"
           artifact_url="https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG/$archive_name"
-          swift run --jobs 1 hostwright-dist homebrew-formula \
+          env -u GH_TOKEN -u GITHUB_TOKEN swift run --jobs 1 hostwright-dist homebrew-formula \
             --release-dir "$release_dir" \
             --team-id "$RELEASE_TEAM_ID" \
             --artifact-url "$artifact_url" \

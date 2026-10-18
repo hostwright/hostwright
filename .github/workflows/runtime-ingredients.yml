@@ -42,7 +42,7 @@ jobs:
           REQUESTED_CHECKPOINT_ATTEMPT: ${{ inputs.sdk_checkpoint_attempt }}
         run: test -z "$REQUESTED_CHECKPOINT_ATTEMPT"
       - name: Check out the exact main commit
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Reclaim unused hosted .NET SDK storage
@@ -201,7 +201,7 @@ jobs:
       artifact-metadata: write
     steps:
       - name: Check out the exact main commit and ancestry
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -322,7 +322,7 @@ jobs:
       artifact-metadata: write
     steps:
       - name: Check out the exact main commit
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -622,7 +622,7 @@ jobs:
       artifact-metadata: write
     steps:
       - name: Check out the exact main commit
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Prepare the pinned Go toolchain and complete sources
@@ -726,7 +726,7 @@ jobs:
       artifact-metadata: write
     steps:
       - name: Check out the exact main commit
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Download the successful native producer fragment

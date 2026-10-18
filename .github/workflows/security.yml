@@ -68,7 +68,7 @@ jobs:
   codeql:
     name: CodeQL (${{ matrix.language }})
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
+    timeout-minutes: ${{ matrix.language == 'swift,c-cpp' && 180 || 60 }}
     permissions:
       contents: read
       security-events: write

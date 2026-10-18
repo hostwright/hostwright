@@ -544,7 +544,11 @@ jobs:
         with:
           name: ${{ steps.native-artifact.outputs.artifact-name }}
           include-hidden-files: true
-          path: ${{ runner.temp }}/runtime-build-ingredients/
+          path: |
+            ${{ runner.temp }}/runtime-build-ingredients/checksums.sha256
+            ${{ runner.temp }}/runtime-build-ingredients/payloads/
+            ${{ runner.temp }}/runtime-build-ingredients/evidence/
+            ${{ runner.temp }}/runtime-build-ingredients/runtime-native-fragment/
           retention-days: 30
           if-no-files-found: error
       - name: Retain failed native build diagnostics

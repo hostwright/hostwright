@@ -164,9 +164,125 @@ def loader_source_closure_digest(files):
     return sha(V.canonical(dict(kind="hostwright.runtime-loader-source-closure.v1", files=records)))
 
 
-def verify_root_guest_bindings(source_root, third_party, runtime, manifest, fetch):
+def validate_loader_baseline(source_root, baseline_root):
+    baseline_root = Path(baseline_root).resolve(strict=True)
+    V.require(baseline_root != Path(source_root).resolve(), "loader baseline must be a separate clean ancestor checkout")
+    for root in (baseline_root, source_root):
+        V.require(not subprocess.check_output(["git", "-C", str(root), "status", "--porcelain=v1", "--untracked-files=all"]),
+                  "loader update source and baseline must be clean")
+    baseline_head = subprocess.check_output(["git", "-C", str(baseline_root), "rev-parse", "HEAD"], text=True).strip()
+    current_head = subprocess.check_output(["git", "-C", str(source_root), "rev-parse", "HEAD"], text=True).strip()
+    V.require(baseline_head != current_head and subprocess.run(
+        ["git", "-C", str(source_root), "merge-base", "--is-ancestor", baseline_head, current_head],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0,
+        "loader baseline must be a strict ancestor of the current source")
+    NOTICES.verify(baseline_root, require_qualified=True)
+    for name in (NOTICES_FILE, THIRD_PARTY_INVENTORY, RUNTIME_INVENTORY, SOURCE_DOCUMENTS, CONFIG_PATH, "Package.resolved"):
+        V.require(regular(source_root, name).read_bytes() == regular(baseline_root, name).read_bytes(),
+                  "loader update template differs from the qualified baseline: " + name)
+    return baseline_root
+
+
+def declared_go_dependencies(module_data, sum_data):
+    requires = {}
+    in_require = False
+    for raw in module_data.decode("utf-8").splitlines():
+        line = raw.split("//", 1)[0].strip()
+        if not line:
+            continue
+        if in_require and line == ")":
+            in_require = False
+            continue
+        parts = line.split()
+        if not in_require:
+            if parts[0] in ("module", "go", "toolchain"):
+                V.require(len(parts) == 2, "invalid captured Go module directive")
+                continue
+            V.require(parts[0] == "require", "unsupported captured Go module directive")
+            parts = parts[1:]
+            if parts == ["("]:
+                in_require = True
+                continue
+        V.require(len(parts) == 2 and V.re.fullmatch(r"[A-Za-z0-9._~+/-]+", parts[0]) is not None and
+                  V.re.fullmatch(r"v[0-9][A-Za-z0-9.+-]*", parts[1]) is not None and
+                  parts[0] not in requires, "duplicate or malformed captured Go require directive")
+        requires[parts[0]] = parts[1]
+    V.require(not in_require and requires, "empty or unterminated captured Go require block")
+    checksums = {}
+    for line in sum_data.decode("utf-8").splitlines():
+        parts = line.split()
+        V.require(len(parts) == 3 and V.re.fullmatch(r"h1:[A-Za-z0-9+/]{43}=", parts[2]) is not None,
+                  "invalid captured Go checksum record")
+        key = tuple(parts[:2])
+        V.require(key not in checksums, "duplicate captured Go checksum record")
+        checksums[key] = parts[2]
+    result = []
+    for module, version in sorted(requires.items()):
+        V.require((module, version) in checksums, "declared Go dependency lacks its exact checksum")
+        result.append(dict(module=module, version=version, checksum=checksums[(module, version)]))
+    return result
+
+
+def refresh_loader_locks(source_root, runtime, manifest, fetch):
+    """Derive new loader lock bindings from the fully verified captured source."""
+    hostwright = next((project for project in manifest["sourceProjects"]
+                       if project["identity"] == manifest["loader"]["project"]), None)
+    V.require(hostwright is not None and hostwright["commit"] == manifest["sourceCommit"],
+              "loader update lacks its exact captured source commit")
+    leaves = source_project_data(hostwright, fetch,
+                                {project["identity"]: project["commit"] for project in manifest["sourceProjects"]})
+    names = {name for name in leaves if name.startswith("Guest/HostwrightNetfilter/")}
+    V.require(len(names) == 20 and names == set(runtime["retainedLoaderSourceFiles"]),
+              "loader update changes the admitted 20-file source scope")
+    updated = copy.deepcopy(runtime)
+    updated["retainedLoaderSourceFiles"] = {}
+    for name in sorted(names):
+        data = regular(source_root, name).read_bytes()
+        V.require(data == leaves[name], "loader update differs from captured source: " + name)
+        updated["retainedLoaderSourceFiles"][name] = sha(data)
+    for name, field in (("go.mod", "goModuleSHA256"), ("go.sum", "goSumSHA256")):
+        updated[field] = sha(leaves["Guest/HostwrightNetfilter/" + name])
+    updated["goDependencies"] = declared_go_dependencies(
+        leaves["Guest/HostwrightNetfilter/go.mod"], leaves["Guest/HostwrightNetfilter/go.sum"])
+    return updated
+
+
+def refresh_go_documents(notices, records, dependencies, loader, projects, fetch, loader_source, baseline_dependencies):
+    captured = {tuple(item["buildInfo"]): projects[item["project"]]
+                for item in loader["modules"] if len(item["buildInfo"]) == 3}
+    baseline = {(item["module"], item["version"], item["checksum"]) for item in baseline_dependencies}
+    prefixes = ["guest-go/" + item["module"] + "@" + item["version"] + "/" for item in dependencies]
+    for record in records:
+        if record["category"] == "runtime-go-license" and not any(
+                record["sourcePath"].startswith(prefix) for prefix in prefixes):
+            record["category"] = "runtime-upstream-go-license"
+    for dependency, prefix in zip(dependencies, prefixes):
+        key = (dependency["module"], dependency["version"], dependency["checksum"])
+        if key not in captured:
+            V.require(key in baseline and any(record["category"] == "runtime-go-license" and record["sourcePath"].startswith(prefix)
+                          for record in records), "resolved-only Go pin lacks an exact license receipt")
+            continue
+        project = captured[key]
+        documents = {item["sourcePath"]: item for item in project["licenses"] + project["notices"]
+                     if "sourceProject" not in item}
+        V.require(documents, "captured Go source lacks its own license records")
+        for source_path, item in sorted(documents.items()):
+            path = prefix + V.path(source_path)
+            data = V.substantive(item, fetch)
+            existing = [record for record in records if record["category"] == "runtime-go-license"
+                        and record["sourcePath"] == path]
+            if existing:
+                V.require(len(existing) == 1 and existing[0]["sha256"] == sha(data) and
+                          existing[0]["sizeBytes"] == len(data), "Go license receipt differs from captured source")
+                continue
+            add_document(notices, records, "runtime-go-license", path, data,
+                         ["git-object:" + project["identity"] + "@" + project["commit"] + ":" + source_path,
+                          stable_source_reference(project, loader_source)])
+
+
+def verify_root_guest_bindings(source_root, third_party, runtime, manifest, fetch, notice_root=None):
     """Require current host locks and loader sources to agree with retained records."""
-    NOTICES.verify(source_root, require_qualified=False)
+    NOTICES.verify(source_root if notice_root is None else notice_root, require_qualified=False)
     resolved = regular(source_root, "Package.resolved").read_bytes()
     V.require(sha(resolved) == third_party["resolvedSHA256"],
               "root Package.resolved differs from its exact host dependency inventory")
@@ -392,12 +508,17 @@ def replace_kernel_configuration(notices, records, config, kernel_sha256):
     return notices
 
 
-def regenerate(prepared_root, source_root):
+def regenerate(prepared_root, source_root, loader_baseline_root=None):
     manifest, prepared_inventory, manifest_data, payloads, fetch, verification = verify_prepared_evidence(prepared_root)
     third_party = read_json(source_root, THIRD_PARTY_INVENTORY)
     runtime = read_json(source_root, RUNTIME_INVENTORY)
+    baseline_go_dependencies = copy.deepcopy(runtime["goDependencies"])
     notices = bytearray(regular(source_root, NOTICES_FILE).read_bytes())
-    guest_bindings = verify_root_guest_bindings(source_root, third_party, runtime, manifest, fetch)
+    notice_root = None
+    if loader_baseline_root is not None:
+        notice_root = validate_loader_baseline(source_root, loader_baseline_root)
+        runtime = refresh_loader_locks(source_root, runtime, manifest, fetch)
+    guest_bindings = verify_root_guest_bindings(source_root, third_party, runtime, manifest, fetch, notice_root)
     notices, preserved_runtime_documents = remove_generated_runtime_documents(
         notices, third_party["runtimeDocuments"])
     third_party["runtimeDocuments"] = preserved_runtime_documents
@@ -414,6 +535,8 @@ def regenerate(prepared_root, source_root):
                                                                      runtime["guestDependencies"])
     refresh_guest_documents(notices, third_party["runtimeDocuments"], guest_dependencies,
                             projects, fetch, guest_bindings["loaderSourceSHA256"])
+    refresh_go_documents(notices, third_party["runtimeDocuments"], runtime["goDependencies"],
+                         manifest["loader"], projects, fetch, guest_bindings["loaderSourceSHA256"], baseline_go_dependencies)
     license_documents = {}
     for identity in ASSETS:
         V.require(identity in manifest["licensing"], "runtime manifest lacks a licensed asset: " + identity)
@@ -599,10 +722,15 @@ if __name__ == "__main__":
     parser.add_argument("--prepared-root", type=Path, required=True)
     parser.add_argument("--source-root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--loader-baseline-root", type=Path,
+                        help="Clean qualified ancestor checkout for a verified loader dependency update")
     args = parser.parse_args()
     V.require(args.prepared_root.is_dir() and not args.prepared_root.is_symlink(), "unsafe prepared provenance root")
     V.require(args.source_root.is_dir() and not args.source_root.is_symlink(), "unsafe source root")
-    outputs, result = regenerate(args.prepared_root.resolve(), args.source_root.resolve())
+    if args.loader_baseline_root is not None:
+        V.require(args.loader_baseline_root.is_dir() and not args.loader_baseline_root.is_symlink(),
+                  "unsafe loader baseline root")
+    outputs, result = regenerate(args.prepared_root.resolve(), args.source_root.resolve(), args.loader_baseline_root)
     write_output(args.output, outputs)
     print(json.dumps(dict(status="qualified", output=str(args.output),
                           manifestSHA256=result["manifestSHA256"], payloadCount=result["payloadCount"],

@@ -8,6 +8,16 @@ import unittest
 
 
 class RuntimeIngredientGateTests(unittest.TestCase):
+    def test_upload_retains_all_checksummed_evidence_without_build_caches(self):
+        workflow = (Path(__file__).resolve().parents[2] / ".github/workflows/runtime-ingredients.yml").read_text()
+        step = workflow.split("      - name: Retain rebuilt ingredients for the reviewed pin update\n")[1].split("      - name:")[0]
+        paths = re.search(r"          path: \|\n((?:            .*\n)+)", step).group(1)
+        prefix = "${{ runner.temp }}/runtime-build-ingredients/"
+        paths = {line.strip().removeprefix(prefix).rstrip("/") for line in paths.splitlines()}
+        self.assertEqual(paths, {"checksums.sha256", "payloads", "evidence", "runtime-native-fragment"})
+        self.assertIn("find payloads evidence runtime-native-fragment -type f -print0", workflow)
+        self.assertIn("include-hidden-files: true", step)
+
     def test_event_and_source_boundaries(self):
         workflow = (Path(__file__).resolve().parents[2] / ".github/workflows/runtime-ingredients.yml").read_text()
         jobs = {name: body for name, body in re.findall(r"^  ([\w-]+):\n(.*?)(?=^  [\w-]+:|\Z)", workflow, re.M | re.S)}

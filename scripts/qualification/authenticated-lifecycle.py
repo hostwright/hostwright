@@ -48,9 +48,18 @@ LANES = {'apple-cli-1.0.0': ('apple-container-cli', '1.0.0'),
          'apple-cli-1.1.0': ('apple-container-cli', '1.1.0'),
          'containerization-0.35.0': ('apple-containerization', '0.35.0')}
 HEX = re.compile(r'^[0-9a-f]{64}$')
-SDK_INIT_DESCRIPTOR_DIGEST = 'sha256:c58d7f9497e8c519869cfedfa5d0be02a63d665fb66127c0a4c8e209c7cfe396'
-SDK_INIT_VARIANT_DIGEST = 'sha256:15a70c63c9ca254020d8bdbe1b6e48332db0629881f563624bfd319412a37ea3'
+SDK_INIT_DESCRIPTOR_DIGEST = 'sha256:523d7e7ac9ee8475f91f29b1d5e215f4bfdcd98e7e2e2369bcca827a32d0bc80'
+SDK_INIT_VARIANT_DIGEST = 'sha256:279d191a42539a5ad4e4e73f396d9356cbc7fc865e335bb85efd3b2588da1212'
 SDK_INIT_IMPORTED_INDEX_SIZE = 358
+SDK_KERNEL_SHA256 = '3dd936598c8e457d2c95e69fc987f8426d76671564d8f2ab658800c185f8c746'
+SDK_KERNEL_SIZE = 16216576
+SDK_INIT_ASSETS = {
+    'oci-layout': ('18f0797eab35a4597c1e9624aa4f15fd91f6254e5538c1e0d193b2a95dd4acc6', 30),
+    'index.json': ('349ef898931e45eb5b447cfbbd52dc6421dee0a0eabfb8120b5b8c213996c5b2', 240),
+    'blobs/sha256/279d191a42539a5ad4e4e73f396d9356cbc7fc865e335bb85efd3b2588da1212': ('279d191a42539a5ad4e4e73f396d9356cbc7fc865e335bb85efd3b2588da1212', 406),
+    'blobs/sha256/c6decfc522bff7ccf321cde092127761fef4a34d5b07912fb8183304f13ac3ec': ('c6decfc522bff7ccf321cde092127761fef4a34d5b07912fb8183304f13ac3ec', 151),
+    'blobs/sha256/5c64be872ab8404a80a6064adf6b0a717c5cdd7171036cf6f8ad27715b4c93e9': ('5c64be872ab8404a80a6064adf6b0a717c5cdd7171036cf6f8ad27715b4c93e9', 67299759),
+}
 
 class Rejected(RuntimeError):
     pass
@@ -437,17 +446,11 @@ def validate_sdk_inputs(args, binding, fresh=False):
     if fresh: require(not data.exists() and not data.is_symlink(), 'SDK data root must be fresh before seeding')
     require(spec.get('frameworkRevision') == '44bec8b9933bc491d0cbf44abac90a1f6aaebf6b', 'SDK source revision mismatch')
     for path, digest in spec['assetSHA256'].items(): bound(path, digest)
-    require(config['kernelPath'] in spec['assetSHA256'] and config['kernelSHA256'] == spec['assetSHA256'][config['kernelPath']] == '18afc95bd6d478d928b30b3230486ce4f1628e86779463aacfd364e2535b513a'
-            and Path(config['kernelPath']).stat().st_size == 16216576, 'SDK kernel not pinned byte bound')
+    require(config['kernelPath'] in spec['assetSHA256'] and config['kernelSHA256'] == spec['assetSHA256'][config['kernelPath']] == SDK_KERNEL_SHA256
+            and Path(config['kernelPath']).stat().st_size == SDK_KERNEL_SIZE, 'SDK kernel not pinned byte bound')
     require(not config.get('guestNetworkPolicyLoaderPath') and not config.get('guestNetworkPolicyLoaderSHA256'), 'qualification workload does not admit guest policy loader')
-    init_digests = ('15a70c63c9ca254020d8bdbe1b6e48332db0629881f563624bfd319412a37ea3','7812fb606774f30d8b6d36c2a37a6e12ae719ece3fc34775f9b87ee94639e257','3c6b087fc41b30d44dac2951f0ee798b242fac8e00db9b6375e25ef48765418d')
     init_root = Path(config['initImageLayoutPath'])
-    init_files = {
-        'oci-layout': ('18f0797eab35a4597c1e9624aa4f15fd91f6254e5538c1e0d193b2a95dd4acc6', 30),
-        'index.json': ('ca910ca52793fbd5269c98aff0ba03091238558ac087d47967611f9d033076d1', 240),
-        **{f'blobs/sha256/{digest}': (digest, size) for digest, size in zip(init_digests, (406, 151, 67222934))},
-    }
-    for relative, (digest, size) in init_files.items():
+    for relative, (digest, size) in SDK_INIT_ASSETS.items():
         path = str(init_root/relative)
         require(spec['assetSHA256'].get(path) == digest and Path(path).stat().st_size == size, 'SDK init OCI asset omitted, unpinned, or wrong size')
     validate_sdk_init_descriptors(config)

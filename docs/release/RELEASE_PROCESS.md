@@ -1,6 +1,6 @@
 # Release process
 
-The active target is `v0.0.2`. Current source prepares `0.0.2-rc.12` and requires a fresh freeze and exact-source qualification. Frozen `0.0.2-rc.11` completed signed staging, but its installed dev.11 rollback failed and it is not accepted. See the [current readiness snapshot](ga-readiness-2026-10-15.md) for the retained results and remaining work. Immutable `v0.0.2-dev.11` and `v0.0.2-dev.12` prereleases supply upgrade baselines; they remain unsupported and are not promoted in place.
+The active target is `v0.0.2`. Current source prepares `0.0.2-rc.13` and requires a fresh freeze and exact-source qualification. Frozen `0.0.2-rc.12` completed signed staging, but independent inspection found guest dependency-inventory and runtime security findings; it remains unaccepted. See the [current readiness snapshot](ga-readiness-2026-10-18.md) for the corrections, retained results and remaining work. Immutable `v0.0.2-dev.11` and `v0.0.2-dev.12` prereleases supply upgrade baselines; they remain unsupported and are not promoted in place.
 
 ## Tag Policy
 

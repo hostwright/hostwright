@@ -2,13 +2,11 @@
 
 Hostwright manages Apple container workloads on one Apple silicon Mac. Declare services in a YAML manifest, review a plan, and confirm it through the CLI or native desktop app. Hostwright tracks resource ownership and operations in a local SQLite database.
 
-**Release status:** The frozen candidate is `0.0.2-rc.12`. Its supported source matrix passed **3,554 unique tests** with no failures or skips in the completed aggregate; see the [source evidence summary](docs/evidence/phase15-rc12-aa8586a1/README.md). Its runtime archive is authenticated, and all six fresh fuzz targets passed five minutes plus corpus replay; see the [runtime and fuzz summary](docs/evidence/phase15-rc12-aa8586a1/runtime-and-fuzz-summary.json).
+**Release status:** Current source prepares `0.0.2-rc.13`. No supported RC or GA channel has been published, and official `brew install hostwright` is not available yet.
 
-ASan and TSan each completed **3,554 unique passing test identities**, including ten fresh live/platform cases; see the [sanitizer coverage summary](docs/evidence/phase15-rc12-aa8586a1/sanitizer-coverage-summary.json). Earlier failed ASan executions remain retained separately and receive no pass credit.
+RC.13 includes reviewed kernel security fixes, the updated guest SwiftNIO pin and guest dependency inventories derived from the authenticated patched sources. The ingredient producer passed; a fresh candidate freeze, final runtime archive, signed artifacts and installed lifecycle qualification remain required. See the [current GA readiness record](docs/release/ga-readiness-2026-10-18.md) for the exact progress and remaining issue gates.
 
-The [signed RC.12 stage](https://github.com/hostwright/hostwright/actions/runs/38912711434) passed reproducibility, signing, notarization, Gatekeeper, corresponding-source and hosted-attestation checks. Artifact review then found two guest dependency revisions reported from the upstream lock instead of the patched build. The corrected inventory needs qualification in a subsequent signed candidate. Fresh advisory review also identified two compiled kernel vulnerabilities requiring fixes and an unresolved guest SwiftNIO ByteBuffer bounds assessment. Frozen RC.12 remains unchanged.
-
-Release qualification remains open. The macOS 26 distribution retry passed all 54 tests, and two production-builder builds matched all nine executable payloads. The original failed comparison remains retained. See the [qualification progress and retained failure hashes](docs/evidence/phase15-rc12-aa8586a1/qualification-progress-summary.json). Signed installation/recovery checks, provider lifecycle cycles and the physical-host soak remain required. No supported RC or GA channel has been published. A GA date is not confirmed; official Homebrew acceptance remains required.
+Frozen RC.12 and its [source, sanitizer and runtime results](docs/evidence/phase15-rc12-aa8586a1/README.md) remain retained under their original bindings. Its signed inventory and security findings require the new candidate; those earlier results do not qualify RC.13. A GA date is not confirmed, and official Homebrew acceptance remains a launch requirement.
 
 | Channel | Current availability |
 | --- | --- |
@@ -16,7 +14,7 @@ Release qualification remains open. The macOS 26 distribution retry passed all 5
 | Vendor Homebrew tap | Signed dev.12 qualification prerelease; unsupported and based on older contracts. |
 | Official Homebrew | Pending. `brew install hostwright` is the launch goal and is not available yet. |
 
-Phase 15 covers compatibility, security, signed installation and recovery, live quickstarts, and release promotion. See the [GA readiness snapshot](docs/release/ga-readiness-2026-10-15.md) for completed checks and remaining work and the [release plan](docs/roadmap/v0.0.2/IMPLEMENTATION_PLAN.md) for acceptance requirements.
+Phase 15 covers compatibility, security, signed installation and recovery, live quickstarts, and release promotion. See the [GA readiness snapshot](docs/release/ga-readiness-2026-10-18.md) for completed checks and remaining work and the [release plan](docs/roadmap/v0.0.2/IMPLEMENTATION_PLAN.md) for acceptance requirements.
 
 ## Requirements
 

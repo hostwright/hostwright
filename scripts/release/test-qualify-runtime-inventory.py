@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 import importlib.util
 import copy
+import ast
+import hashlib
+import json
 from pathlib import Path
+import re
 import tempfile
 import unittest
 
@@ -378,6 +382,68 @@ class RuntimeInventoryQualificationTests(unittest.TestCase):
         (source / "THIRD_PARTY_NOTICES").write_bytes(b"modified notices\n")
         with self.assertRaisesRegex(ValueError, "notices/source documents differ"):
             Q.verify_committed_outputs(source, generated)
+
+
+class CommittedRuntimePinTests(unittest.TestCase):
+    def setUp(self):
+        self.root = HERE.parent.parent
+        self.inventory = json.loads((self.root / "runtime-license-inventory.json").read_text())
+        swift = (self.root / "Sources/HostwrightCore/ContainerizationRuntimeAssetContract.swift").read_text()
+        self.swift = {name: ast.literal_eval(value) for name, value in re.findall(
+            r'public static let (\w+)(?:: Int64)?\s*=\s*("[^"\\\n]*"|[\d_]+)', swift)}
+        shell = (HERE / "prepare-containerization-assets.sh").read_text()
+        self.shell = dict(re.findall(r'^readonly (\w+)="([^"]*)"$', shell, re.M))
+        harness = ast.parse((self.root / "scripts/qualification/authenticated-lifecycle.py").read_text())
+        self.harness = {node.targets[0].id: ast.literal_eval(node.value) for node in harness.body
+                        if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)
+                        and node.targets[0].id.startswith("SDK_")}
+
+    def test_inventory_payloads_match_compiled_and_preparation_pins(self):
+        expected = {}
+        for swift_digest, swift_size, shell_digest, shell_size, relative in [
+            ("kernelSHA256", "kernelSize", "kernel_sha256", "kernel_size", "kernel/" + self.swift["kernelFileName"]),
+            ("guestNetworkPolicyLoaderSHA256", "guestNetworkPolicyLoaderSize", "guest_loader_sha256", "guest_loader_size", "guest/hostwright-netfilter"),
+            ("initImageIndexJSONSHA256", "initImageIndexJSONSize", "index_sha256", "index_size", "vminit/index.json"),
+            ("initImageLayoutSHA256", "initImageLayoutSize", "layout_sha256", "layout_size", "vminit/oci-layout"),
+            *[("initImage" + name + "Digest", "initImage" + name + "Size", shell + "_digest", shell + "_size",
+               "vminit/blobs/sha256/" + self.swift["initImage" + name + "Digest"])
+              for name, shell in [("Manifest", "manifest"), ("Configuration", "configuration"), ("Layer", "layer")]],
+        ]:
+            with self.subTest(payload=relative):
+                digest, size = self.swift[swift_digest], self.swift[swift_size]
+                self.assertEqual((self.shell[shell_digest], int(self.shell[shell_size])), (digest, size))
+                expected["share/hostwright/containerization/" + relative] = (digest, size)
+        self.assertEqual({item["path"]: (item["sha256"], item["sizeBytes"])
+                          for item in self.inventory["payloadFiles"]}, expected)
+        self.assertEqual(self.inventory["initImageReference"], "untagged@sha256:" + self.swift["initImageManifestDigest"])
+        for field, pin in [("initImageConfigurationSHA256", "initImageConfigurationDigest"),
+                           ("initImageLayerSHA256", "initImageLayerDigest")]:
+            self.assertEqual(self.inventory[field], self.swift[pin])
+
+    def test_lifecycle_requires_the_same_kernel_and_oci_payloads(self):
+        self.assertEqual(self.harness["SDK_KERNEL_SHA256"], self.swift["kernelSHA256"])
+        self.assertEqual(self.harness["SDK_KERNEL_SIZE"], self.swift["kernelSize"])
+        prefix = "share/hostwright/containerization/vminit/"
+        expected = {item["path"][len(prefix):]: (item["sha256"], item["sizeBytes"])
+                    for item in self.inventory["payloadFiles"] if item["path"].startswith(prefix)}
+        self.assertEqual(self.harness["SDK_INIT_ASSETS"], expected)
+        self.assertEqual(self.harness["SDK_INIT_VARIANT_DIGEST"], "sha256:" + self.swift["initImageManifestDigest"])
+
+    def test_imported_index_is_derived_from_current_manifest(self):
+        manifest = dict(digest="sha256:" + self.swift["initImageManifestDigest"],
+                        mediaType="application/vnd.oci.image.manifest.v1+json", size=self.swift["initImageManifestSize"])
+        direct = dict(manifests=[manifest], mediaType="application/vnd.oci.image.index.v1+json", schemaVersion=2)
+        direct_bytes = json.dumps(direct, sort_keys=True, separators=(",", ":")).encode()
+        self.assertEqual((hashlib.sha256(direct_bytes).hexdigest(), len(direct_bytes)),
+                         (self.swift["initImageIndexJSONSHA256"], self.swift["initImageIndexJSONSize"]))
+        manifest["platform"] = dict(architecture="arm64", os="linux")
+        direct["annotations"] = {"com.apple.containerization.index.indirect": "true"}
+        imported_bytes = json.dumps(direct, sort_keys=True, separators=(",", ":")).replace("/", "\\/").encode()
+        digest = hashlib.sha256(imported_bytes).hexdigest()
+        self.assertEqual((digest, len(imported_bytes)),
+                         (self.swift["initImageImportedIndexSHA256"], self.swift["initImageImportedIndexSize"]))
+        self.assertEqual(self.harness["SDK_INIT_DESCRIPTOR_DIGEST"], "sha256:" + digest)
+        self.assertEqual(self.harness["SDK_INIT_IMPORTED_INDEX_SIZE"], len(imported_bytes))
 
 
 if __name__ == "__main__":

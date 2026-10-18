@@ -118453,6 +118453,1088 @@ extern void c_nio_sha1_result(struct sha1_ctxt *, char[__min_size(SHA1_RESULTLEN
    limitations under the License.
 
 
+--- guest-swift/swift-nio@0b18836bd8b0162e7e17a995a3fbee20ed8f3b2b/LICENSE.txt ---
+
+                                 Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+
+   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+   1. Definitions.
+
+      "License" shall mean the terms and conditions for use, reproduction,
+      and distribution as defined by Sections 1 through 9 of this document.
+
+      "Licensor" shall mean the copyright owner or entity authorized by
+      the copyright owner that is granting the License.
+
+      "Legal Entity" shall mean the union of the acting entity and all
+      other entities that control, are controlled by, or are under common
+      control with that entity. For the purposes of this definition,
+      "control" means (i) the power, direct or indirect, to cause the
+      direction or management of such entity, whether by contract or
+      otherwise, or (ii) ownership of fifty percent (50%) or more of the
+      outstanding shares, or (iii) beneficial ownership of such entity.
+
+      "You" (or "Your") shall mean an individual or Legal Entity
+      exercising permissions granted by this License.
+
+      "Source" form shall mean the preferred form for making modifications,
+      including but not limited to software source code, documentation
+      source, and configuration files.
+
+      "Object" form shall mean any form resulting from mechanical
+      transformation or translation of a Source form, including but
+      not limited to compiled object code, generated documentation,
+      and conversions to other media types.
+
+      "Work" shall mean the work of authorship, whether in Source or
+      Object form, made available under the License, as indicated by a
+      copyright notice that is included in or attached to the work
+      (an example is provided in the Appendix below).
+
+      "Derivative Works" shall mean any work, whether in Source or Object
+      form, that is based on (or derived from) the Work and for which the
+      editorial revisions, annotations, elaborations, or other modifications
+      represent, as a whole, an original work of authorship. For the purposes
+      of this License, Derivative Works shall not include works that remain
+      separable from, or merely link (or bind by name) to the interfaces of,
+      the Work and Derivative Works thereof.
+
+      "Contribution" shall mean any work of authorship, including
+      the original version of the Work and any modifications or additions
+      to that Work or Derivative Works thereof, that is intentionally
+      submitted to Licensor for inclusion in the Work by the copyright owner
+      or by an individual or Legal Entity authorized to submit on behalf of
+      the copyright owner. For the purposes of this definition, "submitted"
+      means any form of electronic, verbal, or written communication sent
+      to the Licensor or its representatives, including but not limited to
+      communication on electronic mailing lists, source code control systems,
+      and issue tracking systems that are managed by, or on behalf of, the
+      Licensor for the purpose of discussing and improving the Work, but
+      excluding communication that is conspicuously marked or otherwise
+      designated in writing by the copyright owner as "Not a Contribution."
+
+      "Contributor" shall mean Licensor and any individual or Legal Entity
+      on behalf of whom a Contribution has been received by Licensor and
+      subsequently incorporated within the Work.
+
+   2. Grant of Copyright License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      copyright license to reproduce, prepare Derivative Works of,
+      publicly display, publicly perform, sublicense, and distribute the
+      Work and such Derivative Works in Source or Object form.
+
+   3. Grant of Patent License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      (except as stated in this section) patent license to make, have made,
+      use, offer to sell, sell, import, and otherwise transfer the Work,
+      where such license applies only to those patent claims licensable
+      by such Contributor that are necessarily infringed by their
+      Contribution(s) alone or by combination of their Contribution(s)
+      with the Work to which such Contribution(s) was submitted. If You
+      institute patent litigation against any entity (including a
+      cross-claim or counterclaim in a lawsuit) alleging that the Work
+      or a Contribution incorporated within the Work constitutes direct
+      or contributory patent infringement, then any patent licenses
+      granted to You under this License for that Work shall terminate
+      as of the date such litigation is filed.
+
+   4. Redistribution. You may reproduce and distribute copies of the
+      Work or Derivative Works thereof in any medium, with or without
+      modifications, and in Source or Object form, provided that You
+      meet the following conditions:
+
+      (a) You must give any other recipients of the Work or
+          Derivative Works a copy of this License; and
+
+      (b) You must cause any modified files to carry prominent notices
+          stating that You changed the files; and
+
+      (c) You must retain, in the Source form of any Derivative Works
+          that You distribute, all copyright, patent, trademark, and
+          attribution notices from the Source form of the Work,
+          excluding those notices that do not pertain to any part of
+          the Derivative Works; and
+
+      (d) If the Work includes a "NOTICE" text file as part of its
+          distribution, then any Derivative Works that You distribute must
+          include a readable copy of the attribution notices contained
+          within such NOTICE file, excluding those notices that do not
+          pertain to any part of the Derivative Works, in at least one
+          of the following places: within a NOTICE text file distributed
+          as part of the Derivative Works; within the Source form or
+          documentation, if provided along with the Derivative Works; or,
+          within a display generated by the Derivative Works, if and
+          wherever such third-party notices normally appear. The contents
+          of the NOTICE file are for informational purposes only and
+          do not modify the License. You may add Your own attribution
+          notices within Derivative Works that You distribute, alongside
+          or as an addendum to the NOTICE text from the Work, provided
+          that such additional attribution notices cannot be construed
+          as modifying the License.
+
+      You may add Your own copyright statement to Your modifications and
+      may provide additional or different license terms and conditions
+      for use, reproduction, or distribution of Your modifications, or
+      for any such Derivative Works as a whole, provided Your use,
+      reproduction, and distribution of the Work otherwise complies with
+      the conditions stated in this License.
+
+   5. Submission of Contributions. Unless You explicitly state otherwise,
+      any Contribution intentionally submitted for inclusion in the Work
+      by You to the Licensor shall be under the terms and conditions of
+      this License, without any additional terms or conditions.
+      Notwithstanding the above, nothing herein shall supersede or modify
+      the terms of any separate license agreement you may have executed
+      with Licensor regarding such Contributions.
+
+   6. Trademarks. This License does not grant permission to use the trade
+      names, trademarks, service marks, or product names of the Licensor,
+      except as required for reasonable and customary use in describing the
+      origin of the Work and reproducing the content of the NOTICE file.
+
+   7. Disclaimer of Warranty. Unless required by applicable law or
+      agreed to in writing, Licensor provides the Work (and each
+      Contributor provides its Contributions) on an "AS IS" BASIS,
+      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+      implied, including, without limitation, any warranties or conditions
+      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+      PARTICULAR PURPOSE. You are solely responsible for determining the
+      appropriateness of using or redistributing the Work and assume any
+      risks associated with Your exercise of permissions under this License.
+
+   8. Limitation of Liability. In no event and under no legal theory,
+      whether in tort (including negligence), contract, or otherwise,
+      unless required by applicable law (such as deliberate and grossly
+      negligent acts) or agreed to in writing, shall any Contributor be
+      liable to You for damages, including any direct, indirect, special,
+      incidental, or consequential damages of any character arising as a
+      result of this License or out of the use or inability to use the
+      Work (including but not limited to damages for loss of goodwill,
+      work stoppage, computer failure or malfunction, or any and all
+      other commercial damages or losses), even if such Contributor
+      has been advised of the possibility of such damages.
+
+   9. Accepting Warranty or Additional Liability. While redistributing
+      the Work or Derivative Works thereof, You may choose to offer,
+      and charge a fee for, acceptance of support, warranty, indemnity,
+      or other liability obligations and/or rights consistent with this
+      License. However, in accepting such obligations, You may act only
+      on Your own behalf and on Your sole responsibility, not on behalf
+      of any other Contributor, and only if You agree to indemnify,
+      defend, and hold each Contributor harmless for any liability
+      incurred by, or claims asserted against, such Contributor by reason
+      of your accepting any such warranty or additional liability.
+
+   END OF TERMS AND CONDITIONS
+
+   APPENDIX: How to apply the Apache License to your work.
+
+      To apply the Apache License to your work, attach the following
+      boilerplate notice, with the fields enclosed by brackets "[]"
+      replaced with your own identifying information. (Don't include
+      the brackets!)  The text should be enclosed in the appropriate
+      comment syntax for the file format. We also recommend that a
+      file or class name and description of purpose be included on the
+      same "printed page" as the copyright notice for easier
+      identification within third-party archives.
+
+   Copyright [yyyy] [name of copyright owner]
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+
+
+--- guest-swift/swift-nio@0b18836bd8b0162e7e17a995a3fbee20ed8f3b2b/Sources/CNIOLLHTTP/LICENSE ---
+This software is licensed under the MIT License.
+
+Copyright Fedor Indutny, 2018.
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to permit
+persons to whom the Software is furnished to do so, subject to the
+following conditions:
+
+The above copyright notice and this permission notice shall be included
+in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+
+--- guest-swift/swift-nio@0b18836bd8b0162e7e17a995a3fbee20ed8f3b2b/Sources/CNIOAtomics/src/cpp_magic.h ---
+//
+// this is https://github.com/18sg/uSHET/blob/c09e0acafd86720efe42dc15c63e0cc228244c32/lib/cpp_magic.h
+// LICENSE: MIT
+//
+//
+
+/**
+ * This header file contains a library of advanced C Pre-Processor (CPP) macros
+ * which implement various useful functions, such as iteration, in the
+ * pre-processor.
+ *
+ * Though the file name (quite validly) labels this as magic, there should be
+ * enough documentation in the comments for a reader only casually familiar
+ * with the CPP to be able to understand how everything works.
+ *
+ * The majority of the magic tricks used in this file are based on those
+ * described by pfultz2 in his "Cloak" library:
+ *
+ *    https://github.com/pfultz2/Cloak/wiki/C-Preprocessor-tricks,-tips,-and-idioms
+ *
+ * Major differences are a greater level of detailed explanation in this
+ * implementation and also a refusal to include any macros which require a O(N)
+ * macro definitions to handle O(N) arguments (with the exception of DEFERn).
+ */
+
+#ifndef CPP_MAGIC_H
+#define CPP_MAGIC_H
+
+/**
+ * Force the pre-processor to expand the macro a large number of times. Usage:
+ *
+ *   EVAL(expression)
+ *
+ * This is useful when you have a macro which evaluates to a valid macro
+ * expression which is not subsequently expanded in the same pass. A contrived,
+ * but easy to understand, example of such a macro follows. Note that though
+ * this example is contrived, this behaviour is abused to implement bounded
+ * recursion in macros such as FOR.
+ *
+ *   #define A(x) x+1
+ *   #define EMPTY
+ *   #define NOT_QUITE_RIGHT(x) A EMPTY (x)
+ *   NOT_QUITE_RIGHT(999)
+ *
+ * Here's what happens inside the C preprocessor:
+ *
+ * 1. It sees a macro "NOT_QUITE_RIGHT" and performs a single macro expansion
+ *    pass on its arguments. Since the argument is "999" and this isn't a macro,
+ *    this is a boring step resulting in no change.
+ * 2. The NOT_QUITE_RIGHT macro is substituted for its definition giving "A
+ *    EMPTY() (x)".
+ * 3. The expander moves from left-to-right trying to expand the macro:
+ *    The first token, A, cannot be expanded since there are no brackets
+ *    immediately following it. The second token EMPTY(), however, can be
+ *    expanded (recursively in this manner) and is replaced with "".
+ * 4. Expansion continues from the start of the substituted test (which in this
+ *    case is just empty), and sees "(999)" but since no macro name is present,
+ *    nothing is done. This results in a final expansion of "A (999)".
+ *
+ * Unfortunately, this doesn't quite meet expectations since you may expect that
+ * "A (999)" would have been expanded into "999+1". Unfortunately this requires
+ * a second expansion pass but luckily we can force the macro processor to make
+ * more passes by abusing the first step of macro expansion: the preprocessor
+ * expands arguments in their own pass. If we define a macro which does nothing
+ * except produce its arguments e.g.:
+ *
+ *   #define PASS_THROUGH(...) __VA_ARGS__
+ *
+ * We can now do "PASS_THROUGH(NOT_QUITE_RIGHT(999))" causing "NOT_QUITE_RIGHT" to be
+ * expanded to "A (999)", as described above, when the arguments are expanded.
+ * Now when the body of PASS_THROUGH is expanded, "A (999)" gets expanded to
+ * "999+1".
+ *
+ * The EVAL defined below is essentially equivalent to a large nesting of
+ * "PASS_THROUGH(PASS_THROUGH(PASS_THROUGH(..." which results in the
+ * preprocessor making a large number of expansion passes over the given
+ * expression.
+ */
+#define EVAL(...) EVAL1024(__VA_ARGS__)
+#define EVAL1024(...) EVAL512(EVAL512(__VA_ARGS__))
+#define EVAL512(...) EVAL256(EVAL256(__VA_ARGS__))
+#define EVAL256(...) EVAL128(EVAL128(__VA_ARGS__))
+#define EVAL128(...) EVAL64(EVAL64(__VA_ARGS__))
+#define EVAL64(...) EVAL32(EVAL32(__VA_ARGS__))
+#define EVAL32(...) EVAL16(EVAL16(__VA_ARGS__))
+#define EVAL16(...) EVAL8(EVAL8(__VA_ARGS__))
+#define EVAL8(...) EVAL4(EVAL4(__VA_ARGS__))
+#define EVAL4(...) EVAL2(EVAL2(__VA_ARGS__))
+#define EVAL2(...) EVAL1(EVAL1(__VA_ARGS__))
+#define EVAL1(...) __VA_ARGS__
+
+
+/**
+ * Macros which expand to common values
+ */
+#define PASS(...) __VA_ARGS__
+#define EMPTY()
+#define COMMA() ,
+#define PLUS() +
+#define ZERO() 0
+#define ONE() 1
+
+/**
+ * Causes a function-style macro to require an additional pass to be expanded.
+ *
+ * This is useful, for example, when trying to implement recursion since the
+ * recursive step must not be expanded in a single pass as the pre-processor
+ * will catch it and prevent it.
+ *
+ * Usage:
+ *
+ *   DEFER1(IN_NEXT_PASS)(args, to, the, macro)
+ *
+ * How it works:
+ *
+ * 1. When DEFER1 is expanded, first its arguments are expanded which are
+ *    simply IN_NEXT_PASS. Since this is a function-style macro and it has no
+ *    arguments, nothing will happen.
+ * 2. The body of DEFER1 will now be expanded resulting in EMPTY() being
+ *    deleted. This results in "IN_NEXT_PASS (args, to, the macro)". Note that
+ *    since the macro expander has already passed IN_NEXT_PASS by the time it
+ *    expands EMPTY() and so it won't spot that the brackets which remain can be
+ *    applied to IN_NEXT_PASS.
+ * 3. At this point the macro expansion completes. If one more pass is made,
+ *    IN_NEXT_PASS(args, to, the, macro) will be expanded as desired.
+ */
+#define DEFER1(id) id EMPTY()
+
+/**
+ * As with DEFER1 except here n additional passes are required for DEFERn.
+ *
+ * The mechanism is analogous.
+ *
+ * Note that there doesn't appear to be a way of combining DEFERn macros in
+ * order to achieve exponentially increasing defers e.g. as is done by EVAL.
+ */
+#define DEFER2(id) id EMPTY EMPTY()()
+#define DEFER3(id) id EMPTY EMPTY EMPTY()()()
+#define DEFER4(id) id EMPTY EMPTY EMPTY EMPTY()()()()
+#define DEFER5(id) id EMPTY EMPTY EMPTY EMPTY EMPTY()()()()()
+#define DEFER6(id) id EMPTY EMPTY EMPTY EMPTY EMPTY EMPTY()()()()()()
+#define DEFER7(id) id EMPTY EMPTY EMPTY EMPTY EMPTY EMPTY EMPTY()()()()()()()
+#define DEFER8(id) id EMPTY EMPTY EMPTY EMPTY EMPTY EMPTY EMPTY EMPTY()()()()()()()()
+
+
+/**
+ * Indirection around the standard ## concatenation operator. This simply
+ * ensures that the arguments are expanded (once) before concatenation.
+ */
+#define CAT(a, ...) a ## __VA_ARGS__
+#define CAT3(a, b, ...) a ## b ## __VA_ARGS__
+
+
+/**
+ * Get the first argument and ignore the rest.
+ */
+#define FIRST(a, ...) a
+
+/**
+ * Get the second argument and ignore the rest.
+ */
+#define SECOND(a, b, ...) b
+
+/**
+ * Expects a single input (not containing commas). Returns 1 if the input is
+ * PROBE() and otherwise returns 0.
+ *
+ * This can be useful as the basis of a NOT function.
+ *
+ * This macro abuses the fact that PROBE() contains a comma while other valid
+ * inputs must not.
+ */
+#define IS_PROBE(...) SECOND(__VA_ARGS__, 0)
+#define PROBE() ~, 1
+
+
+/**
+ * Logical negation. 0 is defined as false and everything else as true.
+ *
+ * When 0, _NOT_0 will be found which evaluates to the PROBE. When 1 (or any other
+ * value) is given, an appropriately named macro won't be found and the
+ * concatenated string will be produced. IS_PROBE then simply checks to see if
+ * the PROBE was returned, cleanly converting the argument into a 1 or 0.
+ */
+#define NOT(x) IS_PROBE(CAT(_NOT_, x))
+#define _NOT_0 PROBE()
+
+/**
+ * Macro version of C's famous "cast to bool" operator (i.e. !!) which takes
+ * anything and casts it to 0 if it is 0 and 1 otherwise.
+ */
+#define BOOLIFY(x) NOT(NOT(x))
+
+/**
+ * Logical OR. Simply performs a lookup.
+ */
+#define OR(a,b) CAT3(_OR_, a, b)
+#define _OR_00 0
+#define _OR_01 1
+#define _OR_10 1
+#define _OR_11 1
+
+/**
+ * Logical AND. Simply performs a lookup.
+ */
+#define AND(a,b) CAT3(_AND_, a, b)
+#define _AND_00 0
+#define _AND_01 0
+#define _AND_10 0
+#define _AND_11 1
+
+
+/**
+ * Macro if statement. Usage:
+ *
+ *   IF(c)(expansion when true)
+ *
+ * Here's how:
+ *
+ * 1. The preprocessor expands the arguments to _IF casting the condition to '0'
+ *    or '1'.
+ * 2. The casted condition is concatencated with _IF_ giving _IF_0 or _IF_1.
+ * 3. The _IF_0 and _IF_1 macros either returns the argument or doesn't (e.g.
+ *    they implement the "choice selection" part of the macro).
+ * 4. Note that the "true" clause is in the extra set of brackets; thus these
+ *    become the arguments to _IF_0 or _IF_1 and thus a selection is made!
+ */
+#define IF(c) _IF(BOOLIFY(c))
+#define _IF(c) CAT(_IF_,c)
+#define _IF_0(...)
+#define _IF_1(...) __VA_ARGS__
+
+/**
+ * Macro if/else statement. Usage:
+ *
+ *   IF_ELSE(c)( \
+ *     expansion when true, \
+ *     expansion when false \
+ *   )
+ *
+ * The mechanism is analogous to IF.
+ */
+#define IF_ELSE(c) _IF_ELSE(BOOLIFY(c))
+#define _IF_ELSE(c) CAT(_IF_ELSE_,c)
+#define _IF_ELSE_0(t,f) f
+#define _IF_ELSE_1(t,f) t
+
+
+/**
+ * Macro which checks if it has any arguments. Returns '0' if there are no
+ * arguments, '1' otherwise.
+ *
+ * Limitation: HAS_ARGS(,1,2,3) returns 0 -- this check essentially only checks
+ * that the first argument exists.
+ *
+ * This macro works as follows:
+ *
+ * 1. _END_OF_ARGUMENTS_ is concatenated with the first argument.
+ * 2. If the first argument is not present then only "_END_OF_ARGUMENTS_" will
+ *    remain, otherwise "_END_OF_ARGUMENTS something_here" will remain. This
+ *    remaining argument can start with parentheses.
+ * 3. In the former case, the _END_OF_ARGUMENTS_(0) macro expands to a
+ *    0 when it is expanded. In the latter, a non-zero result remains. If the
+ *    first argument started with parentheses these will mostly not contain
+ *    only a single 0, but e.g a C cast or some arithmetic operation that will
+ *    cause the BOOLIFY in _END_OF_ARGUMENTS_ to be one.
+ * 4. BOOLIFY is used to force non-zero results into 1 giving the clean 0 or 1
+ *    output required.
+ */
+#define HAS_ARGS(...) BOOLIFY(FIRST(_END_OF_ARGUMENTS_ __VA_ARGS__)(0))
+#define _END_OF_ARGUMENTS_(...) BOOLIFY(FIRST(__VA_ARGS__))
+
+
+/**
+ * Macro map/list comprehension. Usage:
+ *
+ *   MAP(op, sep, ...)
+ *
+ * Produces a 'sep()'-separated list of the result of op(arg) for each arg.
+ *
+ * Example Usage:
+ *
+ *   #define MAKE_HAPPY(x) happy_##x
+ *   #define COMMA() ,
+ *   MAP(MAKE_HAPPY, COMMA, 1,2,3)
+ *
+ * Which expands to:
+ *
+ *    happy_1 , happy_2 , happy_3
+ *
+ * How it works:
+ *
+ * 1. The MAP macro simply maps the inner MAP_INNER function in an EVAL which
+ *    forces it to be expanded a large number of times, thus enabling many steps
+ *    of iteration (see step 6).
+ * 2. The MAP_INNER macro is substituted for its body.
+ * 3. In the body, op(cur_val) is substituted giving the value for this
+ *    iteration.
+ * 4. The IF macro expands according to whether further iterations are required.
+ *    This expansion either produces _IF_0 or _IF_1.
+ * 5. Since the IF is followed by a set of brackets containing the "if true"
+ *    clause, these become the argument to _IF_0 or _IF_1. At this point, the
+ *    macro in the brackets will be expanded giving the separator followed by
+ *    _MAP_INNER EMPTY()()(op, sep, __VA_ARGS__).
+ * 5. If the IF was not taken, the above will simply be discarded and everything
+ *    stops. If the IF is taken, The expression is then processed a second time
+ *    yielding "_MAP_INNER()(op, sep, __VA_ARGS__)". Note that this call looks
+ *    very similar to the  essentially the same as the original call except the
+ *    first argument has been dropped.
+ * 6. At this point expansion of MAP_INNER will terminate. However, since we can
+ *    force more rounds of expansion using EVAL1. In the argument-expansion pass
+ *    of the EVAL1, _MAP_INNER() is expanded to MAP_INNER which is then expanded
+ *    using the arguments which follow it as in step 2-5. This is followed by a
+ *    second expansion pass as the substitution of EVAL1() is expanded executing
+ *    2-5 a second time. This results in up to two iterations occurring. Using
+ *    many nested EVAL1 macros, i.e. the very-deeply-nested EVAL macro, will in
+ *    this manner produce further iterations, hence the outer MAP macro doing
+ *    this for us.
+ *
+ * Important tricks used:
+ *
+ * * If we directly produce "MAP_INNER" in an expansion of MAP_INNER, a special
+ *   case in the preprocessor will prevent it being expanded in the future, even
+ *   if we EVAL.  As a result, the MAP_INNER macro carefully only expands to
+ *   something containing "_MAP_INNER()" which requires a further expansion step
+ *   to invoke MAP_INNER and thus implementing the recursion.
+ * * To prevent _MAP_INNER being expanded within the macro we must first defer its
+ *   expansion during its initial pass as an argument to _IF_0 or _IF_1. We must
+ *   then defer its expansion a second time as part of the body of the _IF_0. As
+ *   a result hence the DEFER2.
+ * * _MAP_INNER seemingly gets away with producing itself because it actually only
+ *   produces MAP_INNER. It just happens that when _MAP_INNER() is expanded in
+ *   this case it is followed by some arguments which get consumed by MAP_INNER
+ *   and produce a _MAP_INNER.  As such, the macro expander never marks
+ *   _MAP_INNER as expanding to itself and thus it will still be expanded in
+ *   future productions of itself.
+ */
+#define MAP(...) \
+   IF(HAS_ARGS(__VA_ARGS__))(EVAL(MAP_INNER(__VA_ARGS__)))
+#define MAP_INNER(op,sep,cur_val, ...) \
+  op(cur_val) \
+  IF(HAS_ARGS(__VA_ARGS__))( \
+    sep() DEFER2(_MAP_INNER)()(op, sep, ##__VA_ARGS__) \
+  )
+#define _MAP_INNER() MAP_INNER
+
+
+/**
+ * This is a variant of the MAP macro which also includes as an argument to the
+ * operation a valid C variable name which is different for each iteration.
+ *
+ * Usage:
+ *   MAP_WITH_ID(op, sep, ...)
+ *
+ * Where op is a macro op(val, id) which takes a list value and an ID. This ID
+ * will simply be a unary number using the digit "I", that is, I, II, III, IIII,
+ * and so on.
+ *
+ * Example:
+ *
+ *   #define MAKE_STATIC_VAR(type, name) static type name;
+ *   MAP_WITH_ID(MAKE_STATIC_VAR, EMPTY, int, int, int, bool, char)
+ *
+ * Which expands to:
+ *
+ *   static int I; static int II; static int III; static bool IIII; static char IIIII;
+ *
+ * The mechanism is analogous to the MAP macro.
+ */
+#define MAP_WITH_ID(op,sep,...) \
+  IF(HAS_ARGS(__VA_ARGS__))(EVAL(MAP_WITH_ID_INNER(op,sep,I, ##__VA_ARGS__)))
+#define MAP_WITH_ID_INNER(op,sep,id,cur_val, ...) \
+  op(cur_val,id) \
+  IF(HAS_ARGS(__VA_ARGS__))( \
+    sep() DEFER2(_MAP_WITH_ID_INNER)()(op, sep, CAT(id,I), ##__VA_ARGS__) \
+  )
+#define _MAP_WITH_ID_INNER() MAP_WITH_ID_INNER
+
+
+/**
+ * This is a variant of the MAP macro which iterates over pairs rather than
+ * singletons.
+ *
+ * Usage:
+ *   MAP_PAIRS(op, sep, ...)
+ *
+ * Where op is a macro op(val_1, val_2) which takes two list values.
+ *
+ * Example:
+ *
+ *   #define MAKE_STATIC_VAR(type, name) static type name;
+ *   MAP_PAIRS(MAKE_STATIC_VAR, EMPTY, char, my_char, int, my_int)
+ *
+ * Which expands to:
+ *
+ *   static char my_char; static int my_int;
+ *
+ * The mechanism is analogous to the MAP macro.
+ */
+#define MAP_PAIRS(op,sep,...) \
+  IF(HAS_ARGS(__VA_ARGS__))(EVAL(MAP_PAIRS_INNER(op,sep,__VA_ARGS__)))
+#define MAP_PAIRS_INNER(op,sep,cur_val_1, cur_val_2, ...) \
+  op(cur_val_1,cur_val_2) \
+  IF(HAS_ARGS(__VA_ARGS__))( \
+    sep() DEFER2(_MAP_PAIRS_INNER)()(op, sep, __VA_ARGS__) \
+  )
+#define _MAP_PAIRS_INNER() MAP_PAIRS_INNER
+
+/**
+ * This is a variant of the MAP macro which iterates over a two-element sliding
+ * window.
+ *
+ * Usage:
+ *   MAP_SLIDE(op, last_op, sep, ...)
+ *
+ * Where op is a macro op(val_1, val_2) which takes the two list values
+ * currently in the window. last_op is a macro taking a single value which is
+ * called for the last argument.
+ *
+ * Example:
+ *
+ *   #define SIMON_SAYS_OP(simon, next) IF(NOT(simon()))(next)
+ *   #define SIMON_SAYS_LAST_OP(val) last_but_not_least_##val
+ *   #define SIMON_SAYS() 0
+ *
+ *   MAP_SLIDE(SIMON_SAYS_OP, SIMON_SAYS_LAST_OP, EMPTY, wiggle, SIMON_SAYS, dance, move, SIMON_SAYS, boogie, stop)
+ *
+ * Which expands to:
+ *
+ *   dance boogie last_but_not_least_stop
+ *
+ * The mechanism is analogous to the MAP macro.
+ */
+#define MAP_SLIDE(op,last_op,sep,...) \
+  IF(HAS_ARGS(__VA_ARGS__))(EVAL(MAP_SLIDE_INNER(op,last_op,sep,__VA_ARGS__)))
+#define MAP_SLIDE_INNER(op,last_op,sep,cur_val, ...) \
+  IF(HAS_ARGS(__VA_ARGS__))(op(cur_val,FIRST(__VA_ARGS__))) \
+  IF(NOT(HAS_ARGS(__VA_ARGS__)))(last_op(cur_val)) \
+  IF(HAS_ARGS(__VA_ARGS__))( \
+    sep() DEFER2(_MAP_SLIDE_INNER)()(op, last_op, sep, __VA_ARGS__) \
+  )
+#define _MAP_SLIDE_INNER() MAP_SLIDE_INNER
+
+
+/**
+ * Strip any excess commas from a set of arguments.
+ */
+#define REMOVE_TRAILING_COMMAS(...) \
+	MAP(PASS, COMMA, __VA_ARGS__)
+
+
+#endif
+
+
+--- guest-swift/swift-nio@0b18836bd8b0162e7e17a995a3fbee20ed8f3b2b/Sources/CNIOSHA1/c_nio_sha1.c ---
+/* Additional changes for SwiftNIO:
+    - prefixed all symbols by 'c_nio_'
+    - removed the _KERNEL include guards
+    - defined the __min_size macro inline
+    - included sys/endian.h on Android
+    - use welcoming language (soundness check)
+    - ensure BYTE_ORDER is defined
+*/
+/*	$KAME: sha1.c,v 1.5 2000/11/08 06:13:08 itojun Exp $	*/
+/*-
+ * SPDX-License-Identifier: BSD-3-Clause
+ *
+ * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the project nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE PROJECT AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE PROJECT OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */
+
+/*
+ * FIPS pub 180-1: Secure Hash Algorithm (SHA-1)
+ * based on: http://csrc.nist.gov/fips/fip180-1.txt
+ * implemented by Jun-ichiro itojun Itoh <itojun@itojun.org>
+ */
+
+#include "include/CNIOSHA1.h"
+#include <string.h>
+#if !defined(bzero)
+#define bzero(b,l) memset((b), '\0', (l))
+#endif
+#if !defined(bcopy)
+#define bcopy(s,d,l) memmove((d), (s), (l))
+#endif
+#ifdef __ANDROID__
+#include <sys/endian.h>
+#elif defined(__linux__) || defined(__APPLE__) || defined(__wasm32__) || defined(__FreeBSD__) || defined(__OpenBSD__)
+#include <sys/types.h>
+#elif defined(_WIN32) || defined(_WIN64)
+	#ifndef LITTLE_ENDIAN
+	#define LITTLE_ENDIAN 1234
+	#endif
+	#ifndef BIG_ENDIAN
+	#define BIG_ENDIAN 4321
+	#endif
+	#ifndef BYTE_ORDER
+	#define BYTE_ORDER LITTLE_ENDIAN
+	#endif
+#endif
+
+
+/* soundness check */
+#if !defined(BYTE_ORDER)
+#error "BYTE_ORDER not defined"
+#elif BYTE_ORDER != BIG_ENDIAN
+# if BYTE_ORDER != LITTLE_ENDIAN
+#  define unsupported 1
+# endif
+#endif
+
+#ifndef unsupported
+
+/* constant table */
+static uint32_t _K[] = { 0x5a827999, 0x6ed9eba1, 0x8f1bbcdc, 0xca62c1d6 };
+#define	K(t)	_K[(t) / 20]
+
+#define	F0(b, c, d)	(((b) & (c)) | ((~(b)) & (d)))
+#define	F1(b, c, d)	(((b) ^ (c)) ^ (d))
+#define	F2(b, c, d)	(((b) & (c)) | ((b) & (d)) | ((c) & (d)))
+#define	F3(b, c, d)	(((b) ^ (c)) ^ (d))
+
+#define	S(n, x)		(((x) << (n)) | ((x) >> (32 - n)))
+
+#define	H(n)	(ctxt->h.b32[(n)])
+#define	COUNT	(ctxt->count)
+#define	BCOUNT	(ctxt->c.b64[0] / 8)
+#define	W(n)	(ctxt->m.b32[(n)])
+
+#define	PUTBYTE(x)	{ \
+	ctxt->m.b8[(COUNT % 64)] = (x);		\
+	COUNT++;				\
+	COUNT %= 64;				\
+	ctxt->c.b64[0] += 8;			\
+	if (COUNT % 64 == 0)			\
+		sha1_step(ctxt);		\
+     }
+
+#define	PUTPAD(x)	{ \
+	ctxt->m.b8[(COUNT % 64)] = (x);		\
+	COUNT++;				\
+	COUNT %= 64;				\
+	if (COUNT % 64 == 0)			\
+		sha1_step(ctxt);		\
+     }
+
+static void sha1_step(struct sha1_ctxt *);
+
+static void
+sha1_step(struct sha1_ctxt *ctxt)
+{
+	uint32_t	a, b, c, d, e;
+	size_t t, s;
+	uint32_t	tmp;
+
+#if BYTE_ORDER == LITTLE_ENDIAN
+	struct sha1_ctxt tctxt;
+	bcopy(&ctxt->m.b8[0], &tctxt.m.b8[0], 64);
+	ctxt->m.b8[0] = tctxt.m.b8[3]; ctxt->m.b8[1] = tctxt.m.b8[2];
+	ctxt->m.b8[2] = tctxt.m.b8[1]; ctxt->m.b8[3] = tctxt.m.b8[0];
+	ctxt->m.b8[4] = tctxt.m.b8[7]; ctxt->m.b8[5] = tctxt.m.b8[6];
+	ctxt->m.b8[6] = tctxt.m.b8[5]; ctxt->m.b8[7] = tctxt.m.b8[4];
+	ctxt->m.b8[8] = tctxt.m.b8[11]; ctxt->m.b8[9] = tctxt.m.b8[10];
+	ctxt->m.b8[10] = tctxt.m.b8[9]; ctxt->m.b8[11] = tctxt.m.b8[8];
+	ctxt->m.b8[12] = tctxt.m.b8[15]; ctxt->m.b8[13] = tctxt.m.b8[14];
+	ctxt->m.b8[14] = tctxt.m.b8[13]; ctxt->m.b8[15] = tctxt.m.b8[12];
+	ctxt->m.b8[16] = tctxt.m.b8[19]; ctxt->m.b8[17] = tctxt.m.b8[18];
+	ctxt->m.b8[18] = tctxt.m.b8[17]; ctxt->m.b8[19] = tctxt.m.b8[16];
+	ctxt->m.b8[20] = tctxt.m.b8[23]; ctxt->m.b8[21] = tctxt.m.b8[22];
+	ctxt->m.b8[22] = tctxt.m.b8[21]; ctxt->m.b8[23] = tctxt.m.b8[20];
+	ctxt->m.b8[24] = tctxt.m.b8[27]; ctxt->m.b8[25] = tctxt.m.b8[26];
+	ctxt->m.b8[26] = tctxt.m.b8[25]; ctxt->m.b8[27] = tctxt.m.b8[24];
+	ctxt->m.b8[28] = tctxt.m.b8[31]; ctxt->m.b8[29] = tctxt.m.b8[30];
+	ctxt->m.b8[30] = tctxt.m.b8[29]; ctxt->m.b8[31] = tctxt.m.b8[28];
+	ctxt->m.b8[32] = tctxt.m.b8[35]; ctxt->m.b8[33] = tctxt.m.b8[34];
+	ctxt->m.b8[34] = tctxt.m.b8[33]; ctxt->m.b8[35] = tctxt.m.b8[32];
+	ctxt->m.b8[36] = tctxt.m.b8[39]; ctxt->m.b8[37] = tctxt.m.b8[38];
+	ctxt->m.b8[38] = tctxt.m.b8[37]; ctxt->m.b8[39] = tctxt.m.b8[36];
+	ctxt->m.b8[40] = tctxt.m.b8[43]; ctxt->m.b8[41] = tctxt.m.b8[42];
+	ctxt->m.b8[42] = tctxt.m.b8[41]; ctxt->m.b8[43] = tctxt.m.b8[40];
+	ctxt->m.b8[44] = tctxt.m.b8[47]; ctxt->m.b8[45] = tctxt.m.b8[46];
+	ctxt->m.b8[46] = tctxt.m.b8[45]; ctxt->m.b8[47] = tctxt.m.b8[44];
+	ctxt->m.b8[48] = tctxt.m.b8[51]; ctxt->m.b8[49] = tctxt.m.b8[50];
+	ctxt->m.b8[50] = tctxt.m.b8[49]; ctxt->m.b8[51] = tctxt.m.b8[48];
+	ctxt->m.b8[52] = tctxt.m.b8[55]; ctxt->m.b8[53] = tctxt.m.b8[54];
+	ctxt->m.b8[54] = tctxt.m.b8[53]; ctxt->m.b8[55] = tctxt.m.b8[52];
+	ctxt->m.b8[56] = tctxt.m.b8[59]; ctxt->m.b8[57] = tctxt.m.b8[58];
+	ctxt->m.b8[58] = tctxt.m.b8[57]; ctxt->m.b8[59] = tctxt.m.b8[56];
+	ctxt->m.b8[60] = tctxt.m.b8[63]; ctxt->m.b8[61] = tctxt.m.b8[62];
+	ctxt->m.b8[62] = tctxt.m.b8[61]; ctxt->m.b8[63] = tctxt.m.b8[60];
+#endif
+
+	a = H(0); b = H(1); c = H(2); d = H(3); e = H(4);
+
+	for (t = 0; t < 20; t++) {
+		s = t & 0x0f;
+		if (t >= 16) {
+			W(s) = S(1, W((s+13) & 0x0f) ^ W((s+8) & 0x0f) ^ W((s+2) & 0x0f) ^ W(s));
+		}
+		tmp = S(5, a) + F0(b, c, d) + e + W(s) + K(t);
+		e = d; d = c; c = S(30, b); b = a; a = tmp;
+	}
+	for (t = 20; t < 40; t++) {
+		s = t & 0x0f;
+		W(s) = S(1, W((s+13) & 0x0f) ^ W((s+8) & 0x0f) ^ W((s+2) & 0x0f) ^ W(s));
+		tmp = S(5, a) + F1(b, c, d) + e + W(s) + K(t);
+		e = d; d = c; c = S(30, b); b = a; a = tmp;
+	}
+	for (t = 40; t < 60; t++) {
+		s = t & 0x0f;
+		W(s) = S(1, W((s+13) & 0x0f) ^ W((s+8) & 0x0f) ^ W((s+2) & 0x0f) ^ W(s));
+		tmp = S(5, a) + F2(b, c, d) + e + W(s) + K(t);
+		e = d; d = c; c = S(30, b); b = a; a = tmp;
+	}
+	for (t = 60; t < 80; t++) {
+		s = t & 0x0f;
+		W(s) = S(1, W((s+13) & 0x0f) ^ W((s+8) & 0x0f) ^ W((s+2) & 0x0f) ^ W(s));
+		tmp = S(5, a) + F3(b, c, d) + e + W(s) + K(t);
+		e = d; d = c; c = S(30, b); b = a; a = tmp;
+	}
+
+	H(0) = H(0) + a;
+	H(1) = H(1) + b;
+	H(2) = H(2) + c;
+	H(3) = H(3) + d;
+	H(4) = H(4) + e;
+
+	bzero(&ctxt->m.b8[0], 64);
+}
+
+/*------------------------------------------------------------*/
+
+void
+c_nio_sha1_init(struct sha1_ctxt *ctxt)
+{
+	bzero(ctxt, sizeof(struct sha1_ctxt));
+	H(0) = 0x67452301;
+	H(1) = 0xefcdab89;
+	H(2) = 0x98badcfe;
+	H(3) = 0x10325476;
+	H(4) = 0xc3d2e1f0;
+}
+
+void
+c_nio_sha1_pad(struct sha1_ctxt *ctxt)
+{
+	size_t padlen;		/*pad length in bytes*/
+	size_t padstart;
+
+	PUTPAD(0x80);
+
+	padstart = COUNT % 64;
+	padlen = 64 - padstart;
+	if (padlen < 8) {
+		bzero(&ctxt->m.b8[padstart], padlen);
+		COUNT += padlen;
+		COUNT %= 64;
+		sha1_step(ctxt);
+		padstart = COUNT % 64;	/* should be 0 */
+		padlen = 64 - padstart;	/* should be 64 */
+	}
+	bzero(&ctxt->m.b8[padstart], padlen - 8);
+	COUNT += (padlen - 8);
+	COUNT %= 64;
+#if BYTE_ORDER == BIG_ENDIAN
+	PUTPAD(ctxt->c.b8[0]); PUTPAD(ctxt->c.b8[1]);
+	PUTPAD(ctxt->c.b8[2]); PUTPAD(ctxt->c.b8[3]);
+	PUTPAD(ctxt->c.b8[4]); PUTPAD(ctxt->c.b8[5]);
+	PUTPAD(ctxt->c.b8[6]); PUTPAD(ctxt->c.b8[7]);
+#else
+	PUTPAD(ctxt->c.b8[7]); PUTPAD(ctxt->c.b8[6]);
+	PUTPAD(ctxt->c.b8[5]); PUTPAD(ctxt->c.b8[4]);
+	PUTPAD(ctxt->c.b8[3]); PUTPAD(ctxt->c.b8[2]);
+	PUTPAD(ctxt->c.b8[1]); PUTPAD(ctxt->c.b8[0]);
+#endif
+}
+
+void
+c_nio_sha1_loop(struct sha1_ctxt *ctxt, const uint8_t *input, size_t len)
+{
+	size_t gaplen;
+	size_t gapstart;
+	size_t off;
+	size_t copysiz;
+
+	off = 0;
+
+	while (off < len) {
+		gapstart = COUNT % 64;
+		gaplen = 64 - gapstart;
+
+		copysiz = (gaplen < len - off) ? gaplen : len - off;
+		bcopy(&input[off], &ctxt->m.b8[gapstart], copysiz);
+		COUNT += copysiz;
+		COUNT %= 64;
+		ctxt->c.b64[0] += copysiz * 8;
+		if (COUNT % 64 == 0)
+			sha1_step(ctxt);
+		off += copysiz;
+	}
+}
+
+void
+c_nio_sha1_result(struct sha1_ctxt *ctxt, char digest0[static SHA1_RESULTLEN])
+{
+	uint8_t *digest;
+
+	digest = (uint8_t *)digest0;
+	c_nio_sha1_pad(ctxt);
+#if BYTE_ORDER == BIG_ENDIAN
+	bcopy(&ctxt->h.b8[0], digest, SHA1_RESULTLEN);
+#else
+	digest[0] = ctxt->h.b8[3]; digest[1] = ctxt->h.b8[2];
+	digest[2] = ctxt->h.b8[1]; digest[3] = ctxt->h.b8[0];
+	digest[4] = ctxt->h.b8[7]; digest[5] = ctxt->h.b8[6];
+	digest[6] = ctxt->h.b8[5]; digest[7] = ctxt->h.b8[4];
+	digest[8] = ctxt->h.b8[11]; digest[9] = ctxt->h.b8[10];
+	digest[10] = ctxt->h.b8[9]; digest[11] = ctxt->h.b8[8];
+	digest[12] = ctxt->h.b8[15]; digest[13] = ctxt->h.b8[14];
+	digest[14] = ctxt->h.b8[13]; digest[15] = ctxt->h.b8[12];
+	digest[16] = ctxt->h.b8[19]; digest[17] = ctxt->h.b8[18];
+	digest[18] = ctxt->h.b8[17]; digest[19] = ctxt->h.b8[16];
+#endif
+}
+
+#endif /*unsupported*/
+
+
+--- guest-swift/swift-nio@0b18836bd8b0162e7e17a995a3fbee20ed8f3b2b/Sources/CNIOSHA1/include/CNIOSHA1.h ---
+/* Additional changes for SwiftNIO:
+    - prefixed all symbols by 'c_nio_'
+    - removed the _KERNEL include guards
+    - defined the __min_size macro inline
+    - included sys/endian.h on Android
+    - use welcoming language (soundness check)
+    - ensure BYTE_ORDER is defined
+*/
+/*	$FreeBSD$	*/
+/*	$KAME: sha1.h,v 1.5 2000/03/27 04:36:23 sumikawa Exp $	*/
+
+/*-
+ * SPDX-License-Identifier: BSD-3-Clause
+ *
+ * Copyright (C) 1995, 1996, 1997, and 1998 WIDE Project.
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the project nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE PROJECT AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE PROJECT OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */
+/*
+ * FIPS pub 180-1: Secure Hash Algorithm (SHA-1)
+ * based on: http://csrc.nist.gov/fips/fip180-1.txt
+ * implemented by Jun-ichiro itojun Itoh <itojun@itojun.org>
+ */
+
+#ifndef _CRYPTO_SHA1_H_
+#define _CRYPTO_SHA1_H_
+#include <stdint.h>
+#include <stddef.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+struct sha1_ctxt {
+	union {
+		uint8_t		b8[20];
+		uint32_t	b32[5];
+	} h;
+	union {
+		uint8_t		b8[8];
+		uint64_t	b64[1];
+	} c;
+	union {
+		uint8_t		b8[64];
+		uint32_t	b32[16];
+	} m;
+	uint8_t	count;
+};
+typedef struct sha1_ctxt SHA1_CTX;
+
+#define	SHA1_RESULTLEN	(160/8)
+
+#ifdef __cplusplus
+#define __min_size(x)	(x)
+#else
+#define __min_size(x)	static (x)
+#endif
+
+extern void c_nio_sha1_init(struct sha1_ctxt *);
+extern void c_nio_sha1_pad(struct sha1_ctxt *);
+extern void c_nio_sha1_loop(struct sha1_ctxt *, const uint8_t *, size_t);
+extern void c_nio_sha1_result(struct sha1_ctxt *, char[__min_size(SHA1_RESULTLEN)]);
+
+/* compatibilty with other SHA1 source codes */
+#define SHA1Init(x)		c_nio_sha1_init((x))
+#define SHA1Update(x, y, z)	c_nio_sha1_loop((x), (y), (z))
+#define SHA1Final(x, y)		c_nio_sha1_result((y), (x))
+
+#ifdef __cplusplus
+} /* extern "C" */
+#endif
+
+#endif /*_CRYPTO_SHA1_H_*/
+
+
 --- runtime-source/async-http-client@4b99975677236d13f0754339864e5360142ff5a1/LICENSE.txt ---
 
                                  Apache License
@@ -123660,7 +124742,7 @@ scripts from SwiftNIO.
     * https://github.com/apple/swift-nio
 
 
---- runtime-source/swift-nio@4e8f4b1c9adaa59315c523540c1ff2b38adc20a9/LICENSE.txt ---
+--- runtime-source/swift-nio@0b18836bd8b0162e7e17a995a3fbee20ed8f3b2b/LICENSE.txt ---
 
                                  Apache License
                            Version 2.0, January 2004
@@ -123865,7 +124947,7 @@ scripts from SwiftNIO.
    limitations under the License.
 
 
---- runtime-source/swift-nio@4e8f4b1c9adaa59315c523540c1ff2b38adc20a9/NOTICE.txt ---
+--- runtime-source/swift-nio@0b18836bd8b0162e7e17a995a3fbee20ed8f3b2b/NOTICE.txt ---
 
                             The SwiftNIO Project
                             ====================
@@ -123974,7 +125056,7 @@ This product contains a derivation of "TokenBucket.swift" from Swift Package Man
     * https://github.com/swiftlang/swift-package-manager
 
 
---- runtime-source/swift-nio@4e8f4b1c9adaa59315c523540c1ff2b38adc20a9/Sources/CNIOAtomics/src/cpp_magic.h ---
+--- runtime-source/swift-nio@0b18836bd8b0162e7e17a995a3fbee20ed8f3b2b/Sources/CNIOAtomics/src/cpp_magic.h ---
 //
 // this is https://github.com/18sg/uSHET/blob/c09e0acafd86720efe42dc15c63e0cc228244c32/lib/cpp_magic.h
 // LICENSE: MIT
@@ -124429,7 +125511,7 @@ This product contains a derivation of "TokenBucket.swift" from Swift Package Man
 #endif
 
 
---- runtime-source/swift-nio@4e8f4b1c9adaa59315c523540c1ff2b38adc20a9/Sources/CNIOLLHTTP/LICENSE ---
+--- runtime-source/swift-nio@0b18836bd8b0162e7e17a995a3fbee20ed8f3b2b/Sources/CNIOLLHTTP/LICENSE ---
 This software is licensed under the MIT License.
 
 Copyright Fedor Indutny, 2018.
@@ -124454,7 +125536,7 @@ OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 
---- runtime-source/swift-nio@4e8f4b1c9adaa59315c523540c1ff2b38adc20a9/Sources/CNIOSHA1/c_nio_sha1.c ---
+--- runtime-source/swift-nio@0b18836bd8b0162e7e17a995a3fbee20ed8f3b2b/Sources/CNIOSHA1/c_nio_sha1.c ---
 /* Additional changes for SwiftNIO:
     - prefixed all symbols by 'c_nio_'
     - removed the _KERNEL include guards
@@ -124511,7 +125593,7 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
 #endif
 #ifdef __ANDROID__
 #include <sys/endian.h>
-#elif defined(__linux__) || defined(__APPLE__) || defined(__wasm32__)
+#elif defined(__linux__) || defined(__APPLE__) || defined(__wasm32__) || defined(__FreeBSD__) || defined(__OpenBSD__)
 #include <sys/types.h>
 #elif defined(_WIN32) || defined(_WIN64)
 	#ifndef LITTLE_ENDIAN
@@ -124752,7 +125834,7 @@ c_nio_sha1_result(struct sha1_ctxt *ctxt, char digest0[static SHA1_RESULTLEN])
 #endif /*unsupported*/
 
 
---- runtime-source/swift-nio@4e8f4b1c9adaa59315c523540c1ff2b38adc20a9/Sources/CNIOSHA1/include/CNIOSHA1.h ---
+--- runtime-source/swift-nio@0b18836bd8b0162e7e17a995a3fbee20ed8f3b2b/Sources/CNIOSHA1/include/CNIOSHA1.h ---
 /* Additional changes for SwiftNIO:
     - prefixed all symbols by 'c_nio_'
     - removed the _KERNEL include guards

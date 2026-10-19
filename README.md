@@ -4,7 +4,7 @@ Hostwright manages Apple container workloads on one Apple silicon Mac. Declare s
 
 **Release status:** Current source prepares `0.0.2-rc.13`. No supported RC or GA channel has been published, and official `brew install hostwright` is not available yet.
 
-RC.13 includes reviewed kernel security fixes, the updated guest SwiftNIO pin and guest dependency inventories derived from the authenticated patched sources. The ingredient producer passed; a fresh candidate freeze, final runtime archive, signed artifacts and installed lifecycle qualification remain required. See the [current GA readiness record](docs/release/ga-readiness-2026-10-18.md) for the exact progress and remaining issue gates.
+RC.13 includes reviewed kernel security fixes, the updated guest SwiftNIO pin and guest dependency inventories derived from the authenticated patched sources. The frozen candidate and exact-source runtime producer are verified. Source, AddressSanitizer and ThreadSanitizer each passed 3,556 unique tests with zero failures or skips; all six fuzz targets passed. Signed staging and installed lifecycle qualification remain required. See the [current GA readiness record](docs/release/ga-readiness-2026-10-19.md) for the exact progress and remaining issue gates.
 
 Frozen RC.12 and its [source, sanitizer and runtime results](docs/evidence/phase15-rc12-aa8586a1/README.md) remain retained under their original bindings. Its signed inventory and security findings require the new candidate; those earlier results do not qualify RC.13. A GA date is not confirmed, and official Homebrew acceptance remains a launch requirement.
 
@@ -14,7 +14,7 @@ Frozen RC.12 and its [source, sanitizer and runtime results](docs/evidence/phase
 | Vendor Homebrew tap | Signed dev.12 qualification prerelease; unsupported and based on older contracts. |
 | Official Homebrew | Pending. `brew install hostwright` is the launch goal and is not available yet. |
 
-Phase 15 covers compatibility, security, signed installation and recovery, live quickstarts, and release promotion. See the [GA readiness snapshot](docs/release/ga-readiness-2026-10-18.md) for completed checks and remaining work and the [release plan](docs/roadmap/v0.0.2/IMPLEMENTATION_PLAN.md) for acceptance requirements.
+Phase 15 covers compatibility, security, signed installation and recovery, live quickstarts, and release promotion. See the [GA readiness snapshot](docs/release/ga-readiness-2026-10-19.md) for completed checks and remaining work and the [release plan](docs/roadmap/v0.0.2/IMPLEMENTATION_PLAN.md) for acceptance requirements.
 
 ## Requirements
 

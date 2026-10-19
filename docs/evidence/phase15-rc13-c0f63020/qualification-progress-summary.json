@@ -1,0 +1,104 @@
+{
+  "kind": "hostwright.public-rc13-qualification-progress-summary.v1",
+  "recordedDate": "2026-10-19",
+  "sourceCommit": "c0f63020f1c4187623d48d9c0770679b8b0de0d1",
+  "version": "0.0.2-rc.13",
+  "status": "partial-release-qualification",
+  "executionMode": "real",
+  "suiteResults": {
+    "source": {
+      "counts": {
+        "xctestCases": 3495,
+        "swiftTestingCases": 61,
+        "passedCases": 3556,
+        "failedCases": 0,
+        "skippedCases": 0
+      },
+      "matrixVerificationSHA256": "ba837670208e6628805486b003162b5d9032106516edd22be33fb5b028e7ece3",
+      "independentReviewSHA256": "486ea9b471f7a83b1965e8b546786a68f37ddfd3e3e33ea88a9768e2119fc688"
+    },
+    "address": {
+      "counts": {
+        "xctestCases": 3495,
+        "swiftTestingCases": 61,
+        "passedCases": 3556,
+        "failedCases": 0,
+        "skippedCases": 0
+      },
+      "matrixVerificationSHA256": "3100cb20b5e783cad71793e9262aec3626e4d0771fb3a4e63b558ee4821d0f0a",
+      "independentReviewSHA256": "f4923ce143dbe02cd223269023d4512b20f1f66cf90e59448f123ab46b7b7615"
+    },
+    "thread": {
+      "counts": {
+        "xctestCases": 3495,
+        "swiftTestingCases": 61,
+        "passedCases": 3556,
+        "failedCases": 0,
+        "skippedCases": 0
+      },
+      "matrixVerificationSHA256": "993ce37c01ce271263d025f7acfe80991c5b2e4e671ae36fdd11475989469b05",
+      "independentReviewSHA256": "6a22672399af9db98e216a6749d18a13a4c5be75bf839c8d9afe1dd79d260e15"
+    }
+  },
+  "basePassedPerSuite": 3546,
+  "uniqueRoutedPassesPerSuite": 10,
+  "restoredPermissionRepeatCounted": false,
+  "fullHostPermissionEntriesRestored": 48,
+  "fuzz": {
+    "targets": [
+      {
+        "elapsedSeconds": 302.09696970799996,
+        "status": "passed",
+        "target": "manifest-v3"
+      },
+      {
+        "elapsedSeconds": 302.10127762499906,
+        "status": "passed",
+        "target": "compose-import"
+      },
+      {
+        "elapsedSeconds": 302.11995591699815,
+        "status": "passed",
+        "target": "control-stream-v2.1"
+      },
+      {
+        "elapsedSeconds": 302.07272066699807,
+        "status": "passed",
+        "target": "containerization-helper-v1"
+      },
+      {
+        "elapsedSeconds": 302.1027408749942,
+        "status": "passed",
+        "target": "apple-container-json"
+      },
+      {
+        "elapsedSeconds": 302.11139741700026,
+        "status": "passed",
+        "target": "release-qualification-json"
+      }
+    ],
+    "timedExecutions": 5080658,
+    "crashArtifacts": 0,
+    "campaignSHA256": "0539b4c7cfab5934db43632700699b66544da48daa5af01894a518da906bd18a",
+    "gateSHA256": "7fcd570c289e8ca84347c1172d408c38454100c85865ca2f6883226fdf1bfd2b",
+    "independentReviewSHA256": "698518dc3df591844aae7ebcb3d7d61889ff922ccf9019bfa10da4d8848f7f2e"
+  },
+  "gateReceiptSHA256": {
+    "source-regression-gate.json": "31eab85c3d7da529d8cfb7f8bfd723fe6f4ae83056ba95d3be5d1cac294cc257",
+    "sanitizers-gate.json": "1cc7101913282a5b2812699eed69718489adcfa5dade8ee18a5868110a6e8ba2",
+    "critical-fuzz-gate.json": "7fcd570c289e8ca84347c1172d408c38454100c85865ca2f6883226fdf1bfd2b"
+  },
+  "runtimeProducerRun": 39171521610,
+  "trustedStagingRun": 39294412896,
+  "qualificationAccepted": false,
+  "published": false,
+  "officialHomebrewAccepted": false,
+  "limits": [
+    "Derived public summary only; raw receipts, logs and independent reviews remain retained in the private qualification packet.",
+    "Native host test identity coverage does not establish complete child at-exit diagnostics.",
+    "Skipped base results and duplicate restored-permission controls receive no unique pass credit. Original failures remain retained under their actual attempts.",
+    "Signed artifacts, installed lifecycle, provider cycles, soak, recovery, quickstarts and protected acceptance remain separate required gates.",
+    "No RC or GA acceptance and no official short-name Homebrew availability is established by these results."
+  ],
+  "trustedStagingAttempt1Status": "cancelled-during-operator-requested-pause-before-signing"
+}

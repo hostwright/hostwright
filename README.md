@@ -2,9 +2,9 @@
 
 Hostwright manages Apple container workloads on one Apple silicon Mac. Declare services in a YAML manifest, review a plan, and confirm it through the CLI or native desktop app. Hostwright tracks resource ownership and operations in a local SQLite database.
 
-**Release status:** Current source prepares `0.0.2-rc.13`. No supported RC or GA channel has been published, and official `brew install hostwright` is not available yet.
+**Release status:** Current source prepares `0.0.2-rc.14`. No supported RC or GA channel has been published, and official `brew install hostwright` is not available yet.
 
-RC.13 includes reviewed kernel security fixes, the updated guest SwiftNIO pin and guest dependency inventories derived from the authenticated patched sources. The frozen candidate and exact-source runtime producer are verified. Source, AddressSanitizer and ThreadSanitizer each passed 3,556 unique tests with zero failures or skips; all six fuzz targets passed. Signed staging attempt 2 and independent signature, provenance and SBOM verification passed. Installed lifecycle qualification remains required. See the [current GA readiness record](docs/release/ga-readiness-2026-10-20.md) for the exact progress and remaining issue gates.
+RC.14 fixes managed-daemon startup before the authenticated API becomes available. The fix passed 256 daemon tests, its CI checks, and a signed development regression in the qualification VM, including authenticated integrity checks and service cleanup. Issue [#275](https://github.com/hostwright/hostwright/issues/275) is closed with reviewed RC.13 supply-chain evidence. RC.13 results remain bound to their original source and artifacts; RC.14 requires a fresh freeze and qualification. See the [current GA readiness record](docs/release/ga-readiness-2026-10-20-rc14.md) for the eight remaining issues and release gates.
 
 Frozen RC.12 and its [source, sanitizer and runtime results](docs/evidence/phase15-rc12-aa8586a1/README.md) remain retained under their original bindings. Its signed inventory and security findings require the new candidate; those earlier results do not qualify RC.13. A GA date is not confirmed, and official Homebrew acceptance remains a launch requirement.
 

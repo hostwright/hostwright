@@ -124,7 +124,8 @@ public enum DaemonCommand: Equatable, Sendable {
             "HOME": homeDirectory,
             "LANG": "C",
             "LC_ALL": "C",
-            "PATH": SecureSubprocessEnvironment.trustedSystemPath
+            "PATH": SecureSubprocessEnvironment.trustedSystemPath,
+            "__CF_USER_TEXT_ENCODING": "0x\(String(getuid(), radix: 16, uppercase: true)):0:0"
         ]
     }
 

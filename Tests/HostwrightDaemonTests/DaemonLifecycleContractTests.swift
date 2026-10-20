@@ -391,7 +391,8 @@ final class DaemonLifecycleContractTests: XCTestCase {
             "HOME": "/Users/example",
             "LANG": "C",
             "LC_ALL": "C",
-            "PATH": SecureSubprocessEnvironment.trustedSystemPath
+            "PATH": SecureSubprocessEnvironment.trustedSystemPath,
+            "__CF_USER_TEXT_ENCODING": "0x\(String(getuid(), radix: 16, uppercase: true)):0:0"
         ]
         XCTAssertEqual(
             DaemonCommand.managedServiceEnvironment(homeDirectory: "/Users/example"),
@@ -421,6 +422,19 @@ final class DaemonLifecycleContractTests: XCTestCase {
                 homeDirectory: "/Users/example"
             )
         )
+        for inheritedEncoding in ["", "malformed", "0x0:0:0", "0xFFFFFFFF:0:0", "0x1F5:99:99"] {
+            if inheritedEncoding == expectedManagedEnvironment["__CF_USER_TEXT_ENCODING"] { continue }
+            var inherited = expectedManagedEnvironment
+            inherited["__CF_USER_TEXT_ENCODING"] = inheritedEncoding
+            XCTAssertTrue(DaemonCommand.managedServiceEnvironmentRequiresReexec(
+                inheritedEnvironment: inherited, homeDirectory: "/Users/example"
+            ))
+        }
+        var missingEncoding = expectedManagedEnvironment
+        missingEncoding.removeValue(forKey: "__CF_USER_TEXT_ENCODING")
+        XCTAssertTrue(DaemonCommand.managedServiceEnvironmentRequiresReexec(
+            inheritedEnvironment: missingEncoding, homeDirectory: "/Users/example"
+        ))
         XCTAssertThrowsError(
             try DaemonCommand.parse(
                 arguments: [

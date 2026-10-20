@@ -1,0 +1,457 @@
+{
+  "kind": "hostwright.rc13.retained-advisory-policy-summary.v1",
+  "sourceCommit": "c0f63020f1c4187623d48d9c0770679b8b0de0d1",
+  "version": "0.0.2-rc.13",
+  "reviewedAt": "2026-10-20T14:45:06.885148+00:00",
+  "reviewSHA256": "df494200c0e1bd881d5d39f64f3611f88c14af28fe105f640fd7e0adb7c73359",
+  "artifactByteJoinSHA256": "277ee01df516f18ae8e605c48ab6c8675e872f7aa566f5887e1aad376b77d2f9",
+  "limitations": [
+    "Bounded current-byte assessment of the retained official advisory set (last retainedcurrencyOct16) and actualOct18C0Go reachable analysis; no newOct20database refresh or blanket absence of future/new advisories.",
+    "Component-specific affected-code exceptions remain explicit. Changing archive, encoding, HTTP, TLS, YAML-emitter or resolver consumers requires reassessment. This is not universal vulnerability clearance."
+  ],
+  "resolvedPriorBlockers": [
+    "CVE-2026-74747",
+    "CVE-2026-90336",
+    "GHSA-r3rc-9hpw-54v9",
+    "historical-guest-inventory-mismatch"
+  ],
+  "dispositions": [
+    {
+      "id": "CVE-2025-26519",
+      "currentDisposition": "affected-code-present-required-encoding-not-exposed",
+      "affectedCodeMayRemain": true,
+      "primarySource": "https://git.musl-libc.org/cgit/musl/commit/?id=c47ad25ea3b484e10326f933e927c0bc8cded3da"
+    },
+    {
+      "id": "CVE-2025-64031",
+      "currentDisposition": "affected-code-present-required-option-unavailable",
+      "affectedCodeMayRemain": true,
+      "primarySource": "https://github.com/CVEProject/cvelistV5/tree/main/cves/2025/64xxx/CVE-2025-64031.json"
+    },
+    {
+      "id": "CVE-2026-108267",
+      "currentDisposition": "different-vendor-fork-feature",
+      "affectedCodeMayRemain": true,
+      "primarySource": "https://github.com/CVEProject/cvelistV5/tree/main/cves/2026/108xxx/CVE-2026-108267.json"
+    },
+    {
+      "id": "CVE-2026-22184",
+      "currentDisposition": "standalone-utility-not-in-runtime-payload",
+      "affectedCodeMayRemain": true,
+      "primarySource": "https://github.com/CVEProject/cvelistV5/tree/main/cves/2026/22xxx/CVE-2026-22184.json"
+    },
+    {
+      "id": "CVE-2026-23355",
+      "currentDisposition": "excluded-by-current-authenticated-kernel-configuration",
+      "affectedCodeMayRemain": false,
+      "primarySource": "https://git.kernel.org/stable/c/0d12453818c35e1ded84633152c6b05002ae48b9"
+    },
+    {
+      "id": "CVE-2026-25680",
+      "currentDisposition": "go-alias-covered-by-current-exact-loader-review",
+      "affectedCodeMayRemain": true,
+      "primarySource": "https://go.dev/issue/79573"
+    },
+    {
+      "id": "CVE-2026-25681",
+      "currentDisposition": "go-alias-covered-by-current-exact-loader-review",
+      "affectedCodeMayRemain": true,
+      "primarySource": "https://go.dev/issue/79574"
+    },
+    {
+      "id": "CVE-2026-27136",
+      "currentDisposition": "go-alias-covered-by-current-exact-loader-review",
+      "affectedCodeMayRemain": true,
+      "primarySource": "https://go.dev/issue/79575"
+    },
+    {
+      "id": "CVE-2026-27171",
+      "currentDisposition": "affected-code-present-no-untrusted-negative-length-caller-established",
+      "affectedCodeMayRemain": true,
+      "primarySource": "https://github.com/CVEProject/cvelistV5/tree/main/cves/2026/27xxx/CVE-2026-27171.json"
+    },
+    {
+      "id": "CVE-2026-31710",
+      "currentDisposition": "excluded-by-current-authenticated-kernel-configuration",
+      "affectedCodeMayRemain": false,
+      "primarySource": "https://git.kernel.org/stable/c/c4d3fc5844d685441befd0caaab648321013cdfd"
+    },
+    {
+      "id": "CVE-2026-3381",
+      "currentDisposition": "perl-wrapper-not-shipped-underlying-zlib-advisory-retained",
+      "affectedCodeMayRemain": true,
+      "primarySource": "https://github.com/CVEProject/cvelistV5/tree/main/cves/2026/3xxx/CVE-2026-3381.json"
+    },
+    {
+      "id": "CVE-2026-34743",
+      "currentDisposition": "required-decoder-not-observed-in-selected-runtime",
+      "affectedCodeMayRemain": true,
+      "primarySource": "https://github.com/CVEProject/cvelistV5/tree/main/cves/2026/34xxx/CVE-2026-34743.json"
+    },
+    {
+      "id": "CVE-2026-39821",
+      "currentDisposition": "go-alias-covered-by-current-exact-loader-review",
+      "affectedCodeMayRemain": true,
+      "primarySource": "https://go.dev/issue/78760"
+    },
+    {
+      "id": "CVE-2026-42502",
+      "currentDisposition": "go-alias-covered-by-current-exact-loader-review",
+      "affectedCodeMayRemain": true,
+      "primarySource": "https://go.dev/issue/79572"
+    },
+    {
+      "id": "CVE-2026-42506",
+      "currentDisposition": "go-alias-covered-by-current-exact-loader-review",
+      "affectedCodeMayRemain": true,
+      "primarySource": "https://go.dev/issue/79571"
+    },
+    {
+      "id": "CVE-2026-43678",
+      "currentDisposition": "fixed-in-current-authenticated-nio-2.101.3",
+      "affectedCodeMayRemain": false,
+      "primarySource": "https://github.com/apple/swift-nio/security/advisories/GHSA-qcc5-f287-vgmq"
+    },
+    {
+      "id": "CVE-2026-43820",
+      "currentDisposition": "affected-code-present-no-trigger-in-reviewed-entrypoints",
+      "affectedCodeMayRemain": true
+    },
+    {
+      "id": "CVE-2026-53145",
+      "currentDisposition": "excluded-by-current-authenticated-kernel-configuration",
+      "affectedCodeMayRemain": false,
+      "primarySource": "https://git.kernel.org/stable/c/1a4f03d22fb655e5f192244fb2c87d8066fcfca2"
+    },
+    {
+      "id": "CVE-2026-74544",
+      "currentDisposition": "excluded-by-current-authenticated-kernel-configuration",
+      "affectedCodeMayRemain": false,
+      "primarySource": "https://git.kernel.org/stable/c/313cb9ffc4101a885d791facf4b5ea3d5e06144d"
+    },
+    {
+      "id": "CVE-2026-74747",
+      "currentDisposition": "fixed-by-exact-reviewed-backport-in-current-authenticated-kernel",
+      "affectedCodeMayRemain": false,
+      "primarySource": "https://git.kernel.org/stable/c/5365f012451fce2453f13a568dcb72ea534c1e4d"
+    },
+    {
+      "id": "CVE-2026-76844",
+      "currentDisposition": "affected-write-implementation-not-observed-in-selected-runtime",
+      "affectedCodeMayRemain": true,
+      "primarySource": "https://github.com/CVEProject/cvelistV5/tree/main/cves/2026/76xxx/CVE-2026-76844.json"
+    },
+    {
+      "id": "CVE-2026-80668",
+      "currentDisposition": "prior-reviewed-fix-retained-in-current-kernel-patch-chain",
+      "affectedCodeMayRemain": false,
+      "primarySource": "https://git.kernel.org/stable/c/7ec786f4230c2a9b2eaf97a2d45368933b49d2b2"
+    },
+    {
+      "id": "CVE-2026-80786",
+      "currentDisposition": "excluded-by-current-authenticated-kernel-configuration",
+      "affectedCodeMayRemain": false,
+      "primarySource": "https://git.kernel.org/stable/c/07f7e46833f71472e30da54a50dacdf48521bdd3"
+    },
+    {
+      "id": "CVE-2026-89601",
+      "currentDisposition": "excluded-by-current-authenticated-kernel-configuration",
+      "affectedCodeMayRemain": false,
+      "primarySource": "https://git.kernel.org/stable/c/356984d1a5c32e94810cbb6c8dc7d8ff2d4d919a"
+    },
+    {
+      "id": "CVE-2026-89639",
+      "currentDisposition": "excluded-by-current-authenticated-kernel-configuration",
+      "affectedCodeMayRemain": false,
+      "primarySource": "https://git.kernel.org/stable/c/364b183230586a62660a7280c1eb20138338eeb5"
+    },
+    {
+      "id": "CVE-2026-89642",
+      "currentDisposition": "excluded-by-current-authenticated-kernel-configuration",
+      "affectedCodeMayRemain": false,
+      "primarySource": "https://git.kernel.org/stable/c/12bafe32f09c0d24f5096154b59c347b9c6606e0"
+    },
+    {
+      "id": "CVE-2026-89709",
+      "currentDisposition": "excluded-by-current-authenticated-kernel-configuration",
+      "affectedCodeMayRemain": false,
+      "primarySource": "https://git.kernel.org/stable/c/3c461a1820088fb5889d73a6522369bde45527a9"
+    },
+    {
+      "id": "CVE-2026-89818",
+      "currentDisposition": "excluded-by-current-authenticated-kernel-configuration",
+      "affectedCodeMayRemain": false,
+      "primarySource": "https://git.kernel.org/stable/c/47799e1f893d47d8af231710a61065e3ec8a13e8"
+    },
+    {
+      "id": "CVE-2026-89862",
+      "currentDisposition": "excluded-by-current-authenticated-kernel-configuration",
+      "affectedCodeMayRemain": false,
+      "primarySource": "https://git.kernel.org/stable/c/0fb52cc632464b0cd07f970341330466d772efe1"
+    },
+    {
+      "id": "CVE-2026-90093",
+      "currentDisposition": "excluded-by-current-authenticated-kernel-configuration",
+      "affectedCodeMayRemain": false,
+      "primarySource": "https://git.kernel.org/stable/c/8460dc49c9756a1e9288218060b4d41e1b704905"
+    },
+    {
+      "id": "CVE-2026-90336",
+      "currentDisposition": "fixed-by-exact-reviewed-backport-in-current-authenticated-kernel",
+      "affectedCodeMayRemain": false,
+      "primarySource": "https://git.kernel.org/stable/c/06b376432974fe5f25f2843a8e8438c6a1cf3d50"
+    },
+    {
+      "id": "CVE-2026-98085",
+      "currentDisposition": "prior-reviewed-fix-retained-in-current-kernel-patch-chain",
+      "affectedCodeMayRemain": false,
+      "primarySource": "https://git.kernel.org/stable/c/387b1baefbb776e3f48dc2261e77a49213f470f7"
+    },
+    {
+      "id": "CVE-2026-98353",
+      "currentDisposition": "excluded-by-current-authenticated-kernel-configuration",
+      "affectedCodeMayRemain": false,
+      "primarySource": "https://git.kernel.org/stable/c/00baeade709fb66da647e8327e8398bb532e30f7"
+    },
+    {
+      "id": "GHSA-6ph5-fww6-vfwv",
+      "currentDisposition": "affected-request-decompressor-selected-no-reviewed-http1-server-route",
+      "affectedCodeMayRemain": true,
+      "primarySource": "https://github.com/apple/swift-nio-extras/security/advisories/GHSA-6ph5-fww6-vfwv"
+    },
+    {
+      "id": "GHSA-cq87-8r7h-962v",
+      "currentDisposition": "fixed-in-current-authenticated-nio-2.101.3",
+      "affectedCodeMayRemain": false,
+      "primarySource": "https://github.com/apple/swift-nio/security/advisories/GHSA-cq87-8r7h-962v"
+    },
+    {
+      "id": "GHSA-r3rc-9hpw-54v9",
+      "currentDisposition": "fixed-in-current-authenticated-nio-2.101.3",
+      "affectedCodeMayRemain": false,
+      "primarySource": "https://github.com/apple/swift-nio/security/advisories/GHSA-r3rc-9hpw-54v9"
+    },
+    {
+      "id": "GHSA-rj37-6j9x-74q6",
+      "currentDisposition": "fixed-in-current-authenticated-nio-2.101.3",
+      "affectedCodeMayRemain": false,
+      "primarySource": "https://github.com/apple/swift-nio/security/advisories/GHSA-rj37-6j9x-74q6"
+    },
+    {
+      "id": "OSV-2021-777",
+      "currentDisposition": "affected-implementation-not-observed-in-selected-runtime",
+      "affectedCodeMayRemain": true
+    },
+    {
+      "id": "OSV-2024-698",
+      "currentDisposition": "affected-implementation-not-observed-in-selected-runtime",
+      "affectedCodeMayRemain": true
+    },
+    {
+      "id": "GO-2025-3503",
+      "currentDisposition": "affected-x-net-version-replaced-by-0.61.0-beyond-retained-fixed-ranges",
+      "affectedCodeMayRemain": false,
+      "primarySource": "https://pkg.go.dev/vuln/GO-2025-3503"
+    },
+    {
+      "id": "GO-2025-3595",
+      "currentDisposition": "affected-x-net-version-replaced-by-0.61.0-beyond-retained-fixed-ranges",
+      "affectedCodeMayRemain": false,
+      "primarySource": "https://pkg.go.dev/vuln/GO-2025-3595"
+    },
+    {
+      "id": "GO-2026-4440",
+      "currentDisposition": "affected-x-net-version-replaced-by-0.61.0-beyond-retained-fixed-ranges",
+      "affectedCodeMayRemain": false,
+      "primarySource": "https://pkg.go.dev/vuln/GO-2026-4440"
+    },
+    {
+      "id": "GO-2026-4441",
+      "currentDisposition": "affected-x-net-version-replaced-by-0.61.0-beyond-retained-fixed-ranges",
+      "affectedCodeMayRemain": false,
+      "primarySource": "https://pkg.go.dev/vuln/GO-2026-4441"
+    },
+    {
+      "id": "GO-2026-4918",
+      "currentDisposition": "affected-x-net-version-replaced-by-0.61.0-beyond-retained-fixed-ranges",
+      "affectedCodeMayRemain": false,
+      "primarySource": "https://pkg.go.dev/vuln/GO-2026-4918"
+    },
+    {
+      "id": "GO-2026-5025",
+      "currentDisposition": "affected-x-net-version-replaced-by-0.61.0-beyond-retained-fixed-ranges",
+      "affectedCodeMayRemain": false,
+      "primarySource": "https://pkg.go.dev/vuln/GO-2026-5025"
+    },
+    {
+      "id": "GO-2026-5026",
+      "currentDisposition": "stdlib-affected-version-retained-trigger-packages-unselected-in-current-loader",
+      "affectedCodeMayRemain": true,
+      "primarySource": "https://pkg.go.dev/vuln/GO-2026-5026"
+    },
+    {
+      "id": "GO-2026-5027",
+      "currentDisposition": "affected-x-net-version-replaced-by-0.61.0-beyond-retained-fixed-ranges",
+      "affectedCodeMayRemain": false,
+      "primarySource": "https://pkg.go.dev/vuln/GO-2026-5027"
+    },
+    {
+      "id": "GO-2026-5028",
+      "currentDisposition": "affected-x-net-version-replaced-by-0.61.0-beyond-retained-fixed-ranges",
+      "affectedCodeMayRemain": false,
+      "primarySource": "https://pkg.go.dev/vuln/GO-2026-5028"
+    },
+    {
+      "id": "GO-2026-5029",
+      "currentDisposition": "affected-x-net-version-replaced-by-0.61.0-beyond-retained-fixed-ranges",
+      "affectedCodeMayRemain": false,
+      "primarySource": "https://pkg.go.dev/vuln/GO-2026-5029"
+    },
+    {
+      "id": "GO-2026-5030",
+      "currentDisposition": "affected-x-net-version-replaced-by-0.61.0-beyond-retained-fixed-ranges",
+      "affectedCodeMayRemain": false,
+      "primarySource": "https://pkg.go.dev/vuln/GO-2026-5030"
+    },
+    {
+      "id": "GO-2026-5942",
+      "currentDisposition": "stdlib-vendored-dns-code-remains-no-supported-resolver-trigger-established",
+      "affectedCodeMayRemain": true,
+      "primarySource": "https://pkg.go.dev/vuln/GO-2026-5942"
+    },
+    {
+      "id": "GO-2026-5972",
+      "currentDisposition": "stdlib-affected-version-retained-trigger-packages-unselected-in-current-loader",
+      "affectedCodeMayRemain": true,
+      "primarySource": "https://pkg.go.dev/vuln/GO-2026-5972"
+    },
+    {
+      "id": "GO-2026-6088",
+      "currentDisposition": "stdlib-affected-version-retained-trigger-packages-unselected-in-current-loader",
+      "affectedCodeMayRemain": true,
+      "primarySource": "https://pkg.go.dev/vuln/GO-2026-6088"
+    },
+    {
+      "id": "GO-2026-6089",
+      "currentDisposition": "stdlib-affected-version-retained-trigger-packages-unselected-in-current-loader",
+      "affectedCodeMayRemain": true,
+      "primarySource": "https://pkg.go.dev/vuln/GO-2026-6089"
+    },
+    {
+      "id": "GO-2026-6090",
+      "currentDisposition": "stdlib-affected-version-retained-trigger-packages-unselected-in-current-loader",
+      "affectedCodeMayRemain": true,
+      "primarySource": "https://pkg.go.dev/vuln/GO-2026-6090"
+    },
+    {
+      "id": "GO-2026-6091",
+      "currentDisposition": "stdlib-affected-version-retained-trigger-packages-unselected-in-current-loader",
+      "affectedCodeMayRemain": true,
+      "primarySource": "https://pkg.go.dev/vuln/GO-2026-6091"
+    },
+    {
+      "id": "GO-2026-6218",
+      "currentDisposition": "stdlib-affected-version-retained-trigger-packages-unselected-in-current-loader",
+      "affectedCodeMayRemain": true,
+      "primarySource": "https://pkg.go.dev/vuln/GO-2026-6218"
+    },
+    {
+      "id": "GO-2026-6599",
+      "currentDisposition": "stdlib-affected-version-retained-trigger-packages-unselected-in-current-loader",
+      "affectedCodeMayRemain": true,
+      "primarySource": "https://pkg.go.dev/vuln/GO-2026-6599"
+    },
+    {
+      "id": "GO-2026-6600",
+      "currentDisposition": "stdlib-affected-version-retained-trigger-packages-unselected-in-current-loader",
+      "affectedCodeMayRemain": true,
+      "primarySource": "https://pkg.go.dev/vuln/GO-2026-6600"
+    },
+    {
+      "id": "GO-2026-6603",
+      "currentDisposition": "stdlib-affected-version-retained-trigger-packages-unselected-in-current-loader",
+      "affectedCodeMayRemain": true,
+      "primarySource": "https://pkg.go.dev/vuln/GO-2026-6603"
+    },
+    {
+      "id": "GO-2026-6605",
+      "currentDisposition": "stdlib-affected-version-retained-trigger-packages-unselected-in-current-loader",
+      "affectedCodeMayRemain": true,
+      "primarySource": "https://pkg.go.dev/vuln/GO-2026-6605"
+    },
+    {
+      "id": "GO-2026-6607",
+      "currentDisposition": "stdlib-affected-version-retained-trigger-packages-unselected-in-current-loader",
+      "affectedCodeMayRemain": true,
+      "primarySource": "https://pkg.go.dev/vuln/GO-2026-6607"
+    },
+    {
+      "id": "GO-2026-6608",
+      "currentDisposition": "stdlib-affected-version-retained-trigger-packages-unselected-in-current-loader",
+      "affectedCodeMayRemain": true,
+      "primarySource": "https://pkg.go.dev/vuln/GO-2026-6608"
+    },
+    {
+      "id": "GO-2026-6609",
+      "currentDisposition": "stdlib-affected-version-retained-trigger-packages-unselected-in-current-loader",
+      "affectedCodeMayRemain": true,
+      "primarySource": "https://pkg.go.dev/vuln/GO-2026-6609"
+    },
+    {
+      "id": "GO-2026-6610",
+      "currentDisposition": "stdlib-affected-version-retained-trigger-packages-unselected-in-current-loader",
+      "affectedCodeMayRemain": true,
+      "primarySource": "https://pkg.go.dev/vuln/GO-2026-6610"
+    },
+    {
+      "id": "GO-2026-6611",
+      "currentDisposition": "stdlib-affected-version-retained-trigger-packages-unselected-in-current-loader",
+      "affectedCodeMayRemain": true,
+      "primarySource": "https://pkg.go.dev/vuln/GO-2026-6611"
+    },
+    {
+      "id": "GO-2026-6612",
+      "currentDisposition": "stdlib-affected-version-retained-trigger-packages-unselected-in-current-loader",
+      "affectedCodeMayRemain": true,
+      "primarySource": "https://pkg.go.dev/vuln/GO-2026-6612"
+    },
+    {
+      "id": "GO-2026-6613",
+      "currentDisposition": "stdlib-affected-version-retained-trigger-packages-unselected-in-current-loader",
+      "affectedCodeMayRemain": true,
+      "primarySource": "https://pkg.go.dev/vuln/GO-2026-6613"
+    },
+    {
+      "id": "GO-2026-6617",
+      "currentDisposition": "stdlib-affected-version-retained-trigger-packages-unselected-in-current-loader",
+      "affectedCodeMayRemain": true,
+      "primarySource": "https://pkg.go.dev/vuln/GO-2026-6617"
+    },
+    {
+      "id": "GO-2026-5024",
+      "currentDisposition": "windows-only-trigger-on-linux-arm64-unselected"
+    },
+    {
+      "id": "GO-2026-6604",
+      "currentDisposition": "windows-only-trigger-on-linux-arm64-unselected"
+    },
+    {
+      "id": "OSV-2020-1611",
+      "currentDisposition": "affected-emitter-code-present-no-supported-untrusted-input-to-emitter-route-established",
+      "affectedCodeMayRemain": true
+    },
+    {
+      "id": "CVE-2026-43820-host",
+      "currentDisposition": "host-pinned-2.37.2-at-retained-advisory-fixed-version"
+    },
+    {
+      "id": "historical-guest-inventory-mismatch",
+      "currentDisposition": "corrected-current-inventory-joins-25-captured-and-2-resolved-only-guest-revisions"
+    },
+    {
+      "id": "C0-SAST-architecture-exclusion",
+      "currentDisposition": "real-source-defect-retained-x86-only-path-not-shipped-on-proven-arm64-targets",
+      "privateDiagnosticIdentifierRedacted": true
+    }
+  ]
+}

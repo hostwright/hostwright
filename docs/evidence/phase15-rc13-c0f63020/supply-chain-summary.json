@@ -1,0 +1,59 @@
+{
+  "kind": "hostwright.rc13.supply-chain-public-summary.v1",
+  "sourceCommit": "c0f63020f1c4187623d48d9c0770679b8b0de0d1",
+  "version": "0.0.2-rc.13",
+  "stageRun": {
+    "id": 39294412896,
+    "attempt": 2,
+    "conclusion": "success",
+    "artifactID": 12227049141
+  },
+  "inventorySHA256": "381dbf4a23b630a24b2763526cf231c9af164f3ce4600bdc88382b1d70152f5c",
+  "signedSubjects": {
+    "zip": "673d02b76274f8d75749e1acf312ccb6c2d2e15b17e88af800825c1803decfd8",
+    "pkg": "e20cfb87d35587fb47f67a2fde4d77d453dd47510b2567a9fbb12c0e6e131559",
+    "correspondingSource": "6fcbc4a5f1dccb187e3bb3d0b22f18299e66dc4b5fa25b7380faa2a5e2ba9a2a"
+  },
+  "gates": {
+    "dependency-security": {
+      "attachments": 865,
+      "reusedLargeBindings": 0,
+      "sha256": "ba298c2d56c3e2449dc86c15892c22a280a8d03940b641bbee2087638648d8dc",
+      "standaloneValidation": "passed"
+    },
+    "license-policy-sbom": {
+      "attachments": 802,
+      "reusedLargeBindings": 0,
+      "sha256": "b840216dd1346f096698855c8fad17b2a95b4279d328bceb1446963dadd6c3ce",
+      "standaloneValidation": "passed"
+    },
+    "secret-scan": {
+      "attachments": 495,
+      "reusedLargeBindings": 7,
+      "sha256": "36f610f9edf887066dad08a62b6abb685affa5e577595cd43702b0d072b335a0",
+      "standaloneValidation": "passed"
+    },
+    "signed-notarized-artifacts": {
+      "attachments": 314,
+      "reusedLargeBindings": 0,
+      "sha256": "5700c7c51cd81e44e96cb922d22926e3e283ea6f0df508947c44aa0eacf857ef",
+      "standaloneValidation": "passed"
+    }
+  },
+  "protectedAggregateAccepted": false,
+  "published": false,
+  "advisoryAssessment": {
+    "dispositions": 75,
+    "reviewSHA256": "df494200c0e1bd881d5d39f64f3611f88c14af28fe105f640fd7e0adb7c73359",
+    "artifactByteJoinSHA256": "277ee01df516f18ae8e605c48ab6c8675e872f7aa566f5887e1aad376b77d2f9",
+    "scope": "Retained official advisory set, last captured October16, plus exact-source October18 Go analysis; explicit affected-code exceptions, no October20 advisory refresh or universal clearance."
+  },
+  "supportingInputRetention": {
+    "containedCopies": 190,
+    "retentionMapSHA256": "ca96f8b640bd56467ee1a47de34290d92598eac0558ade77f9a11aa74ade0842",
+    "originalsPreserved": true,
+    "runtimeArchiveProducer": "https://github.com/hostwright/hostwright/actions/runs/39171521610",
+    "runtimeArchiveArtifactID": 12157490664,
+    "sourceArchiveAlsoIncludedInSignedStage": true
+  }
+}

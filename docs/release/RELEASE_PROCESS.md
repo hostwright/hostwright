@@ -1,6 +1,6 @@
 # Release process
 
-The active target is `v0.0.2`. Current source prepares `0.0.2-rc.15`, the single replacement candidate for the October 22 closing attempt. It retains the managed-daemon correction and adds three targeted guest-kernel backports after RC.14 security review. Verified rebuilt pins, a clean source freeze and exact-source qualification remain required. See the [current readiness snapshot](ga-readiness-2026-10-22-rc15.md). Immutable `v0.0.2-dev.11` and `v0.0.2-dev.12` prereleases supply upgrade baselines; they remain unsupported and are not promoted in place.
+The active target is `v0.0.2`. Current source prepares `0.0.2-rc.16`, the replacement candidate for the explicitly authorized additional focused repair round on October 22. It retains the verified security-kernel bytes and completes their runtime producer source-patch ledger. A clean source freeze and exact-source qualification remain required; no further repair round is authorized. See the [current readiness snapshot](ga-readiness-2026-10-22-rc16.md). Immutable `v0.0.2-dev.11` and `v0.0.2-dev.12` prereleases supply upgrade baselines; they remain unsupported and are not promoted in place.
 
 ## Tag Policy
 

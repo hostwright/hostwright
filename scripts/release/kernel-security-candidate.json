@@ -45,6 +45,28 @@
       "stableCommit": "ddf51d74ee9f9857c99477329d80408cedebda61",
       "advisory": "CVE-2026-90336",
       "adaptation": "Adjust only the hunk start from 2810 to 2809 for the authenticated 6.18.55 source; preserve the complete upstream semantic change."
+    },
+    {
+      "path": "scripts/release/patches/kernel-security/0005-bpf-map-btf-destructor-lifetime.patch",
+      "sha256": "dc8a2ab01de7fcb44fd41cef262c058f6d61e592634c6855d3685e7a7164d12a",
+      "stableCommit": "b506f5699e145196ee29d76cf1ca1cbb2202c055",
+      "advisory": "CVE-2026-98813",
+      "adaptation": "Backport the complete upstream lifetime fix to 6.18.55 htab_set_dtor; use htab->map.btf in place of map->btf.",
+      "upstreamCommit": "ab39974240a0cff765f3bb9cce81d8001ffdb144"
+    },
+    {
+      "path": "scripts/release/patches/kernel-security/0006-vc-screen-reload-before-copy-error.patch",
+      "sha256": "db71d6dafb9be96b94a7ae5127b5498f555e90b9ee7aa82edd9bc83d25784c2e",
+      "stableCommit": "233a2e190b12884d186027d0b86d43a48799b69c",
+      "advisory": "CVE-2026-98840",
+      "adaptation": "Exact upstream stable 6.18 patch; no local hunk adaptation."
+    },
+    {
+      "path": "scripts/release/patches/kernel-security/0007-ipv6-tunnel-extension-header-validation.patch",
+      "sha256": "db9581188707957c0e4d2063b76fe00c985f5ebed23a7370e4a949b189d06768",
+      "stableCommit": "aa480f05aed7a9eee87d4a6fc90647fe9679c670",
+      "advisory": "CVE-2026-98852",
+      "adaptation": "Exact upstream stable 6.18 patch; preserve both BIG TCP hop-option jumbo exemptions."
     }
   ],
   "requiredDisabled": [
@@ -81,7 +103,10 @@
     "include/net/ip_vs.h": "2fc032558c800a4041c7166e7dd6da052b291a00b9563be42ef97cbd78caedfb",
     "net/netfilter/ipvs/ip_vs_core.c": "7000bac2e9e5bc22b73edba6608f0517a1b51ce32509799cecac7f49dc61ced4",
     "net/netfilter/ipvs/ip_vs_xmit.c": "f669a2df048ea734c97953ce9d688d91dece581439a3b70ec897e9a77db5d9de",
-    "drivers/tty/serial/serial_core.c": "061ceeae0a5c6a723ef3374a81d1977bac454985621bf602d7c816ff9752284c"
+    "drivers/tty/serial/serial_core.c": "061ceeae0a5c6a723ef3374a81d1977bac454985621bf602d7c816ff9752284c",
+    "kernel/bpf/hashtab.c": "78b350f1d7ba6ffa5cc60db133718424d5b1d451397247f35bf56961bfb7d27c",
+    "drivers/tty/vt/vc_screen.c": "925f42a95dea88d077c00f4c432b82a9e60f9f8cab0e2e71bc847e8dcbc0c892",
+    "net/core/dev.c": "83a1a83bdf7a979b0aa27170272748c5a71070ad52227243a8f391008ebed80c"
   },
   "upstreamDAXFix": "The authenticated 6.18.55 fs/dax.c already contains the zero/empty-entry checks before folio conversion from the previous downstream patch."
 }

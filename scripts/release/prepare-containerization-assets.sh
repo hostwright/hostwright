@@ -5,7 +5,7 @@ umask 077
 readonly framework_version="0.35.0"
 readonly kernel_name="vmlinux-6.18.55-186"
 readonly kernel_size="16216576"
-readonly kernel_sha256="3dd936598c8e457d2c95e69fc987f8426d76671564d8f2ab658800c185f8c746"
+readonly kernel_sha256="1ea99b8be7e6becdb255bd8dffcd0434f6725cab2514f3386b667d3d8ad4ad91"
 readonly manifest_digest="279d191a42539a5ad4e4e73f396d9356cbc7fc865e335bb85efd3b2588da1212"
 readonly manifest_size="406"
 readonly configuration_digest="c6decfc522bff7ccf321cde092127761fef4a34d5b07912fb8183304f13ac3ec"

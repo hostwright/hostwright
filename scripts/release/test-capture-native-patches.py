@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import importlib.util
+import json
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -16,6 +18,17 @@ def load(name, filename):
 
 P = load("native_patches", "capture-native-patches.py")
 S = load("patch_source_capture", "capture-runtime-source.py")
+
+
+class RuntimeProducerPatchContractTests(unittest.TestCase):
+    def test_kernel_capture_covers_the_complete_declared_patch_series(self):
+        here = Path(__file__).parent
+        profile = json.loads((here / "kernel-security-candidate.json").read_text())
+        producer = (here / "build-runtime-ingredients.sh").read_text()
+        capture = producer.split('python3 "$patch_capture" --repository "$work/sources/linux"', 1)[1]
+        capture = capture.split('--output', 1)[0]
+        captured = re.findall(r'--patch "\$PWD/([^"]+)"', capture)
+        self.assertEqual([row["path"] for row in profile["patches"]], captured)
 
 
 class NativePatchTests(unittest.TestCase):

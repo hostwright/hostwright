@@ -1,5 +1,6 @@
 import Foundation
 import HostwrightCore
+import HostwrightNetworking
 import HostwrightRuntime
 
 public enum LifecycleRollbackPlanningError: Error, Equatable, Sendable {
@@ -366,6 +367,7 @@ public struct LifecycleRollbackPlanner: Sendable {
 
         let rollbackNodes = try makeRollbackNodes(
             for: mutatingEffects,
+            sourceNodes: updatePlan.nodes,
             healthyRevisions: healthyRevisions
         )
         let plan = LifecycleRollbackPlan(
@@ -399,8 +401,56 @@ public struct LifecycleRollbackPlanner: Sendable {
         }
     }
 
+    static func compensationOrder(
+        sourceNodes: [LifecyclePlanNode], effectedNodes: [LifecyclePlanNode]
+    ) throws -> [LifecyclePlanNode] {
+        var ordered = Array(effectedNodes.reversed())
+        func depends(_ node: LifecyclePlanNode, on key: String) -> Bool {
+            var pending = node.dependencies
+            var seen: Set<String> = []
+            while let dependency = pending.popLast() {
+                if dependency == key { return true }
+                if seen.insert(dependency).inserted,
+                   let next = sourceNodes.first(where: { $0.key == dependency }) { pending += next.dependencies }
+            }
+            return false
+        }
+        for retired in ordered.filter({ $0.action == .retire && $0.compensation?.action == .create }) {
+            let previous = try LifecycleRevisionCodec.decodeRedactedDesiredJSON(retired.desiredSpecificationJSONRedacted)
+            guard !previous.ports.isEmpty else { continue }
+            let removals = try ordered.filter { candidate in
+                guard candidate.action == .create,
+                      candidate.compensation?.action == .delete || candidate.compensation?.action == .retire,
+                      candidate.resourceUUID != retired.resourceUUID, depends(retired, on: candidate.key),
+                      sourceNodes.contains(where: {
+                          $0.action == .stop && $0.compensation?.action == .start &&
+                              $0.resourceUUID == retired.resourceUUID && $0.resourceIdentifier == retired.resourceIdentifier &&
+                              $0.resourceGeneration == retired.resourceGeneration && depends(candidate, on: $0.key)
+                      }) else { return false }
+                let desired = try LifecycleRevisionCodec.decodeRedactedDesiredJSON(candidate.desiredSpecificationJSONRedacted)
+                return desired.identity == previous.identity && previous.ports.contains { old in
+                    desired.ports.contains { new in
+                        guard let oldPort = old.hostPort, let newPort = new.hostPort else { return false }
+                        return NetworkBindAddressPolicy.hostPortsConflict(
+                            lhsBindAddress: old.bindAddress, lhsHostPort: oldPort, lhsProtocolName: old.protocolName.rawValue,
+                            rhsBindAddress: new.bindAddress, rhsHostPort: newPort, rhsProtocolName: new.protocolName.rawValue
+                        )
+                    }
+                }
+            }
+            let removalKeys = Set(removals.map(\.key))
+            guard let oldIndex = ordered.firstIndex(where: { $0.key == retired.key }),
+                  let lastRemoval = ordered.lastIndex(where: { removalKeys.contains($0.key) }), oldIndex < lastRemoval else { continue }
+            ordered.remove(at: oldIndex)
+            let insertion = ordered.lastIndex(where: { removalKeys.contains($0.key) })! + 1
+            ordered.insert(retired, at: insertion)
+        }
+        return ordered
+    }
+
     private func makeRollbackNodes(
         for effectedNodes: [LifecyclePlanNode],
+        sourceNodes: [LifecyclePlanNode],
         healthyRevisions: [LifecycleHealthyRevisionRecord]
     ) throws -> [LifecyclePlanNode] {
         let healthyByUUID = healthyRevisions.reduce(into: [:]) {
@@ -408,7 +458,7 @@ public struct LifecycleRollbackPlanner: Sendable {
         }
         var rollbackNodes: [LifecyclePlanNode] = []
         var previousRollbackKey: String?
-        for effect in effectedNodes.reversed() {
+        for effect in try Self.compensationOrder(sourceNodes: sourceNodes, effectedNodes: effectedNodes) {
             guard let inverse = effect.compensation else {
                 continue
             }

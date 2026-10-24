@@ -1579,7 +1579,10 @@ public struct LifecycleSagaExecutor: Sendable {
                 .filter { $0.direction == .rollback },
             by: \.stepKey
         )
-        for node in affected.reversed() where node.action.mutatesRuntime {
+        let compensationOrder = plan.command == .update
+            ? try LifecycleRollbackPlanner.compensationOrder(sourceNodes: plan.nodes, effectedNodes: affected)
+            : Array(affected.reversed())
+        for node in compensationOrder where node.action.mutatesRuntime {
             guard let compensation = node.compensation else {
                 return try safeHold(
                     plan: plan,

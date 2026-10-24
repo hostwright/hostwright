@@ -9,6 +9,139 @@ import XCTest
 @testable import HostwrightState
 
 final class NetworkPortLifecycleCoordinatorTests: XCTestCase {
+    func testSamePortUpdateHandoffAndActivationPreserveStoppedPredecessor() throws {
+        let update = try makePortUpdate()
+        defer { update.prior.cleanup() }
+        let before = try update.prior.store.networkPorts.loadProject(projectUUID: update.candidate.plan.projectResourceUUID)
+        let reserved = try reservePortUpdate(update)
+        XCTAssertEqual(reserved.records.map(\.resourceUUID), [update.candidate.node.resourceUUID])
+        XCTAssertEqual(try update.prior.store.networkPorts.load(id: before[0].id)?.lifecycleState, .released)
+        XCTAssertEqual(try reservePortUpdate(update), reserved)
+        let active = try NetworkPortLifecycleCoordinator.confirmActive(
+            node: update.candidate.node, plan: update.candidate.plan, group: update.candidate.group,
+            inventory: updateInventory(update, candidate: true), store: update.prior.store
+        )
+        XCTAssertEqual(active.records.map(\.lifecycleState), [.active])
+    }
+
+    func testSamePortUpdateRefusesRunningUnmanagedAndIncompletePriorWithoutChanges() throws {
+        for fault in ["running", "unmanaged", "incomplete", "projection", "socket", "other-owner"] {
+            let update = try makePortUpdate()
+            defer { update.prior.cleanup() }
+            let before = try update.prior.store.networkPorts.loadProject(projectUUID: update.candidate.plan.projectResourceUUID, includeReleased: true)
+            let snapshot = try updateInventory(update, fault: fault)
+            XCTAssertThrowsError(try reservePortUpdate(update, inventory: snapshot, available: fault != "socket"), fault)
+            XCTAssertEqual(try update.prior.store.networkPorts.loadProject(projectUUID: update.candidate.plan.projectResourceUUID, includeReleased: true), before, fault)
+        }
+    }
+
+    func testSamePortHandoffRefusesLeaseReplacementDuringSocketProbeAtomically() throws {
+        let update = try makePortUpdate()
+        defer { update.prior.cleanup() }
+        let before = try update.prior.store.networkPorts.loadProject(projectUUID: update.candidate.plan.projectResourceUUID, includeReleased: true)
+        XCTAssertThrowsError(try NetworkPortLifecycleCoordinator.reserve(service: update.candidate.service,
+            node: update.candidate.node, plan: update.candidate.plan, group: update.candidate.group,
+            inventory: updateInventory(update), store: update.prior.store, isAvailable: { _ in
+                try update.prior.store.withConnection { connection in
+                    try connection.run("UPDATE operation_groups SET lock_owner = 'replacement-owner' WHERE id = ?",
+                        bindings: [.text(update.candidate.group.id)])
+                }
+                return true
+            }))
+        XCTAssertEqual(try update.prior.store.networkPorts.loadProject(projectUUID: update.candidate.plan.projectResourceUUID, includeReleased: true), before)
+    }
+
+    func testSamePortRollbackReacquiresBeforeRestartAndConfirmsOriginalCreationFence() throws {
+        let update = try makePortUpdate()
+        defer { update.prior.cleanup() }
+        _ = try reservePortUpdate(update)
+        let start = try compensationNode(update.stop, action: .start)
+        let rollback = try NetworkPortLifecycleCoordinator.reserve(
+            service: update.prior.service, node: start, plan: update.candidate.plan,
+            group: update.candidate.group, inventory: updateInventory(update), store: update.prior.store
+        )
+        XCTAssertEqual(rollback.records.map(\.resourceUUID), [update.prior.node.resourceUUID])
+        let originalRunning = try RuntimeInventoryBuilder.markRuntimeListAuthoritative(
+            inventory(fixture: update.prior, ports: update.ports), source: .appleContainerCLIRuntimeList
+        )
+        let active = try NetworkPortLifecycleCoordinator.confirmActive(
+            node: start, plan: update.candidate.plan, group: update.candidate.group,
+            inventory: originalRunning, store: update.prior.store
+        )
+        XCTAssertEqual(active.records.map(\.lifecycleState), [.active])
+        XCTAssertEqual(try update.prior.store.networkPorts.loadProject(projectUUID: update.candidate.plan.projectResourceUUID).map(\.resourceUUID), [update.prior.node.resourceUUID])
+    }
+
+    func testSamePortRollbackRefusesCandidateThatWasActivatedOrIsStillPresent() throws {
+        for activated in [false, true] {
+            let update = try makePortUpdate()
+            defer { update.prior.cleanup() }
+            _ = try reservePortUpdate(update)
+            if activated {
+                _ = try NetworkPortLifecycleCoordinator.confirmActive(
+                    node: update.candidate.node, plan: update.candidate.plan, group: update.candidate.group,
+                    inventory: updateInventory(update, candidate: true), store: update.prior.store
+                )
+            }
+            let before = try update.prior.store.networkPorts.loadProject(projectUUID: update.candidate.plan.projectResourceUUID, includeReleased: true)
+            XCTAssertThrowsError(try NetworkPortLifecycleCoordinator.reserve(
+                service: update.prior.service, node: compensationNode(update.stop, action: .start),
+                plan: update.candidate.plan, group: update.candidate.group,
+                inventory: updateInventory(update, candidate: !activated), store: update.prior.store
+            ))
+            XCTAssertEqual(try update.prior.store.networkPorts.loadProject(projectUUID: update.candidate.plan.projectResourceUUID, includeReleased: true), before)
+        }
+    }
+
+    func testRetiredPriorRecreationRequiresCandidateReleaseAndDurableInverseCreationProof() throws {
+        for explicit in [false, true] {
+            let update = try makePortUpdate(includeRetire: true)
+            defer { update.prior.cleanup() }
+            let retire = try XCTUnwrap(update.retire)
+            _ = try reservePortUpdate(update)
+            _ = try NetworkPortLifecycleCoordinator.confirmActive(node: update.candidate.node,
+                plan: update.candidate.plan, group: update.candidate.group,
+                inventory: updateInventory(update, candidate: true), store: update.prior.store)
+            let deletion = try compensationNode(update.candidate.node, action: .delete)
+            let candidateOnly = try RuntimeInventoryBuilder.markRuntimeListAuthoritative(
+                inventory(fixture: update.candidate, ports: update.ports), source: .appleContainerCLIRuntimeList)
+            _ = try NetworkPortLifecycleCoordinator.beginRelease(node: deletion, plan: update.candidate.plan,
+                group: update.candidate.group, inventory: candidateOnly, store: update.prior.store)
+            let absent = try RuntimeInventoryBuilder.markRuntimeListAuthoritative(
+                inventory(fixture: update.prior), source: .appleContainerCLIRuntimeList)
+            _ = try NetworkPortLifecycleCoordinator.confirmReleased(node: deletion, plan: update.candidate.plan,
+                group: update.candidate.group, inventory: absent, store: update.prior.store)
+            let restoration = try portRestoration(update, explicit: explicit)
+            let create = restoration.fixture.node
+            _ = try NetworkPortLifecycleCoordinator.reserve(service: update.prior.service, node: create,
+                plan: restoration.fixture.plan, group: restoration.fixture.group, inventory: absent, store: update.prior.store)
+            let recreated = try RuntimeInventoryBuilder.markRuntimeListAuthoritative(
+                inventory(fixture: restoration.fixture, ports: update.ports, lifecycle: .created), source: .appleContainerCLIRuntimeList)
+            _ = try NetworkPortLifecycleCoordinator.confirmActive(node: create, plan: restoration.fixture.plan,
+                group: restoration.fixture.group, inventory: recreated, store: update.prior.store)
+            XCTAssertThrowsError(try NetworkPortLifecycleCoordinator.reserve(service: update.prior.service,
+                node: restoration.start, plan: restoration.fixture.plan, group: restoration.fixture.group,
+                inventory: recreated, store: update.prior.store))
+            let proofNode = explicit ? create : retire
+            let direction: OperationGroupStepDirection = explicit ? .forward : .rollback
+            try update.prior.store.operationGroupSteps.append(OperationGroupStepRecord(id: UUID().uuidString.lowercased(),
+                groupID: restoration.fixture.group.id, stepKey: proofNode.key, direction: direction,
+                plannedActionType: "create", serviceName: proofNode.serviceName, resourceIdentifier: proofNode.resourceIdentifier,
+                stepIdempotencyKey: proofNode.idempotencyKey + ":" + direction.rawValue + ":1", status: .succeeded,
+                startedAt: nil, updatedAt: hostwrightTimestamp(), finishedAt: hostwrightTimestamp(),
+                lastErrorRedacted: nil, manualRecoveryHintRedacted: "", metadataJSONRedacted: "{}"),
+                expectedFencingToken: restoration.fixture.group.fencingToken, expectedLockOwner: restoration.fixture.group.lockOwner!)
+            _ = try NetworkPortLifecycleCoordinator.reserve(service: update.prior.service,
+                node: restoration.start, plan: restoration.fixture.plan, group: restoration.fixture.group,
+                inventory: recreated, store: update.prior.store)
+            let running = try RuntimeInventoryBuilder.markRuntimeListAuthoritative(
+                inventory(fixture: restoration.fixture, ports: update.ports), source: .appleContainerCLIRuntimeList)
+            let active = try NetworkPortLifecycleCoordinator.confirmActive(node: restoration.start,
+                plan: restoration.fixture.plan, group: restoration.fixture.group, inventory: running, store: update.prior.store)
+            XCTAssertEqual(active.records.map(\.resourceUUID), [update.prior.node.resourceUUID])
+        }
+    }
+
     func testCompensatedCreateCleanupRequiresAuthoritativeAbsenceAndExactLease() throws {
         let fixture = try makeFixture(ports: [RuntimePortMapping(hostPort: 18_180, containerPort: 8_080)])
         defer { fixture.cleanup() }
@@ -1010,8 +1143,7 @@ private func makeFixture(
         updatedAt: "2026-07-26T12:00:00Z",
         metadataJSONRedacted: "{}",
         fencingToken: fence,
-        intentJSONRedacted:
-            "{\"planSHA256\":\"\(plan.planSHA256)\"}",
+        intentJSONRedacted: try LifecyclePersistedIntentCodec.encode(plan),
         compensationJSONRedacted: "[\"delete\"]",
         verificationJSONRedacted: "{}"
     )
@@ -1060,7 +1192,8 @@ private func compensationNode(
         resourceUUID: source.resourceUUID,
         resourceGeneration: source.resourceGeneration,
         fencingToken: source.fencingToken,
-        timeoutSeconds: source.timeoutSeconds
+        timeoutSeconds: source.timeoutSeconds,
+        desiredSpecificationJSONRedacted: source.desiredSpecificationJSONRedacted
     )
 }
 
@@ -1068,7 +1201,8 @@ private func inventory(
     fixture: NetworkPortCoordinatorFixture,
     ports: [RuntimeInventoryPort] = [],
     managed: Bool = true,
-    name: String? = nil
+    name: String? = nil,
+    lifecycle: RuntimeInventoryLifecycleState = .running
 ) throws -> RuntimeInventory {
     let containers: [RuntimeInventoryContainer]
     if ports.isEmpty && name == nil {
@@ -1127,7 +1261,7 @@ private func inventory(
                 name:
                     name ?? fixture.node.resourceIdentifier!,
                 imageReference: fixture.service.image,
-                lifecycle: .running,
+                lifecycle: lifecycle,
                 health: RuntimeInventoryHealth(
                     availability: .notConfigured
                 ),
@@ -1159,6 +1293,124 @@ private func inventory(
         networks: [],
         volumes: []
     )
+}
+
+private struct PortUpdateFixture {
+    let prior: NetworkPortCoordinatorFixture
+    let candidate: NetworkPortCoordinatorFixture
+    let stop: LifecyclePlanNode
+    let retire: LifecyclePlanNode?
+    let ports: [RuntimeInventoryPort]
+}
+
+private func makePortUpdate(includeRetire: Bool = false) throws -> PortUpdateFixture {
+    let prior = try makeFixture(ports: [RuntimePortMapping(hostPort: 18_180, containerPort: 8_080)])
+    let ports = [RuntimeInventoryPort(hostAddress: "127.0.0.1", hostPort: 18_180, containerPort: 8_080, protocolName: .tcp)]
+    _ = try NetworkPortLifecycleCoordinator.reserve(service: prior.service, node: prior.node, plan: prior.plan,
+        group: prior.group, inventory: inventory(fixture: prior), store: prior.store)
+    _ = try NetworkPortLifecycleCoordinator.confirmActive(node: prior.node, plan: prior.plan, group: prior.group,
+        inventory: inventory(fixture: prior, ports: ports), store: prior.store)
+    try prior.store.operationGroups.finishExactLease(groupID: prior.group.id,
+        expectedFencingToken: prior.group.fencingToken, expectedLockOwner: prior.group.lockOwner!,
+        expectedLockExpiresAt: prior.group.lockExpiresAt!, status: .succeeded, checkpoint: "verified",
+        manualRecoveryHintRedacted: "", updatedAt: hostwrightTimestamp(), metadataJSONRedacted: "{}")
+    let fence = UUID().uuidString.lowercased()
+    let stop = try LifecyclePlanNode(key: "api-quiesce", action: .stop, serviceName: "api",
+        resourceIdentifier: prior.node.resourceIdentifier, resourceUUID: prior.node.resourceUUID,
+        resourceGeneration: prior.node.resourceGeneration, fencingToken: fence,
+        compensation: LifecycleCompensation(action: .start),
+        desiredSpecificationJSONRedacted: LifecycleRevisionCodec.redactedDesiredJSON(for: prior.service))
+    let candidate = try LifecyclePlanNode(key: "api-candidate", action: .create, serviceName: "api",
+        resourceIdentifier: String(prior.node.resourceIdentifier!.dropLast(32)) + String(repeating: "c", count: 32), resourceUUID: UUID().uuidString.lowercased(),
+        resourceGeneration: 2, fencingToken: fence, dependencies: [stop.key],
+        compensation: LifecycleCompensation(action: .delete),
+        desiredSpecificationJSONRedacted: LifecycleRevisionCodec.redactedDesiredJSON(for: prior.service))
+    let retire = try LifecyclePlanNode(key: "api-retire", action: .retire, serviceName: "api",
+        resourceIdentifier: prior.node.resourceIdentifier, resourceUUID: prior.node.resourceUUID,
+        resourceGeneration: prior.node.resourceGeneration, fencingToken: fence, dependencies: [candidate.key],
+        compensation: LifecycleCompensation(action: .create),
+        desiredSpecificationJSONRedacted: LifecycleRevisionCodec.redactedDesiredJSON(for: prior.service))
+    let plan = try LifecyclePlan(command: .update, projectID: prior.plan.projectID, projectName: prior.plan.projectName,
+        projectResourceUUID: prior.plan.projectResourceUUID, projectGeneration: prior.plan.projectGeneration,
+        providerID: prior.plan.providerID, providerGeneration: prior.plan.providerGeneration,
+        manifestSHA256: digest("d"), observationSHA256: digest("b"), capabilitySHA256: digest("c"), nodes: [stop, candidate] + (includeRetire ? [retire] : []))
+    let id = UUID().uuidString.lowercased()
+    let group = OperationGroupRecord(id: id, operationID: id, groupKind: "lifecycle-v1", projectID: plan.projectID,
+        serviceName: nil, plannedActionType: "update", status: .active, groupIdempotencyKey: plan.planSHA256,
+        planHash: plan.planSHA256, checkpoint: "intent-persisted", lockOwner: "port-update-test",
+        lockExpiresAt: "2027-07-26T12:00:00Z", rollbackAvailable: true, manualRecoveryHintRedacted: "",
+        createdAt: hostwrightTimestamp(), updatedAt: hostwrightTimestamp(), metadataJSONRedacted: "{}",
+        fencingToken: fence, intentJSONRedacted: try LifecyclePersistedIntentCodec.encode(plan),
+        compensationJSONRedacted: "[]", verificationJSONRedacted: "{}")
+    XCTAssertNotNil(try prior.store.operationGroups.acquire(group).acquired)
+    try prior.store.operationGroupSteps.append(OperationGroupStepRecord(id: UUID().uuidString.lowercased(),
+        groupID: group.id, stepKey: stop.key, direction: .forward, plannedActionType: "stop", serviceName: "api",
+        resourceIdentifier: stop.resourceIdentifier, stepIdempotencyKey: "port-quiesce", status: .succeeded,
+        startedAt: nil, updatedAt: hostwrightTimestamp(), finishedAt: hostwrightTimestamp(), lastErrorRedacted: nil,
+        manualRecoveryHintRedacted: "", metadataJSONRedacted: "{}"), expectedFencingToken: fence, expectedLockOwner: group.lockOwner!)
+    return PortUpdateFixture(prior: prior,
+        candidate: NetworkPortCoordinatorFixture(root: prior.root, store: prior.store, service: prior.service,
+            node: candidate, plan: plan, group: group), stop: stop, retire: includeRetire ? retire : nil, ports: ports)
+}
+
+private func portRestoration(_ update: PortUpdateFixture, explicit: Bool) throws -> (fixture: NetworkPortCoordinatorFixture, start: LifecyclePlanNode) {
+    let retire = try XCTUnwrap(update.retire)
+    if !explicit {
+        return (NetworkPortCoordinatorFixture(root: update.prior.root, store: update.prior.store,
+            service: update.prior.service, node: try compensationNode(retire, action: .create),
+            plan: update.candidate.plan, group: update.candidate.group), try compensationNode(update.stop, action: .start))
+    }
+    try update.prior.store.operationGroups.finishExactLease(groupID: update.candidate.group.id,
+        expectedFencingToken: update.candidate.group.fencingToken, expectedLockOwner: update.candidate.group.lockOwner!,
+        expectedLockExpiresAt: update.candidate.group.lockExpiresAt!, status: .failed, checkpoint: "compensated",
+        manualRecoveryHintRedacted: "", updatedAt: hostwrightTimestamp(), metadataJSONRedacted: "{}")
+    let fence = UUID().uuidString.lowercased()
+    let source = LifecyclePlanCondition(kind: "rollback-source-group", subject: update.candidate.group.id,
+        expectedValue: update.candidate.plan.planSHA256)
+    func inverse(_ original: LifecyclePlanNode, action: LifecyclePlanAction, dependencies: [String]) throws -> LifecyclePlanNode {
+        try LifecyclePlanNode(key: "rollback-" + original.key, action: action, serviceName: original.serviceName,
+            resourceIdentifier: original.resourceIdentifier, resourceUUID: original.resourceUUID,
+            resourceGeneration: original.resourceGeneration, fencingToken: fence, dependencies: dependencies,
+            preconditions: [source], postconditions: [LifecyclePlanCondition(kind: "rollback-effect-verified",
+                subject: original.key, expectedValue: "true")], desiredSpecificationJSONRedacted: original.desiredSpecificationJSONRedacted)
+    }
+    let create = try inverse(retire, action: .create, dependencies: [])
+    let start = try inverse(update.stop, action: .start, dependencies: [create.key])
+    let previous = update.candidate.plan
+    let plan = try LifecyclePlan(command: .rollback, projectID: previous.projectID, projectName: previous.projectName,
+        projectResourceUUID: previous.projectResourceUUID, projectGeneration: previous.projectGeneration,
+        providerID: previous.providerID, providerGeneration: previous.providerGeneration,
+        manifestSHA256: previous.manifestSHA256, observationSHA256: previous.observationSHA256,
+        capabilitySHA256: previous.capabilitySHA256, nodes: [create, start])
+    let id = UUID().uuidString.lowercased()
+    let group = OperationGroupRecord(id: id, operationID: id, groupKind: "lifecycle-v1", projectID: plan.projectID,
+        serviceName: nil, plannedActionType: "rollback", status: .active, groupIdempotencyKey: plan.planSHA256,
+        planHash: plan.planSHA256, checkpoint: "intent-persisted", lockOwner: "port-rollback-test",
+        lockExpiresAt: "2027-07-26T12:00:00Z", rollbackAvailable: false, manualRecoveryHintRedacted: "",
+        createdAt: hostwrightTimestamp(), updatedAt: hostwrightTimestamp(), metadataJSONRedacted: "{}",
+        fencingToken: fence, intentJSONRedacted: try LifecyclePersistedIntentCodec.encode(plan),
+        compensationJSONRedacted: "[]", verificationJSONRedacted: "{}")
+    XCTAssertNotNil(try update.prior.store.operationGroups.acquire(group).acquired)
+    return (NetworkPortCoordinatorFixture(root: update.prior.root, store: update.prior.store,
+        service: update.prior.service, node: create, plan: plan, group: group), start)
+}
+
+private func updateInventory(_ update: PortUpdateFixture, candidate: Bool = false, fault: String = "") throws -> RuntimeInventory {
+    let old = try inventory(fixture: update.prior,
+        ports: fault == "projection" ? [RuntimeInventoryPort(hostAddress: "127.0.0.1", hostPort: 18_181, containerPort: 8_080, protocolName: .tcp)] : update.ports,
+        managed: fault != "unmanaged", lifecycle: fault == "running" ? .running : .stopped)
+    let new = try inventory(fixture: update.candidate, ports: candidate ? update.ports : [])
+    let combined = try RuntimeInventoryBuilder.build(machine: old.machine,
+        containers: old.containers + new.containers + (fault == "other-owner" ? try inventory(fixture: update.prior,
+            ports: update.ports, managed: false, name: "unmanaged-port-owner").containers : []),
+        images: [], networks: [], volumes: [])
+    return fault == "incomplete" ? combined : try RuntimeInventoryBuilder.markRuntimeListAuthoritative(combined, source: .appleContainerCLIRuntimeList)
+}
+
+private func reservePortUpdate(_ update: PortUpdateFixture, inventory: RuntimeInventory? = nil, available: Bool = true) throws -> NetworkPortReservationBatch {
+    try NetworkPortLifecycleCoordinator.reserve(service: update.candidate.service, node: update.candidate.node,
+        plan: update.candidate.plan, group: update.candidate.group, inventory: inventory ?? updateInventory(update),
+        store: update.prior.store, isAvailable: { _ in available })
 }
 
 private func digest(_ value: Character) -> String {

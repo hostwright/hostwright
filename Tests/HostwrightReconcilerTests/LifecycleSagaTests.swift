@@ -792,6 +792,46 @@ final class LifecycleSagaExecutorTests: XCTestCase {
         XCTAssertEqual(steps.filter { $0.status == .succeeded }.count, 1)
     }
 
+    func testSamePortRetirementCompensationDeletesCandidateBeforeRecreatingPrior() async throws {
+        let fixture = try makeCustomFixture(parallelism: 1, command: .update) { fence in
+            let desired = DesiredRuntimeService(identity: RuntimeServiceIdentity(projectName: "demo", serviceName: "web"),
+                image: "local/web@sha256:abc", ports: [RuntimePortMapping(hostPort: 18_180, containerPort: 8_080)])
+            let json = try LifecycleRevisionCodec.redactedDesiredJSON(for: desired)
+            let old = HostwrightResourceUUID.generate()
+            let new = HostwrightResourceUUID.generate()
+            let stop = try LifecyclePlanNode(key: "quiesce", action: .stop, serviceName: "web",
+                resourceIdentifier: "old-web", resourceUUID: old, resourceGeneration: 1, fencingToken: fence,
+                compensation: LifecycleCompensation(action: .start), desiredSpecificationJSONRedacted: json)
+            let create = try LifecyclePlanNode(key: "candidate", action: .create, serviceName: "web",
+                resourceIdentifier: "new-web", resourceUUID: new, resourceGeneration: 2, fencingToken: fence,
+                dependencies: [stop.key], compensation: LifecycleCompensation(action: .delete), desiredSpecificationJSONRedacted: json)
+            let retire = try LifecyclePlanNode(key: "retire", action: .retire, serviceName: "web",
+                resourceIdentifier: "old-web", resourceUUID: old, resourceGeneration: 1, fencingToken: fence,
+                dependencies: [create.key], compensation: LifecycleCompensation(action: .create), desiredSpecificationJSONRedacted: json)
+            let failure = try LifecyclePlanNode(key: "later-failure", action: .create, serviceName: "other",
+                resourceIdentifier: "other", resourceUUID: HostwrightResourceUUID.generate(), resourceGeneration: 1,
+                fencingToken: fence, dependencies: [retire.key], compensation: LifecycleCompensation(action: .delete),
+                desiredSpecificationJSONRedacted: json)
+            return [stop, create, retire, failure]
+        }
+        defer { fixture.cleanup() }
+        let failure = normalizedFailure(category: .rejected, retry: .never, recovery: .none, operationID: fixture.operationID)
+        let effects = ScriptedLifecycleEffects(apply: [.accepted, .accepted, .accepted, .failed(failure)],
+            observe: [.satisfied(LifecycleNodeVerification(summaryRedacted: "stopped")),
+                .satisfied(LifecycleNodeVerification(summaryRedacted: "created")),
+                .satisfied(LifecycleNodeVerification(summaryRedacted: "retired")),
+                .noEffect(LifecycleNodeVerification(summaryRedacted: "rejected"))], compensate: [])
+        let result = try await LifecycleSagaExecutor(store: fixture.store, effects: effects,
+            validator: ExactLifecycleValidator(), clock: FixedLifecycleClock()).execute(plan: fixture.plan,
+                operationID: fixture.operationID, groupID: fixture.groupID, fencingToken: fixture.fence, lockOwner: "lifecycle-test")
+        XCTAssertEqual(result.status, .compensated)
+        let order = await effects.compensatedNodeKeys()
+        XCTAssertEqual(order, ["candidate", "retire", "quiesce"])
+        let steps = try fixture.store.operationGroupSteps.load(groupID: fixture.groupID)
+            .filter { $0.direction == .rollback && $0.status == .succeeded }
+        XCTAssertEqual(steps.map(\.plannedActionType), ["delete", "create", "start"])
+    }
+
     func testDefinitiveFailureCompensatesPreviouslyVerifiedEffectsInReverse() async throws {
         let fixture = try makeFixture(nodeCount: 2)
         defer { fixture.cleanup() }
@@ -1546,6 +1586,7 @@ final class LifecycleSagaExecutorTests: XCTestCase {
 
     private func makeCustomFixture(
         parallelism: Int,
+        command: LifecycleCommand = .up,
         nodes: (String) throws -> [LifecyclePlanNode]
     ) throws -> LifecycleSagaFixture {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -1586,7 +1627,7 @@ final class LifecycleSagaExecutorTests: XCTestCase {
             )
             let fence = HostwrightResourceUUID.generate()
             let plan = try LifecyclePlan(
-                command: .up,
+                command: command,
                 projectID: projectID,
                 projectName: "demo",
                 projectResourceUUID: HostwrightResourceUUID.legacy(

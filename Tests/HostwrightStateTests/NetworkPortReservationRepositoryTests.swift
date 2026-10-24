@@ -11,6 +11,45 @@ final class NetworkPortReservationRepositoryTests: XCTestCase {
     private let resourceUUID =
         "92000000-0000-4000-8000-000000000001"
 
+    func testAtomicReservationChangesRollBackEveryWriteOnConflict() throws {
+        try withStore { store in
+            try seedProject(store)
+            let group = try operationGroup(store, suffix: "01")
+            let original = record(idSuffix: "01", generation: 1, fence: group.fence, operationGroupID: group.id)
+            _ = try store.networkPorts.save(original)
+            let first = record(idSuffix: "02", generation: 1, fence: group.fence,
+                hostPort: 18_081, operationGroupID: group.id)
+            let conflict = record(idSuffix: "03", generation: 1, fence: group.fence, operationGroupID: group.id)
+            XCTAssertThrowsError(try store.networkPorts.saveAtomically([(first, nil), (conflict, nil)]))
+            XCTAssertNil(try store.networkPorts.load(id: first.id))
+            XCTAssertNil(try store.networkPorts.load(id: conflict.id))
+            XCTAssertEqual(try store.networkPorts.load(id: original.id), original)
+            XCTAssertEqual(try store.networkPorts.activeHostPorts(bindAddress: "127.0.0.1", protocolName: .tcp), [18_080])
+            XCTAssertEqual(try store.networkPorts.activeHostPorts(bindAddress: "127.0.0.1", protocolName: .tcp,
+                excludingIDs: [original.id]), [])
+        }
+    }
+
+    func testAtomicHandoffRefusesExpiredOrReplacedLeaseBeforeAnyWrite() throws {
+        for fault in ["expired", "owner"] {
+            try withStore { store in
+                try seedProject(store)
+                let group = try operationGroup(store, suffix: "01")
+                let observed = try XCTUnwrap(store.operationGroups.load(id: group.id))
+                try store.withConnection { connection in
+                    try connection.run(fault == "expired"
+                        ? "UPDATE operation_groups SET lock_expires_at = '2020-01-01T00:00:00Z' WHERE id = ?"
+                        : "UPDATE operation_groups SET lock_owner = 'replacement-owner' WHERE id = ?",
+                        bindings: [.text(group.id)])
+                }
+                let expected = fault == "expired" ? try XCTUnwrap(store.operationGroups.load(id: group.id)) : observed
+                let proposed = record(idSuffix: "01", generation: 1, fence: group.fence, operationGroupID: group.id)
+                XCTAssertThrowsError(try store.networkPorts.saveAtomically([(proposed, nil)], requiring: expected), fault)
+                XCTAssertNil(try store.networkPorts.load(id: proposed.id), fault)
+            }
+        }
+    }
+
     func testSchemaV16IncludesFencedPortReservationState() throws {
         try withStore { store in
             let columns = try store.withConnection(

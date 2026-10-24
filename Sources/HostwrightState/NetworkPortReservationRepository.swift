@@ -17,126 +17,161 @@ public struct NetworkPortReservationRepository: Sendable {
         _ record: NetworkPortReservationRecord,
         replacing expected: NetworkStateExpectedVersion? = nil
     ) throws -> NetworkPortReservationRecord {
-        try Self.validate(record)
-        return try store.withValidatedConnection { connection in
+        try saveAtomically([(record, expected)])[0]
+    }
+
+    @discardableResult
+    public func saveAtomically(
+        _ changes: [(record: NetworkPortReservationRecord, expected: NetworkStateExpectedVersion?)],
+        requiring lease: OperationGroupRecord? = nil
+    ) throws -> [NetworkPortReservationRecord] {
+        try store.withValidatedConnection { connection in
             try connection.transaction {
-                try Self.validateProjectBinding(
-                    projectUUID: record.projectUUID,
-                    providerID: record.providerID,
-                    providerGeneration: record.providerGeneration,
-                    on: connection
-                )
-                try Self.validateOperationGroup(
-                    id: record.operationGroupID,
-                    projectUUID: record.projectUUID,
-                    fencingToken: record.fencingToken,
-                    on: connection
-                )
-                if let existing = try Self.load(id: record.id, on: connection) {
-                    if existing == record {
-                        return record
-                    }
-                    try Self.validateReplacement(
-                        existing: existing,
-                        incoming: record,
-                        expected: expected
-                    )
-                    try Self.validateNoConflict(
-                        record,
-                        excludingID: existing.id,
-                        on: connection
-                    )
-                    try connection.run(
+                if let lease {
+                    let rows = try connection.query(
                         """
-                        UPDATE network_port_reservations
-                        SET generation = ?, provider_generation = ?,
-                            fencing_token = ?, desired_sha256 = ?,
-                            observed_sha256 = ?, lifecycle_state = ?,
-                            finalizer_state = ?, operation_group_id = ?,
-                            updated_at = ?
-                        WHERE id = ? AND generation = ?
-                          AND fencing_token = ?
-                        """,
-                        bindings: [
-                            .int64(record.generation),
-                            .int64(record.providerGeneration),
-                            .text(record.fencingToken),
-                            .text(record.desiredSHA256),
-                            optionalText(record.observedSHA256),
-                            .text(record.lifecycleState.rawValue),
-                            .text(record.finalizerState.rawValue),
-                            .text(record.operationGroupID),
-                            .text(record.updatedAt),
-                            .text(record.id),
-                            .int64(expected!.generation),
-                            .text(expected!.fencingToken)
-                        ]
+                        SELECT status, fencing_token, lock_owner, lock_expires_at, plan_hash, operation_id
+                        FROM operation_groups WHERE id = ?
+                        """, bindings: [.text(lease.id)]
                     )
-                } else {
-                    guard expected == nil,
-                          record.generation == 1,
-                          record.lifecycleState == .reserved,
-                          record.finalizerState == .active,
-                          record.observedSHA256 == nil else {
-                        throw StateStoreError.invalidRecord(
-                            "A new port reservation must begin as generation 1 durable reserved intent."
-                        )
+                    guard rows.count == 1, rows[0].count == 6,
+                          rows[0][0] == "active", rows[0][1] == lease.fencingToken,
+                          let owner = lease.lockOwner, !owner.isEmpty, rows[0][2] == owner,
+                          let expiry = lease.lockExpiresAt, rows[0][3] == expiry,
+                          rows[0][4] == lease.planHash, rows[0][5] == lease.operationID,
+                          ISO8601DateFormatter().date(from: expiry).map({ $0 > Date() }) == true,
+                          changes.allSatisfy({ $0.record.operationGroupID == lease.id && $0.record.fencingToken == lease.fencingToken }) else {
+                        throw StateStoreError.invalidRecord("Atomic port handoff lost its exact active finite operation lease.")
                     }
-                    try Self.validateNoConflict(
-                        record,
-                        excludingID: nil,
-                        on: connection
-                    )
-                    try connection.run(
-                        """
-                        INSERT INTO network_port_reservations (
-                            id, project_uuid, resource_uuid,
-                            service_name, generation, provider_id,
-                            provider_generation, fencing_token,
-                            bind_address, host_port, container_port,
-                            protocol, allocation_kind,
-                            desired_sha256, observed_sha256,
-                            lifecycle_state, finalizer_state,
-                            operation_group_id, created_at, updated_at
-                        ) VALUES (
-                            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-                        )
-                        """,
-                        bindings: [
-                            .text(record.id),
-                            .text(record.projectUUID),
-                            .text(record.resourceUUID),
-                            .text(record.serviceName),
-                            .int64(record.generation),
-                            .text(record.providerID),
-                            .int64(record.providerGeneration),
-                            .text(record.fencingToken),
-                            .text(record.bindAddress),
-                            .int(record.hostPort),
-                            .int(record.containerPort),
-                            .text(record.protocolName.rawValue),
-                            .text(record.allocationKind.rawValue),
-                            .text(record.desiredSHA256),
-                            optionalText(record.observedSHA256),
-                            .text(record.lifecycleState.rawValue),
-                            .text(record.finalizerState.rawValue),
-                            .text(record.operationGroupID),
-                            .text(record.createdAt),
-                            .text(record.updatedAt)
-                        ]
-                    )
                 }
-                guard try Self.load(id: record.id, on: connection) ==
-                        record else {
-                    throw StateStoreError.transactionInvariantViolation(
-                        message:
-                            "Port reservation compare-and-swap did not persist the exact record."
-                    )
+                return try changes.map { record, expected in
+                    try Self.save(record, replacing: expected, on: connection)
                 }
-                return record
             }
         }
+    }
+
+    private static func save(
+        _ record: NetworkPortReservationRecord,
+        replacing expected: NetworkStateExpectedVersion?,
+        on connection: SQLiteConnection
+    ) throws -> NetworkPortReservationRecord {
+        try validate(record)
+        try Self.validateProjectBinding(
+            projectUUID: record.projectUUID,
+            providerID: record.providerID,
+            providerGeneration: record.providerGeneration,
+            on: connection
+        )
+        try Self.validateOperationGroup(
+            id: record.operationGroupID,
+            projectUUID: record.projectUUID,
+            fencingToken: record.fencingToken,
+            on: connection
+        )
+        if let existing = try Self.load(id: record.id, on: connection) {
+            if existing == record {
+                return record
+            }
+            try Self.validateReplacement(
+                existing: existing,
+                incoming: record,
+                expected: expected
+            )
+            try Self.validateNoConflict(
+                record,
+                excludingID: existing.id,
+                on: connection
+            )
+            try connection.run(
+                """
+                UPDATE network_port_reservations
+                SET generation = ?, provider_generation = ?,
+                    fencing_token = ?, desired_sha256 = ?,
+                    observed_sha256 = ?, lifecycle_state = ?,
+                    finalizer_state = ?, operation_group_id = ?,
+                    updated_at = ?
+                WHERE id = ? AND generation = ?
+                  AND fencing_token = ?
+                """,
+                bindings: [
+                    .int64(record.generation),
+                    .int64(record.providerGeneration),
+                    .text(record.fencingToken),
+                    .text(record.desiredSHA256),
+                    optionalText(record.observedSHA256),
+                    .text(record.lifecycleState.rawValue),
+                    .text(record.finalizerState.rawValue),
+                    .text(record.operationGroupID),
+                    .text(record.updatedAt),
+                    .text(record.id),
+                    .int64(expected!.generation),
+                    .text(expected!.fencingToken)
+                ]
+            )
+        } else {
+            guard expected == nil,
+                  record.generation == 1,
+                  record.lifecycleState == .reserved,
+                  record.finalizerState == .active,
+                  record.observedSHA256 == nil else {
+                throw StateStoreError.invalidRecord(
+                    "A new port reservation must begin as generation 1 durable reserved intent."
+                )
+            }
+            try Self.validateNoConflict(
+                record,
+                excludingID: nil,
+                on: connection
+            )
+            try connection.run(
+                """
+                INSERT INTO network_port_reservations (
+                    id, project_uuid, resource_uuid,
+                    service_name, generation, provider_id,
+                    provider_generation, fencing_token,
+                    bind_address, host_port, container_port,
+                    protocol, allocation_kind,
+                    desired_sha256, observed_sha256,
+                    lifecycle_state, finalizer_state,
+                    operation_group_id, created_at, updated_at
+                ) VALUES (
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                )
+                """,
+                bindings: [
+                    .text(record.id),
+                    .text(record.projectUUID),
+                    .text(record.resourceUUID),
+                    .text(record.serviceName),
+                    .int64(record.generation),
+                    .text(record.providerID),
+                    .int64(record.providerGeneration),
+                    .text(record.fencingToken),
+                    .text(record.bindAddress),
+                    .int(record.hostPort),
+                    .int(record.containerPort),
+                    .text(record.protocolName.rawValue),
+                    .text(record.allocationKind.rawValue),
+                    .text(record.desiredSHA256),
+                    optionalText(record.observedSHA256),
+                    .text(record.lifecycleState.rawValue),
+                    .text(record.finalizerState.rawValue),
+                    .text(record.operationGroupID),
+                    .text(record.createdAt),
+                    .text(record.updatedAt)
+                ]
+            )
+        }
+        guard try Self.load(id: record.id, on: connection) ==
+                record else {
+            throw StateStoreError.transactionInvariantViolation(
+                message:
+                    "Port reservation compare-and-swap did not persist the exact record."
+            )
+        }
+        return record
     }
 
     public func load(id: String) throws -> NetworkPortReservationRecord? {
@@ -175,12 +210,13 @@ public struct NetworkPortReservationRepository: Sendable {
 
     public func activeHostPorts(
         bindAddress: String,
-        protocolName: NetworkPortReservationProtocol
+        protocolName: NetworkPortReservationProtocol,
+        excludingIDs: Set<String> = []
     ) throws -> Set<Int> {
         try store.withValidatedConnection(readOnly: true) { connection in
             let rows = try connection.query(
                 """
-                SELECT host_port
+                SELECT id, host_port
                 FROM network_port_reservations
                 WHERE bind_address = ? AND protocol = ?
                   AND lifecycle_state != 'released'
@@ -191,15 +227,15 @@ public struct NetworkPortReservationRepository: Sendable {
                     .text(protocolName.rawValue)
                 ]
             )
-            return Set(try rows.map { row in
-                guard row.count == 1,
-                      let value = row[0],
+            return Set(try rows.compactMap { row -> Int? in
+                guard row.count == 2, let id = row[0],
+                      let value = row[1],
                       let port = Int(value) else {
                     throw StateStoreError.invalidRecord(
                         "Port reservation query returned an invalid host port."
                     )
                 }
-                return port
+                return excludingIDs.contains(id) ? nil : port
             })
         }
     }

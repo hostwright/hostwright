@@ -4342,13 +4342,21 @@ struct LifecycleLiveEffects:
         node: LifecyclePlanNode,
         context: LifecycleSagaContext
     ) async throws {
-        guard node.action == .create ||
+        let rollbackStart = node.action == .start &&
+            (context.plan.command == .update || context.plan.command == .rollback)
+        guard node.action == .create || rollbackStart ||
                 node.action == .delete ||
                 node.action == .retire else {
             return
         }
-        if node.action == .create {
-            guard let desired = action.desiredService else {
+        if node.action == .create || rollbackStart {
+            let group = try exactNetworkPortOperationGroup(context: context)
+            if try rollbackStart && !NetworkPortLifecycleCoordinator.requiresRollbackPortReservation(
+                node: node, plan: context.plan, group: group, store: store
+            ) { return }
+            var desired = action.desiredService
+            if desired == nil { desired = await state.desiredService(for: node.key) }
+            guard let desired else {
                 throw HostwrightDiagnostic(
                     code: .runtimeUnavailable,
                     message:
@@ -4358,9 +4366,6 @@ struct LifecycleLiveEffects:
             guard !desired.ports.isEmpty else {
                 return
             }
-            let group = try exactNetworkPortOperationGroup(
-                context: context
-            )
             let inventory = try await adapter.inventory()
             _ = try NetworkPortLifecycleCoordinator.reserve(
                 service: desired,
@@ -4405,7 +4410,9 @@ struct LifecycleLiveEffects:
         context: LifecycleSagaContext,
         inventory: RuntimeInventory
     ) throws {
-        guard node.action == .create ||
+        let rollbackStart = node.action == .start &&
+            (context.plan.command == .update || context.plan.command == .rollback)
+        guard node.action == .create || rollbackStart ||
                 node.action == .delete ||
                 node.action == .retire else {
             return
@@ -4421,7 +4428,10 @@ struct LifecycleLiveEffects:
         let group = try exactNetworkPortOperationGroup(
             context: context
         )
-        if node.action == .create {
+        if try rollbackStart && !NetworkPortLifecycleCoordinator.requiresRollbackPortReservation(
+            node: node, plan: context.plan, group: group, store: store
+        ) { return }
+        if node.action == .create || rollbackStart {
             _ = try NetworkPortLifecycleCoordinator.confirmActive(
                 node: node,
                 plan: context.plan,

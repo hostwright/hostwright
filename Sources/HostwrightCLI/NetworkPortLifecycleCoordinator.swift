@@ -95,10 +95,13 @@ enum NetworkPortLifecycleCoordinator {
         (RuntimeServiceIdentity) throws -> String?
 
     static func occupiedPorts(
-        in inventory: RuntimeInventory
+        in inventory: RuntimeInventory,
+        excludingResourceUUIDs: Set<String> = []
     ) -> Set<NetworkPortEndpoint> {
         Set(
-            inventory.containers.flatMap { container in
+            inventory.containers.filter { container in
+                !excludingResourceUUIDs.contains(container.ownership?.resourceUUID ?? "")
+            }.flatMap { container in
                 container.ports.compactMap {
                     port -> NetworkPortEndpoint? in
                     guard let hostPort = port.hostPort else {
@@ -380,7 +383,8 @@ enum NetworkPortLifecycleCoordinator {
             service.identity.displayName,
             service.logicalServiceName,
         ])
-        guard node.action == .create,
+        let rollback = try rollbackPortSource(node: node, plan: plan, group: group, store: store)
+        guard (node.action == .create || rollback != nil),
               node.serviceName.map(exactServiceNames.contains) == true,
               service.identity.projectName == plan.projectName else {
             throw conflict(
@@ -405,6 +409,22 @@ enum NetworkPortLifecycleCoordinator {
         let liveRecords = persisted.filter {
             $0.lifecycleState != .released
         }
+        let prior = try quiescedUpdatePrior(node: node, plan: plan, group: group, inventory: inventory, store: store)
+        let excluded: Set<String> = Set([prior?.node.resourceUUID, rollback?.node.resourceUUID].compactMap { $0 })
+        var changes: [(record: NetworkPortReservationRecord, expected: NetworkStateExpectedVersion?)] = []
+        if let rollback {
+            try requireStoppedPortOwner(node: rollback.node, plan: rollback.plan, group: group, inventory: inventory, store: store)
+            for candidate in rollback.plan.nodes where candidate.action == .create && depends(candidate, on: rollback.node.key, in: rollback.plan) {
+                let rows = liveRecords.filter { $0.resourceUUID == candidate.resourceUUID }
+                guard !rows.isEmpty else { continue }
+                guard targetContainers(node: candidate, inventory: inventory).isEmpty,
+                      rows.allSatisfy({ $0.operationGroupID == rollback.group.id && $0.fencingToken == rollback.group.fencingToken && $0.lifecycleState == .reserved && $0.observedSHA256 == nil }) else {
+                    throw conflict("Rollback cannot reacquire ports until the exact candidate is deleted or its unactivated intent is proven absent.")
+                }
+                changes += releaseChanges(rows, group: group, inventory: inventory, plan: plan)
+            }
+        }
+        let releasingIDs = Set(changes.map { $0.record.id })
         var claimed: Set<NetworkPortEndpoint> = []
         var existingRecords:
             [NetworkPortReservationRecord] = []
@@ -474,7 +494,8 @@ enum NetworkPortLifecycleCoordinator {
                     allowedResourceUUID: node.resourceUUID,
                     node: node,
                     plan: plan,
-                    allowedFencingTokens: [group.fencingToken]
+                    allowedFencingTokens: rollback == nil ? [group.fencingToken] : [group.fencingToken, inventory.containers.first(where: { $0.ownership?.resourceUUID == node.resourceUUID })?.ownership?.fencingToken ?? ""],
+                    excludingResourceUUIDs: excluded
                 )
                 if existing.operationGroupID == group.id,
                    existing.fencingToken ==
@@ -492,10 +513,7 @@ enum NetworkPortLifecycleCoordinator {
                           (priorGroup.status == .succeeded ||
                             (priorGroup.status == .failed && priorGroup.checkpoint == "compensated")),
                           inventory.isAuthoritative,
-                          targetContainers(
-                            node: node,
-                            inventory: inventory
-                          ).isEmpty,
+                          (targetContainers(node: node, inventory: inventory).isEmpty || rollback != nil),
                           try isAvailable(endpoint) else {
                         throw conflict(
                             "An earlier port reservation cannot be transferred while its exact runtime owner or operation is still present."
@@ -513,26 +531,22 @@ enum NetworkPortLifecycleCoordinator {
                         finalizerState: .active,
                         operationGroupID: group.id
                     )
-                    existingRecords.append(
-                        try store.networkPorts.save(
-                            renewed,
-                            replacing:
-                                existing.expectedVersion
-                        )
-                    )
+                    changes.append((renewed, existing.expectedVersion))
+                    existingRecords.append(renewed)
                 }
             } else {
-                let unavailable = try store.networkPorts
-                    .activeHostPorts(
-                        bindAddress: item.bindAddress,
-                        protocolName: reservationProtocol(
-                            item.mapping.protocolName
-                        )
-                    )
+                let handedOff = (prior?.records ?? []).filter { Self.endpoint($0).conflicts(with: endpoint) }
+                if !handedOff.isEmpty {
+                    changes += releaseChanges(handedOff, group: group, inventory: inventory, plan: plan)
+                }
+                let ignored = releasingIDs.union(handedOff.map(\.id))
+                let unavailable = try store.networkPorts.activeHostPorts(
+                    bindAddress: item.bindAddress, protocolName: reservationProtocol(item.mapping.protocolName), excludingIDs: ignored
+                )
                 guard !unavailable.contains(hostPort),
                       !containsConflict(
                           endpoint,
-                          in: occupiedPorts(in: inventory)
+                          in: occupiedPorts(in: inventory, excludingResourceUUIDs: excluded)
                       ),
                       try isAvailable(endpoint) else {
                     throw conflict(
@@ -581,9 +595,8 @@ enum NetworkPortLifecycleCoordinator {
             claimed.insert(endpoint)
         }
 
-        for record in newRecords.sorted(by: recordOrder) {
-            _ = try store.networkPorts.save(record)
-        }
+        changes += newRecords.sorted(by: recordOrder).map { ($0, nil) }
+        _ = try store.networkPorts.saveAtomically(changes, requiring: plan.command == .update || plan.command == .rollback ? group : nil)
         return NetworkPortReservationBatch(
             records: (existingRecords + newRecords)
                 .sorted(by: recordOrder)
@@ -604,10 +617,16 @@ enum NetworkPortLifecycleCoordinator {
             group: group,
             store: store
         )
-        guard node.action == .create else {
-            throw conflict(
-                "Port activation requires the exact lifecycle create node."
-            )
+        let rollback = try rollbackPortSource(node: node, plan: plan, group: group, store: store)
+        guard node.action == .create || rollback != nil else {
+            throw conflict("Port activation requires an exact create or authenticated rollback start.")
+        }
+        let prior = try quiescedUpdatePrior(node: node, plan: plan, group: group, inventory: inventory, store: store)
+        let excluded = Set([prior?.node.resourceUUID].compactMap { $0 })
+        var fences: Set<String> = [group.fencingToken]
+        if let rollback {
+            if let container = targetContainers(node: node, inventory: inventory).first,
+               let fence = try verifiedPortCreationFence(node: rollback.node, plan: rollback.plan, container: container, store: store, activeGroup: group) { fences.insert(fence) }
         }
         let records = try exactResourceRecords(
             node: node,
@@ -636,7 +655,7 @@ enum NetworkPortLifecycleCoordinator {
                   container.ownership,
                   node: node,
                   plan: plan,
-                  allowedFencingTokens: [group.fencingToken]
+                  allowedFencingTokens: fences
               ),
               exactObservedPorts(
                   records,
@@ -654,11 +673,13 @@ enum NetworkPortLifecycleCoordinator {
                 allowedResourceUUID: node.resourceUUID,
                 node: node,
                 plan: plan,
-                allowedFencingTokens: [group.fencingToken]
+                allowedFencingTokens: fences,
+                excludingResourceUUIDs: excluded
             )
         }
 
         var activated: [NetworkPortReservationRecord] = []
+        var changes: [(record: NetworkPortReservationRecord, expected: NetworkStateExpectedVersion?)] = []
         for record in records.sorted(by: recordOrder) {
             guard record.lifecycleState == .reserved else {
                 activated.append(record)
@@ -675,13 +696,10 @@ enum NetworkPortLifecycleCoordinator {
                 finalizerState: .active,
                 operationGroupID: group.id
             )
-            activated.append(
-                try store.networkPorts.save(
-                    active,
-                    replacing: record.expectedVersion
-                )
-            )
+            changes.append((active, record.expectedVersion))
+            activated.append(active)
         }
+        _ = try store.networkPorts.saveAtomically(changes, requiring: plan.command == .update || plan.command == .rollback ? group : nil)
         return NetworkPortReservationBatch(records: activated)
     }
 
@@ -909,6 +927,255 @@ enum NetworkPortLifecycleCoordinator {
             ), replacing: releasing.expectedVersion))
         }
         return NetworkPortReservationBatch(records: released)
+    }
+
+    private struct UpdatePortPrior {
+        let node: LifecyclePlanNode
+        let plan: LifecyclePlan
+        let group: OperationGroupRecord
+        let records: [NetworkPortReservationRecord]
+    }
+
+    private static func depends(_ node: LifecyclePlanNode, on key: String, in plan: LifecyclePlan) -> Bool {
+        var pending = node.dependencies
+        var seen: Set<String> = []
+        while let dependency = pending.popLast() {
+            if dependency == key { return true }
+            if seen.insert(dependency).inserted,
+               let next = plan.nodes.first(where: { $0.key == dependency }) {
+                pending += next.dependencies
+            }
+        }
+        return false
+    }
+
+    private static func requireUpdatePortLease(_ group: OperationGroupRecord, plan: LifecyclePlan, store: SQLiteStateStore) throws {
+        guard let persisted = try store.operationGroups.load(id: group.id),
+              persisted == group, group.status == .active,
+              let owner = group.lockOwner, !owner.isEmpty,
+              let expiry = group.lockExpiresAt,
+              ISO8601DateFormatter().date(from: expiry).map({ $0 > Date() }) == true,
+              try LifecyclePersistedIntentCodec.decode(group.intentJSONRedacted).planSHA256 == plan.planSHA256 else {
+            throw conflict("Update port handoff requires its exact persisted plan and active finite saga lease.")
+        }
+    }
+
+    private static func rollbackPortSource(
+        node: LifecyclePlanNode, plan: LifecyclePlan, group: OperationGroupRecord, store: SQLiteStateStore
+    ) throws -> UpdatePortPrior? {
+        guard node.action == .start else { return nil }
+        let sourcePlan: LifecyclePlan
+        let sourceGroup: OperationGroupRecord
+        let sourceNode: LifecyclePlanNode
+        if plan.command == .update,
+           let stop = plan.nodes.first(where: {
+               $0.key == node.key && $0.action == .stop && $0.compensation?.action == .start &&
+                   $0.resourceUUID == node.resourceUUID && $0.resourceIdentifier == node.resourceIdentifier &&
+                   $0.resourceGeneration == node.resourceGeneration
+           }) {
+            sourcePlan = plan; sourceGroup = group; sourceNode = stop
+        } else if plan.command == .rollback,
+                  let source = node.preconditions.first(where: { $0.kind == "rollback-source-group" }),
+                  let prior = try store.operationGroups.load(id: source.subject), prior.planHash == source.expectedValue,
+                  let key = node.postconditions.first(where: { $0.kind == "rollback-effect-verified" && $0.expectedValue == "true" })?.subject {
+            sourcePlan = try LifecyclePersistedIntentCodec.decode(prior.intentJSONRedacted)
+            guard sourcePlan.planSHA256 == prior.planHash, sourcePlan.command == .update,
+                  sourcePlan.projectResourceUUID == plan.projectResourceUUID,
+                  sourcePlan.projectGeneration == plan.projectGeneration,
+                  sourcePlan.providerID == plan.providerID, sourcePlan.providerGeneration == plan.providerGeneration,
+                  let stop = sourcePlan.nodes.first(where: {
+                      $0.key == key && $0.action == .stop && $0.compensation?.action == .start &&
+                          $0.resourceUUID == node.resourceUUID && $0.resourceIdentifier == node.resourceIdentifier &&
+                          $0.resourceGeneration == node.resourceGeneration
+                  }) else { throw conflict("Rollback port reacquisition lost its exact update source.") }
+            sourceGroup = prior; sourceNode = stop
+        } else { return nil }
+        try requireUpdatePortLease(group, plan: plan, store: store)
+        let step = try store.operationGroupSteps.load(groupID: sourceGroup.id).last {
+            $0.direction == .forward && $0.stepKey == sourceNode.key
+        }
+        guard step?.status == .succeeded || (step?.status == .started && node.preconditions.contains {
+            $0.kind == "rollback-source-effect-reobserved" && $0.subject == sourceNode.key && $0.expectedValue == sourceGroup.planHash
+        }) else { throw conflict("Rollback port reacquisition lacks its verified quiesce effect.") }
+        return UpdatePortPrior(node: sourceNode, plan: sourcePlan, group: sourceGroup, records: [])
+    }
+
+    private static func quiescedUpdatePrior(
+        node: LifecyclePlanNode, plan: LifecyclePlan, group: OperationGroupRecord,
+        inventory: RuntimeInventory, store: SQLiteStateStore
+    ) throws -> UpdatePortPrior? {
+        guard plan.command == .update, node.action == .create else { return nil }
+        let desired = try LifecycleRevisionCodec.decodeRedactedDesiredJSON(node.desiredSpecificationJSONRedacted)
+        let stops = try plan.nodes.filter { prior in
+            guard prior.action == .stop, prior.compensation?.action == .start,
+                  prior.resourceUUID != node.resourceUUID, depends(node, on: prior.key, in: plan) else { return false }
+            return try LifecycleRevisionCodec.decodeRedactedDesiredJSON(prior.desiredSpecificationJSONRedacted).identity == desired.identity
+        }
+        guard stops.count <= 1 else { throw conflict("Update port handoff found ambiguous predecessors.") }
+        guard let prior = stops.first else { return nil }
+        try requireUpdatePortLease(group, plan: plan, store: store)
+        guard try store.operationGroupSteps.load(groupID: group.id).last(where: {
+            $0.direction == .forward && $0.stepKey == prior.key
+        })?.status == .succeeded else { throw conflict("Update port handoff requires the verified quiesce dependency.") }
+        try requireStoppedPortOwner(node: prior, plan: plan, group: group, inventory: inventory, store: store)
+        let records = try store.networkPorts.loadProject(projectUUID: plan.projectResourceUUID, includeReleased: true).filter {
+            $0.resourceUUID == prior.resourceUUID && ($0.lifecycleState != .released || $0.operationGroupID == group.id)
+        }
+        let previous = try LifecycleRevisionCodec.decodeRedactedDesiredJSON(prior.desiredSpecificationJSONRedacted)
+        guard records.count == previous.ports.count else {
+            throw conflict("Update port handoff lost an exact predecessor reservation.")
+        }
+        for record in records {
+            guard let mapping = previous.ports.first(where: {
+                $0.containerPort == record.containerPort && reservationProtocol($0.protocolName) == record.protocolName &&
+                    NetworkPortEndpoint(bindAddress: $0.bindAddress, hostPort: $0.hostPort ?? 0, protocolName: $0.protocolName) == endpoint(record)
+            }) else { throw conflict("Update port handoff found a changed predecessor reservation.") }
+            try requireReusable(record, projectUUID: plan.projectResourceUUID, resourceUUID: prior.resourceUUID,
+                serviceName: previous.identity.displayName, providerID: plan.providerID,
+                providerGeneration: plan.providerGeneration, mapping: mapping, bindAddress: record.bindAddress,
+                desiredSHA256: desiredDigest(projectUUID: plan.projectResourceUUID, resourceUUID: prior.resourceUUID,
+                    serviceName: previous.identity.displayName, providerID: plan.providerID,
+                    providerGeneration: plan.providerGeneration, mapping: mapping, bindAddress: record.bindAddress),
+                allowReleasedForUpdate: record.lifecycleState == .released)
+        }
+        guard records.allSatisfy({
+            $0.projectUUID == plan.projectResourceUUID && $0.providerID == plan.providerID.rawValue &&
+                $0.providerGeneration == plan.providerGeneration &&
+                ($0.lifecycleState == .active || $0.lifecycleState == .reserved ||
+                    ($0.lifecycleState == .released && $0.operationGroupID == group.id && $0.fencingToken == group.fencingToken))
+        }) else { throw conflict("Update port handoff found stale or non-transferable prior reservations.") }
+        for record in records where record.operationGroupID != group.id {
+            guard let owner = try store.operationGroups.load(id: record.operationGroupID),
+                  owner.groupKind == "lifecycle-v1", owner.projectID == plan.projectID,
+                  owner.fencingToken == record.fencingToken, owner.lockOwner == nil, owner.lockExpiresAt == nil,
+                  owner.status == .succeeded || (owner.status == .failed && owner.checkpoint == "compensated") else {
+                throw conflict("Update port handoff refused a predecessor reservation with live or unrelated authority.")
+            }
+            let original = try LifecyclePersistedIntentCodec.decode(owner.intentJSONRedacted)
+            guard original.planSHA256 == owner.planHash, original.projectResourceUUID == plan.projectResourceUUID,
+                  original.projectGeneration == plan.projectGeneration, original.providerID == plan.providerID,
+                  original.providerGeneration == plan.providerGeneration,
+                  original.nodes.contains(where: {
+                      $0.resourceUUID == prior.resourceUUID && $0.resourceIdentifier == prior.resourceIdentifier &&
+                          $0.resourceGeneration == prior.resourceGeneration
+                  }) else { throw conflict("Update port handoff lost the predecessor reservation's persisted lineage.") }
+        }
+        guard records.filter({ $0.operationGroupID == group.id }).allSatisfy({ $0.fencingToken == group.fencingToken }) else {
+            throw conflict("Update port handoff lost the current reservation fence.")
+        }
+        return UpdatePortPrior(node: prior, plan: plan, group: group, records: records)
+    }
+
+    private static func requireStoppedPortOwner(
+        node: LifecyclePlanNode, plan: LifecyclePlan, group: OperationGroupRecord, inventory: RuntimeInventory, store: SQLiteStateStore
+    ) throws {
+        let expected: RuntimeInventoryAuthority = plan.providerID == .appleContainerCLI
+            ? .appleContainerCLIRuntimeList : .appleContainerizationRuntimeList
+        let containers = targetContainers(node: node, inventory: inventory)
+        guard inventory.authority == expected, containers.count == 1, let container = containers.first,
+              [.created, .stopped, .exited].contains(container.lifecycle),
+              let fence = try verifiedPortCreationFence(node: node, plan: plan, container: container, store: store, activeGroup: group),
+              try (container.lifecycle != .created || verifiedInversePortCreation(node: node, plan: plan, group: group, store: store)),
+              exactOwnership(container.ownership, node: node, plan: plan, allowedFencingTokens: [fence]) else {
+            throw conflict("Update port handoff requires one authoritative exact stopped predecessor.")
+        }
+        let desired = try LifecycleRevisionCodec.decodeRedactedDesiredJSON(node.desiredSpecificationJSONRedacted)
+        let expectedPorts = desired.ports.compactMap { mapping in mapping.hostPort.map {
+            NetworkPortEndpoint(bindAddress: mapping.bindAddress, hostPort: $0, protocolName: mapping.protocolName)
+        } }
+        let observed = container.ports.compactMap { port in port.hostPort.map {
+            NetworkPortEndpoint(bindAddress: port.hostAddress, hostPort: $0, protocolName: runtimeProtocol(port.protocolName))
+        } }
+        guard expectedPorts.count == observed.count, Set(expectedPorts) == Set(observed) else {
+            throw conflict("Update port handoff refused a changed predecessor port projection.")
+        }
+    }
+
+    private static func verifiedInversePortCreation(
+        node: LifecyclePlanNode, plan: LifecyclePlan, group: OperationGroupRecord, store: SQLiteStateStore
+    ) throws -> Bool {
+        let current = try LifecyclePersistedIntentCodec.decode(group.intentJSONRedacted)
+        try requireUpdatePortLease(group, plan: current, store: store)
+        guard current.projectResourceUUID == plan.projectResourceUUID, current.projectGeneration == plan.projectGeneration,
+              current.providerID == plan.providerID, current.providerGeneration == plan.providerGeneration else { return false }
+        let steps = try store.operationGroupSteps.load(groupID: group.id)
+        for creation in current.nodes where creation.resourceUUID == node.resourceUUID &&
+            creation.resourceIdentifier == node.resourceIdentifier && creation.resourceGeneration == node.resourceGeneration {
+            let direction: OperationGroupStepDirection
+            if current.command == .update, creation.action == .retire, creation.compensation?.action == .create {
+                direction = .rollback
+            } else if current.command == .rollback, creation.action == .create,
+                      let source = creation.preconditions.first(where: { $0.kind == "rollback-source-group" }),
+                      let owner = try store.operationGroups.load(id: source.subject), owner.planHash == source.expectedValue,
+                      let sourceKey = creation.postconditions.first(where: { $0.kind == "rollback-effect-verified" && $0.expectedValue == "true" })?.subject {
+                let original = try LifecyclePersistedIntentCodec.decode(owner.intentJSONRedacted)
+                guard original.command == .update, original.planSHA256 == owner.planHash,
+                      original.projectResourceUUID == plan.projectResourceUUID, original.projectGeneration == plan.projectGeneration,
+                      original.providerID == plan.providerID, original.providerGeneration == plan.providerGeneration,
+                      original.nodes.contains(where: {
+                          $0.key == sourceKey && $0.action == .retire && $0.compensation?.action == .create &&
+                              $0.resourceUUID == node.resourceUUID && $0.resourceIdentifier == node.resourceIdentifier &&
+                              $0.resourceGeneration == node.resourceGeneration
+                      }) else { return false }
+                direction = .forward
+            } else { continue }
+            guard let step = steps.last(where: { $0.stepKey == creation.key && $0.direction == direction }),
+                  step.status == .succeeded, step.plannedActionType == "create",
+                  step.resourceIdentifier == creation.resourceIdentifier, step.serviceName == creation.serviceName,
+                  step.stepIdempotencyKey.hasPrefix(creation.idempotencyKey + ":" + direction.rawValue + ":") else { continue }
+            let restored = try LifecycleRevisionCodec.decodeRedactedDesiredJSON(creation.desiredSpecificationJSONRedacted)
+            let previous = try LifecycleRevisionCodec.decodeRedactedDesiredJSON(node.desiredSpecificationJSONRedacted)
+            guard restored.identity == previous.identity, restored.ports == previous.ports else { return false }
+            return true
+        }
+        return false
+    }
+
+    private static func verifiedPortCreationFence(
+        node: LifecyclePlanNode, plan: LifecyclePlan, container: RuntimeInventoryContainer, store: SQLiteStateStore,
+        activeGroup: OperationGroupRecord? = nil
+    ) throws -> String? {
+        guard let observed = container.ownership else { return nil }
+        if let activeGroup, activeGroup.fencingToken == observed.fencingToken,
+           try verifiedInversePortCreation(node: node, plan: plan, group: activeGroup, store: store) {
+            return observed.fencingToken
+        }
+        var verified: String?
+        try store.operationGroups.visitProjectLifecycleHistory(projectID: plan.projectID) { origin in
+            guard origin.status == .succeeded, origin.fencingToken == observed.fencingToken else { return }
+            let source = try LifecyclePersistedIntentCodec.decode(origin.intentJSONRedacted)
+            guard source.planSHA256 == origin.planHash, source.projectResourceUUID == plan.projectResourceUUID,
+                  source.projectGeneration == plan.projectGeneration, source.providerID == plan.providerID,
+                  source.providerGeneration == plan.providerGeneration,
+                  source.nodes.contains(where: {
+                      $0.action == .create && $0.resourceUUID == node.resourceUUID &&
+                          $0.resourceIdentifier == node.resourceIdentifier && $0.resourceGeneration == node.resourceGeneration
+                  }) else { return }
+            verified = observed.fencingToken
+        }
+        return verified
+    }
+
+    private static func releaseChanges(
+        _ records: [NetworkPortReservationRecord], group: OperationGroupRecord, inventory: RuntimeInventory, plan: LifecyclePlan
+    ) -> [(record: NetworkPortReservationRecord, expected: NetworkStateExpectedVersion?)] {
+        records.filter { $0.lifecycleState != .released }.flatMap { record in
+            let releasing = replacing(record, generation: record.generation + 1,
+                providerGeneration: Int64(plan.providerGeneration), fencingToken: group.fencingToken,
+                observedSHA256: record.observedSHA256, lifecycleState: .releasing, finalizerState: .releasing,
+                operationGroupID: group.id)
+            let released = replacing(releasing, generation: releasing.generation,
+                providerGeneration: Int64(plan.providerGeneration), fencingToken: group.fencingToken,
+                observedSHA256: inventory.semanticSHA256, lifecycleState: .released, finalizerState: .released,
+                operationGroupID: group.id)
+            return [(releasing, record.expectedVersion), (released, releasing.expectedVersion)]
+        }
+    }
+
+    static func requiresRollbackPortReservation(
+        node: LifecyclePlanNode, plan: LifecyclePlan, group: OperationGroupRecord, store: SQLiteStateStore
+    ) throws -> Bool {
+        try rollbackPortSource(node: node, plan: plan, group: group, store: store) != nil
     }
 
     private static func planningWorkItems(
@@ -1196,7 +1463,8 @@ enum NetworkPortLifecycleCoordinator {
         mapping: RuntimePortMapping,
         bindAddress: String,
         desiredSHA256: String,
-        allowReleasingForRemoval: Bool = false
+        allowReleasingForRemoval: Bool = false,
+        allowReleasedForUpdate: Bool = false
     ) throws {
         guard record.projectUUID == projectUUID,
               record.resourceUUID == resourceUUID,
@@ -1213,7 +1481,8 @@ enum NetworkPortLifecycleCoordinator {
               record.desiredSHA256 == desiredSHA256,
               record.lifecycleState == .reserved ||
                 record.lifecycleState == .active ||
-                (allowReleasingForRemoval && record.lifecycleState == .releasing),
+                (allowReleasingForRemoval && record.lifecycleState == .releasing) ||
+                (allowReleasedForUpdate && record.lifecycleState == .released),
               mapping.allocation == .dynamic ||
                 record.hostPort == mapping.hostPort else {
             throw conflict(
@@ -1245,7 +1514,7 @@ enum NetworkPortLifecycleCoordinator {
                     plan.providerID.rawValue,
                   record.providerGeneration ==
                     Int64(plan.providerGeneration),
-                  record.serviceName == node.serviceName,
+                  (record.serviceName == node.serviceName || record.serviceName == plan.projectName + "/" + (node.serviceName ?? "")),
                   keys.insert(key).inserted else {
                 throw conflict(
                     "Port lifecycle found an unmanaged or ambiguous durable row."
@@ -1422,11 +1691,12 @@ enum NetworkPortLifecycleCoordinator {
         allowedResourceUUID: String,
         node: LifecyclePlanNode,
         plan: LifecyclePlan,
-        allowedFencingTokens: Set<String>
+        allowedFencingTokens: Set<String>,
+        excludingResourceUUIDs: Set<String> = []
     ) throws {
         let conflicts = inventory.containers.filter {
             container in
-            container.ports.contains {
+            !excludingResourceUUIDs.contains(container.ownership?.resourceUUID ?? "") && container.ports.contains {
                 port in
                 guard let hostPort = port.hostPort else {
                     return false

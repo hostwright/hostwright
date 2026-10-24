@@ -4,6 +4,32 @@ import XCTest
 @testable import HostwrightRuntime
 
 final class LifecycleRollbackPlannerTests: XCTestCase {
+    func testSamePortRetirementRollbackRemovesCandidateBeforeRecreatingAndStartingPrior() throws {
+        let fixture = try makeFixture(ports: [RuntimePortMapping(hostPort: 18_180, containerPort: 8_080)])
+        let completed = Set(fixture.plan.nodes.map(\.idempotencyKey))
+        let effects = fixture.plan.nodes.filter { $0.action.mutatesRuntime }
+        let retire = try XCTUnwrap(effects.first(where: { $0.action == .retire }))
+        let candidate = try XCTUnwrap(effects.first(where: { $0.action == .create }))
+        let quiesce = try XCTUnwrap(effects.first(where: { $0.action == .stop && $0.resourceUUID == retire.resourceUUID }))
+        let automatic = try LifecycleRollbackPlanner.compensationOrder(sourceNodes: fixture.plan.nodes, effectedNodes: effects)
+        XCTAssertLessThan(try XCTUnwrap(automatic.firstIndex(where: { $0.key == candidate.key })),
+            try XCTUnwrap(automatic.firstIndex(where: { $0.key == retire.key })))
+        XCTAssertLessThan(try XCTUnwrap(automatic.firstIndex(where: { $0.key == retire.key })),
+            try XCTUnwrap(automatic.firstIndex(where: { $0.key == quiesce.key })))
+        let decision = try LifecycleRollbackPlanner().decide(updatePlan: fixture.plan,
+            healthyRevisions: [fixture.healthy], proof: proof(for: fixture.plan, completed: completed),
+            context: LifecycleRollbackRequestContext(request: .rollback, failure: .runtime,
+                completedUpdateNodeIdempotencyKeys: completed))
+        guard case .rollback(let rollback, _) = decision else { return XCTFail("Expected verified rollback.") }
+        let inverses = rollback.nodes.filter { $0.action != .verify }
+        XCTAssertEqual(inverses.compactMap { $0.postconditions.first?.subject }, automatic.map(\.key))
+        for (index, node) in inverses.enumerated() {
+            XCTAssertEqual(node.dependencies, index == 0 ? [] : [inverses[index - 1].key])
+        }
+        let resumed = rollback.resume(completedRollbackNodeIdempotencyKeys: Set(inverses.prefix(2).map(\.idempotencyKey)))
+        XCTAssertFalse(resumed.pendingNodes.contains(where: { inverses.prefix(2).map(\.key).contains($0.key) }))
+    }
+
     func testVerifiedHealthyRevisionRecordIsRedactedAndDigestBound() throws {
         let service = desired(
             image: "local/web@sha256:old",
@@ -442,13 +468,14 @@ final class LifecycleRollbackPlannerTests: XCTestCase {
 
     private func makeFixture(
         hooks: RuntimeLifecycleHooks = RuntimeLifecycleHooks(),
-        healthyEnvironment: [RuntimeEnvironmentValue] = []
+        healthyEnvironment: [RuntimeEnvironmentValue] = [],
+        ports: [RuntimePortMapping] = []
     ) throws -> Fixture {
         let old = desired(
             image: "local/web@sha256:old",
-            environment: healthyEnvironment
+            environment: healthyEnvironment, ports: ports
         )
-        let new = desired(image: "local/web@sha256:new", hooks: hooks)
+        let new = desired(image: "local/web@sha256:new", hooks: hooks, ports: ports)
         let resource = updateResource(for: new)
         let plan = try LifecycleUpdatePlanner().plan(
             previous: DesiredRuntimeState(projectName: "demo", services: [old]),
@@ -475,7 +502,8 @@ final class LifecycleRollbackPlannerTests: XCTestCase {
     private func desired(
         image: String,
         environment: [RuntimeEnvironmentValue] = [],
-        hooks: RuntimeLifecycleHooks = RuntimeLifecycleHooks()
+        hooks: RuntimeLifecycleHooks = RuntimeLifecycleHooks(),
+        ports: [RuntimePortMapping] = []
     ) -> DesiredRuntimeService {
         DesiredRuntimeService(
             identity: RuntimeServiceIdentity(
@@ -484,6 +512,7 @@ final class LifecycleRollbackPlannerTests: XCTestCase {
             ),
             image: image,
             environment: environment,
+            ports: ports,
             probes: RuntimeProbeSet(
                 startup: RuntimeProbeConfiguration(
                     action: .exec(RuntimeProbeExecAction(command: ["/bin/startup"]))

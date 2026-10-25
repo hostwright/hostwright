@@ -1,6 +1,6 @@
 # Release process
 
-The active target is `v0.0.2`. Current source prepares `0.0.2-rc.17`, the replacement candidate for the bounded port-reservation repair authorized on October 24. Same-port updates transfer only the exact quiesced predecessor's reservation; rollback restores port ownership before restart. A clean source freeze and exact-source qualification remain required. No further product repair round is authorized. See the [current readiness snapshot](ga-readiness-2026-10-24-rc17.md). Immutable `v0.0.2-dev.11` and `v0.0.2-dev.12` prereleases supply upgrade baselines; they remain unsupported and are not promoted in place.
+The active target is `v0.0.2`. Current source prepares `0.0.2-rc.18`, the replacement candidate following the bounded SQLite qualification and website audit repair authorized on October 24. It retains the port-reservation repair and adds atomic symlink fixture exchanges plus missing-database validation coverage. Closing work resumed on October 25. A clean source freeze and exact-source qualification remain required. No further product repair round is authorized. See the [current readiness snapshot](ga-readiness-2026-10-25-rc18.md). Immutable `v0.0.2-dev.11` and `v0.0.2-dev.12` prereleases supply upgrade baselines; they remain unsupported and are not promoted in place.
 
 ## Tag Policy
 

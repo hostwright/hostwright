@@ -2,9 +2,9 @@
 
 Hostwright manages Apple container workloads on one Apple silicon Mac. Declare services in a YAML manifest, review a plan, and confirm it through the CLI or native desktop app. Hostwright tracks resource ownership and operations in a local SQLite database.
 
-**Release status:** Current source prepares `0.0.2-rc.17`. No supported RC or GA channel has been published, and official `brew install hostwright` is not available yet.
+**Release status:** Current source prepares `0.0.2-rc.18`. No supported RC or GA channel has been published, and official `brew install hostwright` is not available yet.
 
-RC.17 repairs same-port update reservation handoff and rollback after RC.16 recovery exposed the blocker. It retains the managed-daemon correction, verified guest-kernel security backports and runtime source-patch ledger. The replacement requires a clean source freeze and its own complete qualification. See the [current GA readiness record](docs/release/ga-readiness-2026-10-24-rc17.md) for the remaining issues and bounded closing sequence.
+RC.18 retains the same-port reservation repair and replaces the SQLite symlink qualification fixture with atomic exchanges. It retains the managed-daemon correction, verified guest-kernel security backports and runtime source-patch ledger. The replacement requires a clean source freeze and its own complete qualification. See the [current GA readiness record](docs/release/ga-readiness-2026-10-25-rc18.md) for the remaining issues and bounded closing sequence.
 
 Frozen RC.12 and its [source, sanitizer and runtime results](docs/evidence/phase15-rc12-aa8586a1/README.md) remain retained under their original bindings. Its signed inventory and security findings require the new candidate; those earlier results do not qualify RC.13. A GA date is not confirmed, and official Homebrew acceptance remains a launch requirement.
 
@@ -14,7 +14,7 @@ Frozen RC.12 and its [source, sanitizer and runtime results](docs/evidence/phase
 | Vendor Homebrew tap | Signed dev.12 qualification prerelease; unsupported and based on older contracts. |
 | Official Homebrew | Pending. `brew install hostwright` is the launch goal and is not available yet. |
 
-Phase 15 covers compatibility, security, signed installation and recovery, live quickstarts, and release promotion. See the [GA readiness snapshot](docs/release/ga-readiness-2026-10-24-rc17.md) for completed checks and remaining work and the [release plan](docs/roadmap/v0.0.2/IMPLEMENTATION_PLAN.md) for acceptance requirements.
+Phase 15 covers compatibility, security, signed installation and recovery, live quickstarts, and release promotion. See the [GA readiness snapshot](docs/release/ga-readiness-2026-10-25-rc18.md) for completed checks and remaining work and the [release plan](docs/roadmap/v0.0.2/IMPLEMENTATION_PLAN.md) for acceptance requirements.
 
 ## Requirements
 

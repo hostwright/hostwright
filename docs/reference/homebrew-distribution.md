@@ -151,7 +151,10 @@ installation is managed by Hostwright. The cask therefore calls the installed
 ownership, removes the managed generation and cleans up its exact receipt/staging
 payload. Homebrew first requests a graceful quit of the exact desktop bundle
 `dev.hostwright.desktop`. A separate broad `pkgutil`, wildcard deletion or user-data
-zap would bypass this boundary and is deliberately absent.
+zap would bypass this boundary and is deliberately absent. Homebrew requires an
+explicit zap declaration for new casks. The optional `brew uninstall --zap`
+operation trashes only `~/Library/Preferences/dev.hostwright.desktop.plist`, the
+desktop UI preferences. It does not target manifests, workload state or data.
 
 Homebrew also executes this uninstall stanza during cask upgrades and reinstalls.
 Qualify the resulting removal/reinstallation path with a running desktop app and

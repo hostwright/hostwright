@@ -112,6 +112,8 @@ def render(manifest):
               must_succeed: true,
             }}
 
+  zap trash: "~/Library/Preferences/dev.hostwright.desktop.plist"
+
   caveats <<~EOS
     The command-line tools are installed in /usr/local/bin.
     Open the desktop app with:

@@ -116,6 +116,15 @@ class HomebrewCaskTests(unittest.TestCase):
                 result = subprocess.run(['/usr/bin/ruby', '-c', str(path)], capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_optional_zap_preserves_workload_state_and_user_data(self):
+        text = cask.render(fixture())
+        zap = [line.strip() for line in text.splitlines() if line.strip().startswith('zap ')]
+        self.assertEqual(zap, ['zap trash: "~/Library/Preferences/dev.hostwright.desktop.plist"'])
+        self.assertIn('"--data-policy", "preserve"', text)
+        self.assertNotIn('~/Library/Application Support', text)
+        self.assertNotIn('~/.hostwright', text)
+        self.assertNotIn('delete:', text)
+
     def test_generation_preserves_existing_files_and_immutable_release(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()

@@ -347,6 +347,33 @@ final class SQLiteHardeningTests: XCTestCase {
         }
     }
 
+    func testReadOnlySchemaValidationDoesNotRecreateDisplacedDatabase() throws {
+        try withTemporaryStore { store, databaseURL in
+            try store.migrate()
+            let portable = try SQLiteConnection(
+                path: databaseURL.path,
+                createIfNeeded: false,
+                profile: .portableArtifact
+            )
+            try portable.close()
+            let holdingURL = databaseURL.appendingPathExtension("held")
+            let databaseBefore = try Data(contentsOf: databaseURL)
+            try FileManager.default.moveItem(at: databaseURL, to: holdingURL)
+
+            XCTAssertThrowsError(try store.validateSchema())
+            var metadata = stat()
+            let lookup = lstat(databaseURL.path, &metadata)
+            let lookupError = errno
+            XCTAssertEqual(lookup, -1)
+            XCTAssertEqual(lookupError, ENOENT)
+            XCTAssertEqual(try Data(contentsOf: holdingURL), databaseBefore)
+
+            try FileManager.default.moveItem(at: holdingURL, to: databaseURL)
+            try store.validateSchema()
+            XCTAssertEqual(try store.schemaVersion(), MigrationRunner.latestSchemaVersion)
+        }
+    }
+
     func testConcurrentSymlinkSwapsNeverRedirectSQLiteAccess() throws {
         try withTemporaryStore { store, databaseURL in
             try store.migrate()
@@ -368,43 +395,39 @@ final class SQLiteHardeningTests: XCTestCase {
             try Data("unmanaged-sentinel-authority".utf8).write(to: sentinel)
             XCTAssertEqual(chmod(sentinel.path, 0o600), 0)
             let sentinelBefore = try Data(contentsOf: sentinel)
+            try FileManager.default.createSymbolicLink(
+                atPath: holdingPath,
+                withDestinationPath: sentinel.path
+            )
             let firstSwap = expectation(description: "first symlink swap installed")
             let attackerFinished = expectation(description: "symlink swap loop finished")
             let attackerFailure = Mutex<String?>(nil)
 
             DispatchQueue.global(qos: .userInitiated).async {
+                var databaseDisplaced = false
                 for iteration in 0..<1_000 {
-                    guard rename(databaseURL.path, holdingPath) == 0 else {
+                    guard renamex_np(databaseURL.path, holdingPath, UInt32(RENAME_SWAP)) == 0 else {
                         attackerFailure.withLock {
-                            $0 = "could not displace the database at iteration \(iteration): \(String(cString: strerror(errno)))"
+                            $0 = "could not swap in the symlink at iteration \(iteration): \(String(cString: strerror(errno)))"
                         }
                         break
                     }
-                    guard symlink(sentinel.path, databaseURL.path) == 0 else {
-                        let code = errno
-                        _ = rename(holdingPath, databaseURL.path)
-                        attackerFailure.withLock {
-                            $0 = "could not install the symlink at iteration \(iteration): \(String(cString: strerror(code)))"
-                        }
-                        break
-                    }
+                    databaseDisplaced = true
                     if iteration == 0 { firstSwap.fulfill() }
                     usleep(200)
-                    guard unlink(databaseURL.path) == 0,
-                          rename(holdingPath, databaseURL.path) == 0 else {
+                    guard renamex_np(databaseURL.path, holdingPath, UInt32(RENAME_SWAP)) == 0 else {
                         attackerFailure.withLock {
                             $0 = "could not restore the authoritative database at iteration \(iteration): \(String(cString: strerror(errno)))"
                         }
                         break
                     }
+                    databaseDisplaced = false
                 }
-                var holdingMetadata = stat()
-                if lstat(holdingPath, &holdingMetadata) == 0 {
-                    var databaseMetadata = stat()
-                    if lstat(databaseURL.path, &databaseMetadata) == 0 {
-                        _ = unlink(databaseURL.path)
+                if databaseDisplaced,
+                   renamex_np(databaseURL.path, holdingPath, UInt32(RENAME_SWAP)) != 0 {
+                    attackerFailure.withLock {
+                        $0 = "could not restore the database after the swap loop: \(String(cString: strerror(errno)))"
                     }
-                    _ = rename(holdingPath, databaseURL.path)
                 }
                 attackerFinished.fulfill()
             }

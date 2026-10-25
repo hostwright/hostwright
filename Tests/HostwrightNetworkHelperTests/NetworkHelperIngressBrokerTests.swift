@@ -799,12 +799,6 @@ final class NetworkHelperIngressBrokerTests: XCTestCase {
     let backend = try makeServer()
     defer { Darwin.close(backend.descriptor) }
     let backendFinished = DispatchSemaphore(value: 0)
-    serveMany(
-      backend.descriptor,
-      count: 2,
-      response: response(body: "replaced"),
-      finished: backendFinished
-    )
 
     let store = CertificateIdentityStore()
     let issuerScope = try CertificateIdentityScope(
@@ -888,6 +882,11 @@ final class NetworkHelperIngressBrokerTests: XCTestCase {
       bindings: [tls],
       certificateIdentities: ["local": server]
     )
+    serveOnce(
+      backend.descriptor,
+      response: response(body: "replaced"),
+      finished: backendFinished
+    )
     XCTAssertTrue(
       try tlsRequest(
         port: ingressPort,
@@ -895,6 +894,10 @@ final class NetworkHelperIngressBrokerTests: XCTestCase {
         trustAnchor: trustAnchor,
         request: wireRequest
       ).hasSuffix("\r\n\r\nreplaced")
+    )
+    XCTAssertEqual(
+      backendFinished.wait(timeout: .now() + 2),
+      .success
     )
 
     do {
@@ -911,6 +914,15 @@ final class NetworkHelperIngressBrokerTests: XCTestCase {
           trustAnchor: trustAnchor,
           request: wireRequest
         )
+      )
+      XCTAssertFalse(
+        waitForReadable(backend.descriptor, milliseconds: 0),
+        "Unauthenticated request reached the backend"
+      )
+      serveOnce(
+        backend.descriptor,
+        response: response(body: "replaced"),
+        finished: backendFinished
       )
       XCTAssertTrue(
         try tlsRequest(
@@ -1940,6 +1952,12 @@ private func serveMany(
   }
 }
 
+private enum TestTLSRequestError: Error {
+  case connectionStartFailed
+  case requestSendFailed
+  case emptyResponse
+}
+
 private func tlsRequest(
   port: Int,
   serverName: String,
@@ -2022,16 +2040,19 @@ private func tlsRequest(
     connection: connection,
     label: "test-client"
   )
-  guard tls.start(timeoutMilliseconds: 5_000),
+  guard tls.start(timeoutMilliseconds: 5_000) else {
+    tls.cancel()
+    throw TestTLSRequestError.connectionStartFailed
+  }
+  defer { tls.cancel() }
+  guard
     tls.send(
       Data(request.utf8),
       timeoutMilliseconds: 5_000
     )
   else {
-    tls.cancel()
-    throw NetworkHelperError.ioFailure
+    throw TestTLSRequestError.requestSendFailed
   }
-  defer { tls.cancel() }
 
   var response = Data()
   while response.count <= NetworkHelperProtocolV1.maximumIngressHeaderBytes
@@ -2052,7 +2073,7 @@ private func tlsRequest(
     let value = String(data: response, encoding: .utf8),
     !value.isEmpty
   else {
-    throw NetworkHelperError.ioFailure
+    throw TestTLSRequestError.emptyResponse
   }
   return value
 }

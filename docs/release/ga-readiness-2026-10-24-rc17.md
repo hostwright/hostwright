@@ -26,12 +26,34 @@ These checks do not qualify signed RC.17 artifacts. The RC.16 source, signed sta
 partial qualification and failed recovery retain their original bindings. The
 [RC.16 preparation record](ga-readiness-2026-10-22-rc16.md) remains historical.
 
+## SQLite qualification and website audit repair
+
+The RC.17 ThreadSanitizer base completed with one assertion failure: its
+symlink-swap fixture encountered `EEXIST` at iteration 457. No ThreadSanitizer
+race diagnostic was recorded. That run did not qualify the sanitizer gate.
+
+The fixture now exchanges the database with a preseeded symlink atomically,
+without the previous missing-path interval. It retains the 1,000 attack
+iterations, 500 schema reads, sentinel preservation, error and final-schema
+assertions. A separate missing-database test checks that read-only schema
+validation refuses the displaced database without recreating or changing it.
+The creator of the prior `EEXIST` path remains unconfirmed; this is a fixture
+repair, not a claim that a production SQLite security defect was established.
+
+[Website PR #32](https://github.com/hostwright/hostwright.dev/pull/32) merged the
+readiness corrections and patched only Undici and Zod in both dependency locks.
+Both packages passed check, build, links and `npm audit --audit-level=high`;
+merged-main CI and deployment passed and the public readiness pages were checked.
+Both audits have zero high or critical findings; lower-severity findings remain.
+These results do not execute signed CLI, Compose or desktop quickstarts.
+
 ## Remaining closing gates
 
-1. Merge the reviewed repair after current-head checks pass, freeze the clean
-   RC.17 source, and qualify the candidate once. Reuse unchanged input evidence
-   only within its verified scope. Candidate-bound results require the new source,
-   version and staged inventory. No further product repair round is authorized.
+1. The port-reservation repair is merged. Finish the bounded SQLite-fixture
+   repair after current-head checks pass, then freeze clean replacement source
+   before candidate qualification. Reuse unchanged input evidence only within its
+   verified scope. Candidate-bound results require the exact new source, version
+   and staged inventory; focused repair checks are not full qualification.
 2. Complete source regression and both full sanitizer suites, parser fuzzing,
    security and independent review. Complete provider conformance and ten cycles
    for each supported lane, the 30-minute soak, all eight recovery operations,
@@ -44,7 +66,9 @@ partial qualification and failed recovery retain their original bindings. The
    open until official Homebrew acceptance and fresh-machine
    `brew install hostwright` pass. Pending review triggers no retesting.
 
-Start no new repair round after 8 p.m. Eastern. Stop at 11:59 p.m. Eastern on
-October 24 with completed GA or a precise unfinished-gate report. Missing
+One additional bounded round for the SQLite qualification fixture and website
+audit was authorized after 8 p.m. Eastern. Start no further repair round. Stop at
+11:59 p.m. Eastern on October 24 with completed GA or a precise unfinished-gate
+report. Missing
 credentials, lab capacity, signing failure, ungranted publication authority or
 Homebrew review remain blockers. See the [acceptance contract](../reference/release-promotion.md).

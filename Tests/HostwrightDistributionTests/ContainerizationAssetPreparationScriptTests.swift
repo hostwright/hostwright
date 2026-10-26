@@ -14,7 +14,7 @@ final class ContainerizationAssetPreparationScriptTests: XCTestCase {
 
             XCTAssertEqual(result.status, 0, result.output)
             XCTAssertTrue(result.output.contains("Containerization framework: 0.35.0"))
-            XCTAssertTrue(result.output.contains("Rebuilt Linux kernel: 1ea99b8be7e6becdb255bd8dffcd0434f6725cab2514f3386b667d3d8ad4ad91 (16216576 bytes)"))
+            XCTAssertTrue(result.output.contains("Rebuilt Linux kernel: d6bfd6eeaf5b4f8af446159df8a00aea5f4c04e3be9222082664f17980d7d607 (16151040 bytes)"))
             XCTAssertTrue(result.output.contains("Direct OCI image manifest: sha256:279d191a42539a5ad4e4e73f396d9356cbc7fc865e335bb85efd3b2588da1212 (406 bytes)"))
             XCTAssertTrue(result.output.contains("OCI image configuration: c6decfc522bff7ccf321cde092127761fef4a34d5b07912fb8183304f13ac3ec (151 bytes)"))
             XCTAssertTrue(result.output.contains("OCI image layer: 5c64be872ab8404a80a6064adf6b0a717c5cdd7171036cf6f8ad27715b4c93e9 (67299759 bytes)"))

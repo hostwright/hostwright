@@ -28,8 +28,8 @@ public enum ContainerizationRuntimeAssetContract {
 
     public static let kernelFileName = "vmlinux-6.18.55-186"
     public static let kernelSHA256 =
-        "1ea99b8be7e6becdb255bd8dffcd0434f6725cab2514f3386b667d3d8ad4ad91"
-    public static let kernelSize: Int64 = 16_216_576
+        "d6bfd6eeaf5b4f8af446159df8a00aea5f4c04e3be9222082664f17980d7d607"
+    public static let kernelSize: Int64 = 16_151_040
 
     public static let guestNetworkPolicyLoaderSHA256 =
         "eec0f5c4528f87cf89724474c48dc69fa1bec1511f42e06b3ad9e400b19a2fda"

@@ -3,6 +3,12 @@
 The protected manual `trusted-release.yml` workflow stages `0.0.2-dev.1` through
 `dev.999`, `0.0.2-rc.1` through `rc.99`, and stable `0.0.2`. Source must be an exact
 clean commit already merged to main. Existing historical tags remain immutable.
+The active v0.0.2 path qualifies unpublished final-version artifacts directly; no
+separate accepted-RC receipt is required. All eighteen gates below remain required.
+Retain the mandatory trusted-stage full regression as source evidence and complete
+its actual routed cells; do not run a duplicate successful full suite for unchanged
+inputs. Resolve lab and signing prerequisites before starting expensive jobs.
+
 The existing distribution builder performs two isolated clean builds, signing,
 notarization, stapling and independent verification. Staging has no repository
 write authority and creates no public tag or release.

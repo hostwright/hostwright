@@ -131,6 +131,8 @@ for pass in first second; do
     --patch "$PWD/scripts/release/patches/kernel-security/0005-bpf-map-btf-destructor-lifetime.patch" \
     --patch "$PWD/scripts/release/patches/kernel-security/0006-vc-screen-reload-before-copy-error.patch" \
     --patch "$PWD/scripts/release/patches/kernel-security/0007-ipv6-tunnel-extension-header-validation.patch" \
+    --patch "$PWD/scripts/release/patches/kernel-security/0008-perf-kernel-callchain-access.patch" \
+    --patch "$PWD/scripts/release/patches/kernel-security/0009-inode-xarray-cleanup.patch" \
     --output "$work/evidence/native-patches-linux-$pass.json"
   cp "$tree/.config" "$work/evidence/kernel-$pass.config"
   cp "$tree/arch/arm64/boot/Image" "$work/kernel-$pass.Image"

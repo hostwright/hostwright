@@ -67,6 +67,22 @@
       "stableCommit": "aa480f05aed7a9eee87d4a6fc90647fe9679c670",
       "advisory": "CVE-2026-98852",
       "adaptation": "Exact upstream stable 6.18 patch; preserve both BIG TCP hop-option jumbo exemptions."
+    },
+    {
+      "path": "scripts/release/patches/kernel-security/0008-perf-kernel-callchain-access.patch",
+      "sha256": "234699814a0cf2c8227badde54bade69e1c33d7e17dca2213aa3c9fbc6adbb40",
+      "stableCommit": "2581b43e162cfc43e6f5d8dd8d2b38f3441550de",
+      "advisory": "CVE-2026-98937",
+      "adaptation": "Adjust only the hunk start from 13490 to 13534 for authenticated 6.18.55; preserve the complete upstream semantic change.",
+      "upstreamCommit": "a4573a3838ae4fc73b70019cfa1dac9aaea7cc2f"
+    },
+    {
+      "path": "scripts/release/patches/kernel-security/0009-inode-xarray-cleanup.patch",
+      "sha256": "6c2bdc1fbf8d721fa38eb38e74be31a5dc292370df74ba1e6f3371f20c3ccb5f",
+      "stableCommit": "50cff3f112d64db6e5f57355f79bc837db8fe132",
+      "advisory": "CVE-2026-99080",
+      "adaptation": "Exact upstream stable 6.18 patch; no local hunk adaptation.",
+      "upstreamCommit": "ee3f011250104129893d8e9599147e457d4d7280"
     }
   ],
   "requiredDisabled": [
@@ -106,7 +122,9 @@
     "drivers/tty/serial/serial_core.c": "061ceeae0a5c6a723ef3374a81d1977bac454985621bf602d7c816ff9752284c",
     "kernel/bpf/hashtab.c": "78b350f1d7ba6ffa5cc60db133718424d5b1d451397247f35bf56961bfb7d27c",
     "drivers/tty/vt/vc_screen.c": "925f42a95dea88d077c00f4c432b82a9e60f9f8cab0e2e71bc847e8dcbc0c892",
-    "net/core/dev.c": "83a1a83bdf7a979b0aa27170272748c5a71070ad52227243a8f391008ebed80c"
+    "net/core/dev.c": "83a1a83bdf7a979b0aa27170272748c5a71070ad52227243a8f391008ebed80c",
+    "kernel/events/core.c": "9ba2da03c9f19fb26f6871fc4fea8d65514807d4dcba01f4bdd79f744ad4ad54",
+    "fs/inode.c": "343cc0b58345a716dbee92e4b232819712990d6e64a33ce34f8eb35fa81ddd9f"
   },
   "upstreamDAXFix": "The authenticated 6.18.55 fs/dax.c already contains the zero/empty-entry checks before folio conversion from the previous downstream patch."
 }

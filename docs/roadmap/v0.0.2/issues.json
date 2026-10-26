@@ -5924,7 +5924,7 @@
       "acceptanceCriteria": [
         "Enable reviewed RC and GA versions in the protected release workflow with correct prerelease status.",
         "Build and verify signed/notarized CLI, app and required helpers, archive/package, checksums, SBOM and provenance.",
-        "Complete one clean RC and independent artifact lifecycle verification, qualify final-version bytes, publish immutable v0.0.2 and update the vendor tap."
+        "Complete all eighteen gates once for unpublished final-version v0.0.2 artifacts, including independent artifact lifecycle verification; capture trusted staging's mandatory full source run without duplication, publish immutable accepted bytes without rebuilding and update the vendor tap. A separately accepted RC is not required."
       ],
       "requiredEvidence": [
         "distribution-artifact",

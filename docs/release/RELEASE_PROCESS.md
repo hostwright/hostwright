@@ -1,6 +1,6 @@
 # Release process
 
-The active target is `v0.0.2`. Current source prepares `0.0.2-rc.20` for the bounded closing round on October 26. Two additional guest-kernel security backports have matching independently built kernel inputs. RC.19 internal signing/staging was cancelled during its mandatory regression step after kernel advisory review. Complete replacement-candidate qualification remains pending. Freeze source only after the closing repairs pass review and current-head checks. Exact-source and signed-artifact qualification remain required. See the [current readiness snapshot](ga-readiness-2026-10-26-rc20.md). Immutable `v0.0.2-dev.11` and `v0.0.2-dev.12` prereleases supply upgrade baselines; they remain unsupported and are not promoted in place.
+The active target is `v0.0.2`. Current source prepares `0.0.2` for the bounded closing round on October 26. Two additional guest-kernel security backports have matching independently built kernel inputs. RC.19 internal signing/staging was cancelled during its mandatory regression step after kernel advisory review. One qualification of the unpublished final-version artifacts remains pending. A separately qualified or accepted RC is not required. Freeze source only after the closing repairs pass review and current-head checks. Exact-source and signed-artifact qualification remain required. See the [current readiness snapshot](ga-readiness-2026-10-26-final.md). Immutable `v0.0.2-dev.11` and `v0.0.2-dev.12` prereleases supply upgrade baselines; they remain unsupported and are not promoted in place.
 
 ## Tag Policy
 
@@ -8,10 +8,11 @@ Public releases and candidates use `v*` tags. Optional `phase-*` checkpoints hav
 
 ## Release Ladder
 
-1. Finish required implementation and prepare the qualification lanes on the development line.
-2. Qualify the next unused `v0.0.2-rc.*` candidate against the intended GA scope. Fix defects and repeat affected checks on the corrected candidate.
-3. After one complete RC qualification and independent artifact lifecycle verification, prepare the final `0.0.2` version change.
-4. Qualify the final-version bytes, obtain maintainer approval, and publish through protected promotion. Close release-artifact and parent issues after public-byte and installation verification.
+1. Finish required implementation and resolve VM access, signing, storage and provider prerequisites before the expensive release run.
+2. Review the final runtime pins, policy, documentation and `0.0.2` version together, then freeze the exact clean merged source.
+3. Produce authenticated runtime inputs and stage the unpublished final-version package. Capture staging's mandatory full regression run as source evidence; do not repeat a successful full run for unchanged inputs.
+4. Qualify those exact final-version bytes against all eighteen gates. Exercise installed product lifecycle and recovery first, provider cycles and soak next, then the remaining assurance checks. Obtain protected acceptance and promote the accepted bytes without rebuilding.
+5. Verify public downloads and vendor-tap installation before closing #281. Keep #282 and release parents open until official cask acceptance and a fresh no-tap `brew install hostwright` pass.
 
 ## Active Roadmap Authority
 
@@ -46,7 +47,7 @@ All of the following are required:
 - signed/notarized archives and `.pkg` pass checksum, stapling, Gatekeeper, clean install, reboot, upgrade, rollback, repair, and uninstall;
 - the vendor Homebrew tap installs those exact verified artifacts;
 - for the requested Homebrew-available launch, #282 has official cask acceptance and a verified fresh-machine `brew install hostwright`; the October 8 [scope amendment](../design/adr-0015-reduced-local-release.md#official-homebrew-availability-2026-10-08) defines the publication dependency;
-- one complete clean RC qualification and independent signed-artifact install/reboot/upgrade/rollback/repair/uninstall verification pass; final-version bytes qualify before promotion.
+- one complete qualification of the unpublished final `0.0.2` artifacts, including independent signed-artifact install/reboot/upgrade/rollback/repair/uninstall verification; a separate accepted RC is not a prerequisite.
 
 ## Artifact and Package Policy
 

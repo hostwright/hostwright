@@ -1,6 +1,6 @@
 # ADR 0015: Reduce v0.0.2 to local CLI, desktop, and Compose import
 
-Status: accepted by the maintainer on 2026-09-07; Phase 14 acceptance amended on 2026-10-05; official Homebrew distribution requested on 2026-10-08. Final release qualification remains pending.
+Status: accepted by the maintainer on 2026-09-07; Phase 14 acceptance amended on 2026-10-05; official Homebrew distribution requested on 2026-10-08. Final-version-only qualification approved on 2026-10-26; final release qualification remains pending.
 
 ## Decision
 
@@ -99,9 +99,21 @@ Run ten live lifecycle cycles per supported provider and a checkpointed 30-minut
 single-host soak; replay retained corpora and fuzz each shipped critical parser or
 protocol for five minutes. Preserve supported sanitizer, security, dependency,
 license, recovery, ownership, documentation, and signed-distribution checks.
-One clean RC qualification plus independent signed-artifact install, reboot,
-upgrade, rollback, repair, and uninstall verification replaces the two-RC and
-multi-day requirements. Qualify final-version artifacts before promotion.
+The October 26 amendment replaces the separate clean-RC prerequisite with one
+complete qualification of unpublished final-version `0.0.2` artifacts. Retain all
+eighteen acceptance gates, including independent signed-artifact install, reboot,
+upgrade, rollback, repair and uninstall verification. Capture the mandatory full
+source regression already performed by trusted staging; run no duplicate successful
+full suite for unchanged inputs. Qualify, accept and promote the exact final bytes
+without rebuilding. Earlier RC records retain their original source, version and
+artifact bindings and cannot be relabeled as final evidence.
+
+Resolve VM access, signing, storage and physical-provider prerequisites before the
+expensive release run. Test installed product and recovery before long assurance
+work. One consolidated repair round is allowed; another blocker produces an exact
+unfinished-gate report. Preserve the same candidate and valid evidence across daily
+cutoffs. Official Homebrew acceptance and fresh no-tap installation remain the
+launch boundary described above.
 
 ## Alternatives and tests
 

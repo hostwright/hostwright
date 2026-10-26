@@ -130,8 +130,10 @@ documentation checks and review. Release qualification additionally requires:
 - local backup/restore, upgrade lineage from preserved dev.11/dev.12 artifacts and
   downgrade refusal with one-generation rollback;
 - executed quickstarts, website typecheck/build/link checks and truthful capability docs;
-- one clean RC and independent signed-artifact install, reboot, upgrade, rollback,
-  repair and uninstall verification; final-version artifacts qualify before publication.
+- one complete qualification of unpublished final `0.0.2` artifacts, including independent
+  signed-artifact install, reboot, upgrade, rollback, repair and uninstall verification;
+  a separate accepted RC is not required. Retain all eighteen acceptance gates and
+  capture trusted staging's mandatory full source run rather than duplicate it.
 
 Use macOS 26 arm64, Apple container 1.0.0/1.1.0 and Containerization 0.35.0 for
 exact declared capabilities. Record actual OS builds and hardware. The physical

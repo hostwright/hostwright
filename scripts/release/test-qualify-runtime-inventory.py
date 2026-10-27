@@ -429,6 +429,21 @@ class CommittedRuntimePinTests(unittest.TestCase):
         self.assertEqual(self.harness["SDK_INIT_ASSETS"], expected)
         self.assertEqual(self.harness["SDK_INIT_VARIANT_DIGEST"], "sha256:" + self.swift["initImageManifestDigest"])
 
+    def test_kernel_notice_attribution_matches_verified_payload(self):
+        expected = "embedded-IKCFG_ST:sha256:" + self.swift["kernelSHA256"]
+        third_party = json.loads((self.root / Q.THIRD_PARTY_INVENTORY).read_bytes())
+        records = [row for row in third_party["runtimeDocuments"]
+                   if row["sourcePath"] == Q.CONFIG_DOC_PATH]
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["sourcePaths"], [expected])
+        config = (self.root / Q.CONFIG_PATH).read_bytes()
+        self.assertEqual((records[0]["sha256"], records[0]["sizeBytes"]),
+                         (hashlib.sha256(config).hexdigest(), len(config)))
+        documents = json.loads((self.root / Q.SOURCE_DOCUMENTS).read_bytes())
+        source_configs = [row for row in documents if row["path"] == Q.SOURCE_CONFIG_PATH]
+        self.assertEqual(len(source_configs), 1)
+        self.assertEqual(source_configs[0]["url"], expected)
+
     def test_imported_index_is_derived_from_current_manifest(self):
         manifest = dict(digest="sha256:" + self.swift["initImageManifestDigest"],
                         mediaType="application/vnd.oci.image.manifest.v1+json", size=self.swift["initImageManifestSize"])

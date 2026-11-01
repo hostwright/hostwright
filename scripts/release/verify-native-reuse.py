@@ -109,6 +109,8 @@ def authenticate_subject(root,name,producer,output,key):
                    cwd=bundle_dir,check=True,timeout=120,capture_output=True)
     bundle=bundle_dir/('sha256:'+file_digest(subject)+'.jsonl')
     require(bundle.is_file() and not bundle.is_symlink() and bundle.stat().st_size<=32*1024**2,'missing or oversized original attestation bundle')
+    require(set(bundle_dir.iterdir())=={bundle},'unexpected original attestation download member')
+    bundle=bundle.rename(bundle_dir/'subject.sigstore.jsonl')
     raw=verify_attestation(subject,bundle,producer)
     return dict(subject=I.record(output,'subjects/'+key,subject.read_bytes()),
                 bundle=I.record(output,'subjects/'+key+'.sigstore.jsonl',bundle.read_bytes()),

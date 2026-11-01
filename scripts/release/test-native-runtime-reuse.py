@@ -241,6 +241,54 @@ class NativeProofTests(unittest.TestCase):
         proof,files=self.proof(dict(native,sourceCommit=self.consumer))
         with self.assertRaisesRegex(ValueError,'rebased'): N.validate(proof,files.__getitem__,self.consumer)
 
+    def test_prepare_retains_downloaded_attestations_with_upload_safe_names(self):
+        native=dict(sourceCommit=self.producer,status='prepared-not-release-qualified')
+        proof,files=self.proof(native)
+        bundle_bytes=b'{"synthetic":"original downloaded bundle"}\n'
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);carrier=root/'carrier';carrier.mkdir()
+            members={name:files[proof['subjects'][key]['subject']['path']] for key,name in N.SUBJECTS.items()}
+            members.update({'evidence/'+Path(row['path']).name:files[row['path']] for row in proof['sdk'].values()})
+            for name,data in members.items():
+                path=carrier/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(data)
+            resolution=root/'resolution.json';resolution.write_bytes(files[proof['resolution']['path']])
+            verified=[]
+            def gh(argv,**kwargs):
+                subject=Path(argv[3]);data=subject.read_bytes()
+                if argv[2]=='download':
+                    (Path(kwargs['cwd'])/('sha256:'+I.digest(data)+'.jsonl')).write_bytes(bundle_bytes)
+                    return subprocess.CompletedProcess(argv,0,b'')
+                self.assertEqual(argv[2],'verify')
+                bundle=Path(argv[argv.index('--bundle')+1])
+                self.assertEqual(bundle.name,'subject.sigstore.jsonl')
+                self.assertEqual(bundle.read_bytes(),bundle_bytes)
+                self.assertEqual(argv[argv.index('--source-digest')+1],self.producer)
+                self.assertEqual(argv[argv.index('--signer-digest')+1],self.producer)
+                self.assertIn('--deny-self-hosted-runners',argv)
+                verified.append(data)
+                cert=dict(issuer='https://token.actions.githubusercontent.com',
+                          buildSignerURI=f'https://github.com/{R.REPO}/{R.WORKFLOW}@refs/heads/main',
+                          buildSignerDigest=self.producer,sourceRepositoryURI='https://github.com/'+R.REPO,
+                          sourceRepositoryDigest=self.producer,sourceRepositoryRef='refs/heads/main',
+                          runnerEnvironment='github-hosted',
+                          runInvocationURI=f'https://github.com/{R.REPO}/actions/runs/123/attempts/2')
+                value=[dict(verificationResult=dict(signature=dict(certificate=cert),
+                            verifiedTimestamps=[dict(type='transparency-log')],
+                            statement=dict(subject=[dict(digest=dict(sha256=I.digest(data)))])))]
+                return subprocess.CompletedProcess(argv,0,I.canonical(value))
+            real_run=subprocess.run
+            def commands(argv,**kwargs):
+                return gh(argv,**kwargs) if argv[0]=='gh' else real_run(argv,**kwargs)
+            output=root/'output'
+            with mock.patch.object(N.subprocess,'run',side_effect=commands):
+                actual=N.prepare(carrier,resolution,self.repo,self.consumer,output)
+            self.assertCountEqual(verified,[members[name] for name in N.SUBJECTS.values()])
+            for row in actual['subjects'].values():
+                self.assertEqual(I.bound(row['bundle'],lambda name:(output/name).read_bytes()),bundle_bytes)
+            for path in output.rglob('*'):
+                self.assertFalse(any(character in path.relative_to(output).as_posix() for character in '\":<>|*?\r\n'))
+            self.assertEqual(N.validate(actual,lambda name:(output/name).read_bytes(),self.consumer),native)
+
     def test_composition_preserves_native_bytes_and_fresh_loader_and_explicit_mode(self):
         fixture=P.RuntimePreparationTests(); fixture.setUp(); self.addCleanup(fixture.doCleanups)
         fixture.commit=self.consumer; fixture.native_fragment['sourceCommit']=self.producer
@@ -317,6 +365,21 @@ class NativeProofTests(unittest.TestCase):
 
 
 class NativeAuthenticationTests(unittest.TestCase):
+    def test_download_rejects_unexpected_members_before_verification(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);carrier=root/'carrier';carrier.mkdir()
+            (carrier/'subject').write_bytes(b'original bytes');output=root/'output';output.mkdir()
+            def download(argv,**kwargs):
+                target=Path(kwargs['cwd'])
+                (target/('sha256:'+I.digest(b'original bytes')+'.jsonl')).write_bytes(b'bundle')
+                (target/'unexpected:bundle').write_bytes(b'unexpected')
+                return subprocess.CompletedProcess(argv,0,b'')
+            with mock.patch.object(N.subprocess,'run',side_effect=download), \
+                 mock.patch.object(N,'verify_attestation',return_value=b'[]') as verify:
+                with self.assertRaisesRegex(ValueError,'unexpected original attestation download'):
+                    N.authenticate_subject(carrier,'subject',dict(commit='a'*40,runID=123,attempt=2),output,'checksums')
+                verify.assert_not_called()
+
     def test_crypto_verifier_and_exact_certificate_producer_are_required(self):
         with tempfile.TemporaryDirectory() as directory:
             subject=Path(directory)/'subject';subject.write_bytes(b'original bytes');bundle=Path(directory)/'bundle';bundle.write_bytes(b'bundle')

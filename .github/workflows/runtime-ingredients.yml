@@ -855,6 +855,8 @@ jobs:
             -C "$RUNNER_TEMP/runtime-loader-authenticated"
       - name: Prepare and verify the combined runtime provenance source archive
         shell: bash
+        env:
+          NATIVE_REUSE_ATTEMPT: ${{ needs.native-checkpoint.outputs.producer-attempt }}
         run: |
           set -euo pipefail
           python3 scripts/release/test-prepare-runtime-provenance.py
@@ -862,7 +864,7 @@ jobs:
           python3 scripts/release/test-prepare-runtime-attestation-subjects.py
           native="$RUNNER_TEMP/runtime-inputs/runtime-native-fragment"
           reuse_args=()
-          if [[ -n "${{ needs.native-checkpoint.outputs.producer-attempt }}" ]]; then
+          if [[ -n "$NATIVE_REUSE_ATTEMPT" ]]; then
             reuse_args+=(--native-reuse-root "$RUNNER_TEMP/runtime-inputs/reuse")
           fi
           python3 scripts/release/prepare-runtime-provenance.py \

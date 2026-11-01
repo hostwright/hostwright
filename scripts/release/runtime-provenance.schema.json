@@ -487,12 +487,12 @@
           "minLength": 1,
           "type": "string"
         },
-        "embeddedPinPath": {
-          "minLength": 1,
-          "type": "string"
-        },
         "embeddedCommit": {
           "pattern": "^[a-f0-9]{40}$",
+          "type": "string"
+        },
+        "embeddedPinPath": {
+          "minLength": 1,
           "type": "string"
         },
         "path": {
@@ -574,7 +574,14 @@
   "description": "Schema is structural only. Qualification requires actual byte/source/link checks and cryptographically authenticated fixed producer. Unknown receipt flags confer no authority. Current profile rejects multi-layer OCI, LTO/non-ELF selected inputs, source additions/deletions/mode/binary patches.",
   "properties": {
     "closureMode": {
-      "const": "new-source-build"
+      "oneOf": [
+        {
+          "const": "new-source-build"
+        },
+        {
+          "const": "authenticated-native-reuse"
+        }
+      ]
     },
     "kernel": {
       "$ref": "#/$defs/kernel"
@@ -622,6 +629,188 @@
           "$ref": "#/$defs/goLoader"
         }
       ]
+    },
+    "nativeReuse": {
+      "properties": {
+        "artifact": {
+          "properties": {
+            "id": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "jobID": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "name": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "sha256": {
+              "pattern": "[a-f0-9]{64}",
+              "type": "string"
+            },
+            "sizeBytes": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "sha256",
+            "sizeBytes",
+            "jobID"
+          ],
+          "type": "object"
+        },
+        "inputComparison": {
+          "required": [
+            "producer",
+            "consumer",
+            "ancestry",
+            "comparison"
+          ],
+          "type": "object"
+        },
+        "kind": {
+          "const": "hostwright.native-runtime-reuse.v1"
+        },
+        "producer": {
+          "properties": {
+            "attempt": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "commit": {
+              "pattern": "^[a-f0-9]{40}$",
+              "type": "string"
+            },
+            "runID": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "commit",
+            "runID",
+            "attempt"
+          ],
+          "type": "object"
+        },
+        "resolution": {
+          "$ref": "#/$defs/record"
+        },
+        "schemaVersion": {
+          "const": 1
+        },
+        "sdk": {
+          "properties": {
+            "archive": {
+              "$ref": "#/$defs/record"
+            },
+            "producer": {
+              "$ref": "#/$defs/record"
+            },
+            "reuse": {
+              "$ref": "#/$defs/record"
+            }
+          },
+          "required": [
+            "producer",
+            "reuse",
+            "archive"
+          ],
+          "type": "object"
+        },
+        "sourceCommit": {
+          "pattern": "[a-f0-9]{40}",
+          "type": "string"
+        },
+        "status": {
+          "const": "authenticated-unchanged-inputs-not-release-qualified"
+        },
+        "subjects": {
+          "properties": {
+            "checksums": {
+              "properties": {
+                "bundle": {
+                  "$ref": "#/$defs/record"
+                },
+                "subject": {
+                  "$ref": "#/$defs/record"
+                },
+                "verification": {
+                  "$ref": "#/$defs/record"
+                }
+              },
+              "required": [
+                "subject",
+                "bundle",
+                "verification"
+              ],
+              "type": "object"
+            },
+            "nativeManifest": {
+              "properties": {
+                "bundle": {
+                  "$ref": "#/$defs/record"
+                },
+                "subject": {
+                  "$ref": "#/$defs/record"
+                },
+                "verification": {
+                  "$ref": "#/$defs/record"
+                }
+              },
+              "required": [
+                "subject",
+                "bundle",
+                "verification"
+              ],
+              "type": "object"
+            },
+            "sourceMap": {
+              "properties": {
+                "bundle": {
+                  "$ref": "#/$defs/record"
+                },
+                "subject": {
+                  "$ref": "#/$defs/record"
+                },
+                "verification": {
+                  "$ref": "#/$defs/record"
+                }
+              },
+              "required": [
+                "subject",
+                "bundle",
+                "verification"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "checksums",
+            "nativeManifest",
+            "sourceMap"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "kind",
+        "schemaVersion",
+        "status",
+        "sourceCommit",
+        "producer",
+        "artifact",
+        "resolution",
+        "subjects",
+        "sdk",
+        "inputComparison"
+      ],
+      "type": "object"
     },
     "oci": {
       "properties": {

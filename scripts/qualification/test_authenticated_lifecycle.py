@@ -1,4 +1,5 @@
 import importlib.util
+from contextlib import closing
 import json
 from pathlib import Path
 import tempfile
@@ -9,6 +10,7 @@ import tarfile
 import zipfile
 import hashlib
 import os
+import sqlite3
 
 spec = importlib.util.spec_from_file_location('qualification', Path(__file__).with_name('authenticated-lifecycle.py'))
 q = importlib.util.module_from_spec(spec)
@@ -320,6 +322,79 @@ class BoundaryTests(unittest.TestCase):
         obj = q.load(inventory); del obj['files']['release/release-manifest.json.cms']
         inventory.write_text(json.dumps(obj)); self.receipt['release']['inventorySHA256'] = q.sha(inventory); self.write_receipt()
         self.reject('omits release/CMS')
+
+class SDKDurableOwnershipTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix='hostwright-sdk-ownership-')
+        self.addCleanup(self.temp.cleanup)
+        root = Path(self.temp.name).resolve()
+        self.database = root/'support/state/state.sqlite'
+        self.database.parent.mkdir(parents=True)
+        self.project_uuid = '11111111-1111-4111-8111-111111111111'
+        self.resource_uuid = '22222222-2222-4222-8222-222222222222'
+        self.fence = '33333333-3333-4333-8333-333333333333'
+        self.resource = 'hostwright-sdk-owned'
+        with closing(sqlite3.connect(self.database)) as db, db:
+            db.executescript('''
+                CREATE TABLE projects (id TEXT, name TEXT, resource_uuid TEXT);
+                CREATE TABLE ownership_records (
+                    project_id TEXT, resource_identifier TEXT, runtime_adapter TEXT,
+                    resource_uuid TEXT, project_resource_uuid TEXT,
+                    resource_generation INTEGER, project_generation INTEGER,
+                    provider_generation INTEGER, fencing_token TEXT);
+                CREATE TABLE scheduler_reservations (project_uuid TEXT, status TEXT);
+                CREATE TABLE network_port_reservations (project_uuid TEXT, lifecycle_state TEXT);
+            ''')
+            db.execute('INSERT INTO projects VALUES (?, ?, ?)', ('project', 'qualification', self.project_uuid))
+            db.execute('INSERT INTO ownership_records VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                       ('project', self.resource, 'apple-containerization', self.resource_uuid,
+                        self.project_uuid, 1, 1, 1, self.fence))
+        self.harness = q.Harness.__new__(q.Harness)
+        self.harness.provider = 'apple-containerization'
+        self.harness.a = SimpleNamespace(state_root=str(root), project='qualification',
+                                         cli='/fixture/hostwright', manifest='/fixture/manifest.json')
+        self.harness.evidence = root/'evidence'; self.harness.evidence.mkdir()
+        self.harness.binding = {'health': {'service': 'web'}, 'memory': {'processPaths': [], 'rssBudgetBytes': 2048}, 'artifacts': []}
+        self.harness.daemon = SimpleNamespace(pid=123)
+        self.harness.sequence = 0
+        self.harness.checkpoint = {'verifiedObservations': []}
+        self.harness.baseline = []
+        self.harness.sdk_owned_paths = set()
+        self.record = {'phase': 'stopped', 'projectUUID': self.project_uuid, 'mutationContext': {
+            'resourceUUID': self.resource_uuid, 'projectResourceUUID': self.project_uuid,
+            'resourceGeneration': 1, 'projectGeneration': 1, 'providerGeneration': 1, 'fencingToken': self.fence}}
+        self.harness.inventory = lambda: [{'id': self.resource, 'project': 'qualification', 'nativeInventory': {'record': self.record}}]
+        self.harness.sdk_preservation = lambda final: '123 1 1 Sat Oct 31 20:00:00 2026 /fixture/hostwrightd\n'
+        status = {'runtime': {'observed': True, 'adapter': 'AppleContainerizationRuntimeAdapter'},
+                  'services': [{'name': 'web', 'observed': {'resourceIdentifier': self.resource, 'lifecycle': 'stopped'}}]}
+        self.harness.command = lambda argv, **kwargs: status if argv[1:2] == ['status'] else 'memory fixture'
+
+    def test_canonical_durable_provider_id_is_observed(self):
+        self.harness.observe_sdk('down')
+        self.assertEqual(self.harness.checkpoint['verifiedObservations'], ['down'])
+        self.assertEqual(self.harness.sdk_project_uuid, self.project_uuid)
+        self.assertEqual(q.load(self.harness.evidence/'observation-0000.json')['action'], 'down')
+
+    def test_display_name_and_other_provider_do_not_authorize_ownership(self):
+        for adapter in ('AppleContainerizationRuntimeAdapter', 'apple-container-cli', ''):
+            with self.subTest(adapter=adapter):
+                with closing(sqlite3.connect(self.database)) as db, db:
+                    db.execute('UPDATE ownership_records SET runtime_adapter=?', (adapter,))
+                with self.assertRaisesRegex(q.Rejected, 'SDK exact durable ownership unavailable'):
+                    self.harness.observe_sdk('down')
+                self.assertEqual(self.harness.checkpoint['verifiedObservations'], [])
+
+    def test_canonical_provider_still_requires_matching_resource(self):
+        with closing(sqlite3.connect(self.database)) as db, db:
+            db.execute('UPDATE ownership_records SET resource_identifier=?', ('another-resource',))
+        with self.assertRaisesRegex(q.Rejected, 'SDK exact durable ownership unavailable'):
+            self.harness.observe_sdk('down')
+
+    def test_canonical_provider_still_requires_matching_fence(self):
+        self.record['mutationContext']['fencingToken'] = '44444444-4444-4444-8444-444444444444'
+        with self.assertRaisesRegex(q.Rejected, 'SDK durable UUID/generation/fence mismatch'):
+            self.harness.observe_sdk('down')
+
 
 class SDKInitReadinessTests(unittest.TestCase):
     def setUp(self):

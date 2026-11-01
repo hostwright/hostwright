@@ -27,6 +27,7 @@ Failed runs stop only the owned daemon; retained workloads require explicit
 coordinator recovery/cleanup. A pass is not release publication authorization.
 """
 import argparse
+from contextlib import closing
 import datetime as dt
 import hashlib
 import json
@@ -633,7 +634,7 @@ class Harness:
         running = action in ('up','restart','soak')
         require(len(own) == (0 if action == 'rm' else 1), 'owned SDK record count mismatch')
         database = Path(self.a.state_root)/'support/state/state.sqlite'
-        with sqlite3.connect(database.as_uri()+'?mode=ro',uri=True) as connection:
+        with closing(sqlite3.connect(database.as_uri()+'?mode=ro',uri=True)) as connection:
             connection.row_factory = sqlite3.Row
             connection.execute('BEGIN')
             projects = [dict(x) for x in connection.execute('SELECT resource_uuid FROM projects WHERE name=?',(self.a.project,))]
@@ -659,7 +660,7 @@ class Harness:
             token = sdk.digest(resource.encode())
             self.sdk_owned_paths.update(('state/records/'+token+'.json','state/logs/'+token+'.log','images/containers/'+resource))
             # Structural directories may appear, but their contents are still enumerated exactly.
-            matches = [x for x in durable if x['resource_identifier'] == resource and x['runtime_adapter'] == 'AppleContainerizationRuntimeAdapter']
+            matches = [x for x in durable if x['resource_identifier'] == resource and x['runtime_adapter'] == self.provider]
             require(len(matches) == 1, 'SDK exact durable ownership unavailable')
             row = matches[0]
             expected = {'resourceIdentifier':resource, 'resourceUUID':row['resource_uuid'],'projectResourceUUID':row['project_resource_uuid'],

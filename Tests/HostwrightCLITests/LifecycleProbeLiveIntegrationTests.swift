@@ -1,9 +1,11 @@
 import Foundation
 import HostwrightCore
+import HostwrightControlPlane
 import HostwrightManifest
 import HostwrightReconciler
 import HostwrightRuntime
-import HostwrightState
+import HostwrightScheduler
+@testable import HostwrightState
 import XCTest
 @testable import HostwrightCLI
 
@@ -1539,6 +1541,7 @@ private struct ProbeLiveFixture {
         planCommand: LifecycleCommand? = nil,
         nativeRestartPair: Bool = false,
         nativeFenceObservation: Bool = false,
+        seedOperationGroup: Bool = true,
         interactive: ProbeLiveInteractiveExecutor,
         clock: ProbeLiveClock = ProbeLiveClock()
     ) throws {
@@ -1585,7 +1588,7 @@ private struct ProbeLiveFixture {
         let resourceUUID = "11111111-1111-4111-8111-111111111111"
         let resourceFence = "33333333-3333-4333-8333-333333333333"
         let nodeFence = "44444444-4444-4444-8444-444444444444"
-        let operationFence = native
+        let operationFence = native && seedOperationGroup
             ? "88888888-8888-4888-8888-888888888888" : nodeFence
         let leaseOwner = "probe-live-test"
         let leaseExpiresAt = "2099-01-01T00:00:00Z"
@@ -1680,7 +1683,7 @@ private struct ProbeLiveFixture {
             leaseOwner: leaseOwner,
             attempt: 1
         )
-        let acquired = try store.operationGroups.acquire(
+        let acquired = seedOperationGroup ? try store.operationGroups.acquire(
             OperationGroupRecord(
                 id: groupID,
                 operationID: operationID,
@@ -1705,8 +1708,8 @@ private struct ProbeLiveFixture {
                 compensationJSONRedacted: "[]",
                 verificationJSONRedacted: "{}"
             )
-        )
-        guard acquired.acquired != nil else {
+        ) : nil
+        guard !seedOperationGroup || acquired?.acquired != nil else {
             throw StateStoreError.invalidRecord(
                 "Probe live test operation group was not acquired."
             )
@@ -1946,23 +1949,27 @@ private func nativeFenceCompletedHint(
 private func nativeFenceNextOperation(
     fixture: ProbeLiveFixture,
     adapter: any RuntimeAdapter,
-    observed: ObservedRuntimeState
+    observed: ObservedRuntimeState,
+    command: LifecycleCommand = .restart,
+    nodes: [LifecyclePlanNode]? = nil,
+    seedOperationGroup: Bool = true
 ) async throws -> (effects: LifecycleLiveEffects, context: LifecycleSagaContext) {
     let previous = fixture.context.plan
     let inventory = try await adapter.inventory()
     let plan = try LifecyclePlan(
-        command: .restart, projectID: previous.projectID, projectName: previous.projectName,
+        command: command, projectID: previous.projectID, projectName: previous.projectName,
         projectResourceUUID: previous.projectResourceUUID, projectGeneration: previous.projectGeneration,
         providerID: previous.providerID, providerGeneration: previous.providerGeneration,
         manifestSHA256: previous.manifestSHA256, observationSHA256: inventory.semanticSHA256,
-        capabilitySHA256: previous.capabilitySHA256, nodes: previous.nodes
+        capabilitySHA256: previous.capabilitySHA256, nodes: nodes ?? previous.nodes
     )
     let context = LifecycleSagaContext(
         plan: plan, operationID: HostwrightResourceUUID.generate(),
-        groupID: HostwrightResourceUUID.generate(), fencingToken: HostwrightResourceUUID.generate(),
+        groupID: HostwrightResourceUUID.generate(),
+        fencingToken: seedOperationGroup ? HostwrightResourceUUID.generate() : plan.nodes[0].fencingToken,
         leaseOwner: "native-next-test", attempt: 1
     )
-    let acquired = try fixture.store.operationGroups.acquire(OperationGroupRecord(
+    let acquired = seedOperationGroup ? try fixture.store.operationGroups.acquire(OperationGroupRecord(
         id: context.groupID, operationID: context.operationID, groupKind: "lifecycle-v1",
         projectID: plan.projectID, serviceName: nil, plannedActionType: plan.command.rawValue,
         status: .active, groupIdempotencyKey: plan.planSHA256, planHash: plan.planSHA256,
@@ -1971,8 +1978,8 @@ private func nativeFenceNextOperation(
         createdAt: "2026-10-03T10:00:00Z", updatedAt: "2026-10-03T10:00:00Z",
         metadataJSONRedacted: "{}", fencingToken: context.fencingToken,
         intentJSONRedacted: LifecyclePersistedIntentCodec.encode(plan), compensationJSONRedacted: "[]", verificationJSONRedacted: "{}"
-    ))
-    guard acquired.acquired != nil else {
+    )) : nil
+    guard !seedOperationGroup || acquired?.acquired != nil else {
         throw StateStoreError.invalidRecord("The completed native lifecycle must release its operation group.")
     }
     let binding = try LifecycleResourceBinding(
@@ -2209,4 +2216,651 @@ private actor NativeFenceLifecycleHelper {
             frame: try ContainerizationHelperFraming.frame(payload), peerProcessID: 7
         )
     }
+}
+
+final class LifecycleSchedulerSDKFenceTests: XCTestCase {
+    func testSupersededSDKGenerationReleasesOldCapacityOnlyWithExactProjectScope() async throws {
+        for wrongProjectGeneration in [false, true] {
+            let running = try await nativeSchedulerRunningFixture()
+            defer { running.fixture.cleanup() }
+            let fixture = running.fixture
+            let hints = try hostwrightRuntimeOwnershipHints(
+                store: fixture.store, projectID: fixture.context.plan.projectID,
+                projectName: fixture.context.plan.projectName, providerID: .appleContainerization
+            )
+            let observed = try await running.effects.adapter.observe(desiredState: DesiredRuntimeState(
+                projectName: fixture.context.plan.projectName, services: [probeLiveDesired()], ownedResourceHints: hints
+            ))
+            let prior = try fixture.exactOwnership()
+            let replacementFence = prior.fencingToken
+            func replacementRecord(metadata: String) -> OwnershipRecord {
+                OwnershipRecord(
+                    id: prior.id, resourceIdentifier: prior.resourceIdentifier, resourceType: prior.resourceType,
+                    projectID: prior.projectID, serviceName: prior.serviceName, runtimeAdapter: prior.runtimeAdapter,
+                    createdAt: prior.createdAt, observedAt: prior.observedAt, cleanupEligible: prior.cleanupEligible,
+                    metadataJSONRedacted: metadata, identityVersion: prior.identityVersion, resourceUUID: prior.resourceUUID,
+                    resourceGeneration: prior.resourceGeneration + 1, projectResourceUUID: prior.projectResourceUUID,
+                    projectGeneration: prior.projectGeneration, providerGeneration: prior.providerGeneration,
+                    fencingToken: replacementFence
+                )
+            }
+            let priorAuthority = try XCTUnwrap(OwnershipAuthorityMetadata.decode(from: prior.metadataJSONRedacted))
+            let priorGroup = try XCTUnwrap(fixture.store.operationGroups.load(id: fixture.context.groupID))
+            let generationAuthority = try OwnershipAuthorityRecord.lifecycle(
+                ownership: replacementRecord(metadata: prior.metadataJSONRedacted), operationGroup: priorGroup,
+                finalizerState: .active, handoffGeneration: priorAuthority.handoffGeneration
+            )
+            try fixture.store.ownership.upsert(replacementRecord(metadata: OwnershipAuthorityMetadata.encode(
+                generationAuthority, into: prior.metadataJSONRedacted
+            )))
+            await running.helper.setOwnership(RuntimeInventoryOwnershipEvidence(
+                resourceUUID: prior.resourceUUID, projectUUID: fixture.binding.projectResourceUUID,
+                resourceGeneration: prior.resourceGeneration + 1, projectGeneration: prior.projectGeneration,
+                providerID: .appleContainerization, providerGeneration: prior.providerGeneration,
+                fencingToken: replacementFence
+            ))
+            await running.helper.setLifecycle(.stopped)
+            let start = try LifecyclePlanNode(
+                key: "replacement-start", action: .start, serviceName: prior.serviceName,
+                resourceIdentifier: prior.resourceIdentifier, resourceUUID: prior.resourceUUID,
+                resourceGeneration: prior.resourceGeneration + 1, fencingToken: HostwrightResourceUUID.generate(),
+                postconditions: [LifecyclePlanCondition(kind: "lifecycle", subject: "phase04/web", expectedValue: "running")],
+                timeoutSeconds: 20
+            )
+            let replacement = try await nativeFenceNextOperation(
+                fixture: fixture, adapter: running.effects.adapter, observed: observed,
+                command: .up, nodes: [start], seedOperationGroup: false
+            )
+            try await nativeSchedulerExecute(fixture: fixture, effects: replacement.effects, context: replacement.context)
+            do {
+                _ = try await nativeSchedulerAdmit(
+                    running, plan: fixture.context.plan, desiredByNode: [fixture.node.key: probeLiveDesired()]
+                )
+                XCTFail("An obsolete generation must not regain activation authority.")
+            } catch {
+                XCTAssertEqual(error as? SchedulerAdmissionError, .invalidBinding(field: "lifecycle-active-reservation"))
+            }
+            if wrongProjectGeneration {
+                await running.helper.setOwnership(RuntimeInventoryOwnershipEvidence(
+                    resourceUUID: prior.resourceUUID, projectUUID: fixture.binding.projectResourceUUID,
+                    resourceGeneration: prior.resourceGeneration + 1, projectGeneration: prior.projectGeneration + 1,
+                    providerID: .appleContainerization, providerGeneration: prior.providerGeneration,
+                    fencingToken: replacement.context.fencingToken
+                ))
+            }
+            let inventory = try await replacement.effects.adapter.inventory()
+            XCTAssertEqual(inventory.containers.first?.ownership?.resourceGeneration, prior.resourceGeneration + 1)
+            try LifecycleSchedulerSession.reconcile(
+                store: fixture.store, projectUUID: fixture.binding.projectResourceUUID,
+                providerID: .appleContainerization, inventory: inventory
+            )
+            if wrongProjectGeneration {
+                try assertCapacityHeld(running)
+            } else {
+                let repository = fixture.store.schedulerAdmissions
+                XCTAssertEqual(try repository.reservation(id: running.reservation.reservationID)?.status, .released)
+                XCTAssertEqual(try repository.activeCapacity(nodeID: running.reservation.nodeID), .zero)
+            }
+        }
+    }
+
+    func testRepeatedSDKRestartReleasesAndReadmitsCapacityAtEachNativeFence() async throws {
+        let running = try await nativeSchedulerRunningFixture()
+        defer { running.fixture.cleanup() }
+        var previousReservationID = running.reservation.reservationID
+        for _ in 0..<2 {
+            let next = try await nativeSchedulerRestart(running)
+            let admission = try await nativeSchedulerAdmit(
+                running, plan: next.context.plan,
+                desiredByNode: Dictionary(uniqueKeysWithValues: next.context.plan.nodes.map { ($0.key, probeLiveDesired()) })
+            )
+            let effects = nativeSchedulerEffects(next.effects, admission: admission)
+            try await nativeSchedulerExecute(fixture: running.fixture, effects: effects, context: next.context)
+            let inventory = try await effects.adapter.inventory()
+            XCTAssertEqual(inventory.containers.first?.lifecycle, .running)
+            XCTAssertNotEqual(inventory.containers.first?.ownership?.fencingToken, running.reservation.runtimeOwnership?.fencingToken)
+            try admission.session.reconcile(inventory: inventory)
+            let repository = running.fixture.store.schedulerAdmissions
+            XCTAssertEqual(try repository.reservation(id: previousReservationID)?.status, .released)
+            let active = try repository.activeReservations()
+            XCTAssertEqual(active.count, 1)
+            let current = try XCTUnwrap(active.first)
+            XCTAssertNotEqual(current.reservationID, previousReservationID)
+            XCTAssertEqual(current.status, .committed)
+            XCTAssertEqual(current.runtimeOwnership?.fencingToken, next.context.fencingToken)
+            XCTAssertEqual(current.resources, running.reservation.resources)
+            XCTAssertEqual(try repository.activeCapacity(nodeID: current.nodeID), running.reservation.resources)
+            previousReservationID = current.reservationID
+        }
+        let mutations = await running.helper.mutations()
+        XCTAssertEqual(mutations, [.start, .stop, .start, .stop, .start])
+    }
+
+    func testMixedSDKAdmissionRetainsImmutableBindingAfterAuthorizedFenceAdvance() async throws {
+        let running = try await nativeSchedulerRunningFixture()
+        defer { running.fixture.cleanup() }
+        let restart = try await nativeSchedulerRestart(running)
+        try await nativeSchedulerExecute(fixture: running.fixture, effects: restart.effects, context: restart.context)
+        let existing = try XCTUnwrap(running.fixture.store.schedulerAdmissions.decisionArtifact(id: running.reservation.decisionID))
+            .binding(for: running.reservation.workloadID)
+        let next = try await nativeSchedulerRestart(running)
+        let worker = DesiredRuntimeService(
+            identity: RuntimeServiceIdentity(projectName: "phase04", serviceName: "worker"),
+            image: "local/phase04:latest"
+        )
+        let create = try LifecyclePlanNode(
+            key: "worker-create", action: .create, serviceName: worker.identity.serviceName,
+            resourceIdentifier: worker.identity.managedResourceIdentifier,
+            resourceUUID: HostwrightResourceUUID.generate(), resourceGeneration: 1,
+            fencingToken: next.context.fencingToken
+        )
+        let previous = next.context.plan
+        let start = try LifecyclePlanNode(
+            key: "existing-start", action: .start, serviceName: running.fixture.binding.identity.serviceName,
+            resourceIdentifier: running.fixture.binding.resourceIdentifier,
+            resourceUUID: running.fixture.binding.resourceUUID,
+            resourceGeneration: running.fixture.binding.resourceGeneration,
+            fencingToken: next.context.fencingToken
+        )
+        let mixed = try LifecyclePlan(
+            command: .up, projectID: previous.projectID, projectName: previous.projectName,
+            projectResourceUUID: previous.projectResourceUUID, projectGeneration: previous.projectGeneration,
+            providerID: previous.providerID, providerGeneration: previous.providerGeneration,
+            manifestSHA256: previous.manifestSHA256, observationSHA256: previous.observationSHA256,
+            capabilitySHA256: previous.capabilitySHA256, nodes: [start, create]
+        )
+        _ = try await nativeSchedulerAdmit(running, plan: mixed, desiredByNode: [start.key: probeLiveDesired(), create.key: worker])
+        let repository = running.fixture.store.schedulerAdmissions
+        let reservations = try repository.activeReservations()
+        XCTAssertEqual(reservations.count, 2)
+        let retained = try XCTUnwrap(reservations.first { $0.reservationID == running.reservation.reservationID })
+        XCTAssertEqual(retained.status, .committed)
+        XCTAssertEqual(retained.runtimeOwnership, running.reservation.runtimeOwnership)
+        let added = try XCTUnwrap(reservations.first { $0.reservationID != retained.reservationID })
+        XCTAssertEqual(added.status, .pending)
+        XCTAssertEqual(added.runtimeOwnership?.resourceUUID, create.resourceUUID)
+        XCTAssertEqual(try repository.activeCapacity(nodeID: retained.nodeID), try retained.resources.adding(added.resources))
+        XCTAssertEqual(try repository.decisionArtifact(id: retained.decisionID)?.binding(for: retained.workloadID), existing)
+        XCTAssertEqual(
+            try repository.decisionArtifact(id: added.decisionID)?.binding(for: retained.workloadID)?.runtimeOwnership,
+            running.reservation.runtimeOwnership
+        )
+    }
+
+    func testSDKDownReleasesCommittedCapacityAfterSuccessfulUpAdoptsNewFence() async throws {
+        let running = try await nativeSchedulerRunningFixture()
+        defer { running.fixture.cleanup() }
+        let fixture = running.fixture
+        let repository = fixture.store.schedulerAdmissions
+        let originalBinding = try XCTUnwrap(repository.decisionArtifact(id: running.reservation.decisionID))
+            .binding(for: running.reservation.workloadID)
+        let hints = try hostwrightRuntimeOwnershipHints(
+            store: fixture.store, projectID: fixture.context.plan.projectID,
+            projectName: fixture.context.plan.projectName, providerID: .appleContainerization
+        )
+        let observed = try await running.effects.adapter.observe(desiredState: DesiredRuntimeState(
+            projectName: fixture.context.plan.projectName,
+            services: [probeLiveDesired()], ownedResourceHints: hints
+        ))
+        let stop = try LifecyclePlanNode(
+            key: "scheduler-down-stop", action: .stop,
+            serviceName: fixture.binding.identity.serviceName,
+            resourceIdentifier: fixture.binding.resourceIdentifier,
+            resourceUUID: fixture.binding.resourceUUID,
+            resourceGeneration: fixture.binding.resourceGeneration,
+            fencingToken: HostwrightResourceUUID.generate(),
+            postconditions: [LifecyclePlanCondition(
+                kind: "lifecycle", subject: fixture.binding.identity.displayName, expectedValue: "stopped"
+            )], timeoutSeconds: 20
+        )
+        let down = try await nativeFenceNextOperation(
+            fixture: fixture, adapter: running.effects.adapter, observed: observed,
+            command: .down, nodes: [stop], seedOperationGroup: false
+        )
+        XCTAssertNotEqual(down.context.fencingToken, running.reservation.runtimeOwnership?.fencingToken)
+        try await nativeSchedulerExecute(fixture: fixture, effects: down.effects, context: down.context)
+        let stopped = try await down.effects.adapter.inventory()
+        XCTAssertEqual(stopped.containers.first?.lifecycle, .stopped)
+        XCTAssertEqual(stopped.containers.first?.ownership?.fencingToken, down.context.fencingToken)
+        XCTAssertEqual(try fixture.exactOwnership().fencingToken, down.context.fencingToken)
+        try LifecycleSchedulerSession.reconcile(
+            store: fixture.store, projectUUID: fixture.binding.projectResourceUUID,
+            providerID: .appleContainerization, inventory: stopped
+        )
+        let reloaded = SQLiteStateStore(path: fixture.store.path)
+        XCTAssertEqual(
+            try reloaded.schedulerAdmissions.reservation(id: running.reservation.reservationID)?.status, .released
+        )
+        XCTAssertTrue(try reloaded.schedulerAdmissions.activeReservations().isEmpty)
+        XCTAssertEqual(try reloaded.schedulerAdmissions.activeCapacity(nodeID: running.reservation.nodeID), .zero)
+        XCTAssertEqual(
+            try repository.decisionArtifact(id: running.reservation.decisionID)?.binding(for: running.reservation.workloadID),
+            originalBinding
+        )
+        let mutations = await running.helper.mutations()
+        XCTAssertEqual(mutations, [.start, .stop])
+
+        let upHints = try hostwrightRuntimeOwnershipHints(
+            store: fixture.store, projectID: fixture.context.plan.projectID,
+            projectName: fixture.context.plan.projectName, providerID: .appleContainerization
+        )
+        let inactive = try await down.effects.adapter.observe(desiredState: DesiredRuntimeState(
+            projectName: fixture.context.plan.projectName, services: [probeLiveDesired()], ownedResourceHints: upHints
+        ))
+        let start = try LifecyclePlanNode(
+            key: "scheduler-up-start", action: .start, serviceName: fixture.binding.identity.serviceName,
+            resourceIdentifier: fixture.binding.resourceIdentifier, resourceUUID: fixture.binding.resourceUUID,
+            resourceGeneration: fixture.binding.resourceGeneration, fencingToken: HostwrightResourceUUID.generate(),
+            postconditions: [LifecyclePlanCondition(kind: "lifecycle", subject: "phase04/web", expectedValue: "running")],
+            timeoutSeconds: 20
+        )
+        let up = try await nativeFenceNextOperation(
+            fixture: fixture, adapter: down.effects.adapter, observed: inactive,
+            command: .up, nodes: [start], seedOperationGroup: false
+        )
+        let admission = try await nativeSchedulerAdmit(running, plan: up.context.plan, desiredByNode: [start.key: probeLiveDesired()])
+        let readmitted = try XCTUnwrap(repository.activeReservations().first)
+        XCTAssertNotEqual(readmitted.reservationID, running.reservation.reservationID)
+        XCTAssertEqual(readmitted.status, .pending)
+        XCTAssertEqual(readmitted.resources, running.reservation.resources)
+        let effects = nativeSchedulerEffects(up.effects, admission: admission)
+        try await nativeSchedulerExecute(fixture: fixture, effects: effects, context: up.context)
+        try admission.session.reconcile(inventory: await effects.adapter.inventory())
+        XCTAssertEqual(try repository.reservation(id: readmitted.reservationID)?.status, .committed)
+        XCTAssertEqual(try repository.reservation(id: running.reservation.reservationID)?.status, .released)
+        XCTAssertEqual(try repository.activeCapacity(nodeID: readmitted.nodeID), running.reservation.resources)
+        XCTAssertEqual(try repository.activeReservations().map(\.reservationID), [readmitted.reservationID])
+    }
+
+    func testSDKStoppedInventoryWithStaleOrForeignFenceKeepsCommittedCapacity() async throws {
+        for stale in [true, false] {
+            let running = try await nativeSchedulerRunningFixture()
+            defer { running.fixture.cleanup() }
+            let fixture = running.fixture
+            let fence = stale ? fixture.binding.currentFencingToken : HostwrightResourceUUID.generate()
+            XCTAssertNotEqual(fence, running.reservation.runtimeOwnership?.fencingToken)
+            await running.helper.setOwnership(nativeSchedulerOwnership(fixture: fixture, fence: fence))
+            await running.helper.setLifecycle(.stopped)
+            try LifecycleSchedulerSession.reconcile(
+                store: fixture.store, projectUUID: fixture.binding.projectResourceUUID,
+                providerID: .appleContainerization, inventory: await running.effects.adapter.inventory()
+            )
+            try assertCapacityHeld(running)
+        }
+    }
+
+    func testMatchingSQLiteFenceWithoutAuthorizedLifecycleHandoffKeepsCapacity() async throws {
+        let running = try await nativeSchedulerRunningFixture()
+        defer { running.fixture.cleanup() }
+        let fixture = running.fixture
+        let unprovenFence = HostwrightResourceUUID.generate()
+        let ownership = try fixture.exactOwnership()
+        let advanced = try fixture.store.ownership.advanceFencingToken(
+            resourceIdentifier: ownership.resourceIdentifier, runtimeAdapter: ownership.runtimeAdapter,
+            expectedResourceUUID: ownership.resourceUUID, expectedFencingToken: ownership.fencingToken,
+            newFencingToken: unprovenFence, observedAt: "2026-10-03T10:00:02Z"
+        )
+        XCTAssertNotNil(advanced)
+        await running.helper.setOwnership(nativeSchedulerOwnership(fixture: fixture, fence: unprovenFence))
+        await running.helper.setLifecycle(.stopped)
+        let inventory = try await running.effects.adapter.inventory()
+        XCTAssertEqual(inventory.containers.first?.ownership?.fencingToken, try fixture.exactOwnership().fencingToken)
+        try LifecycleSchedulerSession.reconcile(
+            store: fixture.store, projectUUID: fixture.binding.projectResourceUUID,
+            providerID: .appleContainerization, inventory: inventory
+        )
+        try assertCapacityHeld(running)
+    }
+
+    func testInvalidSDKOperationAuthorityKeepsCommittedCapacity() async throws {
+        for invalid in ["missing-group", "foreign-group", "wrong-resource-plan", "expired-lease"] {
+            let running = try await nativeSchedulerRunningFixture()
+            defer { running.fixture.cleanup() }
+            let fixture = running.fixture
+            let next = try await nativeSchedulerRestart(running)
+            try await nativeSchedulerExecute(fixture: fixture, effects: next.effects, context: next.context)
+            let record = try fixture.exactOwnership()
+            var metadata = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(record.metadataJSONRedacted.utf8)) as? [String: Any])
+            var authority = try XCTUnwrap(metadata[OwnershipAuthorityRecord.metadataKey] as? [String: Any])
+            switch invalid {
+            case "missing-group":
+                authority["operationGroupID"] = HostwrightResourceUUID.generate()
+            case "foreign-group":
+                authority["operationGroupID"] = fixture.context.groupID
+            case "expired-lease":
+                authority["leaseOwner"] = "expired-owner"
+                authority["leaseExpiresAt"] = "2000-01-01T00:00:00Z"
+                try fixture.store.withValidatedConnection { connection in
+                    try connection.run(
+                        "UPDATE operation_groups SET status = 'active', lock_owner = ?, lock_expires_at = ? WHERE id = ?",
+                        bindings: [.text("expired-owner"), .text("2000-01-01T00:00:00Z"), .text(next.context.groupID)]
+                    )
+                }
+            default:
+                let previous = next.context.plan
+                let foreignResource = HostwrightResourceUUID.generate()
+                let nodes = try previous.nodes.map {
+                    try LifecyclePlanNode(
+                        key: $0.key, action: $0.action, serviceName: $0.serviceName,
+                        resourceIdentifier: $0.resourceIdentifier, resourceUUID: foreignResource,
+                        resourceGeneration: $0.resourceGeneration, fencingToken: $0.fencingToken,
+                        dependencies: $0.dependencies, postconditions: $0.postconditions,
+                        timeoutSeconds: $0.timeoutSeconds, compensation: $0.compensation
+                    )
+                }
+                let wrong = try LifecyclePlan(
+                    command: previous.command, projectID: previous.projectID, projectName: previous.projectName,
+                    projectResourceUUID: previous.projectResourceUUID, projectGeneration: previous.projectGeneration,
+                    providerID: previous.providerID, providerGeneration: previous.providerGeneration,
+                    manifestSHA256: previous.manifestSHA256, observationSHA256: previous.observationSHA256,
+                    capabilitySHA256: previous.capabilitySHA256, nodes: nodes
+                )
+                try fixture.store.withValidatedConnection { connection in
+                    try connection.run(
+                        "UPDATE operation_groups SET plan_hash = ?, intent_json_redacted = ? WHERE id = ?",
+                        bindings: [.text(wrong.planSHA256), .text(try LifecyclePersistedIntentCodec.encode(wrong)), .text(next.context.groupID)]
+                    )
+                }
+            }
+            metadata[OwnershipAuthorityRecord.metadataKey] = authority
+            let corrupted = String(decoding: try JSONSerialization.data(withJSONObject: metadata), as: UTF8.self)
+            try fixture.store.withValidatedConnection { connection in
+                try connection.run(
+                    "UPDATE ownership_records SET metadata_json_redacted = ? WHERE id = ?",
+                    bindings: [.text(corrupted), .text(record.id)]
+                )
+            }
+            await running.helper.setLifecycle(.stopped)
+            try LifecycleSchedulerSession.reconcile(
+                store: fixture.store, projectUUID: fixture.binding.projectResourceUUID,
+                providerID: .appleContainerization, inventory: await running.effects.adapter.inventory()
+            )
+            try assertCapacityHeld(running)
+        }
+    }
+
+    private func assertCapacityHeld(_ running: NativeSchedulerRunningFixture) throws {
+        let repository = running.fixture.store.schedulerAdmissions
+        let persisted = try XCTUnwrap(repository.reservation(id: running.reservation.reservationID))
+        XCTAssertEqual(persisted.status, .committed)
+        XCTAssertEqual(persisted.runtimeOwnership, running.reservation.runtimeOwnership)
+        XCTAssertEqual(try repository.activeReservations().map(\.reservationID), [running.reservation.reservationID])
+        XCTAssertEqual(try repository.activeCapacity(nodeID: running.reservation.nodeID), running.reservation.resources)
+    }
+}
+
+private struct NativeSchedulerRunningFixture {
+    let fixture: ProbeLiveFixture
+    let helper: NativeFenceLifecycleHelper
+    let effects: LifecycleLiveEffects
+    let reservation: SchedulerReservationRecord
+}
+
+private struct NativeSchedulerAdmission: Sendable {
+    let session: LifecycleSchedulerSession
+    let context: LifecycleSchedulerContext
+}
+
+private func nativeSchedulerEffects(
+    _ effects: LifecycleLiveEffects, admission: NativeSchedulerAdmission
+) -> LifecycleLiveEffects {
+    var environment = effects.environment
+    environment.lifecycleScheduler = admission.context
+    return LifecycleLiveEffects(
+        adapter: effects.adapter, state: effects.state, store: effects.store, probeStore: effects.probeStore,
+        environment: environment, schedulerActivationValidator: { try admission.session.validate(node: $0) }
+    )
+}
+
+private func nativeSchedulerRestart(
+    _ running: NativeSchedulerRunningFixture
+) async throws -> (effects: LifecycleLiveEffects, context: LifecycleSagaContext) {
+    let fixture = running.fixture
+    let hints = try hostwrightRuntimeOwnershipHints(
+        store: fixture.store, projectID: fixture.context.plan.projectID,
+        projectName: fixture.context.plan.projectName, providerID: .appleContainerization
+    )
+    let observed = try await running.effects.adapter.observe(desiredState: DesiredRuntimeState(
+        projectName: fixture.context.plan.projectName, services: [probeLiveDesired()], ownedResourceHints: hints
+    ))
+    let fence = HostwrightResourceUUID.generate()
+    let stop = try LifecyclePlanNode(
+        key: "scheduler-restart-stop", action: .stop, serviceName: fixture.binding.identity.serviceName,
+        resourceIdentifier: fixture.binding.resourceIdentifier, resourceUUID: fixture.binding.resourceUUID,
+        resourceGeneration: fixture.binding.resourceGeneration, fencingToken: fence,
+        postconditions: [LifecyclePlanCondition(kind: "lifecycle", subject: "phase04/web", expectedValue: "stopped")],
+        timeoutSeconds: 20, compensation: LifecycleCompensation(action: .start, timeoutSeconds: 20)
+    )
+    let start = try LifecyclePlanNode(
+        key: "scheduler-restart-start", action: .start, serviceName: fixture.binding.identity.serviceName,
+        resourceIdentifier: fixture.binding.resourceIdentifier, resourceUUID: fixture.binding.resourceUUID,
+        resourceGeneration: fixture.binding.resourceGeneration, fencingToken: fence, dependencies: [stop.key],
+        postconditions: [LifecyclePlanCondition(kind: "lifecycle", subject: "phase04/web", expectedValue: "running")],
+        timeoutSeconds: 20, compensation: LifecycleCompensation(action: .stop, timeoutSeconds: 20)
+    )
+    return try await nativeFenceNextOperation(
+        fixture: fixture, adapter: running.effects.adapter, observed: observed,
+        nodes: [stop, start], seedOperationGroup: false
+    )
+}
+
+private func nativeSchedulerAdmit(
+    _ running: NativeSchedulerRunningFixture, plan: LifecyclePlan,
+    desiredByNode: [String: DesiredRuntimeService]
+) async throws -> NativeSchedulerAdmission {
+    let fixture = running.fixture
+    let store = fixture.store
+    let capacity = try XCTUnwrap(store.schedulerAdmissions.nodeCapacity(nodeID: running.reservation.nodeID))
+    let context = LifecycleSchedulerContext(subjectID: "owner") {
+        let now = Date()
+        let previous = try store.schedulerAdmissions.hostPressure(nodeID: capacity.nodeID)
+        let pressure = try store.schedulerAdmissions.recordHostPressure(record: SchedulerHostPressureRecord(
+            nodeID: capacity.nodeID, posture: SchedulerHostPosture(pressure: .nominal, energy: .balanced),
+            generation: (previous?.generation ?? 0) + 1,
+            observedAt: ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: floor(now.timeIntervalSince1970))),
+            evidenceDigest: String(repeating: "a", count: 64),
+            policyState: SchedulerHostPressurePolicyState(
+                version: 1, reasonCodes: [.allowed], nextHysteresisState: SchedulerHostPressureHysteresisState(
+                    posture: .allowed, consecutiveClearObservations: 0, version: 1
+                )
+            )
+        ))
+        return LifecycleSchedulerHostSnapshot(
+            capacity: capacity, pressure: pressure, configDigest: String(repeating: "c", count: 64),
+            profileDigest: String(repeating: "d", count: 64), labels: [:], observedAt: now
+        )
+    }
+    let desired = Dictionary(grouping: desiredByNode.values, by: \.identity).values
+        .compactMap(\.first).sorted { $0.identity.serviceName < $1.identity.serviceName }
+    let manifest = HostwrightManifest(version: 3, project: plan.projectName, services: desired.map {
+        HostwrightService(name: $0.identity.serviceName, image: $0.image, resources: HostwrightResources(
+            requests: HostwrightResourceSet(cpus: 1, memory: "512MiB"),
+            limits: HostwrightResourceSet(cpus: 1, memory: "512MiB")
+        ))
+    })
+    let binding = try LifecycleResourceBinding(
+        record: fixture.exactOwnership(), identity: fixture.binding.identity, providerID: .appleContainerization
+    )
+    let hints = try hostwrightRuntimeOwnershipHints(
+        store: store, projectID: plan.projectID, projectName: plan.projectName, providerID: .appleContainerization
+    )
+    let observed = try await running.effects.adapter.observe(desiredState: DesiredRuntimeState(
+        projectName: plan.projectName, services: [probeLiveDesired()], ownedResourceHints: hints
+    ))
+    let preparation = LifecycleCommandPreparation(
+        manifestSHA256: plan.manifestSHA256, manifestBaseDirectory: fixture.directory.path,
+        desiredState: DesiredRuntimeState(projectName: plan.projectName, services: desired), observedState: observed,
+        observationSHA256: plan.observationSHA256, projectID: plan.projectID,
+        projectResourceUUID: plan.projectResourceUUID, projectGeneration: plan.projectGeneration,
+        providerID: plan.providerID, providerGeneration: plan.providerGeneration,
+        capabilitySHA256: plan.capabilitySHA256, planFencingToken: plan.nodes[0].fencingToken,
+        resourceBindings: [binding]
+    )
+    let options = LifecycleCLIOptions(
+        command: plan.command == .restart ? .restart : .up,
+        manifestPath: fixture.directory.appendingPathComponent("hostwright.yaml").path,
+        stateDatabasePath: store.path, dryRun: false, runtimeProvider: .containerization, output: .json
+    )
+    let session = try LifecycleSchedulerSession.admit(
+        context: context, store: store, manifest: manifest,
+        compiled: LifecycleCompiledCommand(plan: plan, desiredServicesByNodeKey: desiredByNode, localImageRequirements: []),
+        preparation: preparation, options: options, providerVersion: "0.35.0"
+    )
+    return NativeSchedulerAdmission(session: session, context: context)
+}
+
+private func nativeSchedulerRunningFixture() async throws -> NativeSchedulerRunningFixture {
+    let fixture = try ProbeLiveFixture(
+        action: .start, desired: probeLiveDesired(),
+        postcondition: LifecyclePlanCondition(kind: "lifecycle", subject: "phase04/web", expectedValue: "running"),
+        providerID: .appleContainerization, planCommand: .up, nativeFenceObservation: true,
+        seedOperationGroup: false,
+        interactive: ProbeLiveInteractiveExecutor(outcomes: [])
+    )
+    do {
+        let helper = NativeFenceLifecycleHelper(fixture: fixture)
+        await helper.setLifecycle(.stopped)
+        let effects = try nativeFenceEffects(fixture: fixture, helper: helper)
+        let reservation = try nativeSchedulerReservation(fixture: fixture)
+        try await nativeSchedulerExecute(fixture: fixture, effects: effects, context: fixture.context)
+        let inventory = try await effects.adapter.inventory()
+        XCTAssertEqual(inventory.containers.first?.lifecycle, .running)
+        XCTAssertEqual(inventory.containers.first?.ownership?.fencingToken, fixture.context.fencingToken)
+        try LifecycleSchedulerSession.reconcile(
+            store: fixture.store, projectUUID: fixture.binding.projectResourceUUID,
+            providerID: .appleContainerization, inventory: inventory
+        )
+        let committed = try XCTUnwrap(fixture.store.schedulerAdmissions.reservation(id: reservation.reservationID))
+        XCTAssertEqual(committed.status, .committed)
+        XCTAssertEqual(try fixture.store.schedulerAdmissions.activeCapacity(nodeID: committed.nodeID), committed.resources)
+        return NativeSchedulerRunningFixture(fixture: fixture, helper: helper, effects: effects, reservation: committed)
+    } catch {
+        fixture.cleanup()
+        throw error
+    }
+}
+
+private func nativeSchedulerOwnership(
+    fixture: ProbeLiveFixture, fence: String
+) -> RuntimeInventoryOwnershipEvidence {
+    RuntimeInventoryOwnershipEvidence(
+        resourceUUID: fixture.binding.resourceUUID, projectUUID: fixture.binding.projectResourceUUID,
+        resourceGeneration: fixture.binding.resourceGeneration, projectGeneration: fixture.binding.projectGeneration,
+        providerID: .appleContainerization, providerGeneration: fixture.binding.providerGeneration,
+        fencingToken: fence
+    )
+}
+
+private func nativeSchedulerExecute(
+    fixture: ProbeLiveFixture, effects: LifecycleLiveEffects, context: LifecycleSagaContext
+) async throws {
+    let validator = LifecycleLiveValidator(
+        adapter: effects.adapter, state: effects.state, store: fixture.store,
+        groupIdempotencyKey: context.plan.planSHA256
+    )
+    for node in context.plan.nodes {
+        XCTAssertEqual(node.fencingToken, context.fencingToken)
+        let validation = await validator.validate(
+            plan: context.plan, node: node, expectedFencingToken: context.fencingToken
+        )
+        XCTAssertEqual(validation.providerID, context.plan.providerID)
+        XCTAssertEqual(validation.providerGeneration, context.plan.providerGeneration)
+        XCTAssertEqual(validation.capabilitySHA256, context.plan.capabilitySHA256)
+        XCTAssertEqual(validation.projectResourceUUID, context.plan.projectResourceUUID)
+        XCTAssertEqual(validation.projectGeneration, context.plan.projectGeneration)
+        XCTAssertTrue(validation.ownershipVerified)
+    }
+    let result = try await LifecycleSagaExecutor(
+        store: fixture.store, effects: effects, validator: validator,
+        finalizer: LifecycleOwnershipFinalizer(store: fixture.store, adapter: effects.adapter)
+    ).execute(
+        plan: context.plan, operationID: context.operationID, groupID: context.groupID,
+        fencingToken: context.fencingToken, lockOwner: try XCTUnwrap(context.leaseOwner)
+    )
+    guard result.status == .succeeded, result.checkpoint == "verified" else {
+        throw StateStoreError.invalidRecord("SDK lifecycle fixture failed: \(result)")
+    }
+    let group = try XCTUnwrap(fixture.store.operationGroups.load(id: context.groupID))
+    XCTAssertEqual(group.status, .succeeded)
+    XCTAssertEqual(group.checkpoint, "verified")
+    XCTAssertNil(group.lockOwner)
+    XCTAssertNil(group.lockExpiresAt)
+    let steps = try fixture.store.operationGroupSteps.load(groupID: context.groupID)
+    for node in context.plan.nodes {
+        let step = try XCTUnwrap(steps.last { $0.stepKey == node.key && $0.direction == .forward })
+        XCTAssertEqual(step.status, .succeeded)
+        XCTAssertEqual(step.plannedActionType, node.action.rawValue)
+    }
+    let authority = try XCTUnwrap(OwnershipAuthorityMetadata.decode(
+        from: fixture.exactOwnership().metadataJSONRedacted
+    ))
+    XCTAssertEqual(authority.operationGroupID, group.id)
+    XCTAssertEqual(authority.fencingToken, context.fencingToken)
+    XCTAssertNil(authority.leaseOwner)
+    XCTAssertNil(authority.leaseExpiresAt)
+}
+
+private func nativeSchedulerReservation(fixture: ProbeLiveFixture) throws -> SchedulerReservationRecord {
+    let repository = fixture.store.schedulerAdmissions
+    if try fixture.store.controlIdentities.loadIdentity("owner") == nil {
+        try fixture.store.controlIdentities.bootstrap(ControlPeerIdentityRecord(
+            subjectID: "owner", userID: 501,
+            codeIdentity: CodeIdentity(
+                teamIdentifier: "993YC3JY4Q", signingIdentifier: "hostwright.lifecycle.tests",
+                codeDirectoryHash: String(repeating: "a", count: 40), validationMode: .installedRequirement
+            ), declaredBySubjectID: "owner", declaredAt: "2026-10-03T10:00:00Z", updatedAt: "2026-10-03T10:00:00Z"
+        ))
+    }
+    let now = Date(timeIntervalSince1970: floor(Date().timeIntervalSince1970))
+    let timestamp = ISO8601DateFormatter().string(from: now)
+    let expiry = ISO8601DateFormatter().string(from: now.addingTimeInterval(300))
+    let ownership = try SchedulerRuntimeOwnershipBinding(
+        resourceIdentifier: fixture.binding.resourceIdentifier, resourceType: "container",
+        resourceUUID: fixture.binding.resourceUUID, resourceGeneration: Int64(fixture.binding.resourceGeneration),
+        projectUUID: fixture.binding.projectResourceUUID, projectName: fixture.context.plan.projectName,
+        projectGeneration: Int64(fixture.binding.projectGeneration), serviceName: fixture.binding.identity.serviceName,
+        instanceName: fixture.binding.identity.instanceName, identityVersion: RuntimeManagedResourceIdentity.currentVersion,
+        providerID: .appleContainerization, providerAPIVersion: HostwrightContractVersions.runtimeProviderAPI,
+        providerVersion: "0.35.0", providerGeneration: Int64(fixture.binding.providerGeneration),
+        fencingToken: fixture.context.fencingToken
+    )
+    let workload = try LifecycleSchedulerWorkloads.providerWorkload(SchedulerWorkload(
+        requirements: WorkloadPlacementRequirements(
+            workloadID: ownership.lifecycleWorkloadID, request: ResourceVector(["cpu": 1, "memory": 512 * 1_024 * 1_024])
+        ), priority: 0, subjectID: "owner", projectID: fixture.binding.projectResourceUUID
+    ), providerID: .appleContainerization)
+    let charge = try workload.capacityCharge()
+    let capacity = try repository.recordNodeCapacity(snapshot: SchedulerNodeCapacitySnapshot(
+        nodeID: UUID(), capacity: charge.adding(charge), generation: 1, observedAt: timestamp
+    ))
+    let decision = try SchedulerEngine().plan(SchedulerEngineInput(
+        pendingWorkloads: [workload], nodes: [SchedulerNode(snapshot: NodePlacementSnapshot(
+            nodeID: capacity.nodeID, capacity: capacity.capacity, allocation: .zero,
+            architecture: "arm64", runtime: "linux-vm", provider: RuntimeProviderID.appleContainerization.rawValue
+        ))]
+    ))
+    let config = String(repeating: "c", count: 64)
+    let profile = String(repeating: "d", count: 64)
+    _ = try repository.recordDecisionArtifact(
+        decision: decision, workloadBindings: [SchedulerDecisionWorkloadBinding(
+            workloadID: workload.workloadID, nodeID: capacity.nodeID, resources: charge,
+            capacityDigest: capacity.capacityDigest, capacityGeneration: capacity.generation,
+            ownerSubjectID: "owner", projectUUID: fixture.binding.projectResourceUUID,
+            runtimeOwnership: ownership, lifecycleWorkload: workload
+        )], projectUUID: fixture.binding.projectResourceUUID, configDigest: config, profileDigest: profile,
+        lifecyclePlanDigest: fixture.context.plan.planSHA256,
+        createdAt: timestamp, updatedAt: timestamp
+    )
+    return try repository.reserve(binding: SchedulerAdmissionBinding(
+        decisionID: decision.decisionID, workloadID: workload.workloadID, nodeID: capacity.nodeID,
+        resources: charge, nodeCapacityDigest: capacity.capacityDigest, nodeCapacityGeneration: capacity.generation,
+        inputDigest: decision.inputDigest, configDigest: config, profileDigest: profile,
+        lifecyclePlanDigest: fixture.context.plan.planSHA256, ownerSubjectID: "owner",
+        projectUUID: fixture.binding.projectResourceUUID,
+        createdAt: timestamp, expiresAt: expiry
+    ), authority: SchedulerAdmissionAuthority(
+        nodeCapacityDigest: capacity.capacityDigest, nodeCapacityGeneration: capacity.generation,
+        inputDigest: decision.inputDigest, configDigest: config, profileDigest: profile,
+        lifecyclePlanDigest: fixture.context.plan.planSHA256, expectedNodeEpoch: 1
+    ))
 }

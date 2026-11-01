@@ -19,12 +19,21 @@ on:
         required: false
         type: string
 
+      native_checkpoint_run:
+        description: Optional successful original native producer with unchanged authenticated build inputs
+        required: false
+        type: string
+      native_checkpoint_attempt:
+        description: Original native producer attempt; required with native_checkpoint_run
+        required: false
+        type: string
+
 permissions: {}
 
 jobs:
   source-built-swift-sdk:
     name: Build and checkpoint the pinned static Swift SDK
-    if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.sdk_checkpoint_run == '' }}
+    if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.sdk_checkpoint_run == '' && inputs.native_checkpoint_run == '' && inputs.native_checkpoint_attempt == '' }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 360
     outputs:
@@ -184,7 +193,7 @@ jobs:
 
   swift-sdk-evidence:
     name: Resolve authenticated SDK evidence without recompiling
-    if: ${{ always() && (github.ref == 'refs/heads/main' || (github.repository == 'hostwright/hostwright' && github.event_name == 'workflow_dispatch' && inputs.ingredients_only == true)) && github.event_name == 'workflow_dispatch' && (needs.source-built-swift-sdk.result == 'success' || (needs.source-built-swift-sdk.result == 'skipped' && inputs.sdk_checkpoint_run != '')) }}
+    if: ${{ always() && (github.ref == 'refs/heads/main' || (github.repository == 'hostwright/hostwright' && github.event_name == 'workflow_dispatch' && inputs.ingredients_only == true)) && github.event_name == 'workflow_dispatch' && (needs.source-built-swift-sdk.result == 'success' || (needs.source-built-swift-sdk.result == 'skipped' && inputs.sdk_checkpoint_run != '')) && inputs.native_checkpoint_run == '' && inputs.native_checkpoint_attempt == '' }}
     needs: source-built-swift-sdk
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 90
@@ -307,7 +316,7 @@ jobs:
 
   runtime-build-ingredients:
     name: Rebuild pinned kernel and vminit ingredients
-    if: ${{ always() && needs.swift-sdk-evidence.result == 'success' && (github.ref == 'refs/heads/main' || (github.repository == 'hostwright/hostwright' && github.event_name == 'workflow_dispatch' && inputs.ingredients_only == true)) && github.event_name == 'workflow_dispatch' }}
+    if: ${{ always() && needs.swift-sdk-evidence.result == 'success' && (github.ref == 'refs/heads/main' || (github.repository == 'hostwright/hostwright' && github.event_name == 'workflow_dispatch' && inputs.ingredients_only == true)) && github.event_name == 'workflow_dispatch' && inputs.native_checkpoint_run == '' && inputs.native_checkpoint_attempt == '' }}
     needs: swift-sdk-evidence
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 120
@@ -607,6 +616,81 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
 
+  native-checkpoint:
+    name: Authenticate an unchanged original native fragment
+    if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && (inputs.native_checkpoint_run != '' || inputs.native_checkpoint_attempt != '') }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    outputs:
+      artifact-name: ${{ steps.native-reuse-artifact.outputs.artifact-name }}
+      producer-attempt: ${{ steps.native-reuse-artifact.outputs.producer-attempt }}
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - name: Check out the exact current source and ancestry
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify native reuse rejection boundaries
+        shell: bash
+        run: python3 scripts/release/test-native-runtime-reuse.py
+      - name: Reclaim unused hosted .NET SDK storage
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$RUNNER_OS" = Linux
+          test "$RUNNER_ARCH" = ARM64
+          {
+            df -B1 /
+            if [[ -d /usr/share/dotnet ]]; then
+              sudo du -sk /usr/share/dotnet
+              sudo rm -rf -- /usr/share/dotnet
+            fi
+            df -B1 /
+          } | tee "$RUNNER_TEMP/runtime-disk-preflight.txt"
+      - name: Resolve and authenticate the exact original native carrier
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NATIVE_CHECKPOINT_RUN: ${{ inputs.native_checkpoint_run }}
+          NATIVE_CHECKPOINT_ATTEMPT: ${{ inputs.native_checkpoint_attempt }}
+          SDK_CHECKPOINT_RUN: ${{ inputs.sdk_checkpoint_run }}
+          SDK_CHECKPOINT_ATTEMPT: ${{ inputs.sdk_checkpoint_attempt }}
+        run: |
+          set -euo pipefail
+          python3 scripts/release/resolve-native-checkpoint.py --output "$RUNNER_TEMP/native-checkpoint"
+          python3 scripts/release/verify-native-reuse.py \
+            --carrier "$RUNNER_TEMP/native-checkpoint/carrier" \
+            --resolution "$RUNNER_TEMP/native-checkpoint/resolution.json" \
+            --repo-root "$GITHUB_WORKSPACE" --source-commit "$GITHUB_SHA" \
+            --output "$RUNNER_TEMP/native-reuse-proof"
+          mv "$RUNNER_TEMP/native-reuse-proof" "$RUNNER_TEMP/native-checkpoint/carrier/reuse"
+          cp "$RUNNER_TEMP/native-checkpoint/download-space.json" "$RUNNER_TEMP/native-checkpoint/extraction-space.json" "$RUNNER_TEMP/runtime-disk-preflight.txt" "$RUNNER_TEMP/native-checkpoint/carrier/reuse/"
+      - name: Attest the explicit unchanged-input reuse proof
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/native-checkpoint/carrier/reuse/native-reuse.json
+      - name: Record the admitted reuse carrier
+        id: native-reuse-artifact
+        shell: bash
+        run: |
+          echo "artifact-name=runtime-native-reuse-$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          echo "producer-attempt=$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+      - name: Retain original native bytes and explicit reuse proof
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.native-reuse-artifact.outputs.artifact-name }}
+          path: ${{ runner.temp }}/native-checkpoint/carrier/
+          include-hidden-files: true
+          retention-days: 30
+          if-no-files-found: error
+
   guest-loader:
     name: Build and attest the guest loader
     if: ${{ (github.ref == 'refs/heads/main' || (github.repository == 'hostwright/hostwright' && github.event_name == 'workflow_dispatch' && inputs.ingredients_only == true)) }}
@@ -715,8 +799,8 @@ jobs:
 
   runtime-provenance:
     name: Assemble and attest the authenticated runtime provenance bundle
-    if: ${{ always() && needs.runtime-build-ingredients.result == 'success' && needs.guest-loader.result == 'success' && inputs.ingredients_only != true && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' }}
-    needs: [runtime-build-ingredients, guest-loader]
+    if: ${{ always() && (needs.runtime-build-ingredients.result == 'success' || needs.native-checkpoint.result == 'success') && needs.guest-loader.result == 'success' && inputs.ingredients_only != true && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' }}
+    needs: [runtime-build-ingredients, native-checkpoint, guest-loader]
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 120
     permissions:
@@ -732,7 +816,7 @@ jobs:
       - name: Download the successful native producer fragment
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: ${{ needs.runtime-build-ingredients.outputs.artifact-name }}
+          name: ${{ needs.runtime-build-ingredients.outputs.artifact-name || needs.native-checkpoint.outputs.artifact-name }}
           path: ${{ runner.temp }}/runtime-inputs
       - name: Download the successful loader producer fragment
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -744,15 +828,22 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           NATIVE_PRODUCER_ATTEMPT: ${{ needs.runtime-build-ingredients.outputs.producer-attempt }}
+          NATIVE_REUSE_ATTEMPT: ${{ needs.native-checkpoint.outputs.producer-attempt }}
           LOADER_PRODUCER_ATTEMPT: ${{ needs.guest-loader.outputs.producer-attempt }}
         run: |
           set -euo pipefail
           native="$RUNNER_TEMP/runtime-inputs"
-          for subject in "$native/checksums.sha256" "$native/runtime-native-fragment/native-provenance.json" "$native/evidence/source-map.json"; do
+          if [[ -n "$NATIVE_REUSE_ATTEMPT" ]]; then
             python3 scripts/release/authenticate-runtime-subject.py \
-              --file "$subject" --source-commit "$GITHUB_SHA" \
-              --run-id "$GITHUB_RUN_ID" --attempt "$NATIVE_PRODUCER_ATTEMPT"
-          done
+              --file "$native/reuse/native-reuse.json" --source-commit "$GITHUB_SHA" \
+              --run-id "$GITHUB_RUN_ID" --attempt "$NATIVE_REUSE_ATTEMPT"
+          else
+            for subject in "$native/checksums.sha256" "$native/runtime-native-fragment/native-provenance.json" "$native/evidence/source-map.json"; do
+              python3 scripts/release/authenticate-runtime-subject.py \
+                --file "$subject" --source-commit "$GITHUB_SHA" \
+                --run-id "$GITHUB_RUN_ID" --attempt "$NATIVE_PRODUCER_ATTEMPT"
+            done
+          fi
           (cd "$native" && sha256sum --check checksums.sha256)
           for subject in loader-build-inputs.tar.gz hostwright-netfilter-first; do
             python3 scripts/release/authenticate-runtime-subject.py \
@@ -770,10 +861,14 @@ jobs:
           python3 scripts/release/test-assemble-runtime-provenance.py
           python3 scripts/release/test-prepare-runtime-attestation-subjects.py
           native="$RUNNER_TEMP/runtime-inputs/runtime-native-fragment"
+          reuse_args=()
+          if [[ -n "${{ needs.native-checkpoint.outputs.producer-attempt }}" ]]; then
+            reuse_args+=(--native-reuse-root "$RUNNER_TEMP/runtime-inputs/reuse")
+          fi
           python3 scripts/release/prepare-runtime-provenance.py \
             --native-root "$native" --loader-root "$RUNNER_TEMP/runtime-loader-authenticated" \
             --source-commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
-            --source-root "$GITHUB_WORKSPACE" \
+            --source-root "$GITHUB_WORKSPACE" "${reuse_args[@]}" \
             --output "$RUNNER_TEMP/runtime-prepared"
           mkdir -m 700 "$RUNNER_TEMP/runtime-final"
           python3 scripts/release/assemble-runtime-provenance.py \

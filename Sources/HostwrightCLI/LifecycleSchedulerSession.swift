@@ -78,7 +78,8 @@ final class LifecycleSchedulerSession: @unchecked Sendable {
                 workloadID: entry.workload.workloadID, projectUUID: project.resourceUUID
             ) {
                 guard [.pending, .committed].contains(existing.status),
-                      existing.runtimeOwnership == entry.ownership,
+                      let originalOwnership = existing.runtimeOwnership,
+                      try LifecycleSchedulerOwnershipAuthority.currentBinding(for: originalOwnership, store: store) == entry.ownership,
                       existing.resources == (try entry.workload.capacityCharge()),
                       existing.nodeID == snapshot.capacity.nodeID else {
                     throw SchedulerAdmissionError.invalidBinding(field: "lifecycle-active-reservation")
@@ -134,7 +135,9 @@ final class LifecycleSchedulerSession: @unchecked Sendable {
                 workloadID: entry.workload.workloadID, nodeID: snapshot.capacity.nodeID,
                 resources: (try entry.workload.capacityCharge()), capacityDigest: snapshot.capacity.capacityDigest,
                 capacityGeneration: snapshot.capacity.generation, ownerSubjectID: context.subjectID,
-                projectUUID: project.resourceUUID, runtimeOwnership: entry.ownership, lifecycleWorkload: entry.workload
+                projectUUID: project.resourceUUID,
+                runtimeOwnership: retained.first { $0.workloadID == entry.workload.workloadID }?.runtimeOwnership ?? entry.ownership,
+                lifecycleWorkload: entry.workload
             )
         }
         try repository.recordDecisionArtifact(
@@ -186,7 +189,7 @@ final class LifecycleSchedulerSession: @unchecked Sendable {
                       let oldOwnership = persisted.runtimeOwnership else {
                     throw SchedulerAdmissionError.staleInput(field: "lifecycle-readmission-constraints")
                 }
-                let ownership = try Self.activationOwnership(oldOwnership, node: node)
+                let ownership = try Self.activationOwnership(oldOwnership, node: node, store: store)
                 let renewed = try Self.reserve(
                     context: context, store: store,
                     entries: [LifecycleSchedulerWorkload(workload: workload, ownership: ownership)],
@@ -336,7 +339,7 @@ final class LifecycleSchedulerSession: @unchecked Sendable {
         let session = try reserve(
             context: context, store: store,
             entries: [LifecycleSchedulerWorkload(
-                workload: workload, ownership: activationOwnership(ownership, node: node)
+                workload: workload, ownership: activationOwnership(ownership, node: node, store: store)
             )],
             plan: plan, project: project
         )
@@ -360,18 +363,15 @@ final class LifecycleSchedulerSession: @unchecked Sendable {
     }
 
     private static func activationOwnership(
-        _ binding: SchedulerRuntimeOwnershipBinding, node: LifecyclePlanNode
+        _ binding: SchedulerRuntimeOwnershipBinding, node: LifecyclePlanNode, store: SQLiteStateStore
     ) throws -> SchedulerRuntimeOwnershipBinding {
-        guard node.action == .create else { return binding }
-        return try SchedulerRuntimeOwnershipBinding(
-            resourceIdentifier: binding.resourceIdentifier, resourceType: binding.resourceType,
-            resourceUUID: binding.resourceUUID, resourceGeneration: binding.resourceGeneration,
-            projectUUID: binding.projectUUID, projectName: binding.projectName, projectGeneration: binding.projectGeneration,
-            serviceName: binding.serviceName, instanceName: binding.instanceName, identityVersion: binding.identityVersion,
-            providerID: binding.providerID, providerAPIVersion: binding.providerAPIVersion,
-            providerVersion: binding.providerVersion, providerGeneration: binding.providerGeneration,
-            fencingToken: node.fencingToken
-        )
+        if node.action == .create {
+            return try LifecycleSchedulerOwnershipAuthority.replacingFence(in: binding, with: node.fencingToken)
+        }
+        guard let current = try LifecycleSchedulerOwnershipAuthority.currentBinding(for: binding, store: store) else {
+            throw SchedulerAdmissionError.staleInput(field: "lifecycle-runtime-ownership-authority")
+        }
+        return current
     }
 
     static func reconcile(
@@ -388,7 +388,16 @@ final class LifecycleSchedulerSession: @unchecked Sendable {
                   expected.providerID == providerID,
                   expected.lifecycleWorkloadID == reservation.workloadID,
                   resourceUUID == nil || expected.resourceUUID == resourceUUID else { continue }
-            let observation = try LifecycleSchedulerRuntimeObservation.observe(expected: expected, inventory: inventory)
+            let original = try LifecycleSchedulerRuntimeObservation.observe(expected: expected, inventory: inventory)
+            let observation: LifecycleSchedulerRuntimeObservation
+            if original.state == .absent {
+                observation = original
+            } else {
+                guard let current = try LifecycleSchedulerOwnershipAuthority.currentBinding(for: expected, store: store) else { continue }
+                observation = current == expected ? original : try LifecycleSchedulerRuntimeObservation.observe(
+                    expected: current, inventory: inventory
+                )
+            }
             switch observation.state {
             case .running:
                 if reservation.status == .pending {

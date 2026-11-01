@@ -1011,7 +1011,7 @@ def verify(manifest_data, runtime, payloads, fetch, source_commit, require_authe
     manifest=parse(manifest_data)
     validate_schema(manifest)
     require(manifest_data==canonical(manifest) and manifest['kind']==KIND and manifest['schemaVersion']==1
-            and manifest['sourceCommit']==source_commit and manifest['closureMode']=='new-source-build', 'wrong runtime provenance contract')
+            and manifest['sourceCommit']==source_commit and manifest['closureMode']==('authenticated-native-reuse' if 'nativeReuse' in manifest else 'new-source-build'), 'wrong runtime provenance contract')
     require(runtime.get('kind')=='hostwright.runtime-license-inventory.v1' and runtime.get('schemaVersion')==1,
             'wrong runtime license inventory')
     assets=runtime.get('assets',[])
@@ -1034,6 +1034,12 @@ def verify(manifest_data, runtime, payloads, fetch, source_commit, require_authe
             authenticate(item,producer,source_commit)
             for index,(name,data) in enumerate(payloads.items()):
                 item=temporary/('payload-'+str(index)); item.write_bytes(data); authenticate(item,producer,source_commit)
+    if "nativeReuse" in manifest:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("native_reuse", pathlib.Path(__file__).with_name("verify-native-reuse.py"))
+        reuse = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(reuse)
+        reuse.verify_composition(manifest, fetch, source_commit, require_authentication)
     projects={}
     project_commits={p['identity']:p['commit'] for p in manifest['sourceProjects']}
     for project in manifest['sourceProjects']:

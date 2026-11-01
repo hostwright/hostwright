@@ -40,8 +40,8 @@ source/license qualification.
 
 ## Runtime producer and signing handoff
 
-The runtime producer rebuilds the Linux kernel, guest binaries and Go loader twice
-and requires matching payload bytes. It installs the authenticated Swift SDK under
+By default, the runtime producer rebuilds the Linux kernel, guest binaries and Go
+loader twice and requires matching payload bytes. It installs the authenticated Swift SDK under
 the build directory to keep the SDK path independent of the user's home directory. The
 signed Linux source archive, applied
 patches, actual configuration, compiler/linker inputs, selected source files,
@@ -59,7 +59,8 @@ runtime pins and notices. This preparation run is not release qualification.
 For release qualification, dispatch `runtime-ingredients.yml` on the reviewed
 `main` commit with `ingredients_only=false` (the default). A successful
 loader-only push run is insufficient. The manual run must complete SDK evidence
-selection, native runtime, loader and final provenance jobs. The SDK may come from
+selection, native runtime, loader and final provenance jobs, or the authenticated
+native reuse path below followed by the fresh loader and final provenance jobs. The SDK may come from
 a new compilation or an authenticated retained producer. The final artifact is
 `runtime-provenance-<source SHA>-<run ID>-<attempt>` and contains exactly
 `runtime-provenance.tar.gz`. The manifest and every runtime payload receive GitHub
@@ -89,6 +90,32 @@ original authenticated files. The native runtime still rebuilds twice from the
 current source.
 Leave both inputs empty when a new SDK compilation is required. Checkpoints use
 artifact storage, so retain/download them deliberately before their expiry.
+
+When native inputs are unchanged, `native_checkpoint_run` and
+`native_checkpoint_attempt` may instead select one complete, successful original
+native producer. Leave both SDK checkpoint inputs empty. The resolver requires the
+exact main workflow run, attempt, native job, unique unexpired artifact, ZIP digest
+and size. It authenticates the original checksums, native manifest and source map
+against that original producer, verifies complete file coverage, and retains their
+raw attestation bundles. Download and extraction require measured free disk space
+plus a fixed reserve. Missing or altered evidence rejects reuse; leave all
+checkpoint inputs empty to rebuild.
+
+The reuse proof includes actual Git commit, tree and blob objects for the original
+ancestor and current source. Membership, modes and bytes must agree across release
+scripts, third-party recipes/licenses, guest sources, contracts and package locks.
+Only the named composition consumers, routing test, exact verifier hook and fixed
+workflow admission/consumer steps may differ; full hashes record those differences.
+The original SDK compilation recipe must also match its retained reuse receipt.
+Missing original SDK inventories are never synthesized.
+
+The original native manifest, build commands, source revisions, toolchains,
+two-build evidence and payload claims remain unchanged. The final manifest labels
+this path `authenticated-native-reuse`, preserves the original native producer,
+and binds a newly built Go loader and final attestation to the current source and
+run. Final verification rechecks the original attestation bundles and all existing
+source, license, generated-header and payload requirements. Reuse establishes no
+release qualification and does not remove any release gate.
 
 The signing consumer verifies the exact source commit, repository, main ref,
 workflow, run, attempt and payload digests. A valid attestation from another run or

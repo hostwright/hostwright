@@ -121,7 +121,7 @@ def rebase_loader(value, fetch, generated):
     return result
 
 
-def prepare(native_root, loader_root, source_commit, run_id, attempt, output, source_root=None):
+def prepare(native_root, loader_root, source_commit, run_id, attempt, output, source_root=None, native_reuse_root=None):
     V.require(re.fullmatch("[a-f0-9]{40}", source_commit) is not None, "invalid source commit")
     producer = dict(commit=source_commit, runID=run_id, attempt=attempt)
     V.producer_binding(producer, source_commit)
@@ -129,6 +129,9 @@ def prepare(native_root, loader_root, source_commit, run_id, attempt, output, so
     for name, root in (("native", native_root), ("loader", loader_root)):
         V.require(not root.is_symlink() and root.is_dir(), "unsafe runtime input root")
         roots[name] = root.resolve(strict=True)
+    if native_reuse_root is not None:
+        V.require(not native_reuse_root.is_symlink() and native_reuse_root.is_dir(), "unsafe native reuse proof root")
+        roots["reuse"] = native_reuse_root.resolve(strict=True)
     if source_root is not None:
         V.require(not source_root.is_symlink() and source_root.is_dir(), "unsafe runtime source root")
         source_root = source_root.resolve(strict=True)
@@ -148,9 +151,17 @@ def prepare(native_root, loader_root, source_commit, run_id, attempt, output, so
 
     native = V.parse(fetch("native/native-provenance.json"))
     loader_fragment = V.parse(fetch("loader/loader-provenance.json"))
-    for fragment in (native, loader_fragment):
-        V.require(fragment.get("status") == "prepared-not-release-qualified" and
-                  fragment.get("sourceCommit") == source_commit, "runtime fragment source/status mismatch")
+    native_reuse = None
+    if native_reuse_root is not None:
+        reuse = load("native_reuse", "verify-native-reuse.py")
+        native_reuse = rebase(V.parse(fetch("reuse/native-reuse.json")), "reuse/")
+        retained_native = reuse.validate(native_reuse, fetch, source_commit)
+        V.require(retained_native == native, "native reuse proof does not bind this original fragment")
+    else:
+        V.require(native.get("sourceCommit") == source_commit, "runtime fragment source/status mismatch")
+    V.require(native.get("status") == "prepared-not-release-qualified" and
+              loader_fragment.get("status") == "prepared-not-release-qualified" and
+              loader_fragment.get("sourceCommit") == source_commit, "runtime fragment source/status mismatch")
     projects = merge([*(rebase(item, "native/") for item in native["sourceProjects"]),
                       *(rebase(item, "loader/") for item in loader_fragment["sourceProjects"])],
                      ("identity",), fetch)
@@ -183,6 +194,9 @@ def prepare(native_root, loader_root, source_commit, run_id, attempt, output, so
                     payloads=sorted(payload_records, key=lambda item: item["path"]),
                     sourceProjects=sorted(projects, key=lambda item: item["identity"]),
                     toolchain=tools, kernel=kernel, oci=oci, loader=loader, licensing=mappings)
+    if native_reuse is not None:
+        manifest["nativeReuse"] = native_reuse
+        manifest["closureMode"] = "authenticated-native-reuse"
     if "reproducibleBuild" in loader_fragment:
         V.require(fetch("loader/capture-second/payload") == loader_data, "Go loader rebuilds differ")
         second = dict(manifest, loader=rebase_loader(loader_fragment["reproducibleBuild"], fetch, generated))
@@ -249,7 +263,8 @@ if __name__ == "__main__":
     parser.add_argument("--run-id", type=int, required=True)
     parser.add_argument("--attempt", type=int, required=True)
     parser.add_argument("--source-root", type=Path, required=True)
+    parser.add_argument("--native-reuse-root", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     prepare(args.native_root, args.loader_root, args.source_commit, args.run_id, args.attempt,
-            args.output, source_root=args.source_root)
+            args.output, source_root=args.source_root, native_reuse_root=args.native_reuse_root)

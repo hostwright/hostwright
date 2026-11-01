@@ -21,22 +21,27 @@ class RuntimeIngredientGateTests(unittest.TestCase):
     def test_event_and_source_boundaries(self):
         workflow = (Path(__file__).resolve().parents[2] / ".github/workflows/runtime-ingredients.yml").read_text()
         jobs = {name: body for name, body in re.findall(r"^  ([\w-]+):\n(.*?)(?=^  [\w-]+:|\Z)", workflow, re.M | re.S)}
-        for main, official, event, ingredients, sdk_available in itertools.product(
-                (False, True), (False, True), ("push", "pull_request", "workflow_dispatch"), (False, True), (False, True)):
+        for main, official, event, ingredients, sdk_available, native_requested, native_passed in itertools.product(
+                (False, True), (False, True), ("push", "pull_request", "workflow_dispatch"),
+                (False, True), (False, True), (False, True), (False, True)):
             values = {"github.ref": "refs/heads/main" if main else "refs/heads/fix/pin-update",
                       "github.repository": "hostwright/hostwright" if official else "example/fork",
                       "github.event_name": event, "inputs.ingredients_only": ingredients,
                       "inputs.sdk_checkpoint_run": "1234" if sdk_available else "",
+                      "inputs.native_checkpoint_run": "5678" if native_requested else "",
+                      "inputs.native_checkpoint_attempt": "1" if native_requested else "",
                       "needs.source-built-swift-sdk.result": "skipped",
                       "needs.swift-sdk-evidence.result": "success",
-                      "needs.runtime-build-ingredients.result": "success",
+                      "needs.runtime-build-ingredients.result": "skipped" if native_requested else "success",
+                      "needs.native-checkpoint.result": "success" if native_passed else "failure",
                       "needs.guest-loader.result": "success"}
             expected = {
-                "source-built-swift-sdk": main and event == "workflow_dispatch" and not sdk_available,
-                "swift-sdk-evidence": event == "workflow_dispatch" and sdk_available and (main or (official and ingredients)),
-                "runtime-build-ingredients": event == "workflow_dispatch" and (main or (official and ingredients)),
+                "source-built-swift-sdk": main and event == "workflow_dispatch" and not sdk_available and not native_requested,
+                "swift-sdk-evidence": event == "workflow_dispatch" and sdk_available and (main or (official and ingredients)) and not native_requested,
+                "runtime-build-ingredients": event == "workflow_dispatch" and (main or (official and ingredients)) and not native_requested,
+                "native-checkpoint": main and event == "workflow_dispatch" and native_requested,
                 "guest-loader": main or (official and event == "workflow_dispatch" and ingredients),
-                "runtime-provenance": main and event == "workflow_dispatch" and not ingredients,
+                "runtime-provenance": main and event == "workflow_dispatch" and not ingredients and (not native_requested or native_passed),
             }
             for job, allowed in expected.items():
                 expression = re.search(r"^    if: \$\{\{ (.*?) \}\}$", jobs[job], re.M).group(1)
@@ -50,7 +55,8 @@ class RuntimeIngredientGateTests(unittest.TestCase):
                                                        ast.Compare, ast.Eq, ast.NotEq, ast.Constant))
                                     for node in ast.walk(tree)))
                 with self.subTest(job=job, main=main, official=official, event=event,
-                                  ingredients=ingredients, sdk_available=sdk_available):
+                                  ingredients=ingredients, sdk_available=sdk_available,
+                                  native_requested=native_requested, native_passed=native_passed):
                     self.assertEqual(eval(compile(tree, "<ingredient-gate>", "eval"), {"__builtins__": {}}), allowed)
 
 

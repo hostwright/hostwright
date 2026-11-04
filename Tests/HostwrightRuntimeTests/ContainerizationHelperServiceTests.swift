@@ -425,6 +425,143 @@ final class ContainerizationHelperServiceTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: directory.directoryURL.path))
     }
 
+    func testUnixShutdownAcknowledgementSurvivesSlowBackendCleanup() async throws {
+        try await requireUnixShutdownAcknowledgement(shutdownDelayMilliseconds: 1_000, withSilentPeer: false)
+    }
+
+    func testUnixShutdownAcknowledgementDrainsAcceptedSilentPeer() async throws {
+        try await requireUnixShutdownAcknowledgement(shutdownDelayMilliseconds: 0, withSilentPeer: true)
+    }
+
+    func testUnixServerCancellationClosesAcceptedSilentPeer() async throws {
+        let parent = try makePrivateParent()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let directory = try ContainerizationHelperRuntimeDirectory.prepare(
+            at: parent.appendingPathComponent("runtime", isDirectory: true)
+        )
+        let backend = try TestBackend(snapshot: snapshot(), inventory: inventory())
+        let dispatcher = ContainerizationHelperDispatcher(backend: backend, expectedCapabilityDigest: digest)
+        let accepted = FixturePeerAcceptance()
+        let server = ContainerizationHelperUnixServer(
+            runtimeDirectory: directory, dispatcher: dispatcher,
+            authenticator: ContainerizationHelperPeerAuthenticator { descriptor in
+                try Self.requireCurrentFixturePeer(descriptor)
+                accepted.record()
+            },
+            connectionReadTimeoutMilliseconds: 5_000
+        )
+        let serverTask = Task { try await server.run() }
+        var peer: Int32?
+        defer { if let peer { Darwin.close(peer) } }
+        do {
+            try await Self.waitForFixtureSocket(directory.socketURL)
+            let descriptor = try Self.connectToCurrentFixture(socketURL: directory.socketURL, privateParent: parent)
+            peer = descriptor
+            try await Self.waitForFixturePeer(accepted)
+            let clock = ContinuousClock()
+            let started = clock.now
+            serverTask.cancel()
+            try await serverTask.value
+            XCTAssertLessThan(started.duration(to: clock.now), .seconds(2))
+            var byte: UInt8 = 0
+            XCTAssertEqual(Darwin.read(descriptor, &byte, 1), 0)
+        } catch {
+            serverTask.cancel()
+            _ = try? await serverTask.value
+            throw error
+        }
+        let shutdownCalls = await backend.shutdownCount()
+        XCTAssertEqual(shutdownCalls, 1)
+        XCTAssertEqual(accepted.count(), 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.directoryURL.path))
+    }
+
+    private func requireUnixShutdownAcknowledgement(
+        shutdownDelayMilliseconds: Int64, withSilentPeer: Bool
+    ) async throws {
+        let parent = try makePrivateParent()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let directory = try ContainerizationHelperRuntimeDirectory.prepare(
+            at: parent.appendingPathComponent("runtime", isDirectory: true)
+        )
+        let backend = try TestBackend(
+            snapshot: snapshot(), inventory: inventory(),
+            shutdownDelayMilliseconds: shutdownDelayMilliseconds
+        )
+        let dispatcher = ContainerizationHelperDispatcher(backend: backend, expectedCapabilityDigest: digest)
+        let accepted = FixturePeerAcceptance()
+        let server = ContainerizationHelperUnixServer(
+            runtimeDirectory: directory, dispatcher: dispatcher,
+            authenticator: ContainerizationHelperPeerAuthenticator { descriptor in
+                try Self.requireCurrentFixturePeer(descriptor)
+                accepted.record()
+            },
+            connectionReadTimeoutMilliseconds: 250
+        )
+        let serverTask = Task { try await server.run() }
+        var silentPeer: Int32?
+        defer { if let silentPeer { Darwin.close(silentPeer) } }
+        do {
+            try await Self.waitForFixtureSocket(directory.socketURL)
+            let clock = ContinuousClock()
+            let started = clock.now
+            if withSilentPeer {
+                let descriptor = try Self.connectToCurrentFixture(socketURL: directory.socketURL, privateParent: parent)
+                silentPeer = descriptor
+                try await Self.waitForFixturePeer(accepted)
+                var byte: UInt8 = 0
+                let received = Darwin.recv(descriptor, &byte, 1, MSG_PEEK | MSG_DONTWAIT)
+                let readError = errno
+                XCTAssertEqual(received, -1)
+                XCTAssertTrue(readError == EAGAIN || readError == EWOULDBLOCK)
+            }
+            let response = try await Self.exchangeWithCurrentFixture(
+                frame: requestFrame(
+                    operation: .shutdown, payload: ContainerizationHelperEmptyPayload(),
+                    deadlineUnixMilliseconds: Int64(Date().timeIntervalSince1970 * 1_000) + 5_000
+                ),
+                socketURL: directory.socketURL, privateParent: parent
+            )
+            let acknowledgement = try ContainerizationHelperCanonicalJSON.decodeResult(
+                ContainerizationHelperAcknowledgement.self,
+                from: ContainerizationHelperFraming.decodeSingleFrame(response)
+            )
+            XCTAssertTrue(acknowledgement.result.accepted)
+            try await serverTask.value
+            XCTAssertLessThan(started.duration(to: clock.now), .seconds(3))
+            if let silentPeer {
+                var byte: UInt8 = 0
+                XCTAssertEqual(Darwin.read(silentPeer, &byte, 1), 0)
+            }
+        } catch {
+            serverTask.cancel()
+            _ = try? await serverTask.value
+            throw error
+        }
+        let shutdownCalls = await backend.shutdownCount()
+        XCTAssertEqual(shutdownCalls, 1)
+        XCTAssertEqual(accepted.count(), withSilentPeer ? 2 : 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.directoryURL.path))
+    }
+
+    private static func waitForFixtureSocket(_ socketURL: URL) async throws {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .seconds(5))
+        while !FileManager.default.fileExists(atPath: socketURL.path), clock.now < deadline {
+            try await clock.sleep(for: .milliseconds(1))
+        }
+        guard FileManager.default.fileExists(atPath: socketURL.path) else { throw POSIXError(.ETIMEDOUT) }
+    }
+
+    private static func waitForFixturePeer(_ accepted: FixturePeerAcceptance) async throws {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .seconds(5))
+        while accepted.count() == 0, clock.now < deadline {
+            try await clock.sleep(for: .milliseconds(1))
+        }
+        guard accepted.count() == 1 else { throw POSIXError(.ETIMEDOUT) }
+    }
+
     private static func requireCurrentFixturePeer(_ descriptor: Int32) throws {
         var uid = uid_t.max
         var gid = gid_t.max
@@ -437,60 +574,70 @@ final class ContainerizationHelperServiceTests: XCTestCase {
         }
     }
 
+    private static func connectToCurrentFixture(
+        socketURL: URL, privateParent: URL
+    ) throws -> Int32 {
+        guard socketURL.deletingLastPathComponent().deletingLastPathComponent() == privateParent else {
+            throw POSIXError(.EINVAL)
+        }
+        for directory in [privateParent, socketURL.deletingLastPathComponent()] {
+            var metadata = stat()
+            guard lstat(directory.path, &metadata) == 0,
+                  metadata.st_mode & S_IFMT == mode_t(S_IFDIR),
+                  metadata.st_mode & 0o7777 == 0o700, metadata.st_uid == geteuid() else {
+                throw POSIXError(.EACCES)
+            }
+        }
+        var before = stat()
+        guard lstat(socketURL.path, &before) == 0,
+              before.st_mode & S_IFMT == mode_t(S_IFSOCK),
+              before.st_mode & 0o7777 == 0o600, before.st_uid == geteuid() else {
+            throw POSIXError(.EACCES)
+        }
+        let descriptor = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+        guard descriptor >= 0 else { throw POSIXError(.EIO) }
+        var shouldClose = true
+        defer { if shouldClose { Darwin.close(descriptor) } }
+        var timeout = timeval(tv_sec: 5, tv_usec: 0)
+        var noSignal: Int32 = 1
+        guard fcntl(descriptor, F_SETFD, FD_CLOEXEC) == 0,
+              setsockopt(descriptor, SOL_SOCKET, SO_RCVTIMEO, &timeout,
+                         socklen_t(MemoryLayout<timeval>.size)) == 0,
+              setsockopt(descriptor, SOL_SOCKET, SO_SNDTIMEO, &timeout,
+                         socklen_t(MemoryLayout<timeval>.size)) == 0,
+              setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &noSignal,
+                         socklen_t(MemoryLayout<Int32>.size)) == 0 else { throw POSIXError(.EIO) }
+        var address = sockaddr_un()
+        address.sun_len = UInt8(MemoryLayout<sockaddr_un>.size)
+        address.sun_family = sa_family_t(AF_UNIX)
+        let bytes = Array(socketURL.path.utf8) + [UInt8(0)]
+        guard bytes.count <= MemoryLayout.size(ofValue: address.sun_path) else {
+            throw POSIXError(.ENAMETOOLONG)
+        }
+        withUnsafeMutableBytes(of: &address.sun_path) { $0.copyBytes(from: bytes) }
+        let connected = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.connect(descriptor, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        guard connected == 0 else { throw POSIXError(.ECONNREFUSED) }
+        try requireCurrentFixturePeer(descriptor)
+        var after = stat()
+        guard lstat(socketURL.path, &after) == 0,
+              after.st_dev == before.st_dev, after.st_ino == before.st_ino else {
+            throw POSIXError(.ESTALE)
+        }
+        shouldClose = false
+        return descriptor
+    }
+
     // This in-process fixture authenticates its own PID/UID, not the signed product helper.
     private static func exchangeWithCurrentFixture(
         frame: Data, socketURL: URL, privateParent: URL
     ) async throws -> Data {
         try await Task.detached {
-            guard socketURL.deletingLastPathComponent().deletingLastPathComponent() == privateParent else {
-                throw POSIXError(.EINVAL)
-            }
-            for directory in [privateParent, socketURL.deletingLastPathComponent()] {
-                var metadata = stat()
-                guard lstat(directory.path, &metadata) == 0,
-                      metadata.st_mode & S_IFMT == mode_t(S_IFDIR),
-                      metadata.st_mode & 0o7777 == 0o700, metadata.st_uid == geteuid() else {
-                    throw POSIXError(.EACCES)
-                }
-            }
-            var before = stat()
-            guard lstat(socketURL.path, &before) == 0,
-                  before.st_mode & S_IFMT == mode_t(S_IFSOCK),
-                  before.st_mode & 0o7777 == 0o600, before.st_uid == geteuid() else {
-                throw POSIXError(.EACCES)
-            }
-            let descriptor = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
-            guard descriptor >= 0 else { throw POSIXError(.EIO) }
+            let descriptor = try connectToCurrentFixture(socketURL: socketURL, privateParent: privateParent)
             defer { Darwin.close(descriptor) }
-            var timeout = timeval(tv_sec: 5, tv_usec: 0)
-            var noSignal: Int32 = 1
-            guard fcntl(descriptor, F_SETFD, FD_CLOEXEC) == 0,
-                  setsockopt(descriptor, SOL_SOCKET, SO_RCVTIMEO, &timeout,
-                             socklen_t(MemoryLayout<timeval>.size)) == 0,
-                  setsockopt(descriptor, SOL_SOCKET, SO_SNDTIMEO, &timeout,
-                             socklen_t(MemoryLayout<timeval>.size)) == 0,
-                  setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &noSignal,
-                             socklen_t(MemoryLayout<Int32>.size)) == 0 else { throw POSIXError(.EIO) }
-            var address = sockaddr_un()
-            address.sun_len = UInt8(MemoryLayout<sockaddr_un>.size)
-            address.sun_family = sa_family_t(AF_UNIX)
-            let bytes = Array(socketURL.path.utf8) + [UInt8(0)]
-            guard bytes.count <= MemoryLayout.size(ofValue: address.sun_path) else {
-                throw POSIXError(.ENAMETOOLONG)
-            }
-            withUnsafeMutableBytes(of: &address.sun_path) { $0.copyBytes(from: bytes) }
-            let connected = withUnsafePointer(to: &address) {
-                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                    Darwin.connect(descriptor, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
-                }
-            }
-            guard connected == 0 else { throw POSIXError(.ECONNREFUSED) }
-            try requireCurrentFixturePeer(descriptor)
-            var after = stat()
-            guard lstat(socketURL.path, &after) == 0,
-                  after.st_dev == before.st_dev, after.st_ino == before.st_ino else {
-                throw POSIXError(.ESTALE)
-            }
             var offset = 0
             while offset < frame.count {
                 let written = frame.withUnsafeBytes {
@@ -690,6 +837,23 @@ final class ContainerizationHelperServiceTests: XCTestCase {
     }
 }
 
+private final class FixturePeerAcceptance: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+
+    func record() {
+        lock.lock()
+        defer { lock.unlock() }
+        value += 1
+    }
+
+    func count() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+}
+
 private actor TestBackend: ContainerizationHelperBackend {
     static let imageEvidence = ContainerizationHelperImageEvidence(
         reference: "example.local/demo@sha256:abc",
@@ -703,6 +867,7 @@ private actor TestBackend: ContainerizationHelperBackend {
     private let observationValue: ContainerizationHelperObservation
     private let allowsIdleShutdown: Bool
     private let blocksIdleDecision: Bool
+    private let shutdownDelayMilliseconds: Int64
     private var idleChecks = 0
     private var shutdownCalls = 0
     private var idleContinuation: CheckedContinuation<Void, Never>?
@@ -716,13 +881,15 @@ private actor TestBackend: ContainerizationHelperBackend {
         inventory: RuntimeInventory,
         blockCreateUntilCancelled: Bool = false,
         allowsIdleShutdown: Bool = false,
-        blocksIdleDecision: Bool = false
+        blocksIdleDecision: Bool = false,
+        shutdownDelayMilliseconds: Int64 = 0
     ) throws {
         self.snapshotValue = snapshot
         self.observationValue = ContainerizationHelperObservation(inventory: inventory)
         self.blockCreateUntilCancelled = blockCreateUntilCancelled
         self.allowsIdleShutdown = allowsIdleShutdown
         self.blocksIdleDecision = blocksIdleDecision
+        self.shutdownDelayMilliseconds = shutdownDelayMilliseconds
     }
 
     func negotiate() async throws -> RuntimeCapabilitySnapshot {
@@ -816,7 +983,13 @@ private actor TestBackend: ContainerizationHelperBackend {
         cancellations.append(requestID)
     }
 
-    func shutdown() async { shutdownCalls += 1 }
+    func shutdown() async {
+        shutdownCalls += 1
+        if shutdownDelayMilliseconds > 0 {
+            // Scheduling stress: the server can observe shutdown before its acknowledgement is ready.
+            try? await Task.sleep(for: .milliseconds(shutdownDelayMilliseconds))
+        }
+    }
 
     func shutdownIfIdle() async -> Bool {
         idleChecks += 1

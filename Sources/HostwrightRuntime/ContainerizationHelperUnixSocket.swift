@@ -367,6 +367,7 @@ public struct ContainerizationHelperUnixServer: Sendable {
         )
 
         await withTaskGroup(of: Void.self) { group in
+            var listenerFailed = false
             while !Task.isCancelled, !(await dispatcher.shouldTerminate()) {
                 let now = Self.monotonicMilliseconds()
                 if await tracker.shouldShutdown(nowMilliseconds: now),
@@ -382,6 +383,7 @@ public struct ContainerizationHelperUnixServer: Sendable {
                 let pollResult = Darwin.poll(&pollDescriptor, 1, 100)
                 if pollResult < 0 {
                     if errno == EINTR { continue }
+                    listenerFailed = true
                     await dispatcher.requestShutdown()
                     break
                 }
@@ -392,6 +394,7 @@ public struct ContainerizationHelperUnixServer: Sendable {
                 let connection = Darwin.accept(lease.descriptor, nil, nil)
                 guard connection >= 0 else {
                     if errno == EINTR || errno == EAGAIN { continue }
+                    listenerFailed = true
                     await dispatcher.requestShutdown()
                     break
                 }
@@ -420,7 +423,10 @@ public struct ContainerizationHelperUnixServer: Sendable {
                 }
             }
 
-            group.cancelAll()
+            // Graceful shutdown must let accepted requests finish writing their responses.
+            if Task.isCancelled || listenerFailed {
+                group.cancelAll()
+            }
             await dispatcher.requestShutdown()
         }
 

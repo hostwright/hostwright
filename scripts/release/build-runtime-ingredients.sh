@@ -133,6 +133,8 @@ for pass in first second; do
     --patch "$PWD/scripts/release/patches/kernel-security/0007-ipv6-tunnel-extension-header-validation.patch" \
     --patch "$PWD/scripts/release/patches/kernel-security/0008-perf-kernel-callchain-access.patch" \
     --patch "$PWD/scripts/release/patches/kernel-security/0009-inode-xarray-cleanup.patch" \
+    --patch "$PWD/scripts/release/patches/kernel-security/0010-coredump-rcu-task-lifetime.patch" \
+    --patch "$PWD/scripts/release/patches/kernel-security/0011-io-uring-waitid-request-ownership.patch" \
     --output "$work/evidence/native-patches-linux-$pass.json"
   cp "$tree/.config" "$work/evidence/kernel-$pass.config"
   cp "$tree/arch/arm64/boot/Image" "$work/kernel-$pass.Image"

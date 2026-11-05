@@ -1,11 +1,17 @@
 # Corresponding-source bundle preparation
 
 Current releases use the authenticated new-runtime archive described below. Its
-kernel is Linux 6.18.55 plus the two reviewed backports in
+kernel is Linux 6.18.55 plus the ordered backport series in
 `scripts/release/kernel-security-candidate.json`. The archive retains the exact
 upstream source, applied patches, embedded configuration, compiler inputs and
 build records. The original Kata configuration is retained as a build seed;
 `scripts/release/qualify-kernel-candidate.py` is the current build recipe.
+
+The candidate recipe includes the upstream coredump task-lifetime fix for
+CVE-2026-99218 and io_uring waitid request-ownership fix for CVE-2026-99231.
+Adding these patches does not update a retained kernel image or its release pins.
+Both independent kernel builds, their corresponding-source records and the new
+candidate's qualification must pass before that rebuilt kernel can ship.
 
 ## Historical source preparation
 

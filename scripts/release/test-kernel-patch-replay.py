@@ -29,7 +29,7 @@ class KernelPatchReplayTests(unittest.TestCase):
             if hashlib.file_digest(stream, "sha256").hexdigest() != archive_pin["sha256"]:
                 raise ValueError("kernel source archive differs from the reviewed pin")
         cls.patches = []
-        paths = set()
+        paths = {"fs/coredump.c", "io_uring/waitid.c"}
         for row in profile["patches"]:
             data = (ROOT / row["path"]).read_bytes()
             if hashlib.sha256(data).hexdigest() != row["sha256"]:
@@ -47,6 +47,30 @@ class KernelPatchReplayTests(unittest.TestCase):
                     cls.originals[name] = archive.extractfile(member).read()
         if not paths or cls.originals.keys() != paths:
             raise ValueError("kernel source archive lacks patch targets")
+
+    def patched_function(self, path, signature):
+        sources = dict(self.originals)
+        for patch in self.patches:
+            V.apply_patch_bytes(patch, sources)
+        return sources[path].decode().split(signature, 1)[1].split("\n}\n", 1)[0]
+
+    def test_coredump_release_holds_rcu_across_task_clear_and_wakeup(self):
+        body = self.patched_function("fs/coredump.c", "static void coredump_finish(bool core_dumped)")
+        self.assertEqual(body.count("guard(rcu)();"), 1)
+        operations = ["spin_unlock_irq(&current->sighand->siglock);", "guard(rcu)();",
+                      "while ((curr = next) != NULL)", "task = curr->task;",
+                      "curr->task = NULL;", "wake_up_process(task);"]
+        positions = [body.index(operation) for operation in operations]
+        self.assertEqual(positions, sorted(positions))
+
+    def test_waitid_keeps_queue_head_until_callback_owns_request(self):
+        body = self.patched_function("io_uring/waitid.c", "static int io_waitid_wait(")
+        ownership = "if (atomic_fetch_inc(&iw->refs) & IO_WAITID_REF_MASK)\n\t\treturn 1;"
+        self.assertEqual(body.count("smp_store_release(&iw->head, NULL);"), 1)
+        operations = ["list_del_init(&wait->entry);", ownership,
+                      "smp_store_release(&iw->head, NULL);", "req->io_task_work.func = io_waitid_cb;"]
+        positions = [body.index(operation) for operation in operations]
+        self.assertEqual(positions, sorted(positions))
 
     def test_strict_replay_matches_git_for_complete_patch_sequence(self):
         expected = dict(self.originals)

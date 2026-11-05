@@ -83,6 +83,22 @@
       "advisory": "CVE-2026-99080",
       "adaptation": "Exact upstream stable 6.18 patch; no local hunk adaptation.",
       "upstreamCommit": "ee3f011250104129893d8e9599147e457d4d7280"
+    },
+    {
+      "path": "scripts/release/patches/kernel-security/0010-coredump-rcu-task-lifetime.patch",
+      "sha256": "0850b2724c37e897cccb51e39d6e407d95786642cb985468e38c05ba38ee62aa",
+      "stableCommit": "16e94ed90b1b02398e044d41fd1db34828daa08e",
+      "advisory": "CVE-2026-99218",
+      "adaptation": "Exact upstream stable 6.18 patch; no local hunk adaptation.",
+      "upstreamCommit": "61d58591aa0188bf2463e263962256316ff8b576"
+    },
+    {
+      "path": "scripts/release/patches/kernel-security/0011-io-uring-waitid-request-ownership.patch",
+      "sha256": "71f811aa1501d47ea70cf020ae9d74bd9570da9df7fcd4ab84fdc1df254eefc2",
+      "stableCommit": "8381a912c65b8de16e8a848225c7c5a56b6ea834",
+      "advisory": "CVE-2026-99231",
+      "adaptation": "Exact upstream stable 6.18 patch; no local hunk adaptation.",
+      "upstreamCommit": "c254eec4364b9f4b4cbdce43be3fb4df5a651a70"
     }
   ],
   "requiredDisabled": [
@@ -124,7 +140,9 @@
     "drivers/tty/vt/vc_screen.c": "925f42a95dea88d077c00f4c432b82a9e60f9f8cab0e2e71bc847e8dcbc0c892",
     "net/core/dev.c": "83a1a83bdf7a979b0aa27170272748c5a71070ad52227243a8f391008ebed80c",
     "kernel/events/core.c": "9ba2da03c9f19fb26f6871fc4fea8d65514807d4dcba01f4bdd79f744ad4ad54",
-    "fs/inode.c": "343cc0b58345a716dbee92e4b232819712990d6e64a33ce34f8eb35fa81ddd9f"
+    "fs/inode.c": "343cc0b58345a716dbee92e4b232819712990d6e64a33ce34f8eb35fa81ddd9f",
+    "fs/coredump.c": "16d99dd3a40a22fe93d303cbb7386f7b2dfe91ad7f798dc69a97dd848a1a16df",
+    "io_uring/waitid.c": "b4da229512d16f5ad9d87a6ac3177d331d9079273d16e5106ab05210548cf2e8"
   },
   "upstreamDAXFix": "The authenticated 6.18.55 fs/dax.c already contains the zero/empty-entry checks before folio conversion from the previous downstream patch."
 }

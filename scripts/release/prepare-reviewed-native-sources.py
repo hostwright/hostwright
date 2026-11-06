@@ -164,6 +164,25 @@ def prepared_sdk_projects(root, catalog):
     return projects
 
 
+def prepared_embedded_license_documents(root, project, reviewed, dependency):
+    identity = dependency["identity"]
+    V.require(project["identity"] == identity and project["commit"] == reviewed["commit"],
+              "embedded prepared source project differs from reviewed declaration")
+    documents = {item["path"]: item for item in reviewed.get("patchedDocuments", reviewed["documents"])}
+    records = {item["sourcePath"]: item for item in project["licenses"] + project["notices"]
+               if "sourceProject" not in item}
+    result = []
+    for name in dependency["licensePaths"]:
+        name = V.path(name)
+        V.require(name in documents and name in records and name in reviewed["licenses"] + reviewed["notices"],
+                  "embedded document is not a reviewed source license: " + identity + "/" + name)
+        data = V.bound(records[name], lambda path: P.regular(root, path).read_bytes())
+        V.bound(documents[name], lambda _name: data)
+        result.append(dict(sourceProject=identity, embeddedPinPath=dependency["pinPath"],
+                           embeddedCommit=project["commit"], sourcePath=name, data=data))
+    return result
+
+
 def retain_prepared_projects(projects, root, staging, prefix):
     def retain(value):
         if isinstance(value, dict):
@@ -340,6 +359,10 @@ def prepare(catalog, source_map, output, sdk_inputs=None, ingredients=None, nati
             for dependency in reviewed["embeddedLicenseProjects"]:
                 child_identity = dependency["identity"]
                 child_group, child_reviewed = declarations[child_identity]
+                if child_identity in prepared_by_id:
+                    embedded_documents.extend(prepared_embedded_license_documents(
+                        prepared_sdk, prepared_by_id[child_identity], child_reviewed, dependency))
+                    continue
                 child_capture = captures[child_identity]
                 child_root = roots[child_group]
                 child_directory = child_capture["directory"]

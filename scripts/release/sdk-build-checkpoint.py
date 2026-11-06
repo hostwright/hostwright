@@ -25,7 +25,9 @@ RECIPE_SPEC = importlib.util.spec_from_file_location("sdk_build_recipe", HERE / 
 RECIPE = importlib.util.module_from_spec(RECIPE_SPEC)
 RECIPE_SPEC.loader.exec_module(RECIPE)
 KIND = "hostwright.swift-sdk-build-checkpoint.v1"
-PREFIXES = ("sources", "build", "records", "temporary")
+PREFIXES = ("sources", "build", "records", "temporary", "bootstrap")
+BOOTSTRAP_HEADERS = Path("/usr/include/c++")
+BOOTSTRAP_KIND = "hostwright.swift-sdk-bootstrap-headers.v1"
 MAX_ENTRIES = 1_000_000
 INDEX_LIMIT = 256 * 1024**2
 
@@ -227,6 +229,41 @@ def _tree_entries(label, root, roots, build_root):
     return entries
 
 
+def _bootstrap_entries(root, other_roots, records_root, build_root):
+    root = Path(root)
+    V.require(root.is_absolute() and root.is_dir() and root.resolve(strict=True) == root
+              and not root.is_symlink(), "bootstrap headers must be a canonical directory")
+    V.require(all(not _inside(root, (other,)) and not _inside(other, (root,))
+                  for other in other_roots), "bootstrap headers overlap another checkpoint root")
+    for directory, children, filenames in os.walk(root, followlinks=False):
+        for name in children + filenames:
+            path = Path(directory) / name
+            if path.is_symlink():
+                try:
+                    target = path.resolve(strict=True)
+                except (OSError, RuntimeError) as error:
+                    raise ValueError("invalid bootstrap header symlink: " + str(path)) from error
+                V.require(target.is_relative_to(root) and (target.is_file() or target.is_dir()),
+                          "bootstrap header symlink escapes its root: " + str(path))
+            else:
+                V.require(stat.S_ISREG(path.lstat().st_mode) or path.is_dir(),
+                          "unsupported bootstrap header file type: " + str(path))
+    packages = records_root / "ubuntu-package-versions.tsv"
+    V.require(_regular(packages) and packages.stat().st_size > 0,
+              "bootstrap headers require retained Ubuntu package versions")
+    package_data = packages.read_bytes()
+    rows = [line.split("\t") for line in package_data.decode("utf-8").splitlines()]
+    V.require(rows and all(len(row) == 2 and all(row) for row in rows)
+              and len({row[0] for row in rows}) == len(rows)
+              and any(row[0].startswith("libstdc++-") for row in rows),
+              "invalid bootstrap header package versions")
+    entries = _tree_entries("bootstrap", root, ((root, "bootstrap"),), build_root)
+    V.require(any(row["type"] == "file" for row in entries), "bootstrap header tree is empty")
+    return entries, dict(kind=BOOTSTRAP_KIND, originRoot=str(root), retainedPrefix="bootstrap",
+                         packageInventory=dict(path="records/ubuntu-package-versions.tsv",
+                                               sizeBytes=len(package_data), sha256=V.digest(package_data)))
+
+
 def _tar_add_tree(archive, label, root, index, all_roots):
     root = Path(root)
     root_row = index[label]
@@ -281,7 +318,7 @@ def _add_link(archive, path, member_name, roots):
 
 
 def create(sources, build, records, trace, trace_cwd, source_commit, run_id, attempt,
-           output, temporary_root=Path("/tmp"), repo_root=None):
+           output, temporary_root=Path("/tmp"), repo_root=None, bootstrap_headers=None):
     roots = [Path(value).resolve(strict=True) for value in (sources, build, records)]
     sources_root, build_root, records_root = roots
     V.require(all(root.is_dir() and not Path(value).is_symlink()
@@ -307,12 +344,20 @@ def create(sources, build, records, trace, trace_cwd, source_commit, run_id, att
     V.require(all(not _inside(temp_root, (root,)) and not _inside(root, (temp_root,)) for root in roots),
               "temporary root overlaps another checkpoint root")
     all_roots = tuple((root, label) for root, label in zip(roots, PREFIXES[:3])) + ((temp_root, "temporary"),)
+    bootstrap_entries, bootstrap_metadata = [], None
+    if bootstrap_headers is not None:
+        bootstrap_entries, bootstrap_metadata = _bootstrap_entries(
+            bootstrap_headers, (*roots, temp_root), records_root, build_root)
+        V.require(not output.is_relative_to(Path(bootstrap_headers)),
+                  "checkpoint output overlaps bootstrap headers")
+        all_roots += ((Path(bootstrap_headers), "bootstrap"),)
     directory = output
     directory.mkdir(mode=0o700)
     try:
         entries = []
         for label, root in zip(PREFIXES[:3], roots):
             entries.extend(_tree_entries(label, root, all_roots, build_root))
+        entries.extend(bootstrap_entries)
         temporary_directories = {PurePosixPath("temporary")}
         for path, (digest, size) in sorted(temp_files.items()):
             relative = PurePosixPath(path.relative_to(temp_root).as_posix())
@@ -324,19 +369,24 @@ def create(sources, build, records, trace, trace_cwd, source_commit, run_id, att
                             mode=stat.S_IMODE(temp_root.joinpath(*path.parts[1:]).stat().st_mode))
                        for path in sorted(temporary_directories, key=lambda item: (len(item.parts), item.as_posix())))
         V.require(len(entries) <= MAX_ENTRIES, "checkpoint exceeds file limit")
-        index_data = V.canonical(dict(kind=KIND + ".index", entries=entries,
-                                      roots={"sources": str(sources_root), "build": str(build_root),
-                                             "records": str(records_root), "temporary": str(temp_root)},
-                                      trace=str(trace), traceCwd=str(trace_cwd)))
+        index = dict(kind=KIND + ".index", entries=entries,
+                     roots={label: str(root) for root, label in all_roots},
+                     trace=str(trace), traceCwd=str(trace_cwd))
+        if bootstrap_metadata is not None:
+            index["bootstrapHeaders"] = bootstrap_metadata
+        by_path = {row["path"]: row for row in entries}
+        _validate_bootstrap_index(index, by_path)
+        index_data = V.canonical(index)
         V.require(len(index_data) <= INDEX_LIMIT, "checkpoint index exceeds size limit")
         index_path = directory / "checkpoint-index.json"
         index_path.write_bytes(index_data)
-        by_path = {row["path"]: row for row in entries}
         archive_path = directory / "checkpoint.tar.gz"
         with archive_path.open("xb") as raw, gzip.GzipFile(fileobj=raw, mode="wb", compresslevel=1, mtime=0) as compressed:
             with tarfile.open(fileobj=compressed, mode="w|", format=tarfile.PAX_FORMAT) as archive:
                 for label, root in zip(PREFIXES[:3], roots):
                     _tar_add_tree(archive, label, root, by_path, all_roots)
+                if bootstrap_metadata is not None:
+                    _tar_add_tree(archive, "bootstrap", Path(bootstrap_headers), by_path, all_roots)
                 for path in sorted(temporary_directories, key=lambda item: (len(item.parts), item.as_posix())):
                     name = path.as_posix()
                     info = tarfile.TarInfo(name + "/")
@@ -372,6 +422,42 @@ def _safe_member_name(name):
               "unsafe checkpoint archive path")
     V.require(path.parts[0] in PREFIXES, "unexpected checkpoint archive root")
     return path.as_posix()
+
+
+def _validate_bootstrap_index(index, records):
+    roots = index.get("roots", {})
+    V.require(isinstance(roots, dict) and set(roots) in (set(PREFIXES[:4]), set(PREFIXES)),
+              "invalid checkpoint root set")
+    paths = [Path(value) for value in roots.values()]
+    V.require(all(path.is_absolute() and str(path) == value and ".." not in path.parts
+                  for path, value in zip(paths, roots.values()))
+              and all(not _inside(left, (right,)) and not _inside(right, (left,))
+                      for i, left in enumerate(paths) for right in paths[i + 1:]),
+              "invalid or overlapping checkpoint roots")
+    bootstrap_rows = [row for name, row in records.items() if PurePosixPath(name).parts[0] == "bootstrap"]
+    metadata = index.get("bootstrapHeaders")
+    if "bootstrap" not in roots:
+        V.require(metadata is None and not bootstrap_rows, "undeclared bootstrap header evidence")
+        return
+    V.require(isinstance(metadata, dict) and set(metadata) == {
+        "kind", "originRoot", "retainedPrefix", "packageInventory"}
+        and metadata.get("kind") == BOOTSTRAP_KIND and metadata.get("originRoot") == roots["bootstrap"]
+        and metadata.get("retainedPrefix") == "bootstrap", "invalid bootstrap header origin")
+    package = records.get("records/ubuntu-package-versions.tsv", {})
+    V.require(package.get("type") == "file" and package.get("sizeBytes", 0) > 0
+              and metadata.get("packageInventory") == {key: package[key]
+                  for key in ("path", "sha256", "sizeBytes") if key in package},
+              "bootstrap header package evidence mismatch")
+    V.require(records.get("bootstrap", {}).get("type") == "directory"
+              and any(row["type"] == "file" for row in bootstrap_rows), "missing bootstrap header entries")
+    root = Path(roots["bootstrap"])
+    for row in bootstrap_rows:
+        if row["type"] == "symlink":
+            V.require(Path(row["target"]).is_absolute() and Path(row["target"]).is_relative_to(root)
+                      and ".." not in Path(row["target"]).parts,
+                      "indexed bootstrap header symlink escapes its root")
+        else:
+            V.require(row["type"] in ("directory", "file"), "invalid bootstrap header entry")
 
 
 def restore(checkpoint, output, source_commit, run_id, attempt, producer_commit=None, repo_root=None):
@@ -413,6 +499,7 @@ def restore(checkpoint, output, source_commit, run_id, attempt, producer_commit=
         V.require(name not in records and row.get("type") in ("file", "directory", "symlink", "excluded-elf"),
                   "duplicate or invalid checkpoint index entry")
         records[name] = row
+    _validate_bootstrap_index(index, records)
     V.require(output.is_absolute() and output.parent.is_dir() and not output.exists() and not output.is_symlink(),
               "checkpoint restore output must be a new absolute path")
     output.mkdir(mode=0o700)
@@ -459,6 +546,9 @@ def restore(checkpoint, output, source_commit, run_id, attempt, producer_commit=
             target = path.resolve(strict=False)
             V.require(_inside(target, tuple(output.resolve() / prefix for prefix in PREFIXES)),
                       "restored checkpoint symlink escapes its roots")
+            if PurePosixPath(name).parts[0] == "bootstrap":
+                V.require(target.is_relative_to(output.resolve() / "bootstrap") and target.exists(),
+                          "restored bootstrap header symlink escapes or is missing")
         return manifest
     except BaseException:
         shutil.rmtree(output, ignore_errors=True)
@@ -487,6 +577,8 @@ def main(argv=None):
     make.add_argument("--attempt", type=int, required=True)
     make.add_argument("--temporary-root", type=Path, default=Path("/tmp"))
     make.add_argument("--repo-root", type=Path, required=True)
+    make.add_argument("--bootstrap-headers", action="store_true",
+                      help="Retain the canonical /usr/include/c++ bootstrap header closure")
     resume = commands.add_parser("restore")
     for name in ("checkpoint", "output"):
         resume.add_argument("--" + name, type=Path, required=True)
@@ -499,7 +591,7 @@ def main(argv=None):
     if args.command == "create":
         result = create(args.sources, args.build, args.records, args.trace, args.trace_cwd,
                         args.source_commit, args.run_id, args.attempt, args.output, args.temporary_root,
-                        args.repo_root)
+                        args.repo_root, BOOTSTRAP_HEADERS if args.bootstrap_headers else None)
     else:
         result = restore(args.checkpoint, args.output, args.source_commit, args.run_id, args.attempt,
                          args.producer_commit, args.repo_root)

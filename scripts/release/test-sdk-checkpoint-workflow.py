@@ -6,6 +6,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import textwrap
 import unittest
 from unittest import mock
 
@@ -22,6 +23,72 @@ def load(name):
 
 RECIPE = load('sdk-build-recipe')
 RESOLVE = load('resolve-sdk-checkpoint')
+
+
+class SDKInputRoutingTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.records = self.root / 'swift-sdk-records'
+        self.records.mkdir()
+        for name in ('recovery.json', 'swift-static-sdk.tar.gz', 'sdk-reuse.json'):
+            (self.records / name).write_text(name + '\n')
+        self.original = b'{"commit":"original-sdk-producer"}\n'
+        (self.records / 'sdk-producer.json').write_bytes(self.original)
+        import hashlib
+        (self.records / 'checksums.sha256').write_text(''.join(
+            hashlib.sha256(path.read_bytes()).hexdigest() + '  ' + path.name + '\n'
+            for path in sorted(self.records.iterdir())))
+        self.bin = self.root / 'bin'
+        self.bin.mkdir()
+        logger = self.bin / 'python3'
+        logger.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$SDK_TEST_CALLS"\n')
+        logger.chmod(0o755)
+        if not shutil.which('sha256sum'):
+            shasum = shutil.which('shasum')
+            if not shasum:
+                self.skipTest('a real SHA-256 checker is required')
+            checker = self.bin / 'sha256sum'
+            checker.write_text('#!/bin/sh\nexec "' + shasum + '" -a 256 "$@"\n')
+            checker.chmod(0o755)
+        workflow = (ROOT / RECIPE.WORKFLOW).read_text()
+        step = workflow.split('      - name: Verify the source-built SDK attestation\n', 1)[1]
+        self.script = textwrap.dedent(step.split('        run: |\n', 1)[1].split('\n      - name:', 1)[0])
+
+    def run_step(self, kind='native-sdk-subset', issuer=None):
+        import os
+        source = 'a' * 40
+        env = dict(os.environ, PATH=str(self.bin) + ':' + os.environ['PATH'],
+                   SDK_TEST_CALLS=str(self.root / 'calls'), RUNNER_TEMP=str(self.root),
+                   GITHUB_WORKSPACE=str(ROOT), GITHUB_SHA=source,
+                   SDK_INPUT_KIND=kind, SDK_PRODUCER_COMMIT=issuer or source,
+                   SDK_PRODUCER_RUN='123', SDK_PRODUCER_ATTEMPT='2')
+        return subprocess.run(['bash', '-c', self.script], env=env, capture_output=True, text=True)
+
+    def test_partial_sdk_authenticates_exact_issuer_and_preserves_original_metadata(self):
+        result = self.run_step()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = (self.root / 'calls').read_text().splitlines()
+        self.assertEqual(len(calls), 4)
+        for row in calls[:3]:
+            self.assertIn('authenticate-runtime-subject.py', row)
+            self.assertIn('--source-commit ' + 'a' * 40 + ' --run-id 123 --attempt 2', row)
+        self.assertIn('prepare-sdk-native-carrier.py --verify ', calls[3])
+        self.assertNotIn('verify-sdk-reuse.py', '\n'.join(calls))
+        self.assertEqual((self.root / 'sdk-producer.json').read_bytes(), self.original)
+
+    def test_partial_sdk_rejects_changed_transport_bytes(self):
+        (self.records / 'recovery.json').write_text('changed\n')
+        result = self.run_step()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn('--verify ', (self.root / 'calls').read_text())
+
+    def test_partial_sdk_rejects_wrong_current_issuer_and_unknown_kind(self):
+        for kind, issuer in [('native-sdk-subset', 'b' * 40), ('unknown', None)]:
+            with self.subTest(kind=kind):
+                self.assertNotEqual(self.run_step(kind, issuer).returncode, 0)
+                self.assertFalse((self.root / 'calls').exists())
 
 
 class BuildRecipeTests(unittest.TestCase):
@@ -43,6 +110,17 @@ class BuildRecipeTests(unittest.TestCase):
                                              'Collect repaired SDK source evidence')
         workflow.write_text(text)
         (self.root / 'scripts/release/capture-sdk-object-sources.py').write_text('changed evidence reader\n')
+        self.assertEqual(RECIPE.fingerprint(self.root), self.before)
+
+    def test_bootstrap_checkpoint_evidence_stays_after_the_compilation_boundary(self):
+        workflow = self.root / RECIPE.WORKFLOW
+        text = workflow.read_text()
+        before, after = text.split(RECIPE.CHECKPOINT_STEP, 1)
+        self.assertNotIn("--bootstrap-headers", before)
+        self.assertIn("--bootstrap-headers \\\n", after)
+        self.assertIn("--bootstrap-headers /workspace/bootstrap", after)
+        self.assertIn("checkpoint-index.json\" /workspace/records/checkpoint-index.json", after)
+        workflow.write_text(before + RECIPE.CHECKPOINT_STEP + after.replace("--bootstrap-headers", "--future-header-evidence"))
         self.assertEqual(RECIPE.fingerprint(self.root), self.before)
 
     def test_actual_build_inputs_invalidate_reuse(self):

@@ -651,6 +651,32 @@ class ObjectSourceTests(unittest.TestCase):
         retained = self.root / row["file"]["path"]
         self.assertEqual(retained.read_bytes(), header.read_bytes())
 
+    def test_real_compiler_bootstrap_dependency_survives_explicit_root_relocation(self):
+        original = self.root / "original-bootstrap"
+        original.mkdir()
+        header = original / "bootstrap.h"
+        header.write_text("#define BOOTSTRAP_VALUE 19\n")
+        arguments = self.arguments[:1] + ["-include", str(header)] + self.arguments[1:]
+        subprocess.run(arguments, cwd=self.build, check=True, capture_output=True)
+        self.database(arguments, "value.c", "value.o")
+        self.archive([self.build / "value.o"])
+        expected = header.read_bytes()
+        restored = self.root / "restored-bootstrap"
+        shutil.copytree(original, restored)
+        shutil.rmtree(original)
+        relocations = [(original, restored)]
+        rejected = self.capture(relocations=relocations, generated_output=self.root / "unadmitted-header")
+        self.assertEqual(rejected["sourceMap"], [])
+        accepted = self.capture(relocations=relocations, external_header_roots=[restored],
+                                generated_output=self.root / "retained-bootstrap")
+        self.assertEqual(accepted["counts"]["mappedMembers"], 1)
+        self.assertEqual(accepted["counts"]["unresolvedMembers"], 0)
+        row = accepted["sourceMap"][0]
+        self.assertEqual({source["project"] for source in row["sourceFiles"]}, {"swift-sdk/example"})
+        header_record = self.full_inputs(row)["generatedHeaders"][0]
+        self.assertEqual(header_record["originalPath"], str(restored / "bootstrap.h"))
+        self.assertEqual((self.root / header_record["file"]["path"]).read_bytes(), expected)
+
     def test_empty_translation_unit_cannot_qualify_a_compilation(self):
         (self.project / "value.c").write_bytes(b"")
         self.pin_current_files()

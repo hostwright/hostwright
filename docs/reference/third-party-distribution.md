@@ -91,6 +91,27 @@ current source.
 Leave both inputs empty when a new SDK compilation is required. Checkpoints use
 artifact storage, so retain/download them deliberately before their expiry.
 
+An original native carrier can also supply an explicitly selected SDK subset when
+the full SDK checkpoint has expired. This is SDK-only recovery: the resolver must
+select the exact successful native attempt and artifact, and the recovery adapter
+authenticates its original checksums, native manifest and source map. The raw SDK,
+original SDK producer and unchanged SDK compile fingerprint remain bound to that
+carrier. Only actual SDK archive members with matching object bytes and original
+source attribution enter the partial map. Native objects that used SDK headers are
+retained as header evidence, never as reusable SDK objects. Fresh links reject any
+SDK member outside the recovered identity-and-digest set.
+
+The adapter retains original prepared SDK project records, verifies their Git
+trees, applied patches and current license declarations, and derives explicitly
+named header inventories from those verified leaves. It does not manufacture the
+missing full SDK build inventory or reassign the original producer. The consumer
+must verify the authenticated recovery before building the new kernel and native
+runtime. This path does not authorize whole-native reuse or release qualification.
+Native fragments produced with this partial SDK path are not eligible for the
+legacy whole-native checkpoint verifier. Subsequent builds must keep both native
+checkpoint inputs empty and repeat SDK-only recovery from the original carrier;
+the historical SDK reuse receipt must retain its original source and issuer.
+
 When native inputs are unchanged, `native_checkpoint_run` and
 `native_checkpoint_attempt` may instead select one complete, successful original
 native producer. Leave both SDK checkpoint inputs empty. The resolver requires the

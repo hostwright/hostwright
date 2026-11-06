@@ -99,6 +99,233 @@ def compiler_inputs_fixture(manifest,files):
  record['compilerInputs']=dict(path='proof/compiler-inputs.json',sha256=v.digest(raw),sizeBytes=len(raw))
  return record,document
 
+def sdk_recovery_fixture(mixed_headers=False):
+    manifest, runtime, payloads, files = fixture()
+    module = v.sdk_recovery_module()
+    sdk_project = copy.deepcopy(manifest['sourceProjects'][0])
+    sdk_project['identity'] = 'swift-sdk/musl'
+    for notice in sdk_project['licenses'] + sdk_project['notices']:
+        notice['component'] = sdk_project['identity']
+        original_path = notice['path']
+        notice['path'] = 'sdk-' + original_path
+        files[notice['path']] = files[original_path]
+    manifest['sourceProjects'].append(sdk_project)
+    sdk_path = module.ORIGINAL_SDK_ROOT + 'fixture.artifactbundle/target/libcompiled.a'
+    for link in manifest['oci']['links']:
+        selected = link['selectedInputs'][0]
+        selected['mapInput'] = sdk_path + '(main.o)'
+        selected['sourceFiles'][0]['project'] = sdk_project['identity']
+        for reference in [link['map'], *link['commands'], *link['responseFiles']]:
+            data = files[reference['path']].replace(b'libcompiled.a', sdk_path.encode())
+            files[reference['path']] = data
+            reference.update(sha256=v.digest(data), sizeBytes=len(data))
+    for row in manifest['oci']['files']:
+        row['components'] = [sdk_project['identity']]
+    manifest['licensing']['apple-vminit-oci'][0]['project'] = sdk_project['identity']
+    manifest['licensing']['apple-vminit-oci'][0]['licenses'] = [row['path'] for row in sdk_project['licenses']]
+    manifest['licensing']['apple-vminit-oci'][0]['notices'] = [row['path'] for row in sdk_project['notices']]
+    header_rows = []
+    if mixed_headers:
+        raw = elf(True) + b'fresh native header consumer'
+        files['proof/native.o'] = raw
+        header_rows = [dict(objectSHA256=v.digest(raw), mapInput='/build/native.o', sourceFiles=[
+            dict(project='compiled-project', path='main.c', sha256=v.digest(b'int main() { return 0; }\n')),
+            dict(project='swift-sdk/musl', path='NOTICE', sha256=v.digest(b'Fixture notice text\n'))])]
+        for link in manifest['oci']['links']:
+            link['selectedInputs'].append(dict(header_rows[0], file=dict(path='proof/native.o', sha256=v.digest(raw), sizeBytes=len(raw))))
+            reference = link['map']
+            data = files[reference['path']] + b'          200290           200290       24     4         /build/native.o:(.text)\n'
+            files[reference['path']] = data; reference.update(sha256=v.digest(data), sizeBytes=len(data))
+            for reference in link['responseFiles']:
+                data = files[reference['path']] + b'/build/native.o\n'
+                files[reference['path']] = data; reference.update(sha256=v.digest(data), sizeBytes=len(data))
+        for row in manifest['oci']['files']:
+            row['components'].append('compiled-project')
+        manifest['licensing']['apple-vminit-oci'].append(copy.deepcopy(manifest['licensing']['kata-linux-kernel'][0]))
+    original_producer = dict(commit='b' * 40, runID=42, attempt=1)
+    sdk_producer = dict(commit='a' * 40, runID=11, attempt=1)
+    native = dict(status='prepared-not-release-qualified', sourceCommit=original_producer['commit'],
+                  sourceProjects=[sdk_project], oci=copy.deepcopy(manifest['oci']))
+    source_map = [dict(objectSHA256=manifest['oci']['links'][0]['selectedInputs'][0]['objectSHA256'], mapInput=sdk_path + '(main.o)',
+                       sourceFiles=manifest['oci']['links'][0]['selectedInputs'][0]['sourceFiles'])]
+    sdk_archive = tar({'fixture.artifactbundle/target/libcompiled.a': files['proof/libcompiled.a']})
+    compile_files = {'fixture-compile-input': 'd' * 64}
+    compile_inputs = dict(files=compile_files, sha256=v.digest(v.json.dumps(compile_files, sort_keys=True, separators=(',', ':')).encode()))
+    reuse = dict(kind=module.S.KIND, status='compatible-not-release-qualified', producer=dict(commit=sdk_producer['commit']),
+                 sourceCommit=original_producer['commit'], sourceInventory=dict(sdkArchiveSHA256=v.digest(sdk_archive)),
+                 compileInputs=compile_inputs)
+    run = dict(id=42, run_attempt=1, repository=dict(full_name=module.N.R.REPO), path=module.N.R.WORKFLOW,
+               head_branch='main', event='workflow_dispatch', head_sha=original_producer['commit'], status='completed', conclusion='success')
+    job = dict(id=81, run_id=42, run_attempt=1, name=module.N.R.JOB, status='completed', conclusion='success')
+    artifact = dict(id=71, name='runtime-build-ingredients-' + 'b' * 40 + '-42-1', expired=False, size_in_bytes=1024,
+                    digest='sha256:' + 'c' * 64, workflow_run=dict(id=42, head_sha=original_producer['commit']))
+    resolution = module.N.R.select(run, [job], [artifact], 42, 1)
+    recovered = {}
+    def retain(name, raw):
+        recovered[name] = raw
+        return dict(path=name, sha256=v.digest(raw), sizeBytes=len(raw))
+    retain('sdk-producer.json', v.canonical(sdk_producer))
+    retain('sdk-reuse.json', v.canonical(reuse))
+    retain('swift-static-sdk.tar.gz', sdk_archive)
+    original_subjects = dict(nativeManifest=v.canonical(native), sourceMap=v.canonical(source_map + header_rows))
+    checksums = {module.N.SUBJECTS[key]: v.digest(raw) for key, raw in original_subjects.items()}
+    checksums.update({'evidence/' + name: v.digest(raw) for name, raw in recovered.items()})
+    original_subjects['checksums'] = ''.join(sha + '  ' + name + '\n' for name, sha in sorted(checksums.items())).encode()
+    subjects = {key: dict(subject=retain('subjects/' + key, raw),
+                         bundle=retain('subjects/' + key + '.bundle', b'fixture bundle\n'),
+                         verification=retain('subjects/' + key + '.verification', b'fixture verification\n'))
+                for key, raw in original_subjects.items()}
+    retain('prepared-sdk/projects.json', v.canonical(module.N.rebase([sdk_project], 'original/')))
+    for reference in [sdk_project['commitObject'], sdk_project['archive'], sdk_project['inventory'],
+                      *sdk_project['licenses'], *sdk_project['notices']]:
+        retain('prepared-sdk/original/' + reference['path'], files[reference['path']])
+    member = dict(identity='fixture.artifactbundle/target/libcompiled.a(main.o)', objectSHA256=source_map[0]['objectSHA256'])
+    mapping = dict(kind='hostwright.sdk-object-sources.v1', status='partial-not-release-qualified',
+                   sourceMap=source_map, headerInputs=header_rows, unresolved=[],
+                   carrierMembers=dict(kind=module.MEMBERS_KIND, sdkArchiveSHA256=v.digest(sdk_archive), members=[member]))
+    retain('sdk-object-sources.json', v.canonical(mapping))
+    resolution_ref = retain('resolution.json', v.canonical(resolution))
+    proof = dict(kind=module.KIND, status='authenticated-selected-sdk-not-release-qualified', preparedForSource=manifest['sourceCommit'],
+                 carrierProducer=original_producer, artifact=resolution['artifact'], subjects=subjects, resolution=resolution_ref,
+                 originalSDKProducer=sdk_producer, compileComparison=dict(kind=module.S.KIND, status='compatible-not-release-qualified',
+                 producer=dict(commit=sdk_producer['commit']), sourceCommit=manifest['sourceCommit'], compileInputs=compile_inputs, sourceInventory=None),
+                 scope=dict(selectedSDKRows=1, selectedMemberBindings=1, headerOnlyRows=len(header_rows), preparedSDKProjects=1, fullSDKInventoryAvailable=False),
+                 files={name: v.digest(raw) for name, raw in recovered.items()})
+    def store(name, raw):
+        files[name] = raw
+        return dict(path=name, sha256=v.digest(raw), sizeBytes=len(raw))
+    proof_ref = store('recovery/current.json', v.canonical(proof))
+    references = []
+    existing = {(v.digest(raw), len(raw)): name for name, raw in files.items()}
+    for name, raw in recovered.items():
+        location = existing.get((v.digest(raw), len(raw)), 'recovery/retained/' + name)
+        references.append(dict(originalPath=name, file=store(location, raw)))
+    issuer = dict(commit=manifest['sourceCommit'], runID=99, attempt=1)
+    attestation = dict(subject=proof_ref, bundle=store('recovery/current.bundle', b'current fixture bundle\n'),
+                       verification=store('recovery/current.verification', b'current fixture verification\n'))
+    envelope = dict(kind=v.SDK_RECOVERY_KIND, issuer=issuer, proof=proof_ref, issuerAttestation=attestation,
+                    retainedEvidence=references, sourceProjectAliases=[dict(identity=sdk_project['identity'], sourceProject=sdk_project)])
+    for link in manifest['oci']['links']:
+        link['sdkRecoveryMode'] = dict(kind=module.MEMBERS_KIND, sdkArchiveSHA256=v.digest(sdk_archive))
+        for selected in link['selectedInputs']:
+            selected['sdkRecoverySHA256'] = proof_ref['sha256']
+        shared = envelope if link is manifest['oci']['links'][0] else dict(
+            kind=v.SDK_RECOVERY_KIND, sharedProofLink=manifest['oci']['links'][0]['path'])
+        link['sdkRecovery'] = dict(shared, selectedClosure=v.sdk_recovery_closure(link, mapping, files.__getitem__, module))
+    return manifest, runtime, payloads, files, recovered, proof
+
+
+class SDKRecoveryTests(unittest.TestCase):
+    def test_rebound_proof_cannot_change_current_source_compile_comparison_or_original_scope(self):
+        for mutation in ('source', 'comparison-source', 'comparison-digest', 'original-producer', 'scope'):
+            with self.subTest(mutation=mutation):
+                manifest, _runtime, _payloads, files, _recovered, proof = sdk_recovery_fixture()
+                if mutation == 'source': proof['preparedForSource'] = 'f' * 40
+                elif mutation == 'comparison-source': proof['compileComparison']['sourceCommit'] = 'f' * 40
+                elif mutation == 'comparison-digest': proof['compileComparison']['compileInputs']['sha256'] = '0' * 64
+                elif mutation == 'original-producer': proof['originalSDKProducer']['runID'] += 1
+                else: proof['scope']['fullSDKInventoryAvailable'] = True
+                raw = v.canonical(proof)
+                reference = manifest['oci']['links'][0]['sdkRecovery']['proof']
+                files[reference['path']] = raw
+                reference.update(sha256=v.digest(raw), sizeBytes=len(raw))
+                for link in manifest['oci']['links']:
+                    for selected in link['selectedInputs']:
+                        selected['sdkRecoverySHA256'] = reference['sha256']
+                with self.assertRaisesRegex(ValueError, 'SDK recovery'):
+                    v.verify_sdk_recovery(manifest['oci']['links'], manifest['sourceProjects'], files.__getitem__,
+                                          manifest['sourceCommit'], require_authentication=False)
+
+    def test_failed_current_or_original_authentication_stops_recovery_verification(self):
+        manifest, _runtime, _payloads, files, _recovered, _proof = sdk_recovery_fixture()
+        for failure in range(4):
+            module = v.sdk_recovery_module()
+            responses = [None] * failure + [ValueError('attestation rejected')]
+            with self.subTest(failure=failure), mock.patch.object(v, 'sdk_recovery_module', return_value=module), \
+                 mock.patch.object(module.N, 'verify_attestation', side_effect=responses) as authenticate, \
+                 self.assertRaisesRegex(ValueError, 'attestation rejected'):
+                v.verify_sdk_recovery(manifest['oci']['links'], manifest['sourceProjects'], files.__getitem__, manifest['sourceCommit'])
+            self.assertEqual(authenticate.call_count, failure + 1)
+
+    def test_mixed_native_header_closure_is_exact_and_not_a_full_sdk_claim(self):
+        manifest, runtime, payloads, files, _recovered, proof = sdk_recovery_fixture(mixed_headers=True)
+        self.assertFalse(proof['scope']['fullSDKInventoryAvailable'])
+        v.verify(v.canonical(manifest), runtime, payloads, files.__getitem__, manifest['sourceCommit'], require_authentication=False)
+        for link in manifest['oci']['links']:
+            self.assertEqual(link['sdkRecovery']['selectedClosure']['headerSources'], [
+                dict(project='swift-sdk/musl', path='NOTICE', sha256=v.digest(b'Fixture notice text\n'))])
+            link['selectedInputs'][1]['sourceFiles'][1] = dict(project='swift-sdk/musl', path='LICENSE', sha256=v.digest(b'Fixture license text\n'))
+        with self.assertRaisesRegex(ValueError, 'current SDK header is outside'):
+            v.verify(v.canonical(manifest), runtime, payloads, files.__getitem__, manifest['sourceCommit'], require_authentication=False)
+
+    def test_recovered_sdk_passes_without_old_git_and_authenticates_four_exact_subjects(self):
+        manifest, runtime, payloads, files, _recovered, _proof = sdk_recovery_fixture()
+        module = v.sdk_recovery_module()
+        with mock.patch.object(v, 'sdk_recovery_module', return_value=module), \
+             mock.patch.object(module.S, 'compare', side_effect=AssertionError('no historical Git during runtime verification')), \
+             mock.patch.object(module.N, 'verify_attestation') as authenticate:
+            v.verify_sdk_recovery(manifest['oci']['links'], manifest['sourceProjects'], files.__getitem__, manifest['sourceCommit'])
+        self.assertEqual(authenticate.call_count, 4)
+        self.assertEqual(authenticate.call_args_list[0].args[2], dict(commit=manifest['sourceCommit'], runID=99, attempt=1))
+        self.assertTrue(all(call.args[2] == dict(commit='b' * 40, runID=42, attempt=1) for call in authenticate.call_args_list[1:]))
+        v.verify(v.canonical(manifest), runtime, payloads, files.__getitem__, manifest['sourceCommit'], require_authentication=False)
+
+    def test_recovery_proof_mode_and_member_markers_cannot_be_accidentally_stripped(self):
+        for field in ('sdkRecovery', 'sdkRecoveryMode', 'sdkRecoverySHA256'):
+            with self.subTest(field=field):
+                manifest, runtime, payloads, files, _recovered, _proof = sdk_recovery_fixture()
+                link = manifest['oci']['links'][0]
+                del (link['selectedInputs'][0] if field == 'sdkRecoverySHA256' else link)[field]
+                with self.assertRaises(ValueError):
+                    v.verify(v.canonical(manifest), runtime, payloads, files.__getitem__, manifest['sourceCommit'], require_authentication=False)
+
+    def test_recovery_rejects_wrong_issuer_alias_missing_subject_and_current_closure(self):
+        for mutation in ('issuer', 'alias', 'coverage', 'project', 'closure', 'archive', 'bundle', 'proof'):
+            with self.subTest(mutation=mutation):
+                manifest, runtime, payloads, files, _recovered, _proof = sdk_recovery_fixture()
+                for link in manifest['oci']['links'][:1]:
+                    evidence = link['sdkRecovery']
+                    if mutation == 'issuer': evidence['issuer']['commit'] = 'f' * 40
+                    elif mutation == 'alias': evidence['retainedEvidence'][0]['file']['sha256'] = '0' * 64
+                    elif mutation == 'coverage': evidence['retainedEvidence'] = evidence['retainedEvidence'][1:]
+                    elif mutation == 'project': evidence['sourceProjectAliases'] = []
+                    elif mutation == 'closure': evidence['selectedClosure']['selectedMembers'][0]['identity'] += '-missing'
+                    elif mutation == 'archive': link['sdkRecoveryMode']['sdkArchiveSHA256'] = '0' * 64
+                    elif mutation == 'bundle': files[evidence['issuerAttestation']['bundle']['path']] += b'tamper'
+                    else: files[evidence['proof']['path']] += b'tamper'
+                with self.assertRaises(ValueError):
+                    v.verify(v.canonical(manifest), runtime, payloads, files.__getitem__, manifest['sourceCommit'], require_authentication=False)
+
+    def test_shared_proof_requires_one_owner_and_exact_link_reference(self):
+        for mutation in ('missing-owner', 'two-owners', 'self-reference', 'non-oci-reference', 'chain',
+                         'cycle', 'extra-reference-field', 'wrong-sdk'):
+            with self.subTest(mutation=mutation):
+                manifest, runtime, payloads, files, _recovered, _proof = sdk_recovery_fixture()
+                first, second = manifest['oci']['links']
+                if mutation == 'missing-owner':
+                    first['sdkRecovery'] = dict(second['sdkRecovery'])
+                elif mutation == 'two-owners':
+                    second['sdkRecovery'] = dict(first['sdkRecovery'])
+                elif mutation == 'self-reference':
+                    second['sdkRecovery']['sharedProofLink'] = second['path']
+                elif mutation == 'non-oci-reference':
+                    second['sdkRecovery']['sharedProofLink'] = manifest['kernel']['payloadPath']
+                elif mutation == 'chain':
+                    third = copy.deepcopy(second)
+                    third['path'] += '-third'
+                    third['sdkRecovery']['sharedProofLink'] = second['path']
+                    manifest['oci']['links'].append(third)
+                elif mutation == 'cycle':
+                    first['sdkRecovery'] = dict(second['sdkRecovery'], sharedProofLink=second['path'])
+                elif mutation == 'wrong-sdk':
+                    second['sdkRecoveryMode']['sdkArchiveSHA256'] = '0' * 64
+                else:
+                    second['sdkRecovery']['proof'] = first['sdkRecovery']['proof']
+                with self.assertRaisesRegex(ValueError, 'SDK recovery'):
+                    v.verify_sdk_recovery(manifest['oci']['links'], manifest['sourceProjects'], files.__getitem__,
+                                          manifest['sourceCommit'], require_authentication=False)
+
+
 class RuntimeProvenanceTests(unittest.TestCase):
  def test_outer_source_archive_inflates_once_for_out_of_order_member_reads(self):
   compressed=tar({'first':b'one','middle':b'two','last':b'three'})

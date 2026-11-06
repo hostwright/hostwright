@@ -397,6 +397,103 @@ class ReviewedNativeSourcesTests(unittest.TestCase):
         projects = self.prepare(ingredients=self.ingredients, native_patches=self.patches)
         self.assertEqual({p["identity"] for p in projects}, {"guest-package", "linux"})
 
+    def captured_parent_with_prepared_child(self, pin=None, patched_license=False):
+        if patched_license:
+            revised = self.original["LICENSE"] + b"Reviewed complete upstream notice\n"
+            (self.repository / "LICENSE").write_bytes(revised)
+            self.sdk = self.root / "sdk-reviewed-license"
+            self.capture_sdk(self.sdk)
+            declaration = self.catalog["sdk"][0]
+            declaration["patchedDocuments"] = copy.deepcopy(declaration["documents"])
+            declaration["patchedDocuments"][0] = dict(self.record("LICENSE", revised),
+                                                       gitBlobSHA1=V.git_object("blob", revised))
+        child = self.prepare()[0]
+        checkouts = self.root / "checkouts"
+        checkouts.mkdir()
+        parent = checkouts / "swift-nio-ssl"
+        subprocess.run(["git", "clone", "-q", str(self.repository), str(parent)], check=True)
+        pin_path = "Sources/CNIOBoringSSL/hash.txt"
+        (parent / pin_path).parent.mkdir(parents=True)
+        (parent / pin_path).write_bytes(V.BORINGSSL_PIN_PREFIX + (self.commit if pin is None else pin).encode() + b"\n")
+        subprocess.run(["git", "-C", str(parent), "add", pin_path], check=True)
+        subprocess.run(["git", "-C", str(parent), "-c", "user.name=Test", "-c",
+                        "user.email=test@example.test", "commit", "-qm", "embedded source pin"], check=True)
+        commit = subprocess.check_output(["git", "-C", str(parent), "rev-parse", "HEAD"], text=True).strip()
+        lock = self.root / "Package.resolved"
+        lock.write_bytes(V.canonical(dict(version=3, pins=[dict(identity="swift-nio-ssl",
+            kind="remoteSourceControl", state=dict(revision=commit))])))
+        PACKAGES.capture_packages(lock, checkouts, self.ingredients / "evidence/source-trees/vminit-packages")
+        declaration = self.declaration("swift-nio-ssl", "swift-nio-ssl")
+        declaration.update(commit=commit, embeddedLicenseProjects=[dict(identity=child["identity"],
+            pinPath=pin_path, licensePaths=["LICENSE", "NOTICE"])])
+        self.catalog["guest"].append(declaration)
+        self.source_map[0]["sourceFiles"] = [dict(project="swift-nio-ssl", path="Sources/main.c",
+                                                 sha256=V.digest(self.original["Sources/main.c"]))]
+        return child
+
+    def prepare_parent(self, target):
+        return A.prepare(self.catalog, self.source_map, target, prepared_sdk=self.output,
+                         ingredients=self.ingredients, native_patches=self.patches)
+
+    def test_captured_parent_embeds_prepared_child_license_closure(self):
+        child = self.captured_parent_with_prepared_child()
+        target = self.root / "parent-prepared"
+        projects = self.prepare_parent(target)
+        self.assertEqual({p["identity"] for p in projects}, {"swift-nio-ssl", "swift-sdk/component", "linux"})
+        self.assertEqual(next(p for p in projects if p["identity"] == child["identity"]),
+                         A.rebase(child, "retained-sdk/"))
+        parent = next(p for p in projects if p["identity"] == "swift-nio-ssl")
+        for field in ("licenses", "notices"):
+            embedded = [row for row in parent[field] if "sourceProject" in row]
+            self.assertEqual({row["sourcePath"] for row in embedded}, {"LICENSE", "NOTICE"})
+            for row in embedded:
+                self.assertEqual(row["sourceProject"], child["identity"])
+                self.assertEqual(row["embeddedCommit"], child["commit"])
+                self.assertEqual(row["embeddedPinPath"], "Sources/CNIOBoringSSL/hash.txt")
+                self.assertEqual(V.bound(row, lambda name: (target / name).read_bytes()),
+                                 self.original[row["sourcePath"]])
+        V.verify_embedded_license_documents(projects, lambda name: (target / name).read_bytes())
+
+    def test_captured_parent_uses_reviewed_patched_child_license_bytes(self):
+        self.captured_parent_with_prepared_child(patched_license=True)
+        target = self.root / "patched-parent"
+        projects = self.prepare_parent(target)
+        parent = next(p for p in projects if p["identity"] == "swift-nio-ssl")
+        record = next(row for row in parent["licenses"] if row.get("sourceProject") == "swift-sdk/component"
+                      and row["sourcePath"] == "LICENSE")
+        self.assertEqual(V.bound(record, lambda name: (target / name).read_bytes()),
+                         self.original["LICENSE"] + b"Reviewed complete upstream notice\n")
+
+    def test_captured_parent_rejects_wrong_prepared_child_pin(self):
+        self.captured_parent_with_prepared_child(pin="0" * 40)
+        target = self.root / "wrong-pin"
+        with self.assertRaisesRegex(ValueError, "embedded.*pin"):
+            self.prepare_parent(target)
+        self.assertFalse(target.exists())
+        self.assertFalse(list(self.root.glob(".reviewed-native-sources-*")))
+
+    def test_captured_parent_rejects_missing_tampered_or_wrong_commit_child(self):
+        child = self.captured_parent_with_prepared_child()
+        document = self.output / child["licenses"][0]["path"]
+        original = document.read_bytes()
+        for change in ("missing", "tampered"):
+            if change == "missing": document.unlink()
+            else: document.write_bytes(original + b"unreviewed change\n")
+            target = self.root / ("bad-child-" + change)
+            with self.subTest(change=change), self.assertRaisesRegex(ValueError, "regular native source input|bytes mismatch"):
+                self.prepare_parent(target)
+            self.assertFalse(target.exists())
+            document.write_bytes(original)
+        projects_path = self.output / "projects.json"
+        projects = V.parse(projects_path.read_bytes())
+        projects[0]["commit"] = "0" * 40
+        projects_path.write_bytes(V.canonical(projects))
+        target = self.root / "wrong-child-commit"
+        with self.assertRaisesRegex(ValueError, "differs from current declaration"):
+            self.prepare_parent(target)
+        self.assertFalse(target.exists())
+        self.assertFalse(list(self.root.glob(".reviewed-native-sources-*")))
+
     def test_changed_commit_or_reviewed_document_digest_fails(self):
         original = copy.deepcopy(self.catalog)
         for change in ("commit", "document"):

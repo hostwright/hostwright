@@ -4,6 +4,8 @@ import json
 import os
 import re
 import subprocess
+import importlib.util
+from pathlib import Path
 
 
 REPO = "hostwright/hostwright"
@@ -54,6 +56,25 @@ def resolve(environment):
             artifact_kind, artifact_name = "sdk", sdk_name
         else:
             matches = [item for item in artifacts if item.get("name") == artifact_name]
+        if not matches and environment.get("SDK_CARRIER_RESOLUTION"):
+            spec = importlib.util.spec_from_file_location("native_checkpoint", Path(__file__).with_name("resolve-native-checkpoint.py"))
+            native = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(native)
+            original = native.api(f"actions/runs/{run_id}/attempts/{attempt}")
+            jobs = [row for page in native.api(f"actions/runs/{run_id}/attempts/{attempt}/jobs?per_page=100", True)
+                    for row in page["jobs"]]
+            resolution = native.select(original, jobs, artifacts, run_id, attempt)
+            destination = Path(environment["SDK_CARRIER_RESOLUTION"])
+            if not destination.is_absolute() or not destination.parent.is_dir() or destination.exists() or destination.is_symlink():
+                raise ValueError("native SDK carrier resolution requires a new absolute output")
+            with destination.open("x") as stream:
+                json.dump(resolution, stream, sort_keys=True)
+                stream.write("\n")
+            artifact = resolution["artifact"]
+            return {"run-id": str(run_id), "producer-attempt": str(attempt), "source-commit": source,
+                    "artifact-kind": "native-sdk-carrier", "artifact-name": artifact["name"],
+                    "artifact-id": str(artifact["id"]), "artifact-sha256": artifact["sha256"],
+                    "artifact-size": str(artifact["sizeBytes"])}
         if len(matches) != 1:
             raise ValueError("exact SDK artifact or checkpoint is missing, expired or ambiguous")
     return {"run-id": str(run_id), "producer-attempt": str(attempt), "source-commit": source,

@@ -14,6 +14,68 @@ SPEC.loader.exec_module(M)
 
 
 class NativeSourceMapTests(unittest.TestCase):
+    def test_recovered_header_only_evidence_maps_fresh_c_object_without_reusing_old_object(self):
+        self.sdk_header['project'] = 'swift-sdk/component'
+        self.add_c_invocation('.build/native.o: Sources/native.c include/copied.h\n')
+        main_document = dict(objectSHA256='a' * 64, sourceFiles=[self.sdk_source], translationUnits=[self.sdk_source])
+        self.write_source(self.sdk_root, 'compiler-inputs.json', main_document)
+        self.sdk_object['compilerInputs'] = dict(path='compiler-inputs.json',
+            sha256=self.sha((self.sdk_root/'compiler-inputs.json').read_bytes()),
+            sizeBytes=(self.sdk_root/'compiler-inputs.json').stat().st_size)
+        old_native = dict(project='containerization', path='old.c', sha256='d' * 64)
+        document = dict(objectSHA256='e' * 64, sourceFiles=[old_native, self.sdk_header], translationUnits=[old_native])
+        self.write_source(self.sdk_root, 'old-native-header-inputs.json', document)
+        header_row = dict(objectSHA256='e' * 64, sourceFiles=[old_native, self.sdk_header],
+            compilerInputs=dict(path='old-native-header-inputs.json',
+                sha256=self.sha((self.sdk_root/'old-native-header-inputs.json').read_bytes()),
+                sizeBytes=(self.sdk_root/'old-native-header-inputs.json').stat().st_size))
+        identity = 'sdk.artifactbundle/libSDK.a(member.o)'
+        capture = dict(kind='hostwright.sdk-object-sources.v1', status='partial-not-release-qualified', unresolved=[],
+            sourceMap=[self.sdk_object], headerInputs=[header_row],
+            carrierMembers=dict(kind='hostwright.sdk-native-carrier-members.v1', sdkArchiveSHA256='b' * 64,
+                members=[dict(identity=identity, objectSHA256='a' * 64)]))
+        self.sdk_map.write_text(json.dumps(capture))
+        native = json.loads(self.native_capture.read_text())
+        native['links'][0]['selectedInputs'][0]['mapInput'] = str(self.tree.parent.parent/'swift-sdks') + '/' + identity
+        self.native_capture.write_text(json.dumps(native))
+        result = M.capture(self.tree, self.captures, self.sdk_map, self.sdk_root, self.native_capture, self.output)
+        self.assertEqual(set(result), {'kind', 'sourceMap', 'sdkRecovery'})
+        self.assertEqual(result['kind'], 'hostwright.native-source-map.v1')
+        self.assertEqual(result['sdkRecovery'], dict(kind='hostwright.sdk-native-carrier-members.v1', sdkArchiveSHA256='b' * 64))
+        self.assertEqual(json.loads(self.output.read_bytes()), result)
+        rows = result['sourceMap']
+        self.assertNotIn('e' * 64, {row['objectSHA256'] for row in rows})
+        fresh = next(row for row in rows if row['objectSHA256'] == self.sha(b'native-c-object'))
+        sources = M.V.native_source_files(fresh, lambda name: (self.output.parent/name).read_bytes())
+        self.assertIn(self.sdk_header, sources)
+        self.assertNotIn(old_native, sources)
+        capture['headerInputs'] = []
+        self.sdk_map.write_text(json.dumps(capture))
+        with self.assertRaisesRegex(ValueError, 'compiler dependency lacks captured source'):
+            M.capture(self.tree, self.captures, self.sdk_map, self.sdk_root, self.native_capture, self.root/'uncovered.json')
+
+    def test_recovered_carrier_requires_exact_fresh_member_and_hash(self):
+        identity = "example.artifactbundle/sdk/libExample.a(unit.o)"
+        capture = dict(carrierMembers=dict(kind="hostwright.sdk-native-carrier-members.v1",
+            sdkArchiveSHA256="b" * 64, members=[dict(identity=identity, objectSHA256="a" * 64)]))
+        prefix = str(self.tree.parent.parent / "swift-sdks") + "/"
+        self.assertTrue(M.carrier_member_candidates(capture, dict(mapInput=prefix + identity, objectSHA256="a" * 64), self.tree))
+        for name, sha in [(identity.replace("unit.o", "other.o"), "a" * 64), (identity, "c" * 64),
+                          (identity.replace("sdk/", "sdk/../"), "a" * 64)]:
+            with self.subTest(name=name, sha=sha), self.assertRaises((ValueError, AssertionError)):
+                M.carrier_member_candidates(capture, dict(mapInput=prefix + name, objectSHA256=sha), self.tree)
+        self.assertFalse(M.carrier_member_candidates(capture, dict(mapInput="/native/unit.o", objectSHA256="a" * 64), self.tree))
+        self.assertIsNone(M.carrier_member_candidates({}, dict(mapInput="libSDK.a(unit.o)", objectSHA256="a" * 64), self.tree))
+
+    def test_header_only_rows_cannot_become_legacy_sdk_objects(self):
+        with self.assertRaises((ValueError, AssertionError)):
+            M.carrier_member_candidates(dict(headerInputs=[]), dict(mapInput="", objectSHA256=""), self.tree)
+        capture = dict(carrierMembers=dict(kind="hostwright.sdk-native-carrier-members.v1", sdkArchiveSHA256="b" * 64,
+            members=[dict(identity="x.artifactbundle/lib.a(a.o)", objectSHA256="a" * 64)]))
+        capture["carrierMembers"]["members"] *= 2
+        with self.assertRaises((ValueError, AssertionError)):
+            M.carrier_member_candidates(capture, dict(mapInput="", objectSHA256=""), self.tree)
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)

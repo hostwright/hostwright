@@ -209,6 +209,19 @@
           },
           "minItems": 1,
           "type": "array"
+        },
+        "sdkRecoveryMode": {
+          "$ref": "#/$defs/sdkRecoveryMode"
+        },
+        "sdkRecovery": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/sdkRecovery"
+            },
+            {
+              "$ref": "#/$defs/sdkRecoveryShared"
+            }
+          ]
         }
       },
       "required": [
@@ -433,6 +446,10 @@
           },
           "minItems": 1,
           "type": "array"
+        },
+        "sdkRecoverySHA256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
         }
       },
       "required": [
@@ -567,6 +584,224 @@
         "loadedLibraries"
       ],
       "type": "object"
+    },
+    "sdkRecoveryMode": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "hostwright.sdk-native-carrier-members.v1"
+        },
+        "sdkArchiveSHA256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "kind",
+        "sdkArchiveSHA256"
+      ]
+    },
+    "sdkRecovery": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "hostwright.runtime-sdk-recovery.v1"
+        },
+        "issuer": {
+          "properties": {
+            "attempt": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "commit": {
+              "pattern": "^[a-f0-9]{40}$",
+              "type": "string"
+            },
+            "runID": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "commit",
+            "runID",
+            "attempt"
+          ],
+          "type": "object"
+        },
+        "proof": {
+          "$ref": "#/$defs/record"
+        },
+        "issuerAttestation": {
+          "type": "object",
+          "properties": {
+            "subject": {
+              "$ref": "#/$defs/record"
+            },
+            "bundle": {
+              "$ref": "#/$defs/record"
+            },
+            "verification": {
+              "$ref": "#/$defs/record"
+            }
+          },
+          "required": [
+            "subject",
+            "bundle",
+            "verification"
+          ]
+        },
+        "retainedEvidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "originalPath": {
+                "type": "string",
+                "minLength": 1
+              },
+              "file": {
+                "$ref": "#/$defs/record"
+              }
+            },
+            "required": [
+              "originalPath",
+              "file"
+            ]
+          },
+          "minItems": 1
+        },
+        "sourceProjectAliases": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "identity": {
+                "type": "string",
+                "minLength": 1
+              },
+              "sourceProject": {
+                "$ref": "#/$defs/project"
+              }
+            },
+            "required": [
+              "identity",
+              "sourceProject"
+            ]
+          },
+          "minItems": 1
+        },
+        "selectedClosure": {
+          "type": "object",
+          "properties": {
+            "selectedMembers": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "mapInput": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "identity": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "objectSHA256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                },
+                "required": [
+                  "mapInput",
+                  "identity",
+                  "objectSHA256"
+                ]
+              },
+              "minItems": 1
+            },
+            "headerSources": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/sourceFile"
+              },
+              "minItems": 0
+            }
+          },
+          "required": [
+            "selectedMembers",
+            "headerSources"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "issuer",
+        "proof",
+        "issuerAttestation",
+        "retainedEvidence",
+        "sourceProjectAliases",
+        "selectedClosure"
+      ]
+    },
+    "sdkRecoveryShared": {
+      "type": "object",
+      "required": [
+        "kind",
+        "sharedProofLink",
+        "selectedClosure"
+      ],
+      "properties": {
+        "kind": {
+          "const": "hostwright.runtime-sdk-recovery.v1"
+        },
+        "sharedProofLink": {
+          "type": "string",
+          "minLength": 1
+        },
+        "selectedClosure": {
+          "type": "object",
+          "properties": {
+            "selectedMembers": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "mapInput": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "identity": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "objectSHA256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                },
+                "required": [
+                  "mapInput",
+                  "identity",
+                  "objectSHA256"
+                ]
+              },
+              "minItems": 1
+            },
+            "headerSources": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/sourceFile"
+              },
+              "minItems": 0
+            }
+          },
+          "required": [
+            "selectedMembers",
+            "headerSources"
+          ]
+        }
+      }
     }
   },
   "$id": "hostwright.runtime-provenance.v1",

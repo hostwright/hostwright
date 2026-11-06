@@ -97,6 +97,72 @@ class NativePreparationTests(unittest.TestCase):
         return P.prepare(self.ingredients, self.sources, self.source_map, self.commit, self.project, self.output,
                          source_map_root)
 
+    def test_recovery_envelope_requires_proof_and_exact_issuer_inputs(self):
+        wrapped = dict(kind="hostwright.native-source-map.v1", sourceMap=self.source_map,
+                       sdkRecovery=dict(kind="hostwright.sdk-native-carrier-members.v1", sdkArchiveSHA256="a" * 64))
+        with self.assertRaisesRegex(ValueError, "recovery mode requires"):
+            P.prepare(self.ingredients, self.sources, wrapped, self.commit, self.project, self.output)
+        with self.assertRaisesRegex(ValueError, "recovery mode requires"):
+            P.prepare(self.ingredients, self.sources, self.source_map, self.commit, self.project, self.output,
+                      sdk_evidence_run=42, sdk_evidence_attempt=1)
+        recovery_root = self.root / "recovered-sdk"
+        recovery_root.mkdir()
+        for run, attempt in ((None, None), (42, None), (True, 1), (42, 0)):
+            with self.subTest(run=run, attempt=attempt), self.assertRaises(ValueError):
+                P.prepare(self.ingredients, self.sources, wrapped, self.commit, self.project, self.output,
+                          sdk_recovery_root=recovery_root, sdk_evidence_run=run, sdk_evidence_attempt=attempt)
+        with self.assertRaisesRegex(ValueError, "overlaps SDK recovery"):
+            P.prepare(self.ingredients, self.sources, wrapped, self.commit, self.project, recovery_root / "output",
+                      sdk_recovery_root=recovery_root, sdk_evidence_run=42, sdk_evidence_attempt=1)
+        self.assertFalse(self.output.exists())
+
+    def test_recovery_proof_survives_final_composition_and_aliases_existing_source_bytes(self):
+        manifest, inventory, payloads, evidence, recovered, proof = FIXTURE.sdk_recovery_fixture()
+        harness = NativePreparationTests()
+        with mock.patch.object(FIXTURE, "fixture", return_value=(manifest, inventory, payloads, evidence)):
+            harness.setUp()
+        self.addCleanup(harness.doCleanups)
+        recovery_root = harness.root / "recovered-sdk"
+        for name, data in recovered.items():
+            harness.write(recovery_root, name, data)
+        harness.write(recovery_root, "recovery.json", V.canonical(proof))
+        module = V.sdk_recovery_module()
+        harness.write(recovery_root, "checksums.sha256", module.transport_checksums(recovery_root, proof))
+        def authenticate_subject(root, name, producer, output, key):
+            self.assertEqual((root, name, producer), (recovery_root, "recovery.json",
+                dict(commit=harness.commit, runID=99, attempt=1)))
+            return {field: module.record(output, "subjects/" + key + suffix, raw)
+                    for field, suffix, raw in [("subject", "", (root / name).read_bytes()),
+                        ("bundle", ".bundle", b"current fixture bundle\n"),
+                        ("verification", ".verification", b"current fixture verification\n")]}
+        wrapped = dict(kind="hostwright.native-source-map.v1", sourceMap=harness.source_map,
+                       sdkRecovery=manifest["oci"]["links"][0]["sdkRecoveryMode"])
+        with mock.patch.object(V, "sdk_recovery_module", return_value=module), \
+             mock.patch.object(module.N, "authenticate_subject", side_effect=authenticate_subject), \
+             mock.patch.object(module.N, "verify_attestation") as authenticate:
+            native = P.prepare(harness.ingredients, harness.sources, wrapped, harness.commit, harness.project,
+                               harness.output, sdk_recovery_root=recovery_root, sdk_evidence_run=99, sdk_evidence_attempt=1)
+        self.assertEqual(authenticate.call_count, 4)
+        envelope = native["oci"]["links"][0]["sdkRecovery"]
+        refs = {row["originalPath"]: row["file"] for row in envelope["retainedEvidence"]}
+        sdk_project = next(project for project in native["sourceProjects"] if project["identity"] == "swift-sdk/musl")
+        self.assertEqual(refs["prepared-sdk/original/proof/source.tar.gz"], sdk_project["archive"])
+        final = harness.prepare_final()
+        owner, shared = final["oci"]["links"]
+        self.assertEqual(shared["sdkRecovery"]["sharedProofLink"], owner["path"])
+        self.assertEqual(set(shared["sdkRecovery"]), {"kind", "sharedProofLink", "selectedClosure"})
+        proof_ref = final["oci"]["links"][0]["sdkRecovery"]["proof"]
+        self.assertEqual((harness.root / "final" / proof_ref["path"]).read_bytes(), V.canonical(proof))
+        archive = harness.root / "sdk-source.tar.gz"
+        FINAL.A.assemble(harness.root / "final", archive, "0.0.2",
+            dict(head=harness.commit, clean=True, gitStatusSHA256=V.digest(b"")),
+            (harness.output / "upstream/kernel-source-signature.json").read_bytes())
+        with tarfile.open(archive) as source:
+            archived = V.parse(source.extractfile("runtime-provenance/manifest.json").read())
+            self.assertEqual(archived["oci"]["links"], final["oci"]["links"])
+            raw_sdk_paths = [name for name in source.getnames() if name.endswith("/swift-static-sdk.tar.gz")]
+            self.assertEqual(len(raw_sdk_paths), 1)
+
     def generated_headers(self):
         root = self.root / "mapping"
         inputs = {"generated/config.h": b"#define BUILD_CONFIG 1\n",

@@ -122,18 +122,22 @@ class SDKBuildCheckpointTests(unittest.TestCase):
     def git(repository, *arguments):
         return subprocess.check_output(["git", "-C", str(repository), *arguments], text=True)
 
-    def capture_map(self, sources, build, output):
+    def capture_map(self, sources, build, output, bootstrap_relocation=None):
         output.mkdir(parents=True)
         restored = sources != self.sources
         trace = build.parent / "records/build.trace" if restored else self.records / "build.trace"
         temporary_root = build.parent / "temporary" if restored else self.temporary
         relocations = ([(self.sources, sources), (self.build, build),
                         (self.temporary, temporary_root)] if restored else [])
+        headers = [temporary_root]
+        if bootstrap_relocation is not None:
+            relocations.append(bootstrap_relocation)
+            headers.append(bootstrap_relocation[1])
         return CAPTURE.capture(sources, [build], build / "sdk_root/aarch64",
             [dict(destination="swift-project", commit=self.project_commit)],
             traces=[trace], relocations=relocations,
             trace_cwd=build, generated_output=output / "generated-headers",
-            external_header_roots=[temporary_root])
+            external_header_roots=headers)
 
     def recipe_repository(self):
         checkout = self.root / "recipe-repo"
@@ -220,6 +224,119 @@ class SDKBuildCheckpointTests(unittest.TestCase):
                          [row["objectSHA256"] for row in after_mapping["sourceMap"]])
         self.assertEqual(before_mapping["sourceMap"][0]["sourceFiles"],
                          after_mapping["sourceMap"][0]["sourceFiles"])
+
+    def bootstrap_fixture(self):
+        bootstrap = self.root / "bootstrap-headers"
+        bootstrap.mkdir()
+        (bootstrap / "value.h").write_text("#define BOOTSTRAP_VALUE 19\n")
+        link = self.build / "swift/Ninja-ReleaseAssert/llvm-linux-aarch64/include/c++"
+        link.parent.mkdir(parents=True)
+        link.symlink_to(bootstrap)
+        (self.records / "ubuntu-package-versions.tsv").write_text("libstdc++-fixture-dev\t1.0\n")
+        return bootstrap, link
+
+    def test_restore_preserves_bootstrap_header_link_and_real_object_mapping(self):
+        bootstrap, link = self.bootstrap_fixture()
+        (bootstrap / "alias.h").symlink_to("value.h")
+        (self.project / "value.c").write_text("int value(void) { return VALUE + GENERATED_VALUE + BOOTSTRAP_VALUE; }\n")
+        self.project_commit = self.commit_fixture(self.project, "consume bootstrap header")
+        self.command[1:1] = ["-include", str(link / "alias.h")]
+        subprocess.run(self.command, check=True, capture_output=True)
+        (self.sdk_root / "libswiftCore.a").write_bytes(self.ar_archive(self.object))
+        (self.build / "compile_commands.json").write_bytes(CAPTURE.V.canonical([dict(
+            directory=str(self.build), file=str(self.project / "value.c"),
+            arguments=self.command, output=str(self.object))]))
+        self.trace.write_text(f'77 1.000 execve({json.dumps(self.command[0])}, {json.dumps(self.command)}, '
+                              '0xffff /* 10 vars */) = 0 <0.001>\n77 1.010 exit_group(0) = ?\n')
+        before = self.capture_map(self.sources, self.build, self.root / "before-bootstrap",
+                                  (bootstrap, bootstrap))
+        self.assertEqual(before["counts"]["mappedMembers"], 1)
+        self.assertEqual(before["counts"]["unresolvedMembers"], 0)
+        object_bytes, header_bytes = self.object.read_bytes(), (bootstrap / "value.h").read_bytes()
+        header_mode = (bootstrap / "value.h").stat().st_mode & 0o7777
+        self.create(bootstrap_headers=bootstrap)
+        index = json.loads((self.checkpoint / "checkpoint-index.json").read_text())
+        self.assertEqual(index["bootstrapHeaders"]["originRoot"], str(bootstrap))
+        self.assertEqual(index["bootstrapHeaders"]["packageInventory"]["sha256"],
+                         CHECKPOINT.digest_file(self.records / "ubuntu-package-versions.tsv"))
+        for root in [self.sources, self.build, self.records, self.temporary, bootstrap]:
+            shutil.rmtree(root)
+        restored = self.root / "restored-bootstrap"
+        with self.authenticate_fixture(self.checkpoint):
+            CHECKPOINT.restore(self.checkpoint, restored, self.source_commit, self.run_id, self.attempt)
+        self.assertEqual((restored / "bootstrap/value.h").read_bytes(), header_bytes)
+        self.assertEqual((restored / "bootstrap/value.h").stat().st_mode & 0o7777, header_mode)
+        self.assertEqual((restored / "bootstrap/alias.h").resolve(), restored / "bootstrap/value.h")
+        self.assertEqual((restored / "build" / link.relative_to(self.build)).resolve(), restored / "bootstrap")
+        self.assertEqual((restored / "build/objects/Swift.o").read_bytes(), object_bytes)
+        after = self.capture_map(restored / "sources", restored / "build", self.root / "after-bootstrap",
+                                 (bootstrap, restored / "bootstrap"))
+        self.assertEqual(before["counts"], after["counts"])
+        self.assertEqual(before["sourceMap"][0]["objectSHA256"], after["sourceMap"][0]["objectSHA256"])
+        self.assertEqual(before["sourceMap"][0]["sourceFiles"], after["sourceMap"][0]["sourceFiles"])
+
+    def test_bootstrap_tree_rejects_escape_loop_dangling_and_special_files(self):
+        bootstrap, _ = self.bootstrap_fixture()
+        outside = self.root / "outside-header.h"
+        outside.write_text("#define OUTSIDE 1\n")
+        for target in [outside, bootstrap / "link.h", bootstrap / "missing.h"]:
+            with self.subTest(target=target):
+                link = bootstrap / "link.h"
+                link.symlink_to(target)
+                with self.assertRaisesRegex(ValueError, "bootstrap header symlink"):
+                    self.create(bootstrap_headers=bootstrap)
+                self.assertFalse(self.checkpoint.exists())
+                link.unlink()
+        os.mkfifo(bootstrap / "pipe")
+        with self.assertRaisesRegex(ValueError, "unsupported bootstrap header file type"):
+            self.create(bootstrap_headers=bootstrap)
+
+    def test_bootstrap_root_and_package_evidence_are_required(self):
+        bootstrap, _ = self.bootstrap_fixture()
+        alias = self.root / "bootstrap-alias"
+        alias.symlink_to(bootstrap)
+        for root, error in [(alias, "canonical"), (self.sources, "overlap"),
+                            (self.root, "overlap")]:
+            with self.subTest(root=root), self.assertRaisesRegex(ValueError, error):
+                self.create(bootstrap_headers=root)
+        inventory = self.records / "ubuntu-package-versions.tsv"
+        inventory.unlink()
+        with self.assertRaisesRegex(ValueError, "package versions"):
+            self.create(bootstrap_headers=bootstrap)
+        inventory.write_text("unrelated-package\t1.0\n")
+        with self.assertRaisesRegex(ValueError, "package versions"):
+            self.create(bootstrap_headers=bootstrap)
+        inventory.unlink()
+        inventory.symlink_to(bootstrap / "value.h")
+        with self.assertRaisesRegex(ValueError, "package versions"):
+            self.create(bootstrap_headers=bootstrap)
+
+    def test_bootstrap_index_rejects_origin_package_and_nested_link_tampering(self):
+        bootstrap, _ = self.bootstrap_fixture()
+        (bootstrap / "alias.h").symlink_to("value.h")
+        self.create(bootstrap_headers=bootstrap)
+        index_path = self.checkpoint / "checkpoint-index.json"
+        original = index_path.read_bytes()
+        for change, expected in [("origin", "bootstrap header origin"),
+                                 ("package", "package evidence"),
+                                 ("link", "bootstrap header symlink"),
+                                 ("root", "root set")]:
+            with self.subTest(change=change):
+                index = json.loads(original)
+                if change == "origin":
+                    index["bootstrapHeaders"]["originRoot"] = "/usr"
+                elif change == "package":
+                    index["bootstrapHeaders"]["packageInventory"]["sha256"] = "0" * 64
+                elif change == "link":
+                    next(row for row in index["entries"] if row["path"] == "bootstrap/alias.h")["target"] = str(self.project / "value.c")
+                else:
+                    index["roots"]["unexpected"] = "/usr"
+                index_path.write_bytes(CHECKPOINT.V.canonical(index))
+                self.rebind_manifest_artifact("index", index_path)
+                with self.authenticate_fixture(self.checkpoint), self.assertRaisesRegex(ValueError, expected):
+                    CHECKPOINT.restore(self.checkpoint, self.root / "restored-tampered",
+                                       self.source_commit, self.run_id, self.attempt)
+                self.assertFalse((self.root / "restored-tampered").exists())
 
     def test_restore_rejects_archive_and_manifest_tampering(self):
         self.create()

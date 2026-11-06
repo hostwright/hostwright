@@ -3,10 +3,10 @@ set -euo pipefail
 umask 077
 
 usage() {
-  echo "usage: capture-static-swift-sdk-evidence.sh --root ABSOLUTE_DIR --repo-root ABSOLUTE_DIR --build-dir ABSOLUTE_DIR --records ABSOLUTE_DIR --temporary-root ABSOLUTE_DIR" >&2
+  echo "usage: capture-static-swift-sdk-evidence.sh --root ABSOLUTE_DIR --repo-root ABSOLUTE_DIR --build-dir ABSOLUTE_DIR --records ABSOLUTE_DIR --temporary-root ABSOLUTE_DIR [--bootstrap-headers ABSOLUTE_DIR]" >&2
   exit 64
 }
-root= repo_root= build_dir= records= temporary_root=
+root= repo_root= build_dir= records= temporary_root= bootstrap_headers=
 while (( $# )); do
   case "$1" in
     --root) (( $# >= 2 )) || usage; root=$2; shift 2 ;;
@@ -14,11 +14,18 @@ while (( $# )); do
     --build-dir) (( $# >= 2 )) || usage; build_dir=$2; shift 2 ;;
     --records) (( $# >= 2 )) || usage; records=$2; shift 2 ;;
     --temporary-root) (( $# >= 2 )) || usage; temporary_root=$2; shift 2 ;;
+    --bootstrap-headers) (( $# >= 2 )) || usage; bootstrap_headers=$2; shift 2 ;;
     *) usage ;;
   esac
 done
 [[ "$root" == /* && "$repo_root" == /* && "$build_dir" == /* && "$records" == /* && "$temporary_root" == /* ]] || usage
 [[ -d "$root" && -d "$build_dir" && -d "$records" && -d "$temporary_root" ]] || usage
+bootstrap_arguments=()
+if [[ -n "$bootstrap_headers" ]]; then
+  [[ "$bootstrap_headers" == /* && -d "$bootstrap_headers" && ! -L "$bootstrap_headers" ]] || usage
+  [[ "$(cd "$bootstrap_headers" && pwd -P)" == "$bootstrap_headers" ]] || usage
+  bootstrap_arguments=(--relocate "/usr/include/c++=$bootstrap_headers" --header-root "$bootstrap_headers")
+fi
 [[ "$(cat "$records/build-exit-status")" == 0 ]] || exit 1
 [[ ! -e "$records/build-inputs" && ! -L "$records/build-inputs" ]] || exit 1
 build_working_directory=$(cat "$records/build-working-directory")
@@ -33,6 +40,7 @@ python3 "$repo_root/scripts/release/capture-sdk-object-sources.py" \
   --sdk-build-inputs "$records/build-inputs/build-inputs.json" \
   --trace "$records/build.trace" --trace-cwd "$build_working_directory" \
   --relocate "/tmp=$temporary_root" \
+  "${bootstrap_arguments[@]}" \
   --generated-output "$records/build-inputs/generated-headers" \
   --output "$records/build-inputs/sdk-object-sources.json"
 printf '%s Hashing complete SDK evidence\n' "$(date -u +%FT%TZ)"

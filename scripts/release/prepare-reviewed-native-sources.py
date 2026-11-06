@@ -6,6 +6,7 @@ import importlib.util
 import os
 from pathlib import Path
 import re
+import shutil
 import tarfile
 import tempfile
 
@@ -24,6 +25,14 @@ def compiler_inputs(row, source_map_root):
 
 def selected_sources(source_map, source_map_root=None):
     if isinstance(source_map, dict):
+        if source_map.get("kind") == "hostwright.native-source-map.v1" or "sdkRecovery" in source_map:
+            V.require(source_map.get("kind") == "hostwright.native-source-map.v1"
+                      and set(source_map) == {"kind", "sourceMap", "sdkRecovery"}, "invalid recovered native source-map envelope")
+            marker = source_map["sdkRecovery"]
+            V.require(isinstance(marker, dict) and set(marker) == {"kind", "sdkArchiveSHA256"}
+                      and marker["kind"] == "hostwright.sdk-native-carrier-members.v1"
+                      and isinstance(marker["sdkArchiveSHA256"], str)
+                      and re.fullmatch("[a-f0-9]{64}", marker["sdkArchiveSHA256"]), "invalid SDK recovery source-map marker")
         V.require(not source_map.get("unresolved"), "selected object mapping has unresolved sources")
         source_map = source_map.get("sourceMap")
     V.require(isinstance(source_map, list) and source_map, "missing selected object/source mapping")
@@ -128,19 +137,70 @@ def retain_source_map(source_map, source_map_root, staging):
     return retained_map
 
 
+def prepared_sdk_projects(root, catalog):
+    V.require(root.is_dir() and not root.is_symlink(), "unsafe prepared SDK source root")
+    projects = V.parse(P.regular(root, "projects.json").read_bytes())
+    declarations = {row["identity"]: row for row in catalog["sdk"]}
+    V.require(isinstance(projects, list) and projects, "missing prepared SDK projects")
+    commits = {row["identity"]: row["commit"] for row in projects}
+    V.require(len(commits) == len(projects) and set(commits) <= set(declarations), "unexpected prepared SDK project")
+    fetch = lambda name: P.regular(root, name).read_bytes()
+    for project in projects:
+        reviewed = declarations[project["identity"]]
+        V.require(project["identity"].startswith("swift-sdk/") and project["commit"] == reviewed["commit"]
+                  and project["spdx"] == reviewed["spdx"], "prepared SDK project differs from current declaration")
+        V.source_project(project, fetch, commits)
+        expected = {item["path"]: item for item in reviewed.get("patchedDocuments", reviewed["documents"])}
+        for field in ("licenses", "notices"):
+            records = [row for row in project[field] if "sourceProject" not in row]
+            V.require({row["sourcePath"] for row in records} == set(reviewed[field]), "prepared SDK license coverage changed")
+            for record in records:
+                document = expected[record["sourcePath"]]
+                data = V.bound(record, fetch)
+                V.require(record["sha256"] == document["sha256"] and record["sizeBytes"] == document["sizeBytes"]
+                          and record["spdx"] == reviewed["spdx"] and V.git_object("blob", data) == document["gitBlobSHA1"],
+                          "prepared SDK license bytes changed")
+    V.verify_embedded_license_documents(projects, fetch)
+    return projects
+
+
+def retain_prepared_projects(projects, root, staging, prefix):
+    def retain(value):
+        if isinstance(value, dict):
+            if {"path", "sha256", "sizeBytes"} <= value.keys():
+                source = P.regular(root, value["path"])
+                V.bound(value, lambda _name: source.read_bytes())
+                target = staging / prefix / V.path(value["path"])
+                target.parent.mkdir(parents=True, exist_ok=True)
+                if target.exists():
+                    V.bound(value, lambda _name: target.read_bytes())
+                else:
+                    shutil.copyfile(source, target)
+            for child in value.values():
+                retain(child)
+        elif isinstance(value, list):
+            for child in value:
+                retain(child)
+    retain(projects)
+    return rebase(projects, prefix + "/")
+
+
 def prepare(catalog, source_map, output, sdk_inputs=None, ingredients=None, native_patches=None,
-            source_map_root=None, sdk_source_patches=None):
+            source_map_root=None, sdk_source_patches=None, prepared_sdk=None):
     V.require(catalog.get("kind") == "hostwright.runtime-native-source-licenses.v1"
               and catalog.get("status") == "reviewed-declarations-not-link-qualified",
               "invalid reviewed source license catalog")
-    V.require(sdk_inputs is not None or ingredients is not None, "source capture inputs are missing")
+    V.require(sdk_inputs is not None or ingredients is not None or prepared_sdk is not None, "source capture inputs are missing")
+    V.require(prepared_sdk is None or (sdk_inputs is None and not sdk_source_patches), "prepared and legacy SDK sources are mutually exclusive")
     V.require(output.is_absolute() and output.parent.is_dir() and not output.exists() and not output.is_symlink(),
               "reviewed source output must be a new absolute path")
     if source_map_root is not None:
         source_map_root = Path(source_map_root)
         V.require(source_map_root.is_dir() and not source_map_root.is_symlink(), "unsafe source map evidence root")
         source_map_root = source_map_root.resolve()
+    marker = source_map.get("sdkRecovery") if isinstance(source_map, dict) else None
     source_map, selected = selected_sources(source_map, source_map_root)
+    V.require(marker is None or prepared_sdk is not None, "recovered native source map requires prepared SDK projects")
     if any("generatedHeaders" in row for row in source_map):
         V.require(source_map_root is not None, "generated-header evidence requires a source map root")
     roots = {}
@@ -168,6 +228,8 @@ def prepare(catalog, source_map, output, sdk_inputs=None, ingredients=None, nati
             declarations[identity] = (group, row)
 
     captures = {}
+    prepared_projects = prepared_sdk_projects(prepared_sdk, catalog) if prepared_sdk is not None else []
+    prepared_by_id = {row["identity"]: row for row in prepared_projects}
 
     def add_capture(group, identity, directory, embedded=None, patch_records=()):
         identity, directory = V.path(identity), V.path(directory)
@@ -221,8 +283,9 @@ def prepare(catalog, source_map, output, sdk_inputs=None, ingredients=None, nati
         identity = queue.pop()
         V.require(identity not in excluded, "selected source project is excluded: " + identity + "; "
                   + excluded.get(identity, ""))
-        V.require(identity in declarations and identity in captures, "selected source project is missing: " + identity)
-        for child in captures[identity]["source"].get("submodules", []):
+        V.require(identity in declarations and (identity in captures or identity in prepared_by_id), "selected source project is missing: " + identity)
+        source = prepared_by_id[identity] if identity in prepared_by_id else captures[identity]["source"]
+        for child in source.get("submodules", []):
             if child["project"] not in requested:
                 requested.add(child["project"])
                 queue.append(child["project"])
@@ -236,7 +299,7 @@ def prepare(catalog, source_map, output, sdk_inputs=None, ingredients=None, nati
                       "invalid embedded source license declaration: " + identity)
             child_identity = V.path(dependency["identity"])
             V.path(dependency["pinPath"])
-            V.require(child_identity in declarations and child_identity in captures and
+            V.require(child_identity in declarations and (child_identity in captures or child_identity in prepared_by_id) and
                       child_identity != identity, "embedded license source project is missing: " + child_identity)
             V.require(len(set(V.path(name) for name in dependency["licensePaths"])) == len(dependency["licensePaths"]),
                       "duplicate embedded source license path: " + child_identity)
@@ -247,6 +310,10 @@ def prepare(catalog, source_map, output, sdk_inputs=None, ingredients=None, nati
     metadata = {name: [] for name in roots}
     for identity in sorted(requested):
         group, reviewed = declarations[identity]
+        if identity in prepared_by_id:
+            for name in selected.get(identity, {}):
+                in_scope(reviewed, name)
+            continue
         captured = captures[identity]
         source = captured["source"]
         V.require(source["commit"] == reviewed["commit"], "captured source differs from reviewed commit: " + identity)
@@ -300,6 +367,9 @@ def prepare(catalog, source_map, output, sdk_inputs=None, ingredients=None, nati
         staging.mkdir(mode=0o700)
         retained_map = retain_source_map(source_map, source_map_root, staging)
         projects = []
+        if prepared_projects:
+            retained = [row for row in prepared_projects if row["identity"] in requested]
+            projects.extend(retain_prepared_projects(retained, prepared_sdk, staging, "retained-sdk"))
         for group, rows in metadata.items():
             if rows:
                 projects.extend(rebase(P.prepare(roots[group], rows, staging / group), group + "/"))
@@ -331,7 +401,8 @@ def prepare(catalog, source_map, output, sdk_inputs=None, ingredients=None, nati
                           "applied patch changes reviewed license/notice bytes: " + identity)
         V.verify_embedded_license_documents(projects, fetch)
         (staging / "projects.json").write_bytes(V.canonical(projects))
-        (staging / "source-map.json").write_bytes(V.canonical(retained_map))
+        retained_document = dict(kind="hostwright.native-source-map.v1", sourceMap=retained_map, sdkRecovery=marker) if marker else retained_map
+        (staging / "source-map.json").write_bytes(V.canonical(retained_document))
         V.require(not output.exists() and not output.is_symlink(), "reviewed source output already exists")
         os.rename(staging, output)
         return projects
@@ -340,6 +411,8 @@ def prepare(catalog, source_map, output, sdk_inputs=None, ingredients=None, nati
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sdk-inputs", type=Path)
+    parser.add_argument("--prepared-sdk-projects", type=Path,
+                        help="Authenticated selected SDK project closure; mutually exclusive with legacy SDK inputs")
     parser.add_argument("--ingredients", type=Path)
     parser.add_argument("--source-map", type=Path, required=True)
     parser.add_argument("--source-map-root", type=Path,
@@ -354,4 +427,4 @@ if __name__ == "__main__":
     prepare(V.parse(args.catalog.read_bytes()), V.parse(args.source_map.read_bytes()), args.output,
             args.sdk_inputs, args.ingredients, V.parse(args.native_patches.read_bytes()) if args.native_patches else None,
             args.source_map_root or args.source_map.parent,
-            V.parse(args.sdk_source_patches.read_bytes()) if args.sdk_source_patches else None)
+            V.parse(args.sdk_source_patches.read_bytes()) if args.sdk_source_patches else None, args.prepared_sdk_projects)

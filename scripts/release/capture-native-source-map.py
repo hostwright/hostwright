@@ -26,7 +26,49 @@ S = load("sdk_capture", "capture-sdk-object-sources.py")
 P = load("reviewed_sources", "prepare-reviewed-native-sources.py")
 
 
-def capture_c_inputs(tree, roots, projects, native, evidence_root, selected, sdk_rows, sdk_root, output, sdk_source_captures=None):
+def carrier_member_bindings(capture):
+    contract = capture.get("carrierMembers")
+    if contract is None:
+        V.require("headerInputs" not in capture, "header-only inputs require a typed SDK carrier")
+        return None
+    V.require(set(contract) == {"kind", "sdkArchiveSHA256", "members"}
+              and contract["kind"] == "hostwright.sdk-native-carrier-members.v1"
+              and re.fullmatch("[a-f0-9]{64}", contract["sdkArchiveSHA256"]), "invalid SDK carrier member contract")
+    members = contract["members"]
+    V.require(isinstance(members, list) and members, "missing selected SDK member bindings")
+    bindings = set()
+    for row in members:
+        V.require(set(row) == {"identity", "objectSHA256"} and re.fullmatch("[a-f0-9]{64}", row["objectSHA256"]),
+                  "invalid selected SDK member binding")
+        name = row["identity"]
+        match = re.fullmatch(r"(.+\.a)\(([^()]+)\)", name)
+        filename, member = match.groups() if match else (name, None)
+        V.path(filename)
+        V.require(filename.split('/')[0].endswith('.artifactbundle') and (member is not None or filename.endswith('.o')),
+                  "invalid selected SDK member identity")
+        if member is not None:
+            V.path(member)
+        bindings.add((name, row["objectSHA256"]))
+    V.require(len(bindings) == len(members), "duplicate SDK member binding")
+    return bindings
+
+
+def carrier_member_candidates(capture, selected, tree, bindings=None):
+    if bindings is None:
+        bindings = carrier_member_bindings(capture)
+    if bindings is None:
+        return None
+    prefix = str(tree.parent.parent / "swift-sdks") + "/"
+    actual = selected["mapInput"]
+    if not actual.startswith(prefix):
+        return False
+    V.require((actual[len(prefix):], selected["objectSHA256"]) in bindings,
+              "fresh SDK member identity/hash is absent from recovered closure")
+    return True
+
+
+def capture_c_inputs(tree, roots, projects, native, evidence_root, selected, sdk_rows, sdk_root, output, sdk_source_captures=None,
+                     sdk_header_rows=()):
     fetch = lambda name: (evidence_root / V.path(name)).read_bytes()
     sdk_fetch = lambda name: (sdk_root / V.path(name)).read_bytes()
     metadata = {row["originalPath"]: row["file"] for row in native.get("metadata", [])}
@@ -49,7 +91,7 @@ def capture_c_inputs(tree, roots, projects, native, evidence_root, selected, sdk
                         continue
                     source = dict(project=identity, path=leaf["path"], sha256=leaf["sha256"])
                     sdk_sources.setdefault(source["sha256"], {})[(source["project"], source["path"])] = source
-        for row in sdk_rows:
+        for row in [*sdk_rows, *sdk_header_rows]:
             reference = row.get("compilerInputs")
             key = reference["sha256"] if reference else V.digest(V.canonical(row))
             if key in seen:
@@ -57,6 +99,8 @@ def capture_c_inputs(tree, roots, projects, native, evidence_root, selected, sdk
             seen.add(key)
             document, prefix = V.compiler_input_document(row, sdk_fetch) if reference else (row, "")
             for source in document["sourceFiles"]:
+                if row in sdk_header_rows and not source["project"].startswith("swift-sdk/"):
+                    continue
                 sdk_sources.setdefault(source["sha256"], {})[(source["project"], source["path"])] = source
             for header in document.get("generatedHeaders", []):
                 sdk_headers.setdefault((header["file"]["sha256"], Path(header["originalPath"]).name), (header, prefix))
@@ -158,6 +202,8 @@ def capture(tree, source_captures, sdk_map_file, sdk_map_root, native_capture_fi
     sdk_capture = V.parse(sdk_map_file.read_bytes())
     V.require(sdk_capture.get("kind") == "hostwright.sdk-object-sources.v1"
               and sdk_capture.get("status") == "partial-not-release-qualified", "invalid SDK object source capture")
+    member_bindings = carrier_member_bindings(sdk_capture)
+    V.require(isinstance(sdk_capture.get("headerInputs", []), list), "invalid SDK header-only evidence")
     native_capture = V.parse(native_capture_file.read_bytes())
     V.require(native_capture.get("status") == "prepared-not-release-qualified"
               and native_capture.get("kind") == "swift", "invalid native Swift build capture")
@@ -245,7 +291,8 @@ def capture(tree, source_captures, sdk_map_file, sdk_map_root, native_capture_fi
         local_mappings.extend(rows)
     local_mappings.extend(capture_c_inputs(tree, roots, projects, native_capture,
                                            native_capture_file.parent, selected_local,
-                                           sdk_capture["sourceMap"], sdk_map_root, output, sdk_source_captures))
+                                           sdk_capture["sourceMap"], sdk_map_root, output, sdk_source_captures,
+                                           sdk_capture.get("headerInputs", [])))
 
     selected_sdk = {}
     available_sdk = {}
@@ -253,7 +300,9 @@ def capture(tree, source_captures, sdk_map_file, sdk_map_root, native_capture_fi
         available_sdk.setdefault(row["objectSHA256"], []).append(row)
     for selected in selected_inputs:
         name = selected["mapInput"]
-        candidates = available_sdk.get(selected["objectSHA256"], [])
+        recovered_member = carrier_member_candidates(sdk_capture, selected, tree, member_bindings)
+        candidates = available_sdk.get(selected["objectSHA256"], []) if recovered_member is not False else []
+        V.require(recovered_member is not True or candidates, "fresh SDK member lacks recovered source attribution")
         if not candidates:
             V.require(any(row["objectSHA256"] == selected["objectSHA256"] for row in local_mappings),
                       "selected native object has no source mapping: " + name)
@@ -278,9 +327,12 @@ def capture(tree, source_captures, sdk_map_file, sdk_map_root, native_capture_fi
     combined = local_mappings + P.retain_source_map(
         [selected_sdk[key] for key in sorted(selected_sdk)], sdk_map_root, output.parent)
     combined.sort(key=V.canonical)
+    result = dict(kind="hostwright.native-source-map.v1", sourceMap=combined,
+                  sdkRecovery=dict(kind="hostwright.sdk-native-carrier-members.v1",
+                                   sdkArchiveSHA256=sdk_capture["carrierMembers"]["sdkArchiveSHA256"])) if member_bindings is not None else combined
     with output.open("xb") as stream:
-        stream.write(V.canonical(combined))
-    return combined
+        stream.write(V.canonical(result))
+    return result
 
 
 if __name__ == "__main__":
@@ -295,4 +347,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
     result = capture(args.tree, args.source_captures, args.sdk_object_sources,
                      args.sdk_source_map_root, args.native_capture, args.output, args.sdk_source_captures)
-    print(json.dumps({"mappedObjects": len(result), "output": str(args.output)}, sort_keys=True))
+    print(json.dumps({"mappedObjects": len(result["sourceMap"] if isinstance(result, dict) else result), "output": str(args.output)}, sort_keys=True))

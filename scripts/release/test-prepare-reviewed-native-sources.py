@@ -25,6 +25,51 @@ V = A.V
 
 
 class ReviewedNativeSourcesTests(unittest.TestCase):
+    def test_recovered_mode_is_strict_required_and_preserved(self):
+        self.prepare()
+        marker = dict(kind="hostwright.sdk-native-carrier-members.v1", sdkArchiveSHA256="a" * 64)
+        envelope = dict(kind="hostwright.native-source-map.v1", sourceMap=self.source_map, sdkRecovery=marker)
+        target = self.root / "recovered-envelope"
+        A.prepare(self.catalog, envelope, target, prepared_sdk=self.output)
+        retained = V.parse((target / "source-map.json").read_bytes())
+        self.assertEqual(retained, envelope)
+        with self.assertRaisesRegex(ValueError, "requires prepared SDK"):
+            A.prepare(self.catalog, envelope, self.root / "without-proof", sdk_inputs=self.sdk)
+        for change in ("kind", "missing", "extra", "digest"):
+            bad = copy.deepcopy(envelope)
+            if change == "kind": bad["kind"] = "unexpected"
+            elif change == "missing": bad.pop("sdkRecovery")
+            elif change == "extra": bad["unresolved"] = []
+            else: bad["sdkRecovery"]["sdkArchiveSHA256"] = "not-a-digest"
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                A.selected_sources(bad)
+
+    def test_prepared_sdk_reuses_verified_project_without_legacy_inventory(self):
+        original = self.prepare()
+        recovered = self.root / "recovered-projects"
+        actual = A.prepare(self.catalog, self.source_map, recovered, prepared_sdk=self.output)
+        self.assertEqual(actual, A.rebase(original, "retained-sdk/"))
+        self.assertFalse((self.output / "build-inputs.json").exists())
+        leaves = V.source_project(actual[0], lambda name: (recovered / name).read_bytes())
+        self.assertEqual(leaves["Sources/main.c"]["sha256"], V.digest(self.patched))
+
+    def test_prepared_sdk_rejects_changed_commit_license_scope_and_mixed_mode(self):
+        self.prepare()
+        for change in ("commit", "spdx", "documents", "scope"):
+            with self.subTest(change=change):
+                catalog = copy.deepcopy(self.catalog)
+                row = catalog["sdk"][0]
+                if change == "commit": row["commit"] = "0" * 40
+                elif change == "spdx": row["spdx"] = "BSD-3-Clause"
+                elif change == "documents": row["documents"][0]["sha256"] = "0" * 64
+                else: row["allowedSourcePrefixes"] = ["Tests/"]
+                target = self.root / ("rejected-" + change)
+                with self.assertRaises((ValueError, AssertionError)):
+                    A.prepare(catalog, self.source_map, target, prepared_sdk=self.output)
+                self.assertFalse(target.exists())
+        with self.assertRaises((ValueError, AssertionError)):
+            A.prepare(self.catalog, self.source_map, self.root / "mixed", sdk_inputs=self.sdk, prepared_sdk=self.output)
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)

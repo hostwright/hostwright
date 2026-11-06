@@ -1007,6 +1007,184 @@ def go_loader(loader, output, projects, fetch, tools=None):
     require({canonical(item) for item in loader['sourceFiles']}==
             {canonical(item) for package in trace for item in package['sourceFiles']}, 'Go loader source inventory differs from package trace')
 
+SDK_RECOVERY_KIND = 'hostwright.runtime-sdk-recovery.v1'
+
+
+def sdk_recovery_module():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('runtime_sdk_carrier', pathlib.Path(__file__).with_name('prepare-sdk-native-carrier.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def evidence_identity(value):
+    if isinstance(value, dict):
+        result = {key: evidence_identity(child) for key, child in value.items()}
+        if {'path', 'sha256', 'sizeBytes'} <= result.keys():
+            result['path'] = 'retained-evidence'
+        return result
+    return [evidence_identity(child) for child in value] if isinstance(value, list) else value
+
+
+def sdk_recovery_closure(link, mapping, fetch, module):
+    def attribution(row):
+        value = {key: child for key, child in row.items() if key != 'mapInput'}
+        value['sourceFiles'] = sorted(value['sourceFiles'], key=lambda source: (source['project'], source['path']))
+        return evidence_identity(value)
+    rows = {}
+    for row in mapping['sourceMap']:
+        rows.setdefault(row['objectSHA256'], []).append(row)
+    allowed_members = {(row['identity'], row['objectSHA256']) for row in mapping['carrierMembers']['members']}
+    allowed_headers = {canonical(source) for row in mapping['sourceMap'] + mapping['headerInputs']
+                       for source in native_source_files(row, fetch) if source['project'].startswith('swift-sdk/')}
+    selected, headers = [], {}
+    for actual in link['selectedInputs']:
+        identity = module.sdk_identity(actual['mapInput'])
+        sources = native_source_files(actual, fetch)
+        sdk_sources = [source for source in sources if source['project'].startswith('swift-sdk/')]
+        if identity is not None:
+            require((identity, actual['objectSHA256']) in allowed_members,
+                    'current SDK member is outside the recovered original closure')
+            observed = {key: value for key, value in actual.items()
+                        if key not in ('file', 'mapInput', 'archiveOffset', 'member', 'sdkRecoverySHA256')}
+            require(any(attribution(observed) == attribution(row)
+                        for row in rows.get(actual['objectSHA256'], [])),
+                    'current SDK member attribution differs from recovered evidence')
+            selected.append(dict(mapInput=actual['mapInput'], identity=identity, objectSHA256=actual['objectSHA256']))
+        else:
+            for source in sdk_sources:
+                require(canonical(source) in allowed_headers, 'current SDK header is outside recovered source closure')
+                headers[canonical(source)] = source
+    require(selected, 'recovered SDK mode has no actual selected SDK members')
+    return dict(selectedMembers=sorted(selected, key=lambda row: (row['mapInput'], row['objectSHA256'])),
+                headerSources=[headers[key] for key in sorted(headers)])
+
+
+def verify_sdk_recovery(links, source_projects, fetch, source_commit, require_authentication=True):
+    active = any('sdkRecovery' in link or 'sdkRecoveryMode' in link or
+                 any('sdkRecoverySHA256' in row for row in link['selectedInputs']) for link in links)
+    if not active:
+        return
+    require(all('sdkRecovery' in link and 'sdkRecoveryMode' in link for link in links),
+            'missing SDK recovery proof or mode')
+    require(len({path(link['path']) for link in links}) == len(links), 'ambiguous SDK recovery link paths')
+    module = sdk_recovery_module()
+    owners = [link for link in links if 'sharedProofLink' not in link['sdkRecovery']]
+    require(len(owners) == 1, 'SDK recovery requires exactly one shared proof owner')
+    owner = owners[0]
+    for link in links:
+        if link is not owner:
+            reference = link['sdkRecovery']
+            require(set(reference) == {'kind', 'sharedProofLink', 'selectedClosure'}
+                    and reference['kind'] == SDK_RECOVERY_KIND and reference['sharedProofLink'] == owner['path'],
+                    'conflicting SDK recovery shared proof reference')
+    envelope = {key: value for key, value in owner['sdkRecovery'].items() if key != 'selectedClosure'}
+    require(set(envelope) == {'kind', 'issuer', 'proof', 'issuerAttestation', 'retainedEvidence', 'sourceProjectAliases'}
+            and envelope['kind'] == SDK_RECOVERY_KIND, 'invalid SDK recovery proof contract')
+    producer_binding(envelope['issuer'], source_commit)
+    proof_bytes = bound(envelope['proof'], fetch)
+    proof = parse(proof_bytes)
+    require(proof.get('kind') == module.KIND and proof.get('status') == 'authenticated-selected-sdk-not-release-qualified'
+            and proof.get('preparedForSource') == source_commit, 'SDK recovery is not prepared for the current source')
+    table = {}
+    for row in envelope['retainedEvidence']:
+        name = path(row['originalPath'])
+        require(set(row) == {'originalPath', 'file'} and name not in table, 'duplicate or invalid SDK recovery alias')
+        table[name] = row['file']
+    require(set(table) == set(proof['files']), 'SDK recovery retained evidence coverage mismatch')
+    for name, reference in table.items():
+        require(reference['sha256'] == proof['files'][name], 'SDK recovery alias differs from attested bytes')
+        bound(reference, fetch)
+    local = lambda name: bound(table[path(name)], fetch)
+    resolution = parse(bound(proof['resolution'], local))
+    original_producer = proof['carrierProducer']
+    require(module.N.R.select(resolution['originalRun'], resolution['originalJobs'], resolution['originalArtifacts'],
+                             original_producer['runID'], original_producer['attempt']) == resolution
+            and resolution['producer'] == original_producer and resolution['artifact'] == proof['artifact'],
+            'SDK recovery original carrier resolution mismatch')
+    require(set(proof['subjects']) == set(module.N.SUBJECTS), 'SDK recovery original subject coverage mismatch')
+    subjects = {key: bound(records['subject'], local) for key, records in proof['subjects'].items()}
+    attestation = envelope['issuerAttestation']
+    require(set(attestation) == {'subject', 'bundle', 'verification'} and attestation['subject'] == envelope['proof'],
+            'SDK recovery issuer subject mismatch')
+    with tempfile.TemporaryDirectory(prefix='sdk-recovery-auth-') as directory:
+        directory = pathlib.Path(directory)
+        for key, records, producer, reader in [
+                ('current', attestation, envelope['issuer'], fetch),
+                *[(key, records, original_producer, local) for key, records in proof['subjects'].items()]]:
+            subject = directory / (key + '.json')
+            bundle = directory / (key + '.sigstore.jsonl')
+            subject.write_bytes(bound(records['subject'], reader))
+            bundle.write_bytes(bound(records['bundle'], reader))
+            bound(records['verification'], reader)
+            if require_authentication:
+                module.N.verify_attestation(subject, bundle, producer)
+    checksums = module.N.checksums(subjects['checksums'])
+    for key in ('nativeManifest', 'sourceMap'):
+        require(checksums[module.N.SUBJECTS[key]] == digest(subjects[key]), 'SDK recovery original subjects conflict')
+    for name in ('sdk-producer.json', 'sdk-reuse.json', 'swift-static-sdk.tar.gz'):
+        require(checksums['evidence/' + name] == digest(local(name)), 'SDK recovery original carrier bytes changed')
+    original = parse(subjects['nativeManifest'])
+    require(original['sourceCommit'] == original_producer['commit']
+            and original['status'] == 'prepared-not-release-qualified', 'SDK recovery original native source mismatch')
+    sdk_producer = parse(local('sdk-producer.json'))
+    comparison = proof['compileComparison']
+    require(comparison['kind'] == module.S.KIND and comparison['status'] == 'compatible-not-release-qualified'
+            and comparison['producer'] == {'commit': sdk_producer['commit']} and comparison['sourceCommit'] == source_commit
+            and comparison['sourceInventory'] is None and proof['originalSDKProducer'] == sdk_producer,
+            'SDK recovery current compile comparison source mismatch')
+    compile_inputs = comparison['compileInputs']
+    require(set(compile_inputs) == {'sha256', 'files'} and compile_inputs['files']
+            and all(re.fullmatch('[a-f0-9]{64}', value) for value in compile_inputs['files'].values())
+            and digest(json.dumps(compile_inputs['files'], sort_keys=True, separators=(',', ':')).encode()) == compile_inputs['sha256'],
+            'SDK recovery compile comparison digest mismatch')
+    archive = local('swift-static-sdk.tar.gz')
+    module.validate_sdk_chain(sdk_producer, parse(local('sdk-reuse.json')), original_producer, digest(archive), comparison)
+    mapping = parse(local('sdk-object-sources.json'))
+    original_map = parse(subjects['sourceMap'])
+    original_by_row = {canonical(module.N.rebase(row, 'source-map/')): row for row in original_map}
+    require(len({canonical(row) for row in mapping['headerInputs']}) == len(mapping['headerInputs'])
+            and all(canonical(row) in original_by_row for row in mapping['headerInputs']),
+            'SDK recovery header row lacks original attribution')
+    original_fetch = lambda name: local('source-map/' + path(name))
+    with tempfile.NamedTemporaryFile() as sdk_file:
+        sdk_file.write(archive); sdk_file.seek(0)
+        rows, headers, members = module.select_rows(original, original_map, sdk_file.name, original_fetch,
+            [original_by_row[canonical(row)] for row in mapping['headerInputs']])
+    expected_mapping = dict(kind='hostwright.sdk-object-sources.v1', status='partial-not-release-qualified', unresolved=[],
+        sourceMap=module.N.rebase(rows, 'source-map/'), headerInputs=module.N.rebase(headers, 'source-map/'),
+        carrierMembers=dict(kind=module.MEMBERS_KIND, sdkArchiveSHA256=digest(archive), members=members))
+    require(mapping == expected_mapping, 'SDK recovery selected original closure changed')
+    original_projects = [project for project in original['sourceProjects'] if project['identity'].startswith('swift-sdk/')]
+    require(parse(local('prepared-sdk/projects.json')) == module.N.rebase(original_projects, 'original/'),
+            'SDK recovery prepared original projects changed')
+    current = {project['identity']: project for project in source_projects if project['identity'].startswith('swift-sdk/')}
+    aliases = {row['identity']: row['sourceProject'] for row in envelope['sourceProjectAliases']}
+    require(len(aliases) == len(envelope['sourceProjectAliases']) and aliases == current
+            and set(current) == {project['identity'] for project in original_projects}, 'SDK recovery source project alias coverage mismatch')
+    for project in original_projects:
+        require(evidence_identity(project) == evidence_identity(current[project['identity']]),
+                'SDK recovery current source project differs from original bytes')
+    require(proof['scope'] == dict(selectedSDKRows=len(rows), selectedMemberBindings=len(members),
+        headerOnlyRows=len(headers), preparedSDKProjects=len(original_projects), fullSDKInventoryAvailable=False),
+        'SDK recovery partial scope changed')
+    mode = dict(kind=module.MEMBERS_KIND, sdkArchiveSHA256=digest(archive))
+    for link in links:
+        require(link['sdkRecoveryMode'] == mode, 'SDK recovery mode/archive mismatch')
+        for selected in link['selectedInputs']:
+            relevant = module.sdk_identity(selected['mapInput']) is not None or any(
+                source['project'].startswith('swift-sdk/') for source in native_source_files(selected, fetch))
+            require(selected.get('sdkRecoverySHA256') == envelope['proof']['sha256'] if relevant
+                    else 'sdkRecoverySHA256' not in selected, 'missing or conflicting SDK recovery member marker')
+        # The mapping's references remain relative to the original recovery root.
+        mapped = module.N.rebase(mapping, '')
+        def joined(name):
+            return local(name) if name in table else fetch(name)
+        require(link['sdkRecovery']['selectedClosure'] == sdk_recovery_closure(link, mapped, joined, module),
+                'SDK recovery current selected closure changed')
+
+
 def verify(manifest_data, runtime, payloads, fetch, source_commit, require_authentication=True):
     manifest=parse(manifest_data)
     validate_schema(manifest)
@@ -1048,6 +1226,7 @@ def verify(manifest_data, runtime, payloads, fetch, source_commit, require_authe
     verify_embedded_license_documents(manifest['sourceProjects'],fetch)
     require(projects, 'missing complete corresponding sources')
     tools=toolchain(manifest,fetch)
+    verify_sdk_recovery(manifest['oci']['links'], manifest['sourceProjects'], fetch, source_commit, require_authentication)
     oci=manifest['oci']; prefix=path(oci['prefix'])
     require(prefix=='share/hostwright/containerization/vminit' and
             manifest['kernel']['payloadPath'].startswith('share/hostwright/containerization/kernel/') and

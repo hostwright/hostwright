@@ -30,7 +30,8 @@ def regular(root, name):
     return current
 
 
-def prepare(ingredients, source_projects, source_map, source_commit, kernel_project, output, source_map_root=None):
+def prepare(ingredients, source_projects, source_map, source_commit, kernel_project, output, source_map_root=None,
+            sdk_recovery_root=None, sdk_evidence_run=None, sdk_evidence_attempt=None):
     V.require(re.fullmatch("[a-f0-9]{40}", source_commit), "invalid native release source commit")
     for root in (ingredients, source_projects):
         V.require(root.is_dir() and not root.is_symlink(), "unsafe native input root")
@@ -39,6 +40,23 @@ def prepare(ingredients, source_projects, source_map, source_commit, kernel_proj
               "native output must be a new absolute directory")
     V.require(all(not output.resolve().is_relative_to(root) for root in (ingredients, source_projects)),
               "native output must be outside input roots")
+    recovery_mode = None
+    if isinstance(source_map, dict):
+        V.require(set(source_map) == {"kind", "sourceMap", "sdkRecovery"}
+                  and source_map["kind"] == "hostwright.native-source-map.v1", "invalid native source map envelope")
+        recovery_mode, source_map = source_map["sdkRecovery"], source_map["sourceMap"]
+        V.require(isinstance(recovery_mode, dict) and set(recovery_mode) == {"kind", "sdkArchiveSHA256"}
+                  and recovery_mode["kind"] == "hostwright.sdk-native-carrier-members.v1"
+                  and re.fullmatch("[a-f0-9]{64}", recovery_mode["sdkArchiveSHA256"]), "invalid native SDK recovery mode")
+    V.require((recovery_mode is not None) == (sdk_recovery_root is not None)
+              and (sdk_recovery_root is not None or sdk_evidence_run is sdk_evidence_attempt is None),
+              "native SDK recovery mode requires its exact recovery proof")
+    if recovery_mode is not None:
+        sdk_recovery_root = Path(sdk_recovery_root)
+        V.require(sdk_recovery_root.is_dir() and not sdk_recovery_root.is_symlink(), "unsafe SDK recovery root")
+        V.require(not output.resolve().is_relative_to(sdk_recovery_root.resolve()), "native output overlaps SDK recovery input")
+        recovery_issuer = dict(commit=source_commit, runID=sdk_evidence_run, attempt=sdk_evidence_attempt)
+        V.producer_binding(recovery_issuer, source_commit)
     V.require(isinstance(source_map, list) and source_map, "missing actual native object/source mappings")
     if any("generatedHeaders" in row or "compilerInputs" in row for row in source_map):
         V.require(source_map_root is not None, "native compiler evidence requires a source map root")
@@ -55,6 +73,7 @@ def prepare(ingredients, source_projects, source_map, source_commit, kernel_proj
     with tempfile.TemporaryDirectory(prefix=".native-provenance-", dir=output.parent) as temporary:
         staging = Path(temporary) / "prepared"
         staging.mkdir(mode=0o700)
+        byte_aliases = {}
 
         def write(name, data):
             name = V.path(name)
@@ -64,7 +83,9 @@ def prepare(ingredients, source_projects, source_map, source_commit, kernel_proj
                 V.require(target.read_bytes() == data, "conflicting retained native evidence: " + name)
             else:
                 target.write_bytes(data)
-            return dict(path=name, sha256=V.digest(data), sizeBytes=len(data))
+            record = dict(path=name, sha256=V.digest(data), sizeBytes=len(data))
+            byte_aliases.setdefault((record["sha256"], record["sizeBytes"]), record)
+            return record
 
         copied = {}
         mapping_files = {}
@@ -98,6 +119,7 @@ def prepare(ingredients, source_projects, source_map, source_commit, kernel_proj
                         write(destination, data)
                         copied[identity] = (binding, destination)
                     result["path"] = destination
+                    byte_aliases[binding] = result
                 return result
             return [copy_evidence(child, root, prefix) for child in value] if isinstance(value, list) else value
 
@@ -296,6 +318,43 @@ def prepare(ingredients, source_projects, source_map, source_commit, kernel_proj
             files.append(dict(path=path, sha256=V.digest(data), sizeBytes=len(data), type="elf",
                 components=sorted({source["project"] for selected in link["selectedInputs"]
                                    for source in V.native_source_files(selected, fetch)})))
+        if recovery_mode is not None:
+            recovery = V.sdk_recovery_module()
+            proof = V.parse(regular(sdk_recovery_root, "recovery.json").read_bytes())
+            V.require(proof.get("preparedForSource") == source_commit, "SDK recovery source differs from native producer")
+            recovery.verify_transport(sdk_recovery_root, proof)
+            retained = []
+            for name, digest in sorted(proof["files"].items()):
+                original = regular(sdk_recovery_root, name)
+                alias = byte_aliases.get((digest, original.stat().st_size))
+                if alias is None:
+                    raw = original.read_bytes()
+                    V.require(V.digest(raw) == digest, "SDK recovery bytes changed: " + name)
+                    alias = write("evidence/sdk-recovery/retained/" + name, raw)
+                retained.append(dict(originalPath=name, file=alias))
+            auth_prefix = "evidence/sdk-recovery/current/"
+            auth_root = staging / auth_prefix
+            auth_root.mkdir(parents=True)
+            attestation = recovery.N.authenticate_subject(sdk_recovery_root, "recovery.json", recovery_issuer,
+                                                          auth_root, "recovery")
+            attestation = recovery.N.rebase(attestation, auth_prefix)
+            envelope = dict(kind=V.SDK_RECOVERY_KIND, issuer=recovery_issuer, proof=attestation["subject"],
+                issuerAttestation=attestation, retainedEvidence=retained,
+                sourceProjectAliases=[dict(identity=project["identity"], sourceProject=project)
+                                      for project in projects if project["identity"].startswith("swift-sdk/")])
+            table = {row["originalPath"]: row["file"] for row in retained}
+            def joined(name):
+                return V.bound(table[name], fetch) if name in table else fetch(name)
+            mapping = V.parse(joined("sdk-object-sources.json"))
+            for link in links:
+                link["sdkRecoveryMode"] = recovery_mode
+                for selected in link["selectedInputs"]:
+                    if recovery.sdk_identity(selected["mapInput"]) is not None or any(
+                            row["project"].startswith("swift-sdk/") for row in V.native_source_files(selected, fetch)):
+                        selected["sdkRecoverySHA256"] = envelope["proof"]["sha256"]
+                shared = envelope if link is links[0] else dict(kind=V.SDK_RECOVERY_KIND, sharedProofLink=links[0]["path"])
+                link["sdkRecovery"] = dict(shared, selectedClosure=V.sdk_recovery_closure(link, mapping, joined, recovery))
+            V.verify_sdk_recovery(links, projects, fetch, source_commit)
         write("upstream/kernel-source-signature.json", regular(evidence, "kernel-source-signature.json").read_bytes())
         result = dict(status="prepared-not-release-qualified", sourceCommit=source_commit, sourceProjects=projects,
                       toolchain=toolchain, kernel=kernel, oci=dict(prefix=PREFIX + "vminit", links=links, files=files),
@@ -315,6 +374,10 @@ if __name__ == "__main__":
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--kernel-project", required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--sdk-recovery-root", type=Path)
+    parser.add_argument("--sdk-evidence-run", type=int)
+    parser.add_argument("--sdk-evidence-attempt", type=int)
     args = parser.parse_args()
     prepare(args.ingredients, args.source_projects, V.parse(args.source_map.read_bytes()),
-            args.source_commit, args.kernel_project, args.output, args.source_map_root or args.source_map.parent)
+            args.source_commit, args.kernel_project, args.output, args.source_map_root or args.source_map.parent,
+            args.sdk_recovery_root, args.sdk_evidence_run, args.sdk_evidence_attempt)

@@ -167,7 +167,7 @@ let package = Package(
     dependencies: [
         .package(
             url: "https://github.com/apple/containerization.git",
-            exact: "0.35.0"
+            exact: "0.51.0"
         ),
         .package(
             url: "https://github.com/jpsim/Yams.git",

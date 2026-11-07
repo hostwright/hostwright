@@ -175,7 +175,7 @@ let package = Package(
         ),
         .package(
             url: "https://github.com/apple/swift-certificates.git",
-            exact: "1.19.3"
+            exact: "1.21.0"
         ),
         .package(
             url: "https://github.com/apple/swift-crypto.git",

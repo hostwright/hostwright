@@ -5,19 +5,19 @@ public enum ContainerizationRuntimeAssetContract {
     public static let frameworkRevision = "44bec8b9933bc491d0cbf44abac90a1f6aaebf6b"
 
     public static let initImageManifestDigest =
-        "279d191a42539a5ad4e4e73f396d9356cbc7fc865e335bb85efd3b2588da1212"
+        "3a5094a64cdef4cf046d2c14c4ddcc7b90b9cb3770557448057963f3bf407ee6"
     public static let initImageManifestSize: Int64 = 406
     public static let initImageImportedIndexSHA256 =
-        "523d7e7ac9ee8475f91f29b1d5e215f4bfdcd98e7e2e2369bcca827a32d0bc80"
+        "192a6c09c051ff325dc287c74b7a0abd98ba9f8de774bf49cba668103b2f9ba8"
     public static let initImageImportedIndexSize: Int64 = 358
     public static let initImageConfigurationDigest =
-        "c6decfc522bff7ccf321cde092127761fef4a34d5b07912fb8183304f13ac3ec"
+        "3fb2ac47d7b42b5021eeb8df651ef59376d21a195ead7e6c06d165b033b01542"
     public static let initImageConfigurationSize: Int64 = 151
     public static let initImageLayerDigest =
-        "5c64be872ab8404a80a6064adf6b0a717c5cdd7171036cf6f8ad27715b4c93e9"
-    public static let initImageLayerSize: Int64 = 67_299_759
+        "2dfd62ec0dadc8639b0d9791290c7f7cbb5bf6c6c8be835a206146f8783b2de0"
+    public static let initImageLayerSize: Int64 = 67_299_790
     public static let initImageIndexJSONSHA256 =
-        "349ef898931e45eb5b447cfbbd52dc6421dee0a0eabfb8120b5b8c213996c5b2"
+        "59846bfa4f0493957ef54a6fecb0d6d80a16f4613a277e7c4c3aaca34894526b"
     public static let initImageIndexJSONSize: Int64 = 240
     public static let initImageLayoutSHA256 =
         "18f0797eab35a4597c1e9624aa4f15fd91f6254e5538c1e0d193b2a95dd4acc6"
@@ -28,7 +28,7 @@ public enum ContainerizationRuntimeAssetContract {
 
     public static let kernelFileName = "vmlinux-6.18.55-186"
     public static let kernelSHA256 =
-        "d6bfd6eeaf5b4f8af446159df8a00aea5f4c04e3be9222082664f17980d7d607"
+        "f9f44ee7f47457dce364e494633d1056950f22301aeba1c8f01f665d958f3adf"
     public static let kernelSize: Int64 = 16_151_040
 
     public static let guestNetworkPolicyLoaderSHA256 =

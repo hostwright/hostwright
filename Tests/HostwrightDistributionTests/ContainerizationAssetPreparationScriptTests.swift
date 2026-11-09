@@ -1,4 +1,5 @@
 import Foundation
+import HostwrightCore
 import XCTest
 
 final class ContainerizationAssetPreparationScriptTests: XCTestCase {
@@ -13,12 +14,19 @@ final class ContainerizationAssetPreparationScriptTests: XCTestCase {
             ])
 
             XCTAssertEqual(result.status, 0, result.output)
-            XCTAssertTrue(result.output.contains("Containerization framework: 0.35.0"))
-            XCTAssertTrue(result.output.contains("Rebuilt Linux kernel: d6bfd6eeaf5b4f8af446159df8a00aea5f4c04e3be9222082664f17980d7d607 (16151040 bytes)"))
-            XCTAssertTrue(result.output.contains("Direct OCI image manifest: sha256:279d191a42539a5ad4e4e73f396d9356cbc7fc865e335bb85efd3b2588da1212 (406 bytes)"))
-            XCTAssertTrue(result.output.contains("OCI image configuration: c6decfc522bff7ccf321cde092127761fef4a34d5b07912fb8183304f13ac3ec (151 bytes)"))
-            XCTAssertTrue(result.output.contains("OCI image layer: 5c64be872ab8404a80a6064adf6b0a717c5cdd7171036cf6f8ad27715b4c93e9 (67299759 bytes)"))
-            XCTAssertTrue(result.output.contains("Guest policy loader: eec0f5c4528f87cf89724474c48dc69fa1bec1511f42e06b3ad9e400b19a2fda (2949246 bytes)"))
+            let contract = ContainerizationRuntimeAssetContract.self
+            let expectedLines = [
+                "Containerization framework: \(contract.frameworkVersion)",
+                "Rebuilt Linux kernel: \(contract.kernelSHA256) (\(contract.kernelSize) bytes)",
+                "Direct OCI image manifest: sha256:\(contract.initImageManifestDigest) (\(contract.initImageManifestSize) bytes)",
+                "OCI image configuration: \(contract.initImageConfigurationDigest) (\(contract.initImageConfigurationSize) bytes)",
+                "OCI image layer: \(contract.initImageLayerDigest) (\(contract.initImageLayerSize) bytes)",
+                "Guest policy loader: \(contract.guestNetworkPolicyLoaderSHA256) (\(contract.guestNetworkPolicyLoaderSize) bytes)"
+            ]
+            let outputLines = result.output.split(whereSeparator: \.isNewline)
+            for line in expectedLines {
+                XCTAssertTrue(outputLines.contains(Substring(line)), "Missing \(line) in:\n\(result.output)")
+            }
             XCTAssertTrue(result.output.contains("authenticated source \(String(repeating: "a", count: 40)) run 1234 attempt 1"))
             XCTAssertFalse(result.output.localizedCaseInsensitiveContains("kata archive"))
             XCTAssertFalse(result.output.localizedCaseInsensitiveContains("ghcr"))

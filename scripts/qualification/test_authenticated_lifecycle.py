@@ -415,9 +415,9 @@ class SDKInitReadinessTests(unittest.TestCase):
         }
         self.harness.binding = {'sdk': {
             'reference': 'fixture-workload', 'descriptor': 'sha256:'+'a'*64,
-            'assetSHA256': {str(self.root/'layout/blobs/sha256'/digest): digest for digest in (
-                q.SDK_INIT_VARIANT_DIGEST[7:], 'c6decfc522bff7ccf321cde092127761fef4a34d5b07912fb8183304f13ac3ec',
-                '5c64be872ab8404a80a6064adf6b0a717c5cdd7171036cf6f8ad27715b4c93e9')},
+            'assetSHA256': {str(self.root/'layout'/relative): digest
+                            for relative, (digest, _) in q.SDK_INIT_ASSETS.items()
+                            if relative.startswith('blobs/sha256/')},
         }}
         self.harness.sdk_fs_baseline = q.sdk.filesystem_inventory(self.native)
         index = {

@@ -914,7 +914,8 @@ jobs:
     if: ${{ always() && (needs.runtime-build-ingredients.result == 'success' || needs.native-checkpoint.result == 'success') && needs.guest-loader.result == 'success' && inputs.ingredients_only != true && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' }}
     needs: [runtime-build-ingredients, native-checkpoint, guest-loader]
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 120
+    # Full source closure, archive verification and final authentication run here.
+    timeout-minutes: 360
     permissions:
       contents: read
       id-token: write
@@ -979,11 +980,13 @@ jobs:
           if [[ -n "$NATIVE_REUSE_ATTEMPT" ]]; then
             reuse_args+=(--native-reuse-root "$RUNNER_TEMP/runtime-inputs/reuse")
           fi
+          echo "Preparing and verifying the combined runtime source closure"
           python3 scripts/release/prepare-runtime-provenance.py \
             --native-root "$native" --loader-root "$RUNNER_TEMP/runtime-loader-authenticated" \
             --source-commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
             --source-root "$GITHUB_WORKSPACE" "${reuse_args[@]}" \
             --output "$RUNNER_TEMP/runtime-prepared"
+          echo "Assembling and verifying the runtime source archive"
           mkdir -m 700 "$RUNNER_TEMP/runtime-final"
           python3 scripts/release/assemble-runtime-provenance.py \
             --input-root "$RUNNER_TEMP/runtime-prepared" \
@@ -991,6 +994,7 @@ jobs:
             --version "$(python3 -c 'import json; print(json.load(open("contracts/v0.0.2/versions.json"))["productVersion"])')" \
             --source-root "$GITHUB_WORKSPACE" \
             --kernel-signature-inputs "$RUNNER_TEMP/runtime-inputs/evidence/kernel-inputs"
+          echo "Preparing exact runtime attestation subjects"
           python3 scripts/release/prepare-runtime-attestation-subjects.py \
             --archive "$RUNNER_TEMP/runtime-final/runtime-provenance.tar.gz" \
             --output "$RUNNER_TEMP/runtime-attestation-subjects" --source-commit "$GITHUB_SHA"

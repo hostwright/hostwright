@@ -236,6 +236,7 @@ public final class DaemonConfigurationChangeMonitor: @unchecked Sendable {
     private let queue = DispatchQueue(label: "dev.hostwright.daemon.configuration-watch")
     private var sources: [DispatchSourceFileSystemObject] = []
     private var watchedParents: [String] = []
+    private var activeWatchID: UUID?
     private var pending = false
 
     public init() {}
@@ -250,6 +251,7 @@ public final class DaemonConfigurationChangeMonitor: @unchecked Sendable {
         let unchanged = parents == watchedParents
         lock.unlock()
         if unchanged { return }
+        let watchID = UUID()
         var replacements: [DispatchSourceFileSystemObject] = []
         do {
             for parent in parents {
@@ -263,20 +265,24 @@ public final class DaemonConfigurationChangeMonitor: @unchecked Sendable {
                     queue: queue
                 )
                 source.setEventHandler { [weak self] in
-                    self?.markPending()
+                    self?.markPending(watchID: watchID)
                 }
                 source.setCancelHandler { close(descriptor) }
-                source.resume()
                 replacements.append(source)
             }
         } catch {
-            replacements.forEach { $0.cancel() }
+            for source in replacements {
+                source.cancel()
+                source.activate()
+            }
             throw error
         }
         lock.lock()
         let prior = sources
         sources = replacements
         watchedParents = parents
+        activeWatchID = watchID
+        replacements.forEach { $0.activate() }
         lock.unlock()
         prior.forEach { $0.cancel() }
     }
@@ -294,14 +300,17 @@ public final class DaemonConfigurationChangeMonitor: @unchecked Sendable {
         let prior = sources
         sources = []
         watchedParents = []
+        activeWatchID = nil
         pending = false
         lock.unlock()
         prior.forEach { $0.cancel() }
     }
 
-    private func markPending() {
+    private func markPending(watchID: UUID) {
         lock.lock()
-        pending = true
-        lock.unlock()
+        defer { lock.unlock() }
+        if activeWatchID == watchID {
+            pending = true
+        }
     }
 }

@@ -389,7 +389,7 @@ jobs:
     if: ${{ always() && needs.swift-sdk-evidence.result == 'success' && (github.ref == 'refs/heads/main' || (github.repository == 'hostwright/hostwright' && github.event_name == 'workflow_dispatch' && inputs.ingredients_only == true)) && github.event_name == 'workflow_dispatch' && inputs.native_checkpoint_run == '' && inputs.native_checkpoint_attempt == '' }}
     needs: swift-sdk-evidence
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 120
+    timeout-minutes: 180
     outputs:
       artifact-name: ${{ steps.native-artifact.outputs.artifact-name }}
       producer-attempt: ${{ steps.native-artifact.outputs.producer-attempt }}

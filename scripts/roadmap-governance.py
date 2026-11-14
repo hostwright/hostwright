@@ -21,6 +21,7 @@ RELEASE_LABEL = "roadmap:v0.0.2"
 ASSIGNEE = "d3v07"
 EVIDENCE_MARKER = "<!-- hostwright-evidence-gate:v1 -->"
 SCOPE_DECISION = "docs/design/adr-0015-reduced-local-release.md"
+FOCUSED_SCOPE_DECISION = "docs/design/adr-0017-focused-v002-qualification.md"
 SCOPE_URL = f"https://github.com/{REPOSITORY}/blob/main/{SCOPE_DECISION}"
 EVIDENCE_CLASSES = [
     "unit-contract",
@@ -118,7 +119,7 @@ def validate_manifest(path: Path) -> dict[str, Any]:
         require(isinstance(labels, list) and RELEASE_LABEL in labels, f"issue #{number} lacks {RELEASE_LABEL}")
         require(isinstance(assignees, list) and ASSIGNEE in assignees, f"issue #{number} lacks assignee {ASSIGNEE}")
         require(issue.get("releaseDisposition") in {"required", "deferred"}, f"issue #{number} has invalid release disposition")
-        require(issue.get("scopeDecision") == SCOPE_DECISION, f"issue #{number} lacks the recorded scope decision")
+        require(issue.get("scopeDecision") in {SCOPE_DECISION, FOCUSED_SCOPE_DECISION}, f"issue #{number} lacks the recorded scope decision")
         require(issue.get("state") in {"open", "closed"}, f"issue #{number} has invalid recorded state")
         if issue["state"] == "closed":
             reason = "not_planned" if issue["releaseDisposition"] == "deferred" else "completed"
@@ -301,7 +302,8 @@ def closure_policy_errors(
     expected_reason = "not_planned" if deferred else "completed"
     if issue.get("state") != "closed" or issue.get("state_reason") != expected_reason:
         errors.append(f"issue #{record['number']} requires a closed {expected_reason} disposition")
-    if deferred and SCOPE_URL not in (issue.get("body") or ""):
+    scope_url = f"https://github.com/{REPOSITORY}/blob/main/{record['scopeDecision']}"
+    if deferred and scope_url not in (issue.get("body") or ""):
         errors.append("deferred issue body lacks the committed scope-decision link")
     for child, current in children:
         child_reason = "not_planned" if child["releaseDisposition"] == "deferred" else "completed"

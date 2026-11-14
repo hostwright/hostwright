@@ -150,11 +150,14 @@ def preserve_baseline(before, after, owned_prefixes=()):
 
 def stats_payload(raw):
     frames = [decode(line) for line in raw.splitlines() if line.strip()]
-    require(frames and all(frame.get('schemaVersion') == 1 and type(frame.get('sequence')) is int and frame['sequence'] == i for i, frame in enumerate(frames))
-            and frames[-1].get('stream') == 'control' and frames[-1].get('endOfStream') is True
-            and frames[-1].get('payloadBase64') == '', 'invalid/incomplete stats stream sequence')
+    require(len(frames) >= 3 and all(isinstance(frame, dict) and frame.get('schemaVersion') == 1
+            and type(frame.get('sequence')) is int and frame['sequence'] == i for i, frame in enumerate(frames)),
+            'invalid/incomplete stats stream sequence')
+    require([frame.get('stream') for frame in frames[-2:]] == ['stdout', 'stderr']
+            and all(frame.get('endOfStream') is True and frame.get('payloadBase64') == '' for frame in frames[-2:]),
+            'missing ordered stdout/stderr stats termination')
     payload = b''
-    for frame in frames[:-1]:
+    for frame in frames[:-2]:
         require(frame.get('schemaVersion') == 1 and frame.get('stream') == 'stdout' and frame.get('endOfStream') is False, 'invalid stats stream shape')
         try: chunk = base64.b64decode(frame['payloadBase64'], validate=True)
         except (ValueError, KeyError): raise Rejected('invalid stats payload encoding')

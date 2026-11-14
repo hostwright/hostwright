@@ -15,9 +15,6 @@ staged = acceptance.staged
 
 def assemble(a):
     staged.version(a.version)
-    if (not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._/-]{0,127}', a.reviewer)
-            or not re.fullmatch('[a-f0-9]{64}', a.review_sha256)):
-        raise ValueError('exact independent reviewer and report digest required')
     if not a.input_root.is_absolute() or not a.output.is_absolute():
         raise ValueError('input and export directories must be explicit absolute paths')
     if a.input_root.is_symlink() or not a.input_root.is_dir() or a.output.exists() or a.output.is_symlink():
@@ -58,8 +55,7 @@ def assemble(a):
         rebased[str(report_path)] = report_hash
         gate['attachments'] = rebased
         acceptance.validate_gate(name, gate, a.input_root, a.commit, a.version,
-                                 inventory_hash, source_binding,
-                                 a.reviewer, a.review_sha256)
+                                 inventory_hash, source_binding)
         for path, expected in rebased.items():
             target = 'raw/' + path
             if target in files and files[target] != expected:
@@ -99,7 +95,7 @@ def assemble(a):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    for name in ('commit', 'version', 'run', 'attempt', 'reviewer', 'review-sha256'):
+    for name in ('commit', 'version', 'run', 'attempt'):
         parser.add_argument('--' + name, required=True)
     for name in ('stage', 'input-root', 'output'):
         parser.add_argument('--' + name, type=pathlib.Path, required=True)

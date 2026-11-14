@@ -109,15 +109,17 @@ struct InteractiveCommandRunner: Sendable {
     let options: InteractiveCLIOptions
     let driver: any InteractiveCommandDriving
     let liveStreamSink: LiveStreamSink?
+    let maximumBufferedBytes: Int
 
     init(options: InteractiveCLIOptions, environment: CLIEnvironment) {
         self.init(
             options: options,
             driver: InteractiveLiveDriver(
                 environment: environment,
-                connectsStandardIO: true
+                connectsStandardIO: environment.interactiveOutputByteLimit == nil
             ),
-            liveStreamSink: InteractiveStandardOutput.write
+            liveStreamSink: environment.interactiveOutputByteLimit == nil ? InteractiveStandardOutput.write : nil,
+            maximumBufferedBytes: environment.interactiveOutputByteLimit ?? RuntimeStreamEnvelope.maximumFrameBytes
         )
     }
 
@@ -128,15 +130,17 @@ struct InteractiveCommandRunner: Sendable {
     init(
         options: InteractiveCLIOptions,
         driver: any InteractiveCommandDriving,
-        liveStreamSink: LiveStreamSink?
+        liveStreamSink: LiveStreamSink?,
+        maximumBufferedBytes: Int = RuntimeStreamEnvelope.maximumFrameBytes
     ) {
         self.options = options
         self.driver = driver
         self.liveStreamSink = liveStreamSink
+        self.maximumBufferedBytes = maximumBufferedBytes
     }
 
     func run() -> CLIRunResult {
-        let output = InteractiveOutputBuffer(format: options.output)
+        let output = InteractiveOutputBuffer(format: options.output, maximumBufferedBytes: maximumBufferedBytes)
         do {
             _ = try driver.execute(options: options) { envelope in
                 if let liveStreamSink {
@@ -971,15 +975,16 @@ enum InteractiveOperationBuilder {
 }
 
 private final class InteractiveOutputBuffer: @unchecked Sendable {
-    static let maximumBufferedBytes = RuntimeStreamEnvelope.maximumFrameBytes
+    private let maximumBufferedBytes: Int
 
     private let lock = NSLock()
     private let format: CLIOutputFormat
     private var standardOutput = Data()
     private var standardError = Data()
 
-    init(format: CLIOutputFormat) {
+    init(format: CLIOutputFormat, maximumBufferedBytes: Int) {
         self.format = format
+        self.maximumBufferedBytes = maximumBufferedBytes
     }
 
     func append(_ envelope: RuntimeStreamEnvelope) throws {
@@ -995,7 +1000,7 @@ private final class InteractiveOutputBuffer: @unchecked Sendable {
         }
         try lock.withLock {
             guard standardOutput.count + standardError.count + payload.count <=
-                    Self.maximumBufferedBytes else {
+                    maximumBufferedBytes else {
                 throw RuntimeInteractiveError.streamFrameTooLarge
             }
             if destination == .standardError {

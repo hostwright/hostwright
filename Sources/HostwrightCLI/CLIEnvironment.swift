@@ -13,6 +13,7 @@ import HostwrightSecrets
 import HostwrightStorage
 
 public struct CLIEnvironment: @unchecked Sendable {
+    public var interactiveOutputByteLimit: Int? = nil
     public var lifecycleScheduler: LifecycleSchedulerContext? = nil
     public var lifecycleOperationIdempotencyKeySHA256: String? = nil
     public var fileExists: (String) -> Bool

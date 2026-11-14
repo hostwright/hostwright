@@ -1,97 +1,44 @@
-# Release process
+# Hostwright v0.0.2 release process
 
-The active target is `v0.0.2`. Current source prepares `0.0.2` for the bounded closing round on October 26. Two additional guest-kernel security backports have matching independently built kernel inputs. RC.19 internal signing/staging was cancelled during its mandatory regression step after kernel advisory review. One qualification of the unpublished final-version artifacts remains pending. A separately qualified or accepted RC is not required. Freeze source only after the closing repairs pass review and current-head checks. Exact-source and signed-artifact qualification remain required. See the [current readiness snapshot](ga-readiness-2026-10-26-final.md). Immutable `v0.0.2-dev.11` and `v0.0.2-dev.12` prereleases supply upgrade baselines; they remain unsupported and are not promoted in place.
+The active target is signed downloads and `brew install hostwright/tap/hostwright`.
+Official Homebrew acceptance is deferred under [ADR 0017](../design/adr-0017-focused-v002-qualification.md).
+The [issue manifest](../roadmap/v0.0.2/issues.json) records release dispositions.
 
-## Tag Policy
+## Prepare and verify
 
-Public releases and candidates use `v*` tags. Optional `phase-*` checkpoints have no GitHub Release. Create a public tag only for a reviewed, clean commit with the required evidence. Published tags and assets must not be moved or replaced.
+1. Preserve unique local work and use one clean reviewed source commit on main.
+2. Resolve demonstrated product defects with targeted regressions. Run the complete
+   existing suite once in trusted staging; reuse its output rather than rerun it.
+3. Build signed/notarized final-version archive/package artifacts through the
+   reviewed workflow. Verify runtime provenance and corresponding source; reuse
+   native ingredients only through authenticated supported checkpoints.
+4. Complete the five [focused qualification groups](../design/adr-0017-focused-v002-qualification.md):
+   source, artifact integrity, installation, working product and documentation.
+   One lifecycle per declared provider is sufficient. No separate timed soak,
+   full sanitizer/fuzz campaign or agent-review receipt is required.
+5. Retain raw results, actual source/version/environment, exact inventory bindings
+   and verified owned-resource cleanup. Failures and skipped work are not passes.
 
-## Release Ladder
+## Accept and publish
 
-1. Finish required implementation and resolve VM access, signing, storage and provider prerequisites before the expensive release run.
-2. Review the final runtime pins, policy, documentation and `0.0.2` version together, then freeze the exact clean merged source.
-3. Produce authenticated runtime inputs and stage the unpublished final-version package. Capture staging's mandatory full regression run as source evidence; do not repeat a successful full run for unchanged inputs.
-4. Qualify those exact final-version bytes against all eighteen gates. Exercise installed product lifecycle and recovery first, provider cycles and soak next, then the remaining assurance checks. Obtain protected acceptance and promote the accepted bytes without rebuilding.
-5. Verify public downloads and vendor-tap installation before closing #281. Keep #282 and release parents open until official cask acceptance and a fresh no-tap `brew install hostwright` pass.
+Use [staged promotion](../reference/release-promotion.md) to retain the evidence,
+obtain protected acceptance and promote the exact accepted bytes without rebuilding.
+Verify public downloads against staging, publish the matching vendor-tap formula
+and exercise installation/upgrade from that public channel.
 
-## Active Roadmap Authority
+Close #271 after provider compatibility checks, #277 after state/workload recovery,
+#279 after signed quickstarts and documentation, and #281 after publication verification.
+Close deferred #282 as not planned. Close #283 and #284 after their required children.
+Required closures retain the existing `<!-- hostwright-evidence-gate:v1 -->` record
+and `status:verification`; deferrals reference the merged scope decision.
 
-The [release plan](../roadmap/v0.0.2/IMPLEMENTATION_PLAN.md), [issue manifest](../roadmap/v0.0.2/issues.json), [testing contract](../reference/testing-evidence.md), and [evidence schema](../../schemas/hostwright-evidence.schema.json) define the requirements for [master issue #284](https://github.com/hostwright/hostwright/issues/284).
+## Artifact policy
 
-Required issues close through a final `status:verification` PR and clean evidence comment. Intermediate PRs use `Refs #NN`; final evidence PRs use `Closes #NN`. Deferred issues close as `not_planned` under [ADR 0015](../design/adr-0015-reduced-local-release.md). Parents require completed required children and correctly deferred children. Governance checks enforce these rules.
-
-## Baseline Gate for Every Phase and RC
-
-```bash
-scripts/test.sh pr
-```
-
-Run the owning workstream's required lanes as well. Trusted staging runs the full regression suite. Unavailable, skipped, blocked, simulated, dirty-source, or cleanup-failed results cannot satisfy a required release gate.
-
-## v0.0.2 GA Gate
-
-All of the following are required:
-
-- every required implementation workstream is verified, and all deferred issues are explicitly closed as not planned; release-artifact, Phase 15 and master issues close after publication verification;
-- zero unresolved P0/P1 defects;
-- macOS 26 arm64, Apple `container` 1.0.0/1.1.0 and Containerization 0.35.0 declared capabilities are frozen from passing evidence with exact OS builds and hardware;
-- Apple CLI and pinned Containerization providers pass declared-capability conformance;
-- ten live lifecycle cycles per provider and a checkpointed 30-minute physical-host soak pass without duplicate resources, unmanaged mutation, leaked reservations, or monotonic leaks; gaps do not count;
-- the physical M4 Pro provides live runtime evidence and one macOS VM provides independent clean-environment artifact lifecycle evidence; neither implies independent-hardware or HA qualification;
-- every shipped critical parser/protocol receives five minutes of fuzzing plus retained corpus replay;
-- supported ASan and TSan lanes pass;
-- focused independent security review of shipped boundaries is complete and release-blocking findings are remediated and retested;
-- dependency, license, secret, SAST, SBOM, signature, vulnerability, and provenance gates pass;
-- bounded local performance, upgrade lineage, rollback, local backup/recovery, compatibility, and desktop accessibility gates pass;
-- every documentation quickstart executes and website typecheck/build/link checks pass;
-- signed/notarized archives and `.pkg` pass checksum, stapling, Gatekeeper, clean install, reboot, upgrade, rollback, repair, and uninstall;
-- the vendor Homebrew tap installs those exact verified artifacts;
-- for the requested Homebrew-available launch, #282 has official cask acceptance and a verified fresh-machine `brew install hostwright`; the October 8 [scope amendment](../design/adr-0015-reduced-local-release.md#official-homebrew-availability-2026-10-08) defines the publication dependency;
-- one complete qualification of the unpublished final `0.0.2` artifacts, including independent signed-artifact install/reboot/upgrade/rollback/repair/uninstall verification; a separate accepted RC is not a prerequisite.
-
-## Artifact and Package Policy
-
-New artifact and trusted release manifests use schema 4. Their SPDX inventories identify the desktop executable, kernel and guest loader as binaries, and the compressed OCI layer as an archive. Historical schemas 1–3 retain their original verification policy.
-
-The reviewed staging workflow builds from an exact clean commit already merged to `main`. It produces signed/notarized Apple-silicon archive and package payloads, checksums, SPDX SBOMs, signed provenance, corresponding source, verification metadata, and a vendor-tap formula bound to the archive digest.
-
-Staging requires an authenticated runtime-provenance archive from the exact source commit. It verifies the `hostwright.corresponding-source.new-runtime.v1` manifest and payloads against the shipped runtime bytes. Ingredient-only runs and legacy source bundles cannot satisfy this input.
-
-The protected workflow retains staged bundles for 90 days. Published assets, signatures, provenance, inventories, checksums, and release evidence are retained indefinitely. Exceptional removal requires a separate reviewed action.
-
-The core source-build formula remains deferred. Official cask distribution is now
-required for the requested Homebrew-available GA launch. Publish and verify the
-signed stable bytes before submitting their cask; keep the official-channel and
-parent issues open until Homebrew acceptance and fresh installation verification.
-Do not advertise `brew install hostwright` before that verification.
-
-See [Homebrew distribution and package names](../reference/homebrew-distribution.md)
-for vendor-tap setup, official formula/cask requirements and submission order.
-
-## Final Evidence Record
-
-Include this marker in the final evidence comment:
-
-```text
-<!-- hostwright-evidence-gate:v1 -->
-```
-
-Record the full commit, `Dirty: false`, OS build, architecture, hardware, runtime and tool versions, commands and raw outcomes, failures, blockers, cleanup identities, artifact links, and documentation changes. Redact secrets and private details while preserving auditable results.
-
-Gate receipts bind the source commit, version, clean state, and hashed raw attachments. Artifact-dependent gates also bind the staged inventory. Keep complete inventories and their referenced files together. See [staged release promotion](../reference/release-promotion.md) for the exact receipt and attestation contracts.
-
-## Promotion Steps
-
-1. Verify the reviewed candidate or final-version commit is merged to `main` and matches its clean qualification source.
-2. Run the complete authenticated runtime producer for that commit and verify its archive.
-3. Dispatch trusted staging with the commit, version, unused tag, and producer run ID. Staging builds twice, signs, notarizes, staples, verifies, and retains the exact bytes without publishing a tag or release.
-4. Qualify those staged artifacts, including the independent macOS VM lifecycle, and retain the complete evidence export. Obtain protected acceptance of the exact inventory and independent review report.
-5. After maintainer approval, promote the accepted bytes without rebuilding. Verify the public downloads against staging, publish the matching vendor-tap formula, and test installation and upgrade from the public channel.
-6. Retain post-release canary/support results and close the publication and parent issues when their evidence passes.
-
-RC receipts cannot promote GA: the final version requires its own source, staged bytes, and qualification.
-
-If promotion fails or is cancelled after creating a tag, retain the exact tag, ownership evidence, and any published assets for maintainer review. Promotion must not automatically delete a release or bypass version-tag protection. A new attempt normally uses a new qualified version; exceptional removal requires the separate reviewed action described above.
+Retain signed/notarized archives and package, checksums, SPDX SBOMs, provenance,
+corresponding source, verification metadata and digest-bound vendor formula.
+Published releases and evidence are immutable. Protected staging retention is
+90 days; retain the final release's necessary source/evidence permanently.
+Never advertise fresh-machine `brew install hostwright` as an official channel.
 
 ## Immutable Historical Releases
 

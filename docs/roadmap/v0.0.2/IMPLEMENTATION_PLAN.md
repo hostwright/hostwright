@@ -24,7 +24,7 @@ There is no replacement calendar deadline or promise for deferred work.
 | 12 / #247 | Preserve development contracts without Kubernetes compatibility claims. | #236–#247: sandbox VM, CRI/CNI/CSI, kubelet, Helm and conformance. |
 | 13 / #257 | #250: existing Compose subset import/export/update planning, explicit loss reports, and real execution through normal Hostwright lifecycle commands. | #248–#249 and #251–#256: Docker socket/API, Podman, Testcontainers and dedicated CI/IDE integrations. |
 | 14 / #270 | #258–#262: signed local SwiftUI/menu-bar app, manifest selection, services/health/logs/events, reviewed up/down/restart, accessibility and package upgrade/rollback. | #263–#269: team/MDM/cloud/SSO/fleet/remote support. Full CLI parity and automatic updates are removed from retained requirements. |
-| 15 / #283 | #271–#281: bounded local qualification, security, recovery, upgrade lineage, docs, support, signed artifacts and vendor tap. #282: official cask acceptance and fresh-machine `brew install hostwright`. | Core source-build formula; physical cluster, broad client and multi-day qualification requirements are removed. |
+| 15 / #283 | #271–#281: bounded local qualification, security, recovery, upgrade lineage, docs, support, signed artifacts and vendor tap.  | #282: official Homebrew distribution; core source-build formula, physical cluster and broad client requirements. |
 
 The [issue manifest](issues.json) owns each retained issue's reduced acceptance
 criteria and required evidence. The [generated index](WORKSTREAM_INDEX.md) lists
@@ -117,51 +117,14 @@ Kubernetes and the proposed pod-sandbox VM, CRI, CNI, and CSI adapters are defer
 
 ## Verification and Closure
 
-Every implementation PR runs `scripts/test.sh pr`, changed-behavior tests,
-documentation checks and review. Release qualification additionally requires:
+[ADR 0017](../../design/adr-0017-focused-v002-qualification.md) supersedes the prior
+qualification budget and Homebrew launch dependency. Complete five groups: source,
+artifact integrity, clean installation, working product and documentation. Run one
+lifecycle per declared provider, retain targeted regression evidence and the trusted
+stage's one full source suite. No repeated ten-cycle budget, separate timed soak,
+mandatory full sanitizer/fuzz campaign or agent-review receipt remains.
 
-- ten live lifecycle cycles per supported provider and one checkpointed 30-minute
-  physical-host soak; verify cancellation, interruption, recovery, reservation release,
-  ownership and exact cleanup without duplicate resources or monotonic leaks;
-- retained corpus replay plus five minutes of fuzzing per shipped critical parser/protocol;
-- supported ASan/TSan lanes, dependency/license/secret/static-security gates and focused
-  independent security review with no unresolved P0/P1 defects;
-- real Compose-to-running-workload and desktop lifecycle/stream/reconnect tests;
-- local backup/restore, upgrade lineage from preserved dev.11/dev.12 artifacts and
-  downgrade refusal with one-generation rollback;
-- executed quickstarts, website typecheck/build/link checks and truthful capability docs;
-- one complete qualification of unpublished final `0.0.2` artifacts, including independent
-  signed-artifact install, reboot, upgrade, rollback, repair and uninstall verification;
-  a separate accepted RC is not required. Retain all eighteen acceptance gates and
-  capture trusted staging's mandatory full source run rather than duplicate it.
-
-Use macOS 26 arm64, Apple container 1.0.0/1.1.0 and Containerization 0.35.0 for
-exact declared capabilities. Record actual OS builds and hardware. The physical
-M4 Pro supplies runtime evidence; one macOS VM supplies clean-environment evidence.
-No independent-hardware, M1/8-GB, cluster-scale, HA, Kubernetes or Docker-client
-support follows from this lab. Publish measured local performance without broad
-scale, density, energy or optimality guarantees.
-
-The full evidence vocabulary remains available for historical and future work:
-`unit-contract`, `local-integration`, `live-runtime`, `hardware-benchmark`,
-`distribution-artifact`, `migration-upgrade`, `security-assessment`,
-`resilience-chaos`, `multi-host`, `interop-conformance`, and `ux-accessibility`.
-Required classes for this release are selected per issue; deferred lanes cannot
-count as passed. Every result binds its actual source commit, environment and
-artifacts. Blocked, skipped, dirty or cleanup-failed evidence fails a required gate.
-
-Required issues close only with `status:verification`, clean final evidence, and
-correct child closure. Deferred issues close only as `not_planned`, with the merged
-scope-decision link and matching deferred children. Final implementation PRs use
-`Closes`; intermediate work uses `Refs`. Never use implementation closure keywords
-for a deferred issue. Historical release artifacts and evidence remain unchanged.
-
-## Completion
-
-Follow the [release process](../../release/RELEASE_PROCESS.md). Publish immutable
-v0.0.2, verify downloaded artifact bytes and vendor-tap installation, and close
-#283 and #284 only after the supported local workflows and all required evidence
-are complete, including the requested official Homebrew launch channel under the
-October 8 scope amendment. Keep the verified vendor tap as a controlled channel;
-close #282 only after official acceptance and fresh-machine `brew install hostwright`
-verification. Homebrew review time is external and has no guaranteed ETA.
+Preserve clean source and exact signed inventory bindings, actual results, state/
+workload recovery and owned cleanup. Required issues close with verified evidence;
+#282 closes as not planned. Publish signed downloads and the verified vendor tap,
+then close #281, #283 and #284 after their required evidence is complete.

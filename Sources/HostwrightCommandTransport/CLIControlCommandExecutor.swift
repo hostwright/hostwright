@@ -121,7 +121,7 @@ public enum CLIControlCommandExecutor {
             )
         }
         let command = try CLICommand.parse(arguments: route.arguments)
-        let executionEnvironment: CLIEnvironment
+        var executionEnvironment: CLIEnvironment
         if isComposeAuthorizationCommand(command) {
             executionEnvironment = try snapshottingCommandInputs(
                 command: command,
@@ -131,6 +131,7 @@ public enum CLIControlCommandExecutor {
         } else {
             executionEnvironment = prepared.environment
         }
+        executionEnvironment.interactiveOutputByteLimit = CLIControlResultContract.maximumCombinedOutputBytes
         return try CLIControlAuthorizationScopeResolver.withExecutionAuthorizationFence(
             command: command,
             arguments: route.arguments,

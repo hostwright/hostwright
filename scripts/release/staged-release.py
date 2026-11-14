@@ -15,14 +15,8 @@ if source_stage is None:
     sys.modules['hostwright_source_stage']=source_stage
     source_spec.loader.exec_module(source_stage)
 
-REQUIRED_GATES = {
-    'source-regression', 'documentation-source-contracts', 'signed-notarized-artifacts',
-    'installed-lifecycle-vm', 'sanitizers', 'critical-fuzz', 'dependency-security',
-    'secret-scan', 'license-policy-sbom', 'independent-review', 'desktop-accessibility',
-    'compose-execution', 'provider-apple-container-1.0.0', 'provider-apple-container-1.1.0',
-    'provider-containerization-0.35.0', 'single-host-soak',
-    'local-backup-recovery', 'public-education',
-}
+QUALIFICATION_POLICY = 'hostwright.v0.0.2.focused.v1'
+REQUIRED_GATES = {'source', 'artifact-integrity', 'installation', 'working-product', 'documentation'}
 
 def digest(path):
     if path.is_symlink() or not path.is_file():
@@ -131,7 +125,7 @@ def main():
         raise ValueError('retained staged bytes differ from immutable inventory')
     if args.mode == 'receipt':
         receipt = load(args.receipt)
-        expected = dict(kind='hostwright.promotion-receipt.v2', sourceCommit=args.commit,
+        expected = dict(kind='hostwright.promotion-receipt.v3', qualificationPolicy=QUALIFICATION_POLICY, sourceCommit=args.commit,
                         version=args.version, buildRunID=args.run, buildRunAttempt=args.attempt,
                         inventorySHA256=digest(inventory_path), files=actual['files'], correspondingSource=actual['correspondingSource'])
         if any(receipt.get(key) != value for key, value in expected.items()):
@@ -144,14 +138,6 @@ def main():
                     or gate.get('version') != args.version
                     or not re.fullmatch('[a-f0-9]{64}', gate.get('receiptSHA256', ''))):
                 raise ValueError(f'invalid gate binding: {key}')
-        review = receipt.get('independentReview', {})
-        if (review.get('status') != 'approved' or not review.get('reviewer')
-                or review.get('reviewKind') != 'independent-agent'
-                or review.get('issuerClaim') != review.get('reviewer')
-                or not re.fullmatch('[a-f0-9]{64}', review.get('reportSHA256', ''))
-                or review.get('sourceCommit') != args.commit
-                or review.get('inventorySHA256') != expected['inventorySHA256']):
-            raise ValueError('independent review missing or bound to different bytes')
 
 if __name__ == '__main__':
     main()

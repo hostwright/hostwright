@@ -59,7 +59,8 @@ class SDKBoundaryTests(unittest.TestCase):
     def test_actual_stats_and_complete_frame_sequence(self):
         obj = self.stats(); sdk.validate_stats(obj, 'owned', 'a'*64, 805306368)
         frames = [dict(schemaVersion=1, sequence=0, stream='stdout', payloadBase64=base64.b64encode(json.dumps(obj).encode()).decode(), endOfStream=False),
-                  dict(schemaVersion=1, sequence=1, stream='control', payloadBase64='', endOfStream=True)]
+                  dict(schemaVersion=1, sequence=1, stream='stdout', payloadBase64='', endOfStream=True),
+                  dict(schemaVersion=1, sequence=2, stream='stderr', payloadBase64='', endOfStream=True)]
         raw = '\n'.join(map(json.dumps, frames)); self.assertEqual(sdk.stats_payload(raw), obj)
         with self.assertRaises(sdk.Rejected): sdk.stats_payload(json.dumps(frames[0]))
         frames[1]['sequence'] = 2

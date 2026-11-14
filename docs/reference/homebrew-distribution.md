@@ -1,5 +1,11 @@
 # Homebrew distribution and package names
 
+Current v0.0.2 policy: [ADR 0017](../design/adr-0017-focused-v002-qualification.md).
+Signed downloads and the vendor tap are the release channels. Official Homebrew
+acceptance and the prior timed qualification campaigns are deferred. Historical
+procedures below do not add requirements to the focused five-group policy.
+
+
 Hostwright's controlled distribution channel is
 `brew install hostwright/tap/hostwright`. The public tap currently points to the
 unsupported `0.0.2-dev.12` qualification build; it is not a GA installation claim.
@@ -53,7 +59,7 @@ coordinates have two components (`owner/tap`); a fully qualified formula has thr
 coordinates, not the global package name. Keep the product and executable name
 `hostwright`; renaming does not remove acceptance requirements.
 
-## Official submission prerequisites
+## Future official submission prerequisites
 
 The current renderer in
 [TrustedReleaseSupport.swift](../../Sources/HostwrightDistribution/TrustedReleaseSupport.swift)

@@ -137,7 +137,7 @@ class NativeProofTests(unittest.TestCase):
         old_workflow = current_workflow.replace(jobs['native-checkpoint'].encode(), b'').replace(I.EMPTY_NATIVE.encode(), b'')
         current_verifier = (ROOT/I.VERIFIER).read_bytes()
         old_verifier = current_verifier.replace(I.HOOK.encode(), b'').replace(I.NEW_MODE.encode(), I.OLD_MODE.encode())
-        names = [*I.FILES, *I.CONSUMERS, 'scripts/release/build-static-swift-sdk.sh',
+        names = [*I.FILES, *I.CONSUMERS, *I.TEST_CONSUMERS, 'scripts/release/build-static-swift-sdk.sh',
                  'scripts/release/runtime-swift-sources.json', 'scripts/release/materialize-swift-sdk-sources.py']
         cls.old = {name:(ROOT/name).read_bytes() if (ROOT/name).is_file() else b'fixture\n' for name in names}
         cls.old.update({p.relative_to(ROOT).as_posix():p.read_bytes() for p in (HERE/'patches/swift-sdk').rglob('*') if p.is_file()})
@@ -165,7 +165,7 @@ class NativeProofTests(unittest.TestCase):
 
     def test_every_closed_tree_rejects_changed_inputs_or_membership(self):
         for name in self.old:
-            if name in (*I.CONSUMERS,I.VERIFIER,I.WORKFLOW): continue
+            if name in (*I.CONSUMERS,*I.TEST_CONSUMERS,I.VERIFIER,I.WORKFLOW): continue
             with self.subTest(name=name):
                 changed=dict(self.new); changed[name]+=b'changed'
                 with self.assertRaises(ValueError): I.compare_files(self.old,changed)
@@ -173,6 +173,28 @@ class NativeProofTests(unittest.TestCase):
                 with self.assertRaises(ValueError): I.compare_files(self.old,changed)
         for name in ('scripts/release/unnamed.py','Guest/new','ThirdPartyLicenses/new','contracts/v0.0.2/new'):
             with self.assertRaises(ValueError): I.compare_files(self.old,dict(self.new, **{name:b'new'}))
+
+    def test_release_policy_consumers_do_not_change_native_compilation_inputs(self):
+        for name in (*I.CONSUMERS, *I.TEST_CONSUMERS):
+            with self.subTest(name=name):
+                changed = dict(self.new)
+                changed[name] += b'\n# updated final release policy\n'
+                result = I.compare_files(self.old, changed)
+                self.assertEqual(result['sdkCompileInputs'], self.comparison['comparison']['sdkCompileInputs'])
+                self.assertIn(name, {row['path'] for row in result['reviewedConsumerChanges']})
+
+    def test_comparator_transition_requires_exact_baseline_and_executing_implementation(self):
+        before = b'previous reviewed comparator fixture\n'
+        old = dict(self.old, **{I.INPUT_COMPARATOR: before})
+        current = dict(self.new, **{I.INPUT_COMPARATOR: Path(I.__file__).read_bytes()})
+        with mock.patch.object(I, 'BASELINE_COMPARATOR_SHA256', I.digest(before)):
+            result = I.compare_files(old, current)
+            self.assertIn('reviewed-consumer-boundary-transition',
+                          {row['role'] for row in result['reviewedConsumerChanges']})
+            with self.assertRaisesRegex(ValueError, 'baseline transition'):
+                I.compare_files(dict(old, **{I.INPUT_COMPARATOR: before+b'changed'}), current)
+            with self.assertRaisesRegex(ValueError, 'baseline transition'):
+                I.compare_files(old, dict(current, **{I.INPUT_COMPARATOR: current[I.INPUT_COMPARATOR]+b'changed'}))
 
     def test_workflow_globals_jobs_steps_and_verifier_are_closed(self):
         raw=self.new[I.WORKFLOW]

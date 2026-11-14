@@ -56,19 +56,16 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
-          run_regression=true
-          if [[ "$EVENT_NAME" == pull_request || "$EVENT_NAME" == push ]] && [[ -n "$BASE_SHA" && -n "$HEAD_SHA" ]]; then
-            if changed_files="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")" && [[ -n "$changed_files" ]]; then
-              run_regression=false
-              while IFS= read -r file; do
-                case "$file" in
-                  README.md|AGENTS.md|CHANGELOG.md|CONTRIBUTING.md|docs/*|ThirdPartyLicenses/*) ;;
-                  *) run_regression=true; break ;;
-                esac
-              done <<< "$changed_files"
-            fi
-          fi
+          scope="$(python3 scripts/ci-check-scope.py --event "$EVENT_NAME" --base "$BASE_SHA" --head "$HEAD_SHA")"
+          python3 scripts/test-ci-check-scope.py
+          case "$scope" in
+            full) run_regression=true; run_native_reuse=false ;;
+            native-reuse) run_regression=false; run_native_reuse=true ;;
+            docs) run_regression=false; run_native_reuse=false ;;
+            *) exit 1 ;;
+          esac
           printf 'run_regression=%s\n' "$run_regression" >> "$GITHUB_OUTPUT"
+          printf 'run_native_reuse=%s\n' "$run_native_reuse" >> "$GITHUB_OUTPUT"
           if [[ "$EVENT_NAME" == pull_request || "$EVENT_NAME" == push ]] \
             && [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ && "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] \
             && [[ "$BASE_SHA" != 0000000000000000000000000000000000000000 ]] \
@@ -135,8 +132,27 @@ jobs:
             | tee "$HOSTWRIGHT_TEST_RESULTS_DIR/pr.log"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
+      - name: Native runtime provenance regressions
+        if: steps.check-scope.outputs.run_native_reuse == 'true'
+        shell: bash
+        env:
+          HOSTWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/hostwright-test-results
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          mkdir -p "$HOSTWRIGHT_TEST_RESULTS_DIR"
+          {
+            python3 scripts/release/test-native-runtime-reuse.py
+            python3 scripts/release/test-runtime-ingredient-gates.py
+            python3 scripts/release/test-prepare-runtime-provenance.py
+            python3 scripts/release/test-runtime-provenance.py
+            python3 scripts/release/test-verify-sdk-reuse.py
+          } 2>&1 | tee "$HOSTWRIGHT_TEST_RESULTS_DIR/pr.log"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
       - name: Retain pull-request logs and results
-        if: ${{ always() && steps.check-scope.outputs.run_regression == 'true' }}
+        if: ${{ always() && (steps.check-scope.outputs.run_regression == 'true' || steps.check-scope.outputs.run_native_reuse == 'true') }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ci-test-results-${{ github.run_id }}-${{ github.run_attempt }}

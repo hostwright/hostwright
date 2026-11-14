@@ -7,8 +7,9 @@ procedures below do not add requirements to the focused five-group policy.
 
 
 Hostwright's controlled distribution channel is
-`brew install hostwright/tap/hostwright`. The public tap currently points to the
-unsupported `0.0.2-dev.12` qualification build; it is not a GA installation claim.
+`brew install hostwright/tap/hostwright`. Check the installed version: historical
+`0.0.2-dev.12` formulae use older contracts and are unsupported. The v0.0.2
+formula must select its own verified signed archive after publication.
 Generate, test and publish the final formula against the verified release
 inventory. Follow the [release process](../release/RELEASE_PROCESS.md).
 

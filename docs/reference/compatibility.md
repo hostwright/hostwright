@@ -18,7 +18,7 @@ The `0.0.2` candidate implements the single-Mac scope in [ADR 0015](../design/ad
 | Scheduling | Local CPU/memory admission, deterministic placement, and safe pressure deferral. |
 | Compose | Explicit import subset with diagnostics for unsupported fields, followed by normal Hostwright lifecycle commands. |
 | Desktop | Local manifest selection, status/logs/events, and confirmed up/down/restart. |
-| Distribution | Immutable dev.11/dev.12 archives, packages, and vendor tap are unsupported qualification prereleases. RC and GA require new signed artifacts and lifecycle evidence. |
+| Distribution | Signed v0.0.2 downloads and the vendor tap require exact-artifact focused qualification. Historical dev.11/dev.12 releases remain unsupported qualification inputs. |
 
 Run `hostwright runtime providers --json` and `hostwright capabilities --json` for the selected build. The CLI and native providers have different image, network, and interactive capabilities; a provider must reject an operation it does not advertise.
 
@@ -45,4 +45,4 @@ Multi-Mac operation, Kubernetes, Docker-client compatibility, host accelerators,
 
 ## GA Matrix Rule
 
-Freeze the published matrix from passing evidence for the exact RC and final-version artifacts. Record provider versions, OS builds, hardware, capability results, and cleanup. One physical host plus a VM establishes neither independent-hardware coverage nor high availability. The [release process](../release/RELEASE_PROCESS.md) defines the required cycles, recovery, security, and distribution checks.
+Freeze the published matrix from passing evidence for the exact RC and final-version artifacts. Record provider versions, OS builds, hardware, capability results, and cleanup. One physical host plus a VM establishes neither independent-hardware coverage nor high availability. The [release process](../release/RELEASE_PROCESS.md) defines one complete lifecycle per declared provider, recovery, security and distribution checks.

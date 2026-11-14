@@ -1,6 +1,6 @@
 # Installed Distribution Lifecycle
 
-Status: implemented for an explicit local install prefix and a verifier-produced trusted, developer, or staged Apple Installer artifact. Historical development artifacts retain their original signing, publication, and clean-Mac evidence. The current `0.0.2` candidate still requires its complete signed VM lifecycle and protected qualification acceptance. Published development channels remain unsupported; no supported RC or `v0.0.2` GA has been published.
+Status: implemented for an explicit local install prefix and a verifier-produced trusted, developer, or staged Apple Installer artifact. Historical development artifacts retain their original signing, publication, and clean-Mac evidence. Every v0.0.2 candidate requires its signed VM lifecycle and protected focused qualification acceptance before publication. Published development channels remain unsupported; consult [GitHub Releases](https://github.com/hostwright/hostwright/releases) for published final artifacts.
 
 ## Boundary
 

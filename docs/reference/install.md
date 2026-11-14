@@ -6,7 +6,7 @@ acceptance and the prior timed qualification campaigns are deferred. Historical
 procedures below do not add requirements to the focused five-group policy.
 
 
-Status: source candidate preparation (`0.0.2`) and the Hostwright-controlled unsupported dev.12 qualification channel are available. The `v0.0.2` release is not GA or production ready.
+This guide covers signed v0.0.2 downloads and the vendor tap. [GitHub Releases](https://github.com/hostwright/hostwright/releases) is the authority for published versions and verification assets. Source builds and unpublished candidates do not establish release qualification; historical dev.11/dev.12 channels remain unsupported.
 
 ## Package Manager Truth
 
@@ -27,7 +27,7 @@ The Hostwright-controlled package-manager command is:
 brew install hostwright/tap/hostwright
 ```
 
-That command uses [`hostwright/homebrew-tap`](https://github.com/hostwright/homebrew-tap) and installs the immutable unsupported dev.12 qualification release with older contracts. It does not install the current source candidate.
+That command uses [`hostwright/homebrew-tap`](https://github.com/hostwright/homebrew-tap). The v0.0.2 formula must select the exact verified signed archive after publication. Check `hostwright --version` before following v0.0.2 quickstarts; a formula still selecting dev.12 installs an unsupported historical qualification release with older contracts.
 
 The v0.0.2 launch uses signed downloads and the verified vendor tap. Official
 Homebrew cask/core inclusion is deferred and does not block publication or release
@@ -106,7 +106,7 @@ Detached CMS signing resolves the selected certificate's subject key identifier 
 
 The generated Homebrew formula is accepted only for the exact immutable `https://github.com/hostwright/hostwright/releases/download/<tag>/<archive>` URL from the verified release manifest. Local tests run the rendered formula through real Homebrew Ruby and formula-style checks. The current renderer preserves the signed desktop bundle under the formula prefix’s `libexec/hostwright/Hostwright.app`, installs all eight command/helper tools and runtime assets, and keeps its offline test independent of daemon setup.
 
-That machinery passed credentialed qualification for the immutable dev.11 and dev.12 prereleases. Their signed/notarized ZIP and `.pkg` artifacts, stapling, Gatekeeper assessment, checksums, detached CMS signatures, SPDX SBOMs, provenance, GitHub attestations, public-byte re-download, and vendor formulas were independently verified. The vendor tap publishes the qualified dev.12 formula. These are unsupported qualification releases, not `v0.0.2` GA artifacts.
+That machinery passed credentialed qualification for the immutable dev.11 and dev.12 prereleases. Their signed/notarized ZIP and `.pkg` artifacts, stapling, Gatekeeper assessment, checksums, detached CMS signatures, SPDX SBOMs, provenance, GitHub attestations, public-byte re-download, and vendor formulas were independently verified. The dev.12 formula and artifacts are retained as unsupported historical qualification inputs. They are not promoted or relabeled as `v0.0.2` artifacts.
 
 ## State and Installed Lifecycle Reality
 

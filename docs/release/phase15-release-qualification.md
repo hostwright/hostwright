@@ -1,5 +1,11 @@
 # Phase 15 release qualification
 
+Current v0.0.2 policy: [ADR 0017](../design/adr-0017-focused-v002-qualification.md).
+Signed downloads and the vendor tap are the release channels. Official Homebrew
+acceptance and the prior timed qualification campaigns are deferred. Historical
+procedures below do not add requirements to the focused five-group policy.
+
+
 This document describes the additive release-qualification boundary introduced for issues #271, #273, #274, #275, and #279. It is a source-only qualification tool and contract library. It does not close Phase 15 or authorize a release.
 
 ## Scope and authority

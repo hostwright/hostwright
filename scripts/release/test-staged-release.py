@@ -28,18 +28,15 @@ accept_spec=importlib.util.spec_from_file_location('acceptance',pathlib.Path(__f
 acceptance=importlib.util.module_from_spec(accept_spec);accept_spec.loader.exec_module(acceptance)
 
 def gate_fixture(name, raw_hash, inventory_hash, source_binding):
-    return dict(sourceCommit='a'*40, version='0.0.2', status='passed', executionMode='real',
+    return dict(qualificationPolicy=stage.QUALIFICATION_POLICY,
+                sourceCommit='a'*40, version='0.0.2', status='passed', executionMode='real',
                 sourceCleanBefore=True, sourceCleanAfter=True, blockers=[], failures=[],
                 attachments={'raw.log':raw_hash}, cleanupStatus='passed', unresolvedP0P1=0,
-                conformancePassed=True, completedCycles=10, elapsedSeconds=1800,
-                fullSuiteLanes=['address','thread'], inventorySHA256=inventory_hash,
-                reviewer='reviewer', reviewKind='independent-agent', reportSHA256=raw_hash,
-                passedOperations=sorted(acceptance.RECOVERY_OPERATIONS if name == 'local-backup-recovery' else acceptance.VM_OPERATIONS),
-                passedQuickstarts=['cli','compose','desktop'], passedWebsiteChecks=sorted(acceptance.WEBSITE_CHECKS),
+                inventorySHA256=inventory_hash, passedChecks=sorted(acceptance.REQUIRED_CHECKS[name]),
+                providerChecks={p:sorted(acceptance.PROVIDER_CHECKS) for p in acceptance.PROVIDERS},
+                passedWebsiteChecks=sorted(acceptance.WEBSITE_CHECKS),
                 websiteCommit='c'*40, websiteSourceClean=True, correspondingSource=source_binding,
-                runtimeSourceLicenseStatus='qualified', independentlyVerifiedKernelSignature=True,
-                targets=[dict(target=t,elapsedSeconds=300,status='passed') for t in
-                         ['manifest-v3','compose-import','control-stream-v2.1','containerization-helper-v1','apple-container-json','release-qualification-json']])
+                runtimeSourceLicenseStatus='qualified', independentlyVerifiedKernelSignature=True)
 
 class StagingTests(unittest.TestCase):
     def test_retention_copies_only_exact_complete_export(self):
@@ -97,62 +94,6 @@ class StagingTests(unittest.TestCase):
             (root/'release/unexpected').write_text('extra')
             with self.assertRaises(ValueError): stage.inventory(root,'a'*40,'0.0.2','123','1')
 
-    def test_aggregate_requires_all_source_bound_gates_and_review(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = pathlib.Path(temporary); bundle = root / 'stage'; evidence = root / 'evidence'
-            (bundle / 'release').mkdir(parents=True); (bundle / 'Formula').mkdir(); evidence.mkdir()
-            manifest = dict(sourceCommit='a'*40, packageVersion='0.0.2', releaseTag='v0.0.2')
-            for key, name in [('archive','artifact.zip'), ('package','artifact.pkg'), ('archiveSBOM','artifact.archive.spdx.json'), ('packageSBOM','artifact.pkg.spdx.json')]:
-                path = bundle / 'release' / name; path.write_bytes(key.encode()); manifest[key] = dict(fileName=name, sha256=stage.digest(path))
-            for name in ('release-manifest.json.cms','SHA256SUMS','SHA256SUMS.cms','provenance.intoto.json','provenance.intoto.json.cms','release-evidence.json','release-evidence.json.cms'):
-                (bundle / 'release' / name).write_text('test')
-            (bundle / 'release/release-manifest.json').write_text(json.dumps(manifest)); (bundle / 'Formula/hostwright.rb').write_text('formula')
-            source_binding=source_fixture(bundle)
-            (bundle / 'stage-inventory.json').write_text(json.dumps(stage.inventory(bundle,'a'*40,'0.0.2','123','1')))
-            inventory_hash = stage.digest(bundle / 'stage-inventory.json')
-            (evidence / 'raw.log').write_text('actual raw evidence fixture')
-            for name in stage.REQUIRED_GATES:
-                gate = gate_fixture(name, stage.digest(evidence/'raw.log'), inventory_hash, source_binding)
-                (evidence / (name+'.json')).write_text(json.dumps(gate))
-            command = [sys.executable,str(pathlib.Path(__file__).with_name('accept-qualification.py')),'--commit','a'*40,'--version','0.0.2','--run','123','--attempt','1','--reviewer','reviewer','--review-sha256',stage.digest(evidence/'raw.log'),'--producer','producer','--acceptance-run','456','--stage',str(bundle),'--evidence',str(evidence),'--output',str(root/'receipt.json')]
-            def run_acceptance():
-                values={command[i][2:].replace('-','_'):command[i+1] for i in range(2,len(command),2)}
-                for key in ('stage','evidence','output'):values[key]=pathlib.Path(values[key])
-                with mock.patch.object(stage.source_stage,'verify_contract',return_value=source_binding) as verifier:
-                    try:acceptance.accept(argparse.Namespace(**values)); verifier.assert_called_once_with(bundle,'a'*40,'0.0.2'); return 0
-                    except ValueError:return 1
-            self.assertEqual(run_acceptance(),0)
-            receipt = json.loads((root/'receipt.json').read_text()); self.assertEqual(set(receipt['gates']),stage.REQUIRED_GATES)
-            verify = [sys.executable,str(pathlib.Path(__file__).with_name('staged-release.py')),'receipt','--commit','a'*40,'--version','0.0.2','--run','123','--attempt','1','--root',str(bundle),'--receipt',str(root/'receipt.json')]
-            self.assertEqual(subprocess.run(verify,capture_output=True).returncode,0)
-            receipt['gates'].pop('critical-fuzz'); (root/'receipt.json').write_text(json.dumps(receipt))
-            self.assertNotEqual(subprocess.run(verify,capture_output=True).returncode,0)
-            (root/'receipt.json').unlink()
-            gate_path = evidence/'critical-fuzz.json'; gate=json.loads(gate_path.read_text()); gate['targets'][0]['elapsedSeconds']=299; gate_path.write_text(json.dumps(gate))
-            self.assertNotEqual(run_acceptance(),0)
-            gate['targets'][0]['elapsedSeconds']=300; gate['version']='0.0.2-rc.1'; gate_path.write_text(json.dumps(gate))
-            self.assertNotEqual(run_acceptance(),0)
-            gate['version']='0.0.2'; gate_path.write_text(json.dumps(gate))
-            for lane in ('installed-lifecycle-vm', 'single-host-soak', 'desktop-accessibility', 'compose-execution', 'signed-notarized-artifacts', 'dependency-security', 'license-policy-sbom', 'local-backup-recovery', 'public-education'):
-                if lane not in stage.REQUIRED_GATES: continue
-                lane_path=evidence/(lane+'.json'); original=json.loads(lane_path.read_text()); changed=dict(original); changed['inventorySHA256']='b'*64; lane_path.write_text(json.dumps(changed))
-                self.assertNotEqual(run_acceptance(),0,lane)
-                lane_path.write_text(json.dumps(original))
-            vm=evidence/'installed-lifecycle-vm.json'; original=json.loads(vm.read_text()); changed=dict(original); changed['passedOperations']=['install','reboot','upgrade','rollback','repair','uninstall']; vm.write_text(json.dumps(changed))
-            self.assertNotEqual(run_acceptance(),0)
-            vm.write_text(json.dumps(original))
-            review=evidence/'independent-review.json'; original=json.loads(review.read_text())
-            for field, value in [('reportSHA256', 'b'*64), ('reviewKind', 'external-human')]:
-                changed=dict(original); changed[field]=value; review.write_text(json.dumps(changed))
-                self.assertNotEqual(run_acceptance(),0)
-            review.write_text(json.dumps(original))
-            outside=root/'outside'; outside.mkdir(); (outside/'raw.log').write_bytes((evidence/'raw.log').read_bytes())
-            (evidence/'linked').symlink_to(outside, target_is_directory=True)
-            changed=dict(original); changed['attachments']={'linked/raw.log':stage.digest(outside/'raw.log')}; review.write_text(json.dumps(changed))
-            self.assertNotEqual(run_acceptance(),0)
-            review.write_text(json.dumps(original))
-            (evidence/'raw.log').write_text('tampered')
-            self.assertNotEqual(run_acceptance(),0)
 
 class QualificationGateTests(unittest.TestCase):
     def setUp(self):
@@ -163,58 +104,57 @@ class QualificationGateTests(unittest.TestCase):
         self.raw_hash = stage.digest(self.root / 'raw.log')
 
     def validate(self, name, gate):
-        acceptance.validate_gate(name, gate, self.root, 'a'*40, '0.0.2', 'b'*64,
-                                 {}, 'reviewer', self.raw_hash)
+        acceptance.validate_gate(name, gate, self.root, 'a'*40, '0.0.2', 'b'*64, {})
 
     def gate(self, name):
         return gate_fixture(name, self.raw_hash, 'b'*64, {})
 
-    def test_recovery_requires_every_real_outcome(self):
-        original = self.gate('local-backup-recovery')
-        self.validate('local-backup-recovery', original)
-        for outcome in acceptance.RECOVERY_OPERATIONS:
-            changed = copy.deepcopy(original); changed['passedOperations'].remove(outcome)
-            with self.subTest(outcome=outcome), self.assertRaises(ValueError):
-                self.validate('local-backup-recovery', changed)
-        for field, value in [('executionMode','fixture'), ('status','blocked'),
-                             ('sourceCleanBefore',False), ('sourceCleanAfter',False),
-                             ('blockers',['unavailable provider']), ('failures',['interrupted']),
-                             ('cleanupStatus','failed'), ('sourceCommit','c'*40),
-                             ('version','0.0.2-rc.2'), ('inventorySHA256','d'*64)]:
-            changed = dict(original); changed[field] = value
-            with self.subTest(field=field), self.assertRaises(ValueError):
-                self.validate('local-backup-recovery', changed)
-        changed=copy.deepcopy(original); changed['passedOperations'].append(changed['passedOperations'][0])
-        with self.assertRaises(ValueError): self.validate('local-backup-recovery', changed)
+    def test_each_group_requires_its_checks_without_duplicates(self):
+        for name in stage.REQUIRED_GATES:
+            original = self.gate(name)
+            self.validate(name, original)
+            for outcome in original['passedChecks']:
+                changed = copy.deepcopy(original); changed['passedChecks'].remove(outcome)
+                with self.subTest(name=name, missing=outcome), self.assertRaises(ValueError):
+                    self.validate(name, changed)
+            changed = copy.deepcopy(original); changed['passedChecks'].append(changed['passedChecks'][0])
+            with self.assertRaises(ValueError): self.validate(name, changed)
 
-    def test_vm_requires_reupgrade_and_compensation_recovery(self):
-        original=self.gate('installed-lifecycle-vm')
-        self.validate('installed-lifecycle-vm', original)
-        for outcome in ('re-upgrade', 'compensation-recovery-repair'):
-            changed=copy.deepcopy(original); changed['passedOperations'].remove(outcome)
-            with self.subTest(outcome=outcome), self.assertRaises(ValueError):
-                self.validate('installed-lifecycle-vm', changed)
+    def test_failed_cleanup_wrong_source_and_artifact_cannot_pass(self):
+        for name in stage.REQUIRED_GATES:
+            fields = [('executionMode','fixture'), ('status','blocked'), ('sourceCleanBefore',False),
+                      ('sourceCleanAfter',False), ('blockers',['unavailable']), ('failures',['failed']),
+                      ('sourceCommit','c'*40), ('version','0.0.2-rc.2'), ('qualificationPolicy','old')]
+            if name != 'source': fields.append(('inventorySHA256','d'*64))
+            if name in {'installation','working-product','documentation'}: fields.append(('cleanupStatus','failed'))
+            for field, value in fields:
+                changed = self.gate(name); changed[field] = value
+                with self.subTest(name=name, field=field), self.assertRaises(ValueError):
+                    self.validate(name, changed)
 
-    def test_education_requires_each_quickstart_and_both_website_packages(self):
-        original=self.gate('public-education')
-        self.validate('public-education', original)
-        for field in ('passedQuickstarts','passedWebsiteChecks'):
-            for outcome in original[field]:
-                changed=copy.deepcopy(original); changed[field].remove(outcome)
-                with self.subTest(outcome=outcome), self.assertRaises(ValueError):
-                    self.validate('public-education', changed)
-        for field, value in [('websiteCommit','0'*40), ('websiteCommit','main'), ('websiteSourceClean',False)]:
-            changed=dict(original); changed[field]=value
-            with self.subTest(field=field,value=value), self.assertRaises(ValueError):
-                self.validate('public-education', changed)
+    def test_every_provider_requires_stats_logs_and_one_lifecycle(self):
+        for provider in acceptance.PROVIDERS:
+            for operation in acceptance.PROVIDER_CHECKS:
+                changed = self.gate('working-product'); changed['providerChecks'][provider].remove(operation)
+                with self.subTest(provider=provider, operation=operation), self.assertRaises(ValueError):
+                    self.validate('working-product', changed)
+        changed = self.gate('working-product'); changed['providerChecks'].pop(next(iter(acceptance.PROVIDERS)))
+        with self.assertRaises(ValueError): self.validate('working-product', changed)
 
-    def test_numeric_shortcuts_and_json_nonfinite_are_rejected(self):
-        for name, field, values in [('single-host-soak','elapsedSeconds',[float('nan'),float('inf'),True,1799]),
-                                    ('provider-apple-container-1.1.0','completedCycles',[True,10.0,9])]:
-            for value in values:
-                gate=self.gate(name); gate[field]=value
-                with self.subTest(name=name,value=value), self.assertRaises(ValueError): self.validate(name,gate)
-        path=self.root/'nan.json'; path.write_text('{"elapsedSeconds":NaN}')
+    def test_content_findings_and_tampered_evidence_are_rejected(self):
+        for field, value in [('unresolvedP0P1',1), ('unresolvedP0P1',False),
+                             ('correspondingSource',{'wrong':True}), ('runtimeSourceLicenseStatus','pending'),
+                             ('independentlyVerifiedKernelSignature',False)]:
+            changed=self.gate('artifact-integrity'); changed[field]=value
+            with self.subTest(field=field), self.assertRaises(ValueError): self.validate('artifact-integrity',changed)
+        (self.root/'raw.log').write_text('tampered')
+        with self.assertRaises(ValueError): self.validate('source',self.gate('source'))
+
+    def test_website_checks_remain_bound_to_a_clean_commit(self):
+        for field,value in [('websiteCommit','main'),('websiteCommit','0'*40),('websiteSourceClean',False),('passedWebsiteChecks',[])]:
+            changed=self.gate('documentation'); changed[field]=value
+            with self.subTest(field=field), self.assertRaises(ValueError): self.validate('documentation',changed)
+        path=self.root/'nan.json'; path.write_text('{"duration":NaN}')
         with self.assertRaises(ValueError): stage.load(path)
 
 

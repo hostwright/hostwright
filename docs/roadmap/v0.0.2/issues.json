@@ -57,7 +57,7 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "scopeDecision": "docs/design/adr-0017-focused-v002-qualification.md",
       "acceptanceCriteria": [
         "Every required child satisfies its reduced acceptance criteria with clean final evidence.",
         "Every deferred child is explicitly closed as not planned under ADR 0015; deferral is not implementation.",
@@ -593,7 +593,7 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "scopeDecision": "docs/design/adr-0017-focused-v002-qualification.md",
       "acceptanceCriteria": [
         "Every required child satisfies its reduced acceptance criteria with clean final evidence.",
         "Every deferred child is explicitly closed as not planned under ADR 0015; deferral is not implementation.",
@@ -5513,7 +5513,7 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "scopeDecision": "docs/design/adr-0017-focused-v002-qualification.md",
       "acceptanceCriteria": [
         "Record exact physical/VM OS builds and Apple-silicon hardware.",
         "Qualify macOS 26 arm64, Apple container 1.0.0/1.1.0 and Containerization 0.35.0 only for declared provider capabilities.",
@@ -5755,7 +5755,7 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "scopeDecision": "docs/design/adr-0017-focused-v002-qualification.md",
       "acceptanceCriteria": [
         "Restore verified local state/data backups and recover interrupted lifecycle operations.",
         "Verify daemon interruption, cancellation, stale authority and exact cleanup without touching unmanaged resources.",
@@ -5839,7 +5839,7 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "scopeDecision": "docs/design/adr-0017-focused-v002-qualification.md",
       "acceptanceCriteria": [
         "Execute the CLI, Compose and desktop release quickstarts.",
         "Synchronize README, capability output, reference docs, website, examples and supported matrix.",
@@ -5920,7 +5920,7 @@
         "d3v07"
       ],
       "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "scopeDecision": "docs/design/adr-0017-focused-v002-qualification.md",
       "acceptanceCriteria": [
         "Enable reviewed RC and GA versions in the protected release workflow with correct prerelease status.",
         "Build and verify signed/notarized CLI, app and required helpers, archive/package, checksums, SBOM and provenance.",
@@ -5961,21 +5961,14 @@
       "assignees": [
         "d3v07"
       ],
-      "releaseDisposition": "required",
-      "scopeDecision": "docs/design/adr-0015-reduced-local-release.md",
+      "releaseDisposition": "deferred",
+      "scopeDecision": "docs/design/adr-0017-focused-v002-qualification.md",
       "stateReason": null,
       "acceptanceCriteria": [
-        "Generate a Hostwright cask from the exact verified signed native application and CLI package; stable public bytes and SHA-256 must match the accepted release inventory.",
-        "Pass Homebrew DSL/style and new-cask audits plus real clean-machine install, CLI/app launch, upgrade and preserve-data uninstall; verify Gatekeeper and current Homebrew platform requirements.",
-        "Submit the official cask with accurate public-interest evidence and resolve maintainer feedback without fabricating adoption or acceptance.",
-        "Obtain official Homebrew acceptance and verify brew install hostwright on a fresh Homebrew environment before closing this workstream or announcing the Homebrew-available GA launch."
+        "Official Homebrew distribution is outside v0.0.2; close as not planned."
       ],
-      "requiredEvidence": [
-        "local-integration",
-        "distribution-artifact",
-        "migration-upgrade",
-        "security-assessment"
-      ]
+      "requiredEvidence": [],
+      "deferralReason": "The approved November 13 release uses signed downloads and the vendor tap; official Homebrew acceptance is outside v0.0.2."
     }
   ],
   "historicalPhaseSchedule": [

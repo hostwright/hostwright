@@ -1,5 +1,11 @@
 # Install and Upgrade
 
+Current v0.0.2 policy: [ADR 0017](../design/adr-0017-focused-v002-qualification.md).
+Signed downloads and the vendor tap are the release channels. Official Homebrew
+acceptance and the prior timed qualification campaigns are deferred. Historical
+procedures below do not add requirements to the focused five-group policy.
+
+
 Status: source candidate preparation (`0.0.2`) and the Hostwright-controlled unsupported dev.12 qualification channel are available. The `v0.0.2` release is not GA or production ready.
 
 ## Package Manager Truth
@@ -23,7 +29,9 @@ brew install hostwright/tap/hostwright
 
 That command uses [`hostwright/homebrew-tap`](https://github.com/hostwright/homebrew-tap) and installs the immutable unsupported dev.12 qualification release with older contracts. It does not install the current source candidate.
 
-The launch requires an official Homebrew cask for the signed package and desktop app so a fresh Mac can use `brew install hostwright` without adding the vendor tap. Signed-package qualification, latest-major macOS validation, submission eligibility, and upstream acceptance remain pending. The separate Homebrew-core formula is deferred; that does not defer the official cask requirement. See [Homebrew distribution](homebrew-distribution.md) for the acceptance path.
+The v0.0.2 launch uses signed downloads and the verified vendor tap. Official
+Homebrew cask/core inclusion is deferred and does not block publication or release
+issue closure. See [ADR 0017](../design/adr-0017-focused-v002-qualification.md).
 
 ## Current Source Build
 

@@ -5,6 +5,8 @@ import importlib.util
 import json
 import pathlib
 import tempfile
+import subprocess
+import sys
 import unittest
 from unittest import mock
 
@@ -63,7 +65,7 @@ class AssemblyTests(unittest.TestCase):
         self.input_path = self.raw / 'qualification-inputs.json'
         self.input_path.write_text(json.dumps(self.inputs))
         self.args = argparse.Namespace(commit='a'*40, version='0.0.2', run='123', attempt='1',
-            reviewer='reviewer', review_sha256=self.review_hash, stage=self.bundle,
+            stage=self.bundle,
             input_root=self.raw, inputs='qualification-inputs.json', output=self.root / 'export')
 
     def assemble(self):
@@ -83,17 +85,29 @@ class AssemblyTests(unittest.TestCase):
         with mock.patch.object(stage.source_stage, 'verify_contract', return_value=self.binding):
             assembler.acceptance.accept(args)
         self.assertEqual(set(stage.load(args.output)['gates']), stage.REQUIRED_GATES)
-        raw = output / 'raw/critical-fuzz/complete.json'
-        self.assertEqual(raw.read_bytes(), (self.raw / 'critical-fuzz/complete.json').read_bytes())
+        receipt = stage.load(args.output)
+        command = [sys.executable, str(pathlib.Path(__file__).with_name('staged-release.py')),
+                   'receipt', '--root', str(self.bundle), '--commit', 'a'*40, '--version', '0.0.2',
+                   '--run', '123', '--attempt', '1', '--receipt', str(args.output)]
+        self.assertEqual(subprocess.run(command, capture_output=True).returncode, 0)
+        for field, value in [('gates', {}), ('qualificationPolicy', 'old'), ('inventorySHA256', 'f'*64)]:
+            changed = copy.deepcopy(receipt); changed[field] = value
+            args.output.write_text(json.dumps(changed))
+            with self.subTest(field=field):
+                self.assertNotEqual(subprocess.run(command, capture_output=True).returncode, 0)
+        args.output.write_text(json.dumps(receipt))
+
+        raw = output / 'raw/source/complete.json'
+        self.assertEqual(raw.read_bytes(), (self.raw / 'source/complete.json').read_bytes())
         with self.assertRaises(ValueError): self.assemble()
 
     def test_invalid_lane_never_creates_an_export(self):
-        path = self.raw / 'local-backup-recovery/complete.json'
-        original = self.reports['local-backup-recovery']
+        path = self.raw / 'working-product/complete.json'
+        original = self.reports['working-product']
         changes = [('sourceCommit','b'*40), ('version','0.0.2-rc.2'), ('status','blocked'),
                    ('executionMode','mock'), ('sourceCleanAfter',False),
                    ('cleanupStatus','failed'), ('inventorySHA256','f'*64),
-                   ('passedOperations',[]), ('attachments',{}), ('blockers',['unsupported'])]
+                   ('passedChecks',[]), ('attachments',{}), ('blockers',['unsupported'])]
         for field, value in changes:
             changed = copy.deepcopy(original); changed[field] = value
             path.write_text(json.dumps(changed))
@@ -103,22 +117,22 @@ class AssemblyTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'must be an object'): self.assemble()
         self.assertFalse(self.args.output.exists())
         path.write_text(json.dumps(original))
-        (self.raw / 'local-backup-recovery/raw.log').write_text('tampered output')
+        (self.raw / 'working-product/raw.log').write_text('tampered output')
         with self.assertRaises(ValueError): self.assemble()
         self.assertFalse(self.args.output.exists())
 
     def test_missing_gate_and_unsafe_raw_paths_are_rejected(self):
-        changed=copy.deepcopy(self.inputs); changed['gates'].pop('public-education')
+        changed=copy.deepcopy(self.inputs); changed['gates'].pop('documentation')
         self.input_path.write_text(json.dumps(changed))
         with self.assertRaises(ValueError): self.assemble()
         self.input_path.write_text(json.dumps(self.inputs))
-        report=self.raw/'public-education/complete.json'
+        report=self.raw/'documentation/complete.json'
         raw=report.read_bytes(); report.unlink()
         outside=self.root/'outside.json'; outside.write_bytes(raw); report.symlink_to(outside)
         with self.assertRaises(ValueError): self.assemble()
         report.unlink(); report.write_bytes(raw)
-        changed=copy.deepcopy(self.reports['public-education'])
-        changed['attachments']={'../critical-fuzz/raw.log':self.review_hash}
+        changed=copy.deepcopy(self.reports['documentation'])
+        changed['attachments']={'../source/raw.log':self.review_hash}
         report.write_text(json.dumps(changed))
         with self.assertRaises(ValueError): self.assemble()
         self.assertFalse(self.args.output.exists())
@@ -126,7 +140,7 @@ class AssemblyTests(unittest.TestCase):
     def test_changed_json_cannot_be_parsed_under_an_older_digest(self):
         original_load = stage.load
         targets = [self.bundle / 'stage-inventory.json', self.input_path,
-                   self.raw / 'public-education/complete.json']
+                   self.raw / 'documentation/complete.json']
         for target in targets:
             original = target.read_bytes()
             def swap_before_parse(path, expected_sha256=None):
@@ -149,7 +163,7 @@ class AssemblyTests(unittest.TestCase):
         args.output = self.root / 'accepted.json'
         original_load = stage.load
         for target in (self.bundle / 'stage-inventory.json',
-                       args.evidence / 'public-education.json'):
+                       args.evidence / 'documentation.json'):
             original = target.read_bytes()
             for timing in ('before-parse', 'after-parse'):
                 def replace_during_read(path, expected_sha256=None):

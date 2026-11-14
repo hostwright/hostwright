@@ -2,6 +2,9 @@
 
 Status: accepted by the maintainer on 2026-09-07; Phase 14 acceptance amended on 2026-10-05; official Homebrew distribution requested on 2026-10-08. Final-version-only qualification approved on 2026-10-26; final release qualification remains pending.
 
+The current qualification budget and distribution decision are superseded by
+[ADR 0017](adr-0017-focused-v002-qualification.md). The dated amendments below retain historical context.
+
 ## Decision
 
 Ship the single-Mac CLI, deterministic local resource admission, a native desktop

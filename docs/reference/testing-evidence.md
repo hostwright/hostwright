@@ -1,5 +1,11 @@
 # Testing And Evidence
 
+Current v0.0.2 policy: [ADR 0017](../design/adr-0017-focused-v002-qualification.md).
+Signed downloads and the vendor tap are the release channels. Official Homebrew
+acceptance and the prior timed qualification campaigns are deferred. Historical
+procedures below do not add requirements to the focused five-group policy.
+
+
 Hostwright separates deterministic test coverage from evidence that exercises real local systems. A report uses exactly one evidence class:
 
 | Evidence class | What it proves | What it cannot prove |

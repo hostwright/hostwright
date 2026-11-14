@@ -8,6 +8,38 @@ import XCTest
 @testable import HostwrightRuntime
 
 final class InteractiveCommandRunnerTests: XCTestCase {
+    func testDelegatedOutputReturnsFramesAndRejectsOverflow() throws {
+        let driver = ScriptedInteractiveDriver { _, sink in
+            try sink(RuntimeStreamEnvelope(sequence: 0, stream: .standardOutput, payload: Data("metrics".utf8)))
+            try sink(RuntimeStreamEnvelope(sequence: 1, stream: .standardOutput, payload: Data(), endOfStream: true))
+            try sink(RuntimeStreamEnvelope(sequence: 2, stream: .standardError, payload: Data(), endOfStream: true))
+            return RuntimeInteractiveExecutionResult(operation: .stats, exitStatus: 0, emittedFrameCount: 3, standardErrorTail: "")
+        }
+        let command = options(command: .stats, output: .json)
+        let result = InteractiveCommandRunner(options: command, driver: driver, liveStreamSink: nil, maximumBufferedBytes: 4096).run()
+        XCTAssertEqual(result.exitCode, 0, result.standardError)
+        let frames = try result.standardOutput.split(separator: "\n").map {
+            try RuntimeStreamEnvelope.decodeNDJSONLine(Data($0.utf8))
+        }
+        XCTAssertEqual(frames.count, 3)
+        XCTAssertEqual(frames.first?.payload, Data("metrics".utf8))
+        XCTAssertTrue(frames[1].endOfStream)
+        XCTAssertTrue(frames[2].endOfStream)
+        let overflow = InteractiveCommandRunner(options: command, driver: driver, liveStreamSink: nil, maximumBufferedBytes: 8).run()
+        XCTAssertNotEqual(overflow.exitCode, 0)
+        XCTAssertTrue(overflow.standardOutput.isEmpty)
+    }
+
+    func testDelegatedEnvironmentDisablesProcessStandardIO() throws {
+        try withLiveFixture(providerID: .appleContainerization) { fixture in
+            var environment = fixture.environment
+            environment.interactiveOutputByteLimit = 960 * 1024
+            let runner = InteractiveCommandRunner(options: fixture.options, environment: environment)
+            XCTAssertNil(runner.liveStreamSink)
+            XCTAssertEqual(runner.maximumBufferedBytes, 960 * 1024)
+        }
+    }
+
     func testLiveDriverUsesExactStateAndInventoryBeforeInjectedExecutor() throws {
         try withLiveFixture(providerID: .appleContainerCLI) { fixture in
             let result = InteractiveCommandRunner(

@@ -1226,7 +1226,8 @@ def verify(manifest_data, runtime, payloads, fetch, source_commit, require_authe
     verify_embedded_license_documents(manifest['sourceProjects'],fetch)
     require(projects, 'missing complete corresponding sources')
     tools=toolchain(manifest,fetch)
-    verify_sdk_recovery(manifest['oci']['links'], manifest['sourceProjects'], fetch, source_commit, require_authentication)
+    native_source_commit = manifest['nativeReuse']['producer']['commit'] if 'nativeReuse' in manifest else source_commit
+    verify_sdk_recovery(manifest['oci']['links'], manifest['sourceProjects'], fetch, native_source_commit, require_authentication)
     oci=manifest['oci']; prefix=path(oci['prefix'])
     require(prefix=='share/hostwright/containerization/vminit' and
             manifest['kernel']['payloadPath'].startswith('share/hostwright/containerization/kernel/') and

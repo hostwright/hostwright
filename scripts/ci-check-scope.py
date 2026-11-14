@@ -8,6 +8,8 @@ NATIVE_REUSE = {
     'scripts/release/native-reuse-inputs.py',
     'scripts/release/verify-native-reuse.py',
     'scripts/release/test-native-runtime-reuse.py',
+    'scripts/release/verify-runtime-provenance.py',
+    'scripts/release/test-runtime-provenance.py',
     'scripts/ci-check-scope.py',
     'scripts/test-ci-check-scope.py',
     '.github/workflows/ci.yml',

@@ -20,6 +20,7 @@ TEST_CONSUMERS = (
     'scripts/release/test-runtime-ingredient-gates.py',
     'scripts/release/test-assemble-qualification.py', 'scripts/release/test-staged-release.py',
     'scripts/release/test-native-runtime-reuse.py',
+    'scripts/release/test-runtime-provenance.py',
 )
 INPUT_COMPARATOR = 'scripts/release/native-reuse-inputs.py'
 BASELINE_COMPARATOR_SHA256 = '0fbb17ffdbc39f92b0215089512200390204d37b0fe697a07bd6f7111b7b179a'
@@ -44,6 +45,8 @@ FINAL_COMPOSITION_JOB_SHA256 = '0a77bba93362dd4966043ec6140a355bfa5ec1047f8e9f22
 EMPTY_NATIVE = " && inputs.native_checkpoint_run == '' && inputs.native_checkpoint_attempt == ''"
 OLD_MODE = "manifest['closureMode']=='new-source-build'"
 NEW_MODE = "manifest['closureMode']==('authenticated-native-reuse' if 'nativeReuse' in manifest else 'new-source-build')"
+SDK_RECOVERY_CALL = "    verify_sdk_recovery(manifest['oci']['links'], manifest['sourceProjects'], fetch, source_commit, require_authentication)\n"
+NATIVE_SDK_RECOVERY_CALL = "    native_source_commit = manifest['nativeReuse']['producer']['commit'] if 'nativeReuse' in manifest else source_commit\n    verify_sdk_recovery(manifest['oci']['links'], manifest['sourceProjects'], fetch, native_source_commit, require_authentication)\n"
 
 
 def require(condition, message):
@@ -169,8 +172,14 @@ def compare_files(old, new):
             if current != raw:
                 require(current.count(HOOK.encode()) == 1 and current.count(NEW_MODE.encode()) == 1,
                         'runtime verifier reuse hook or mode guard is missing/ambiguous')
-                normalized=current.replace(HOOK.encode(),b'',1).replace(NEW_MODE.encode(),OLD_MODE.encode(),1)
-                require(normalized == raw,'runtime verifier differs beyond the exact reuse hook and mode guard')
+                candidates=[current]
+                if NATIVE_SDK_RECOVERY_CALL.encode() in current:
+                    require(current.count(NATIVE_SDK_RECOVERY_CALL.encode()) == 1,
+                            'runtime verifier native SDK context is ambiguous')
+                    candidates.append(current.replace(NATIVE_SDK_RECOVERY_CALL.encode(),SDK_RECOVERY_CALL.encode(),1))
+                require(any(candidate == raw or candidate.replace(HOOK.encode(),b'',1).replace(NEW_MODE.encode(),OLD_MODE.encode(),1) == raw
+                            for candidate in candidates),
+                        'runtime verifier differs beyond the exact reuse hook, mode guard and native SDK context')
             changes.append(dict(path=name,role='exact-final-reuse-hook-and-mode-guard',before=digest(raw),after=digest(current)))
         else: require(current == raw, 'native producer input changed: '+name)
     old_jobs,new_jobs = jobs(old[WORKFLOW]),jobs(new[WORKFLOW])

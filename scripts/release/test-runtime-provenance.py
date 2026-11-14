@@ -99,8 +99,11 @@ def compiler_inputs_fixture(manifest,files):
  record['compilerInputs']=dict(path='proof/compiler-inputs.json',sha256=v.digest(raw),sizeBytes=len(raw))
  return record,document
 
-def sdk_recovery_fixture(mixed_headers=False):
+def sdk_recovery_fixture(mixed_headers=False, source_commit=None):
     manifest, runtime, payloads, files = fixture()
+    if source_commit is not None:
+        manifest['sourceCommit'] = source_commit
+        manifest['producer']['commit'] = source_commit
     module = v.sdk_recovery_module()
     sdk_project = copy.deepcopy(manifest['sourceProjects'][0])
     sdk_project['identity'] = 'swift-sdk/musl'
@@ -196,10 +199,8 @@ def sdk_recovery_fixture(mixed_headers=False):
         return dict(path=name, sha256=v.digest(raw), sizeBytes=len(raw))
     proof_ref = store('recovery/current.json', v.canonical(proof))
     references = []
-    existing = {(v.digest(raw), len(raw)): name for name, raw in files.items()}
     for name, raw in recovered.items():
-        location = existing.get((v.digest(raw), len(raw)), 'recovery/retained/' + name)
-        references.append(dict(originalPath=name, file=store(location, raw)))
+        references.append(dict(originalPath=name, file=store('recovery/retained/' + name, raw)))
     issuer = dict(commit=manifest['sourceCommit'], runID=99, attempt=1)
     attestation = dict(subject=proof_ref, bundle=store('recovery/current.bundle', b'current fixture bundle\n'),
                        verification=store('recovery/current.verification', b'current fixture verification\n'))

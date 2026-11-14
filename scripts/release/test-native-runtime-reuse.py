@@ -213,6 +213,17 @@ class NativeProofTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError,'baseline transition'):
                     I.compare_files(changed_old,changed_new)
 
+    def test_native_sdk_context_transition_is_exact_and_keeps_reuse_guards(self):
+        current = self.new[I.VERIFIER]
+        baseline = current.replace(I.NATIVE_SDK_RECOVERY_CALL.encode(), I.SDK_RECOVERY_CALL.encode(), 1)
+        self.assertNotEqual(current, baseline)
+        I.compare_files(dict(self.old, **{I.VERIFIER: baseline}), self.new)
+        for changed in (current+b'changed', current.replace(I.HOOK.encode(), b''),
+                        current.replace(I.NEW_MODE.encode(), I.OLD_MODE.encode()),
+                        current.replace(b"manifest['nativeReuse']['producer']['commit']", b'source_commit')):
+            with self.assertRaises(ValueError):
+                I.compare_files(dict(self.old, **{I.VERIFIER: baseline}), dict(self.new, **{I.VERIFIER: changed}))
+
     def test_workflow_globals_jobs_steps_and_verifier_are_closed(self):
         raw=self.new[I.WORKFLOW]
         variants=[raw+b'env:\n  CC: altered\n', raw+b'jobs:\n',
@@ -349,8 +360,19 @@ class NativeProofTests(unittest.TestCase):
                 self.assertFalse(any(character in path.relative_to(output).as_posix() for character in '\":<>|*?\r\n'))
             self.assertEqual(N.validate(actual,lambda name:(output/name).read_bytes(),self.consumer),native)
 
-    def test_composition_preserves_native_bytes_and_fresh_loader_and_explicit_mode(self):
+    def composition(self, sdk_recovery=False):
         fixture=P.RuntimePreparationTests(); fixture.setUp(); self.addCleanup(fixture.doCleanups)
+        if sdk_recovery:
+            manifest, _runtime, _payloads, evidence, _recovered, _proof = P.F.sdk_recovery_fixture(source_commit=self.producer)
+            for key in ('sourceProjects', 'oci'):
+                fixture.native_fragment[key] = copy.deepcopy(manifest[key])
+            fixture.payloads = _payloads
+            fixture.native_fragment['payloads'] = [copy.deepcopy(row) for row in manifest['payloads']
+                                                   if row['path'] != manifest['loader']['path']]
+            for row in fixture.native_fragment['payloads']:
+                fixture.write(fixture.native, row['path'], fixture.payloads[row['path']])
+            for name, data in evidence.items():
+                fixture.write(fixture.native, name, data)
         fixture.commit=self.consumer; fixture.native_fragment['sourceCommit']=self.producer
         fixture.loader_fragment['sourceCommit']=self.consumer
         source_files={}; inventory=[]
@@ -370,12 +392,19 @@ class NativeProofTests(unittest.TestCase):
         fixture.loader_fragment['sourceProjects']=[project]
         for item in fixture.loader_fragment['loader']['selectedInputs']:
             for source in item['sourceFiles']:source['project']='current-loader'
+        if sdk_recovery:
+            fixture.loader_fragment['reproducibleBuild'] = copy.deepcopy(fixture.loader_fragment['loader'])
+            fixture.write(fixture.loader, 'capture-second/payload', fixture.payloads[fixture.manifest['loader']['path']])
         fixture.save_fragments()
         proof,files=self.proof(fixture.native_fragment)
         reuse=fixture.root/'reuse'; reuse.mkdir()
         for name,data in files.items(): fixture.write(reuse,name,data)
         fixture.write(reuse,'native-reuse.json',I.canonical(proof))
         manifest=P.P.prepare(fixture.native,fixture.loader,self.consumer,999,1,fixture.output,native_reuse_root=reuse)
+        return fixture, manifest, proof, files
+
+    def test_composition_preserves_native_bytes_and_fresh_loader_and_explicit_mode(self):
+        fixture, manifest, proof, files = self.composition()
         self.assertEqual(manifest['closureMode'],'authenticated-native-reuse')
         self.assertEqual(manifest['producer']['commit'],self.consumer)
         self.assertEqual(manifest['nativeReuse']['producer']['commit'],self.producer)
@@ -419,9 +448,27 @@ class NativeProofTests(unittest.TestCase):
             with self.assertRaises(ValueError):N.verify_composition(changed,fetch,self.consumer,False)
         fixture.loader_fragment['sourceCommit']=self.producer;fixture.save_fragments()
         with self.assertRaisesRegex(ValueError,'source/status'):
-            P.P.prepare(fixture.native,fixture.loader,self.consumer,999,1,fixture.root/'stale-loader',native_reuse_root=reuse)
+            P.P.prepare(fixture.native,fixture.loader,self.consumer,999,1,fixture.root/'stale-loader',native_reuse_root=fixture.root/'reuse')
         with self.assertRaisesRegex(ValueError,'source/status'):
             P.P.prepare(fixture.native,fixture.loader,self.consumer,999,1,fixture.root/'no-proof')
+
+
+    def test_reused_sdk_recovery_remains_bound_to_original_native_source_with_fresh_loader(self):
+        fixture, manifest, _proof, _files = self.composition(sdk_recovery=True)
+        fetch = lambda name: (fixture.output/name).read_bytes()
+        runtime = json.loads((fixture.output/'licenses/runtime-license-inventory.json').read_bytes())
+        owner = manifest['oci']['links'][0]['sdkRecovery']
+        self.assertEqual(owner['issuer']['commit'], self.producer)
+        self.assertEqual(json.loads(fetch(owner['proof']['path']))['preparedForSource'], self.producer)
+        self.assertEqual(manifest['producer']['commit'], self.consumer)
+        P.P.V.verify(I.canonical(manifest), runtime, fixture.payloads, fetch, self.consumer, require_authentication=False)
+        with self.assertRaisesRegex(ValueError, 'producer binding'):
+            P.P.V.verify_sdk_recovery(manifest['oci']['links'], manifest['sourceProjects'], fetch,
+                                     self.consumer, require_authentication=False)
+        altered = copy.deepcopy(manifest)
+        altered['oci']['links'][0]['sdkRecovery']['issuer']['commit'] = self.consumer
+        with self.assertRaisesRegex(ValueError, 'reused OCI provenance changed'):
+            P.P.V.verify(I.canonical(altered), runtime, fixture.payloads, fetch, self.consumer, require_authentication=False)
 
 
 class NativeAuthenticationTests(unittest.TestCase):

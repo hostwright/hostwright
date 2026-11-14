@@ -23,6 +23,8 @@ TEST_CONSUMERS = (
 )
 INPUT_COMPARATOR = 'scripts/release/native-reuse-inputs.py'
 BASELINE_COMPARATOR_SHA256 = '0fbb17ffdbc39f92b0215089512200390204d37b0fe697a07bd6f7111b7b179a'
+NATIVE_REUSE_VERIFIER = 'scripts/release/verify-native-reuse.py'
+BASELINE_REUSE_VERIFIER_SHA256 = '14aec8970f04e06e461e3519727ec35cdf07993eb2cab8fd5a500dfd8209317e'
 ADDITIONS = (
     'scripts/release/resolve-native-checkpoint.py', 'scripts/release/native-reuse-inputs.py',
     'scripts/release/verify-native-reuse.py', 'scripts/release/test-native-runtime-reuse.py',
@@ -156,8 +158,9 @@ def compare_files(old, new):
         if name in (*CONSUMERS, *TEST_CONSUMERS):
             role = 'reviewed-workflow-routing-test' if name in TEST_CONSUMERS else 'reviewed-final-composition-consumer'
             changes.append(dict(path=name, role=role, before=digest(raw), after=digest(current)))
-        elif name == INPUT_COMPARATOR:
-            require(current == raw or (digest(raw) == BASELINE_COMPARATOR_SHA256 and current == Path(__file__).read_bytes()),
+        elif name in (INPUT_COMPARATOR, NATIVE_REUSE_VERIFIER):
+            baseline = BASELINE_COMPARATOR_SHA256 if name == INPUT_COMPARATOR else BASELINE_REUSE_VERIFIER_SHA256
+            require(current == raw or (digest(raw) == baseline and current == (HERE/Path(name).name).read_bytes()),
                     'native input comparator differs from the reviewed baseline transition')
             changes.append(dict(path=name, role=('unchanged-input-boundary' if current == raw else
                                                 'reviewed-consumer-boundary-transition'),
@@ -199,7 +202,7 @@ def compare_files(old, new):
         return dict(sha256=digest(json.dumps(hashes,sort_keys=True,separators=(',',':')).encode()),files=hashes)
     old_recipe,new_recipe=recipe(old),recipe(new)
     require(old_recipe == new_recipe, 'original SDK compilation recipe changed')
-    return dict(unchanged={name:digest(raw) for name,raw in old.items() if name not in (*CONSUMERS,*TEST_CONSUMERS,INPUT_COMPARATOR,VERIFIER,WORKFLOW)},
+    return dict(unchanged={name:digest(raw) for name,raw in old.items() if name not in (*CONSUMERS,*TEST_CONSUMERS,INPUT_COMPARATOR,NATIVE_REUSE_VERIFIER,VERIFIER,WORKFLOW)},
                 reviewedConsumerChanges=changes, workflow=dict(before=digest(old[WORKFLOW]),after=digest(new[WORKFLOW])),
                 sdkCompileInputs=new_recipe,
                 addedConsumers={name:digest(new[name]) for name in sorted(set(new)-set(old))})
@@ -227,13 +230,38 @@ def verify(comparison, fetch, producer, source):
     return result
 
 
-def prepare(repo, producer, source, output):
+def verify_ancestor(comparison, fetch, ancestor, descendant):
+    require(re.fullmatch('[a-f0-9]{40}', ancestor) and re.fullmatch('[a-f0-9]{40}', descendant),
+            'invalid SDK ancestry endpoint')
+    require(len(comparison['ancestry']) <= 10000, 'SDK ancestry exceeds bound')
+    chain={identity:bound(item,fetch) for identity,item in comparison['ancestry'].items()}
+    for name in ('producer','consumer'):
+        row=comparison[name];chain[row['commit']]=bound(row['commitObject'],fetch)
+    require(all(oid('commit',raw)==identity for identity,raw in chain.items()), 'SDK ancestry object mismatch')
+    pending=[descendant];seen=set()
+    while pending:
+        identity=pending.pop()
+        if identity==ancestor:return
+        if identity in seen:continue
+        seen.add(identity)
+        require(identity in chain and len(seen)<=10000, 'SDK ancestry proof is incomplete')
+        parents=[line[7:].decode() for line in chain[identity].splitlines()
+                 if re.fullmatch(rb'parent [a-f0-9]{40}',line)]
+        pending.extend(parent for parent in parents if parent==ancestor or parent in chain)
+    raise ValueError('historical SDK source is not an ancestor of the native producer')
+
+
+def prepare(repo, producer, source, output, extra_ancestors=()):
     require(git(repo,'rev-parse','HEAD').decode().strip()==source and not git(repo,'status','--porcelain=v1','--untracked-files=all'), 'native reuse requires exact clean current source')
     subprocess.run(['git','-C',str(repo),'merge-base','--is-ancestor',producer,source],check=True,timeout=30)
     old=capture(repo,producer,output,'git/producer');new=capture(repo,source,output,'git/consumer')
-    ancestors=git(repo,'rev-list','--ancestry-path',producer+'..'+source).decode().splitlines()
+    ancestors=set(git(repo,'rev-list','--ancestry-path',producer+'..'+source).decode().splitlines())
+    for ancestor in extra_ancestors:
+        require(re.fullmatch('[a-f0-9]{40}',ancestor), 'invalid retained SDK source')
+        subprocess.run(['git','-C',str(repo),'merge-base','--is-ancestor',ancestor,producer],check=True,timeout=30)
+        ancestors.update(git(repo,'rev-list','--ancestry-path',ancestor+'..'+source).decode().splitlines())
     require(len(ancestors)<=10000,'native ancestry exceeds bound')
-    chain={identity:record(output,'git/ancestry/'+identity,git(repo,'cat-file','commit',identity)) for identity in ancestors}
+    chain={identity:record(output,'git/ancestry/'+identity,git(repo,'cat-file','commit',identity)) for identity in sorted(ancestors)}
     fetch=lambda name:(output/name).read_bytes()
     proof=dict(producer=old,consumer=new,ancestry=chain,comparison=compare_files(snapshot(old,fetch),snapshot(new,fetch)))
     verify(proof,fetch,producer,source)

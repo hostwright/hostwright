@@ -152,11 +152,15 @@ def validate(proof,fetch,source,authenticate=False):
     require(set(sdk_producer)=={'commit','runID','attempt'} and set(sdk_reuse['producer'])=={'commit'}
             and re.fullmatch('[a-f0-9]{40}',sdk_producer['commit'])
             and sdk_reuse['kind']=='hostwright.swift-sdk-reuse-compatibility.v1' and sdk_reuse['status']=='compatible-not-release-qualified'
-            and sdk_reuse['sourceCommit']==producer['commit'] and sdk_reuse['producer']['commit']==sdk_producer['commit']
+            and re.fullmatch('[a-f0-9]{40}',sdk_reuse['sourceCommit'])
+            and sdk_reuse['producer']['commit']==sdk_producer['commit']
             and type(sdk_producer['runID']) is int and sdk_producer['runID']>0 and type(sdk_producer['attempt']) is int and sdk_producer['attempt']>0
             and sdk_reuse['sourceInventory']['sdkArchiveSHA256']==sdk['archive']['sha256'], 'original SDK reuse chain changed')
     comparison=I.verify(proof['inputComparison'],fetch,producer['commit'],source)
     require(comparison['sdkCompileInputs']==sdk_reuse['compileInputs'],'original SDK recipe is not the unchanged accepted recipe')
+    for ancestor in (sdk_producer['commit'],sdk_reuse['sourceCommit']):
+        I.verify_ancestor(proof['inputComparison'],fetch,ancestor,producer['commit'])
+    I.verify_ancestor(proof['inputComparison'],fetch,sdk_producer['commit'],sdk_reuse['sourceCommit'])
     if authenticate:
         with tempfile.TemporaryDirectory(prefix='native-reuse-auth-') as temporary:
             temporary=Path(temporary)
@@ -193,9 +197,12 @@ def prepare(carrier,resolution_path,repo,source,output):
     verify_carrier(carrier)
     sdk={key:I.record(output,'sdk/'+name,safe(carrier,'evidence/'+name).read_bytes())
          for key,name in [('producer','sdk-producer.json'),('reuse','sdk-reuse.json'),('archive','swift-static-sdk.tar.gz')]}
+    sdk_producer=json.loads(safe(carrier,'evidence/sdk-producer.json').read_bytes())
+    sdk_reuse=json.loads(safe(carrier,'evidence/sdk-reuse.json').read_bytes())
     proof=dict(kind=KIND,schemaVersion=1,status='authenticated-unchanged-inputs-not-release-qualified',sourceCommit=source,
                producer=producer,artifact=resolution['artifact'],resolution=I.record(output,'resolution.json',canonical(resolution)),
-               subjects=subjects,sdk=sdk,inputComparison=I.prepare(repo,producer['commit'],source,output))
+               subjects=subjects,sdk=sdk,inputComparison=I.prepare(repo,producer['commit'],source,output,
+                   extra_ancestors=(sdk_producer['commit'],sdk_reuse['sourceCommit'])))
     validate(proof,lambda name:safe(output,name).read_bytes(),source)
     (output/'native-reuse.json').write_bytes(canonical(proof))
     return proof

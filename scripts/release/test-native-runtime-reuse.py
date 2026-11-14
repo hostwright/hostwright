@@ -149,7 +149,11 @@ class NativeProofTests(unittest.TestCase):
                 path=cls.repo/name; path.parent.mkdir(parents=True,exist_ok=True); path.write_bytes(data)
         write(cls.old)
         write({'main.c':b'int main() { return 0; }\n','LICENSE':b'Fixture license text\n','NOTICE':b'Fixture notice text\n'})
-        git('add','.'); git('commit','-qm','Original native fixture'); cls.producer=git('rev-parse','HEAD')
+        git('add','.'); git('commit','-qm','Original SDK fixture'); cls.sdk_producer=git('rev-parse','HEAD')
+        write({'sdk-evidence-marker':b'retained intermediate SDK evidence\n'})
+        git('add','.');git('commit','-qm','SDK evidence fixture');cls.sdk_source=git('rev-parse','HEAD')
+        write({'native-marker':b'native producer uses retained SDK evidence\n'})
+        git('add','.');git('commit','-qm','Original native fixture');cls.producer=git('rev-parse','HEAD')
         cls.new = dict(cls.old, **{I.WORKFLOW:current_workflow, I.VERIFIER:current_verifier})
         cls.new.update({name:(ROOT/name).read_bytes() for name in I.ADDITIONS})
         write(cls.new); git('add','.'); git('commit','-qm','Reuse consumer fixture'); cls.consumer=git('rev-parse','HEAD')
@@ -196,6 +200,19 @@ class NativeProofTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'baseline transition'):
                 I.compare_files(old, dict(current, **{I.INPUT_COMPARATOR: current[I.INPUT_COMPARATOR]+b'changed'}))
 
+    def test_sdk_validator_transition_requires_exact_baseline_and_current_implementation(self):
+        before=b'previous reviewed SDK validator fixture\n'
+        old=dict(self.old,**{I.NATIVE_REUSE_VERIFIER:before})
+        current=dict(self.new,**{I.NATIVE_REUSE_VERIFIER:Path(N.__file__).read_bytes()})
+        with mock.patch.object(I,'BASELINE_REUSE_VERIFIER_SHA256',I.digest(before)):
+            I.compare_files(old,current)
+            for changed_old,changed_new in (
+                (dict(old,**{I.NATIVE_REUSE_VERIFIER:before+b'changed'}),current),
+                (old,dict(current,**{I.NATIVE_REUSE_VERIFIER:current[I.NATIVE_REUSE_VERIFIER]+b'changed'})),
+            ):
+                with self.assertRaisesRegex(ValueError,'baseline transition'):
+                    I.compare_files(changed_old,changed_new)
+
     def test_workflow_globals_jobs_steps_and_verifier_are_closed(self):
         raw=self.new[I.WORKFLOW]
         variants=[raw+b'env:\n  CC: altered\n', raw+b'jobs:\n',
@@ -224,16 +241,18 @@ class NativeProofTests(unittest.TestCase):
             return data+b'changed' if '/blobs/' in name else data
         with self.assertRaises(ValueError): I.verify(self.comparison,corrupted,self.producer,self.consumer)
 
-    def proof(self, native):
-        files={p.relative_to(self.evidence).as_posix():p.read_bytes() for p in self.evidence.rglob('*') if p.is_file()}
+    def proof(self, native, sdk_commit=None, sdk_source=None, comparison=None, evidence=None):
+        evidence=self.evidence if evidence is None else evidence
+        comparison=self.comparison if comparison is None else comparison
+        files={p.relative_to(evidence).as_posix():p.read_bytes() for p in evidence.rglob('*') if p.is_file()}
         def record(name,data):
             files[name]=data
             return dict(path=name,sha256=I.digest(data),sizeBytes=len(data))
-        sdk_producer=dict(commit='d'*40,runID=11,attempt=1)
+        sdk_producer=dict(commit=sdk_commit or self.producer,runID=11,attempt=1)
         archive=b'original synthetic SDK archive'
         sdk_reuse=dict(kind='hostwright.swift-sdk-reuse-compatibility.v1',status='compatible-not-release-qualified',
-                       sourceCommit=self.producer,producer=dict(commit=sdk_producer['commit']),
-                       sourceInventory=dict(sdkArchiveSHA256=I.digest(archive)),compileInputs=self.comparison['comparison']['sdkCompileInputs'])
+                       sourceCommit=sdk_source or self.producer,producer=dict(commit=sdk_producer['commit']),
+                       sourceInventory=dict(sdkArchiveSHA256=I.digest(archive)),compileInputs=comparison['comparison']['sdkCompileInputs'])
         members={'evidence/sdk-producer.json':I.canonical(sdk_producer), 'evidence/sdk-reuse.json':I.canonical(sdk_reuse),
                  'evidence/swift-static-sdk.tar.gz':archive, 'runtime-native-fragment/native-provenance.json':I.canonical(native),
                  'evidence/source-map.json':b'{"fixture":"original source map"}\n'}
@@ -246,8 +265,27 @@ class NativeProofTests(unittest.TestCase):
                    producer=resolution['producer'],artifact=resolution['artifact'],resolution=record('resolution.json',I.canonical(resolution)),
                    subjects=subjects,sdk={key:record('sdk/'+name,members['evidence/'+name]) for key,name in (
                        ('producer','sdk-producer.json'),('reuse','sdk-reuse.json'),('archive','swift-static-sdk.tar.gz'))},
-                   inputComparison=copy.deepcopy(self.comparison))
+                   inputComparison=copy.deepcopy(comparison))
         return proof,files
+
+    def test_historical_sdk_source_stays_bound_to_its_original_ancestor(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            comparison=I.prepare(self.repo,self.producer,self.consumer,root,
+                                 extra_ancestors=(self.sdk_producer,self.sdk_source))
+            native=dict(sourceCommit=self.producer,status='prepared-not-release-qualified')
+            proof,files=self.proof(native,self.sdk_producer,self.sdk_source,comparison,root)
+            self.assertEqual(N.validate(proof,files.__getitem__,self.consumer),native)
+            retained=json.loads(files[proof['sdk']['reuse']['path']])
+            self.assertEqual(retained['sourceCommit'],self.sdk_source)
+            changed=copy.deepcopy(proof)
+            del changed['inputComparison']['ancestry'][self.sdk_source]
+            with self.assertRaises(ValueError):
+                N.validate(changed,files.__getitem__,self.consumer)
+            for commit,source in ((self.sdk_producer,'e'*40),(self.consumer,self.sdk_source)):
+                bad,bad_files=self.proof(native,commit,source,comparison,root)
+                with self.subTest(commit=commit,source=source),self.assertRaises(ValueError):
+                    N.validate(bad,bad_files.__getitem__,self.consumer)
 
     def test_original_native_claim_and_sdk_chain_remain_bound(self):
         native=dict(sourceCommit=self.producer,status='prepared-not-release-qualified')

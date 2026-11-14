@@ -11,8 +11,18 @@ import subprocess
 HERE = Path(__file__).resolve().parent
 WORKFLOW = '.github/workflows/runtime-ingredients.yml'
 VERIFIER = 'scripts/release/verify-runtime-provenance.py'
-CONSUMERS = ('scripts/release/prepare-runtime-provenance.py', 'scripts/release/runtime-provenance.schema.json')
-TEST_CONSUMERS = ('scripts/release/test-runtime-ingredient-gates.py',)
+CONSUMERS = (
+    'scripts/release/prepare-runtime-provenance.py', 'scripts/release/runtime-provenance.schema.json',
+    'scripts/release/accept-qualification.py', 'scripts/release/assemble-qualification.py',
+    'scripts/release/staged-release.py',
+)
+TEST_CONSUMERS = (
+    'scripts/release/test-runtime-ingredient-gates.py',
+    'scripts/release/test-assemble-qualification.py', 'scripts/release/test-staged-release.py',
+    'scripts/release/test-native-runtime-reuse.py',
+)
+INPUT_COMPARATOR = 'scripts/release/native-reuse-inputs.py'
+BASELINE_COMPARATOR_SHA256 = '0fbb17ffdbc39f92b0215089512200390204d37b0fe697a07bd6f7111b7b179a'
 ADDITIONS = (
     'scripts/release/resolve-native-checkpoint.py', 'scripts/release/native-reuse-inputs.py',
     'scripts/release/verify-native-reuse.py', 'scripts/release/test-native-runtime-reuse.py',
@@ -140,12 +150,18 @@ def compare_files(old, new):
     require(set(new)-set(old) <= set(ADDITIONS), 'unreviewed native producer input was added')
     require(all(name in old and name in new for name in FILES[:3]), 'native package/asset input is missing')
     changes = []
-    for name,raw in old.items():
+    for name,raw in sorted(old.items()):
         if name == WORKFLOW: continue
         current = new[name]
         if name in (*CONSUMERS, *TEST_CONSUMERS):
             role = 'reviewed-workflow-routing-test' if name in TEST_CONSUMERS else 'reviewed-final-composition-consumer'
             changes.append(dict(path=name, role=role, before=digest(raw), after=digest(current)))
+        elif name == INPUT_COMPARATOR:
+            require(current == raw or (digest(raw) == BASELINE_COMPARATOR_SHA256 and current == Path(__file__).read_bytes()),
+                    'native input comparator differs from the reviewed baseline transition')
+            changes.append(dict(path=name, role=('unchanged-input-boundary' if current == raw else
+                                                'reviewed-consumer-boundary-transition'),
+                                before=digest(raw), after=digest(current)))
         elif name == VERIFIER:
             if current != raw:
                 require(current.count(HOOK.encode()) == 1 and current.count(NEW_MODE.encode()) == 1,
@@ -183,7 +199,7 @@ def compare_files(old, new):
         return dict(sha256=digest(json.dumps(hashes,sort_keys=True,separators=(',',':')).encode()),files=hashes)
     old_recipe,new_recipe=recipe(old),recipe(new)
     require(old_recipe == new_recipe, 'original SDK compilation recipe changed')
-    return dict(unchanged={name:digest(raw) for name,raw in old.items() if name not in (*CONSUMERS,*TEST_CONSUMERS,VERIFIER,WORKFLOW)},
+    return dict(unchanged={name:digest(raw) for name,raw in old.items() if name not in (*CONSUMERS,*TEST_CONSUMERS,INPUT_COMPARATOR,VERIFIER,WORKFLOW)},
                 reviewedConsumerChanges=changes, workflow=dict(before=digest(old[WORKFLOW]),after=digest(new[WORKFLOW])),
                 sdkCompileInputs=new_recipe,
                 addedConsumers={name:digest(new[name]) for name in sorted(set(new)-set(old))})

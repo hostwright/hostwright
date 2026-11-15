@@ -11,6 +11,9 @@ import subprocess
 HERE = Path(__file__).resolve().parent
 WORKFLOW = '.github/workflows/runtime-ingredients.yml'
 VERIFIER = 'scripts/release/verify-runtime-provenance.py'
+ASSEMBLER = 'scripts/release/assemble-runtime-provenance.py'
+BASELINE_ASSEMBLER_SHA256 = 'abfe52232a1eb5905852f932df3cfdfb7977e0150e743de5bc5130abd6a60415'
+STREAMING_ASSEMBLER_SHA256 = '7614f16bf70b4718d2d21c103408a133c6badee8a9d234110441fd56818954fd'
 CONSUMERS = (
     'scripts/release/prepare-runtime-provenance.py', 'scripts/release/runtime-provenance.schema.json',
     'scripts/release/accept-qualification.py', 'scripts/release/assemble-qualification.py',
@@ -21,6 +24,7 @@ TEST_CONSUMERS = (
     'scripts/release/test-assemble-qualification.py', 'scripts/release/test-staged-release.py',
     'scripts/release/test-native-runtime-reuse.py',
     'scripts/release/test-runtime-provenance.py',
+    'scripts/release/test-assemble-runtime-provenance.py',
 )
 INPUT_COMPARATOR = 'scripts/release/native-reuse-inputs.py'
 BASELINE_COMPARATOR_SHA256 = '0fbb17ffdbc39f92b0215089512200390204d37b0fe697a07bd6f7111b7b179a'
@@ -161,6 +165,12 @@ def compare_files(old, new):
         if name in (*CONSUMERS, *TEST_CONSUMERS):
             role = 'reviewed-workflow-routing-test' if name in TEST_CONSUMERS else 'reviewed-final-composition-consumer'
             changes.append(dict(path=name, role=role, before=digest(raw), after=digest(current)))
+        elif name == ASSEMBLER:
+            require(current == raw or (digest(raw) == BASELINE_ASSEMBLER_SHA256
+                    and digest(current) == STREAMING_ASSEMBLER_SHA256),
+                    'runtime archive writer differs from the exact streaming transition')
+            changes.append(dict(path=name, role='exact-streaming-archive-writer',
+                                before=digest(raw), after=digest(current)))
         elif name in (INPUT_COMPARATOR, NATIVE_REUSE_VERIFIER):
             baseline = BASELINE_COMPARATOR_SHA256 if name == INPUT_COMPARATOR else BASELINE_REUSE_VERIFIER_SHA256
             require(current == raw or (digest(raw) == baseline and current == (HERE/Path(name).name).read_bytes()),
@@ -211,7 +221,7 @@ def compare_files(old, new):
         return dict(sha256=digest(json.dumps(hashes,sort_keys=True,separators=(',',':')).encode()),files=hashes)
     old_recipe,new_recipe=recipe(old),recipe(new)
     require(old_recipe == new_recipe, 'original SDK compilation recipe changed')
-    return dict(unchanged={name:digest(raw) for name,raw in old.items() if name not in (*CONSUMERS,*TEST_CONSUMERS,INPUT_COMPARATOR,NATIVE_REUSE_VERIFIER,VERIFIER,WORKFLOW)},
+    return dict(unchanged={name:digest(raw) for name,raw in old.items() if name not in (*CONSUMERS,*TEST_CONSUMERS,INPUT_COMPARATOR,NATIVE_REUSE_VERIFIER,VERIFIER,ASSEMBLER,WORKFLOW)},
                 reviewedConsumerChanges=changes, workflow=dict(before=digest(old[WORKFLOW]),after=digest(new[WORKFLOW])),
                 sdkCompileInputs=new_recipe,
                 addedConsumers={name:digest(new[name]) for name in sorted(set(new)-set(old))})

@@ -966,7 +966,8 @@ jobs:
           mkdir -m 700 "$RUNNER_TEMP/runtime-loader-authenticated"
           tar --no-same-owner -xzf "$RUNNER_TEMP/runtime-loader/loader-build-inputs.tar.gz" \
             -C "$RUNNER_TEMP/runtime-loader-authenticated"
-      - name: Prepare and verify the combined runtime provenance source archive
+      - name: Prepare and verify the combined runtime source closure
+        timeout-minutes: 150
         shell: bash
         env:
           NATIVE_REUSE_ATTEMPT: ${{ needs.native-checkpoint.outputs.producer-attempt }}
@@ -986,6 +987,11 @@ jobs:
             --source-commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
             --source-root "$GITHUB_WORKSPACE" "${reuse_args[@]}" \
             --output "$RUNNER_TEMP/runtime-prepared"
+      - name: Assemble and verify the runtime source archive
+        timeout-minutes: 120
+        shell: bash
+        run: |
+          set -euo pipefail
           echo "Assembling and verifying the runtime source archive"
           mkdir -m 700 "$RUNNER_TEMP/runtime-final"
           python3 scripts/release/assemble-runtime-provenance.py \
@@ -994,6 +1000,11 @@ jobs:
             --version "$(python3 -c 'import json; print(json.load(open("contracts/v0.0.2/versions.json"))["productVersion"])')" \
             --source-root "$GITHUB_WORKSPACE" \
             --kernel-signature-inputs "$RUNNER_TEMP/runtime-inputs/evidence/kernel-inputs"
+      - name: Prepare exact runtime attestation subjects
+        timeout-minutes: 60
+        shell: bash
+        run: |
+          set -euo pipefail
           echo "Preparing exact runtime attestation subjects"
           python3 scripts/release/prepare-runtime-attestation-subjects.py \
             --archive "$RUNNER_TEMP/runtime-final/runtime-provenance.tar.gz" \
@@ -1005,6 +1016,7 @@ jobs:
             ${{ runner.temp }}/runtime-attestation-subjects/runtime-provenance.json
             ${{ runner.temp }}/runtime-attestation-subjects/payloads/*
       - name: Authenticate the final bundle against this producer run
+        timeout-minutes: 120
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}

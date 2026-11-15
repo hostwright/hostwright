@@ -41,7 +41,7 @@ HOOK = '''    if "nativeReuse" in manifest:
         reuse.verify_composition(manifest, fetch, source_commit, require_authentication)
 '''
 NATIVE_CHECKPOINT_JOB_SHA256 = 'b4fa6898cccb47be502aa59aff52da06059fe386cb67dc540b79a3ce3c0ac078'
-FINAL_COMPOSITION_JOB_SHA256 = '0a77bba93362dd4966043ec6140a355bfa5ec1047f8e9f226d542c102119229d'
+FINAL_COMPOSITION_JOB_SHA256 = '837a4074fd94c172a2b9e384ca65c7a8abcc59fc5edabc82490a4d752b29fce3'
 EMPTY_NATIVE = " && inputs.native_checkpoint_run == '' && inputs.native_checkpoint_attempt == ''"
 OLD_MODE = "manifest['closureMode']=='new-source-build'"
 NEW_MODE = "manifest['closureMode']==('authenticated-native-reuse' if 'nativeReuse' in manifest else 'new-source-build')"

@@ -231,6 +231,12 @@ class NativeProofTests(unittest.TestCase):
                   raw.replace(b'runs-on: ubuntu-24.04-arm',b'runs-on: other',1),
                   raw.replace(b'      - name: Install pinned Swift SDK build prerequisites',b'      - run: arbitrary-command\n      - name: Install pinned Swift SDK build prerequisites'),
                   raw.replace(b'          persist-credentials: false',b'          persist-credentials: true',1),
+                  raw.replace(b'      - name: Assemble and verify the runtime source archive',
+                              b'      - continue-on-error: true\n        name: Assemble and verify the runtime source archive'),
+                  raw.replace(b'          python3 scripts/release/assemble-runtime-provenance.py',
+                              b'          true # omitted archive verification'),
+                  raw.replace(b'      - name: Authenticate the final bundle against this producer run',
+                              b'      - if: ${{ false }}\n        name: Authenticate the final bundle against this producer run'),
                   raw.replace(b'  native-checkpoint:',b'  other-checkpoint:')]
         for value in variants:
             with self.assertRaises(ValueError): I.compare_files(self.old,dict(self.new, **{I.WORKFLOW:value}))

@@ -76,8 +76,9 @@ jobs:
           git fetch --no-tags origin main
           git merge-base --is-ancestor "$RELEASE_COMMIT" origin/main
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$STAGE_RUN" > "$RUNNER_TEMP/stage-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$STAGE_RUN/jobs?filter=all&per_page=100" > "$RUNNER_TEMP/stage-jobs.json"
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QUALIFICATION_RUN" > "$RUNNER_TEMP/qualification-run.json"
-          python3 scripts/release/validate-run.py "$RUNNER_TEMP/stage-run.json" trusted-release.yml "$STAGE_ATTEMPT"
+          python3 scripts/release/validate-run.py "$RUNNER_TEMP/stage-run.json" trusted-release.yml "$STAGE_ATTEMPT" --jobs "$RUNNER_TEMP/stage-jobs.json" --commit "$RELEASE_COMMIT"
           python3 scripts/release/validate-run.py "$RUNNER_TEMP/qualification-run.json" release-qualification-acceptance.yml
       - name: Recheck immutable publication inputs
         shell: bash

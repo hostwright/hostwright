@@ -1,5 +1,15 @@
 # Staged v0.0.2 release promotion
 
+Attestation-only retries retain the successful signed build's original attempt in
+the staged inventory. Acceptance and promotion check the complete job history:
+the signed build must still be the original successful execution on the restricted
+release runner group. GitHub's carried-forward job records must match that
+execution's timestamps, steps and runner, and the latest hosted attestation must
+succeed for the same source. A later failed or replacement build, failed attestation, different source
+or runner group, or truncated history blocks promotion. Preserve earlier cancelled
+attempts and controller failures; retrying attestation does not rebuild or relabel
+the signed artifacts.
+
 Trusted staging builds unpublished final `0.0.2` artifacts from a clean reviewed
 commit on main. The active qualification policy is
 `hostwright.v0.0.2.focused.v1`, defined by [ADR 0017](../design/adr-0017-focused-v002-qualification.md).

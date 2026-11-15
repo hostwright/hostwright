@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import importlib.util
+import gzip
+import hashlib
 import io
 import json
 import pathlib
@@ -27,6 +29,56 @@ CORRESPONDING_SOURCE = load("corresponding_source", "corresponding-source.py")
 
 class RuntimeProvenanceAssemblerTests(unittest.TestCase):
     """Exercise archive closure only; synthetic bytes are not producer evidence."""
+
+    def test_streamed_archive_matches_legacy_bytes_with_bounded_file_io(self):
+        evidence = {
+            "payload/large": hashlib.shake_256(b"archive-streaming-fixture").digest(3 * 1024 * 1024 + 117),
+            "licenses/" + "long-unicode-\u00e9/" * 20 + "LICENSE": b"retained license\n",
+        }
+        source_manifest = b'{"kind":"synthetic-source-manifest"}\n'
+        legacy = io.BytesIO()
+        with tarfile.open(fileobj=legacy, mode="w", format=tarfile.PAX_FORMAT) as archive:
+            for name, data in [*sorted(evidence.items()), ("source-manifest.json", source_manifest)]:
+                info = tarfile.TarInfo(name)
+                info.size = len(data)
+                info.mode = 0o644
+                info.uid = info.gid = 0
+                info.uname = info.gname = ""
+                info.mtime = 0
+                archive.addfile(info, io.BytesIO(data))
+        expected = io.BytesIO()
+        with gzip.GzipFile(filename="", mode="wb", fileobj=expected, mtime=0) as compressed:
+            compressed.write(legacy.getvalue())
+
+        class BoundedFile:
+            def __init__(self, stream):
+                self.stream = stream
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return self.stream.__exit__(*args)
+            def __getattr__(self, name):
+                return getattr(self.stream, name)
+            def write(self, data):
+                if len(data) > 1024 * 1024:
+                    raise AssertionError("archive-sized compressed write")
+                return self.stream.write(data)
+            def read(self, size=-1):
+                if not 0 < size <= 1024 * 1024:
+                    raise AssertionError("unbounded artifact read")
+                return self.stream.read(size)
+
+        class Output:
+            def __init__(self, path):
+                self.path = path
+            def open(self, mode):
+                return BoundedFile(self.path.open(mode))
+
+        with tempfile.TemporaryDirectory() as temporary:
+            path = pathlib.Path(temporary) / "streamed.tar.gz"
+            actual_sha = ASSEMBLER.write_archive(Output(path), evidence, source_manifest)
+            self.assertEqual(path.read_bytes(), expected.getvalue())
+            self.assertEqual(actual_sha, hashlib.sha256(expected.getvalue()).hexdigest())
 
     def test_go_capture_retains_nested_tool_input_and_archive_records(self):
         files = {}

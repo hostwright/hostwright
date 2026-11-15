@@ -137,7 +137,7 @@ class NativeProofTests(unittest.TestCase):
         old_workflow = current_workflow.replace(jobs['native-checkpoint'].encode(), b'').replace(I.EMPTY_NATIVE.encode(), b'')
         current_verifier = (ROOT/I.VERIFIER).read_bytes()
         old_verifier = current_verifier.replace(I.HOOK.encode(), b'').replace(I.NEW_MODE.encode(), I.OLD_MODE.encode())
-        names = [*I.FILES, *I.CONSUMERS, *I.TEST_CONSUMERS, 'scripts/release/build-static-swift-sdk.sh',
+        names = [*I.FILES, *I.CONSUMERS, *I.TEST_CONSUMERS, I.ASSEMBLER, 'scripts/release/build-static-swift-sdk.sh',
                  'scripts/release/runtime-swift-sources.json', 'scripts/release/materialize-swift-sdk-sources.py']
         cls.old = {name:(ROOT/name).read_bytes() if (ROOT/name).is_file() else b'fixture\n' for name in names}
         cls.old.update({p.relative_to(ROOT).as_posix():p.read_bytes() for p in (HERE/'patches/swift-sdk').rglob('*') if p.is_file()})
@@ -212,6 +212,24 @@ class NativeProofTests(unittest.TestCase):
             ):
                 with self.assertRaisesRegex(ValueError,'baseline transition'):
                     I.compare_files(changed_old,changed_new)
+
+    def test_archive_writer_transition_requires_exact_reviewed_bytes(self):
+        before = b'previous archive writer fixture\n'
+        current = (ROOT / I.ASSEMBLER).read_bytes()
+        self.assertEqual(I.digest(current), I.STREAMING_ASSEMBLER_SHA256)
+        old = dict(self.old, **{I.ASSEMBLER: before})
+        new = dict(self.new, **{I.ASSEMBLER: current})
+        with mock.patch.object(I, 'BASELINE_ASSEMBLER_SHA256', I.digest(before)):
+            result = I.compare_files(old, new)
+            self.assertIn('exact-streaming-archive-writer',
+                          {row['role'] for row in result['reviewedConsumerChanges']})
+            for changed_old, changed_new in (
+                (dict(old, **{I.ASSEMBLER: before + b'changed'}), new),
+                (old, dict(new, **{I.ASSEMBLER: current + b'changed'})),
+                (old, dict(new, **{I.ASSEMBLER: current.replace(b'VERIFIER.verify(', b'no_verification(')})),
+            ):
+                with self.assertRaisesRegex(ValueError, 'exact streaming transition'):
+                    I.compare_files(changed_old, changed_new)
 
     def test_native_sdk_context_transition_is_exact_and_keeps_reuse_guards(self):
         current = self.new[I.VERIFIER]

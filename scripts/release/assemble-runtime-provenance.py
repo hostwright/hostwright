@@ -91,6 +91,25 @@ def evidence_records(manifest, fetch):
     return found
 
 
+def write_archive(output, evidence, source_manifest_data):
+    with output.open("xb") as raw:
+        with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed:
+            with tarfile.open(fileobj=compressed, mode="w|", format=tarfile.PAX_FORMAT) as archive:
+                for name, data in [*sorted(evidence.items()), ("source-manifest.json", source_manifest_data)]:
+                    info = tarfile.TarInfo(name)
+                    info.size = len(data)
+                    info.mode = 0o644
+                    info.uid = info.gid = 0
+                    info.uname = info.gname = ""
+                    info.mtime = 0
+                    archive.addfile(info, io.BytesIO(data))
+    digest = hashlib.sha256()
+    with output.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def assemble(input_root, output, version, prepared_source_state, signature_receipt_data):
     if input_root.is_symlink():
         fail("runtime provenance input root must not be a symlink")
@@ -205,28 +224,7 @@ def assemble(input_root, output, version, prepared_source_state, signature_recei
     })
 
     output.parent.mkdir(parents=True, exist_ok=True)
-    buffer = io.BytesIO()
-    with tarfile.open(fileobj=buffer, mode="w", format=tarfile.PAX_FORMAT) as archive:
-        for name in sorted(required):
-            data = evidence[name]
-            info = tarfile.TarInfo(name)
-            info.size = len(data)
-            info.mode = 0o644
-            info.uid = info.gid = 0
-            info.uname = info.gname = ""
-            info.mtime = 0
-            archive.addfile(info, io.BytesIO(data))
-        info = tarfile.TarInfo("source-manifest.json")
-        info.size = len(source_manifest_data)
-        info.mode = 0o644
-        info.uid = info.gid = 0
-        info.uname = info.gname = ""
-        info.mtime = 0
-        archive.addfile(info, io.BytesIO(source_manifest_data))
-    with output.open("xb") as raw:
-        with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed:
-            compressed.write(buffer.getvalue())
-    return hashlib.sha256(output.read_bytes()).hexdigest()
+    return write_archive(output, evidence, source_manifest_data)
 
 
 def main():

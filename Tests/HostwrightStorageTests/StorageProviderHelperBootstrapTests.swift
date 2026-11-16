@@ -33,7 +33,7 @@ final class StorageProviderHelperBootstrapTests: XCTestCase {
     }
 
     func testSecretCreationRejectsWrongHelperSignerBeforeKeychainMutation() throws {
-        let root = FileManager.default.temporaryDirectory
+        let root = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("hostwright-keychain-\(UUID().uuidString)")
             .resolvingSymlinksInPath()
         try FileManager.default.createDirectory(
@@ -42,9 +42,16 @@ final class StorageProviderHelperBootstrapTests: XCTestCase {
             attributes: [.posixPermissions: 0o700]
         )
         defer { try? FileManager.default.removeItem(at: root) }
-        try FileManager.default.copyItem(
-            at: URL(fileURLWithPath: "/usr/bin/true"),
-            to: root.appendingPathComponent("hostwright-storage-helper")
+        let helper = root.appendingPathComponent("hostwright-storage-helper")
+        try Data(contentsOf: URL(fileURLWithPath: "/usr/bin/true"))
+            .write(to: helper, options: .withoutOverwriting)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: helper.path
+        )
+        _ = try SecureExecutableResolver.verify(
+            path: helper.path,
+            ownershipPolicy: .rootOrCurrentUser
         )
         let manager = StorageProviderKeychainAccess.secretManager(
             hostExecutableURL: root.appendingPathComponent("hostwright")

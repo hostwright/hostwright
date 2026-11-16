@@ -1,10 +1,76 @@
 import Darwin
 import Foundation
 import HostwrightCore
+import HostwrightSecrets
 import XCTest
 @testable import HostwrightStorage
 
 final class StorageProviderHelperBootstrapTests: XCTestCase {
+    func testSecretCreationRejectsMissingHelperBeforeKeychainMutation() throws {
+        let manager = StorageProviderKeychainAccess.secretManager(
+            hostExecutableURL: nil
+        )
+        let reference = try HostwrightSecretReference(
+            service: "dev.hostwright.integration.\(UUID().uuidString.lowercased())",
+            account: "missing-helper"
+        )
+        XCTAssertThrowsError(
+            try manager.create(
+                reference: reference,
+                value: try HostwrightSecretValue("never-written")
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? StorageProviderHelperBootstrapError,
+                .invalidConfiguration
+            )
+        }
+        XCTAssertThrowsError(try manager.check(reference: reference)) { error in
+            guard case .notFound = error as? SecretStoreError else {
+                return XCTFail("Expected no Keychain mutation, got \(error).")
+            }
+        }
+    }
+
+    func testSecretCreationRejectsWrongHelperSignerBeforeKeychainMutation() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hostwright-keychain-\(UUID().uuidString)")
+            .resolvingSymlinksInPath()
+        try FileManager.default.createDirectory(
+            at: root,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700]
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.copyItem(
+            at: URL(fileURLWithPath: "/usr/bin/true"),
+            to: root.appendingPathComponent("hostwright-storage-helper")
+        )
+        let manager = StorageProviderKeychainAccess.secretManager(
+            hostExecutableURL: root.appendingPathComponent("hostwright")
+        )
+        let reference = try HostwrightSecretReference(
+            service: "dev.hostwright.integration.\(UUID().uuidString.lowercased())",
+            account: "wrong-signer"
+        )
+        XCTAssertThrowsError(
+            try manager.create(
+                reference: reference,
+                value: try HostwrightSecretValue("never-written")
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? StorageProviderHelperBootstrapError,
+                .signerMismatch
+            )
+        }
+        XCTAssertThrowsError(try manager.check(reference: reference)) { error in
+            guard case .notFound = error as? SecretStoreError else {
+                return XCTFail("Expected no Keychain mutation, got \(error).")
+            }
+        }
+    }
+
     func testLaunchConnectsWithExpectedPIDAndCleansExactly() async throws {
         let harness = try HelperBootstrapHarness()
         defer { harness.removeRoot() }

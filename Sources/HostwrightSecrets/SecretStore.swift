@@ -370,9 +370,19 @@ public struct MacOSKeychainSecretStore: SecretManager, @unchecked Sendable {
     private static let itemLabel = "Hostwright managed secret"
     private let keychain: SecKeychain?
     private let cancellationCheck: @Sendable () throws -> Void
+    private let additionalTrustedApplications:
+        @Sendable () throws -> [SecTrustedApplication]
 
     public init() {
+        self.init(additionalTrustedApplications: { [] })
+    }
+
+    public init(
+        additionalTrustedApplications:
+            @escaping @Sendable () throws -> [SecTrustedApplication]
+    ) {
         self.keychain = nil
+        self.additionalTrustedApplications = additionalTrustedApplications
         self.cancellationCheck = {
             var cancelled = false
             withUnsafeCurrentTask { task in
@@ -389,11 +399,17 @@ public struct MacOSKeychainSecretStore: SecretManager, @unchecked Sendable {
     init(cancellationCheck: @escaping @Sendable () throws -> Void) {
         self.keychain = nil
         self.cancellationCheck = cancellationCheck
+        self.additionalTrustedApplications = { [] }
     }
 
-    init(keychain: SecKeychain) {
+    init(
+        keychain: SecKeychain,
+        additionalTrustedApplications:
+            @escaping @Sendable () throws -> [SecTrustedApplication] = { [] }
+    ) {
         self.keychain = keychain
         self.cancellationCheck = {}
+        self.additionalTrustedApplications = additionalTrustedApplications
     }
 
     public func readString(reference: HostwrightSecretReference) throws -> String {
@@ -411,7 +427,9 @@ public struct MacOSKeychainSecretStore: SecretManager, @unchecked Sendable {
         applySearchList(to: &query)
 
         var result: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        let status = Self.noninteractive {
+            SecItemCopyMatching(query as CFDictionary, &result)
+        }
         guard status == errSecSuccess else {
             throw Self.error(
                 for: status,
@@ -463,7 +481,37 @@ public struct MacOSKeychainSecretStore: SecretManager, @unchecked Sendable {
         if let keychain {
             addQuery[kSecUseKeychain as String] = keychain
         }
-        let status = SecItemAdd(addQuery as CFDictionary, nil)
+        let additionalApplications = try additionalTrustedApplications()
+        if !additionalApplications.isEmpty {
+            var caller: SecTrustedApplication?
+            let callerStatus = SecTrustedApplicationCreateFromPath(nil, &caller)
+            guard callerStatus == errSecSuccess, let caller else {
+                throw Self.error(
+                    for: callerStatus,
+                    operation: "identify creator",
+                    referenceDescription: reference.redactedDescription
+                )
+            }
+            var access: SecAccess?
+            let accessStatus = SecAccessCreate(
+                Self.itemLabel as CFString,
+                ([caller] + additionalApplications) as CFArray,
+                &access
+            )
+            guard accessStatus == errSecSuccess, let access else {
+                throw Self.error(
+                    for: accessStatus,
+                    operation: "configure access",
+                    referenceDescription: reference.redactedDescription
+                )
+            }
+            addQuery[kSecAttrAccess as String] = access
+        }
+        addQuery[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUIFail
+        try cancellationCheck()
+        let status = Self.noninteractive {
+            SecItemAdd(addQuery as CFDictionary, nil)
+        }
         guard status == errSecSuccess else {
             throw Self.error(
                 for: status,
@@ -483,7 +531,9 @@ public struct MacOSKeychainSecretStore: SecretManager, @unchecked Sendable {
         } catch {
             var cleanupQuery = managedQuery(reference: reference)
             cleanupQuery[kSecAttrComment as String] = try encoded(metadata)
-            let cleanupStatus = SecItemDelete(cleanupQuery as CFDictionary)
+            let cleanupStatus = Self.noninteractive {
+                SecItemDelete(cleanupQuery as CFDictionary)
+            }
             guard cleanupStatus == errSecSuccess || cleanupStatus == errSecItemNotFound else {
                 throw SecretStoreError.partialEffect(
                     "Keychain create verification failed and exact compensation also failed for \(reference.redactedDescription)."
@@ -530,7 +580,9 @@ public struct MacOSKeychainSecretStore: SecretManager, @unchecked Sendable {
             kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
             kSecAttrLabel as String: Self.itemLabel
         ]
-        let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        let status = Self.noninteractive {
+            SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        }
         if status == errSecItemNotFound {
             throw conditionalMutationMiss(reference: reference)
         }
@@ -554,13 +606,15 @@ public struct MacOSKeychainSecretStore: SecretManager, @unchecked Sendable {
         } catch {
             var rollbackQuery = managedQuery(reference: reference)
             rollbackQuery[kSecAttrComment as String] = nextComment
-            let rollbackStatus = SecItemUpdate(
-                rollbackQuery as CFDictionary,
-                [
-                    kSecValueData as String: priorData,
-                    kSecAttrComment as String: existing.comment
-                ] as CFDictionary
-            )
+            let rollbackStatus = Self.noninteractive {
+                SecItemUpdate(
+                    rollbackQuery as CFDictionary,
+                    [
+                        kSecValueData as String: priorData,
+                        kSecAttrComment as String: existing.comment
+                    ] as CFDictionary
+                )
+            }
             guard rollbackStatus == errSecSuccess else {
                 throw SecretStoreError.partialEffect(
                     "Keychain update verification failed and exact rollback also failed for \(reference.redactedDescription)."
@@ -582,7 +636,9 @@ public struct MacOSKeychainSecretStore: SecretManager, @unchecked Sendable {
         ]
         applySearchList(to: &query)
         var result: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        let status = Self.noninteractive {
+            SecItemCopyMatching(query as CFDictionary, &result)
+        }
         if status == errSecItemNotFound {
             return []
         }
@@ -627,7 +683,9 @@ public struct MacOSKeychainSecretStore: SecretManager, @unchecked Sendable {
         }
         var query = managedQuery(reference: reference)
         query[kSecAttrComment as String] = existing.comment
-        let status = SecItemDelete(query as CFDictionary)
+        let status = Self.noninteractive {
+            SecItemDelete(query as CFDictionary)
+        }
         if status == errSecItemNotFound {
             throw conditionalMutationMiss(reference: reference)
         }
@@ -690,6 +748,22 @@ public struct MacOSKeychainSecretStore: SecretManager, @unchecked Sendable {
         }
     }
 
+    private static let interactionLock = NSRecursiveLock()
+
+    private static func noninteractive(_ operation: () -> OSStatus) -> OSStatus {
+        // File-based Keychain authentication ignores LAContext in some paths.
+        interactionLock.lock()
+        defer { interactionLock.unlock() }
+        var previous = DarwinBoolean(false)
+        let readStatus = SecKeychainGetUserInteractionAllowed(&previous)
+        guard readStatus == errSecSuccess else { return readStatus }
+        let disableStatus = SecKeychainSetUserInteractionAllowed(false)
+        guard disableStatus == errSecSuccess else { return disableStatus }
+        let result = operation()
+        let restoreStatus = SecKeychainSetUserInteractionAllowed(previous.boolValue)
+        return restoreStatus == errSecSuccess ? result : restoreStatus
+    }
+
     private var authenticationContext: LAContext {
         let context = LAContext()
         context.interactionNotAllowed = true
@@ -719,7 +793,9 @@ public struct MacOSKeychainSecretStore: SecretManager, @unchecked Sendable {
         query[kSecReturnData as String] = returnData
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        let status = Self.noninteractive {
+            SecItemCopyMatching(query as CFDictionary, &result)
+        }
         if status == errSecItemNotFound {
             throw try missingOrUnmanaged(reference: reference)
         }
@@ -840,7 +916,9 @@ public struct MacOSKeychainSecretStore: SecretManager, @unchecked Sendable {
             query[kSecAttrGeneric as String] = Self.ownershipMarker
         }
         var result: CFTypeRef?
-        return SecItemCopyMatching(query as CFDictionary, &result)
+        return Self.noninteractive {
+            SecItemCopyMatching(query as CFDictionary, &result)
+        }
     }
 
     private func conditionalMutationMiss(
@@ -861,6 +939,7 @@ public struct MacOSKeychainSecretStore: SecretManager, @unchecked Sendable {
     }
 
     private func applySearchList(to query: inout [String: Any]) {
+        query[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUIFail
         if let keychain {
             query[kSecMatchSearchList as String] = [keychain]
         }

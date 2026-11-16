@@ -137,7 +137,7 @@ class NativeProofTests(unittest.TestCase):
         old_workflow = current_workflow.replace(jobs['native-checkpoint'].encode(), b'').replace(I.EMPTY_NATIVE.encode(), b'')
         current_verifier = (ROOT/I.VERIFIER).read_bytes()
         old_verifier = current_verifier.replace(I.HOOK.encode(), b'').replace(I.NEW_MODE.encode(), I.OLD_MODE.encode())
-        names = [*I.FILES, *I.CONSUMERS, *I.TEST_CONSUMERS, I.ASSEMBLER, 'scripts/release/build-static-swift-sdk.sh',
+        names = [*I.FILES, *I.CONSUMERS, *I.TEST_CONSUMERS, I.ASSEMBLER, I.STAGE_VALIDATOR, 'scripts/release/build-static-swift-sdk.sh',
                  'scripts/release/runtime-swift-sources.json', 'scripts/release/materialize-swift-sdk-sources.py']
         cls.old = {name:(ROOT/name).read_bytes() if (ROOT/name).is_file() else b'fixture\n' for name in names}
         cls.old.update({p.relative_to(ROOT).as_posix():p.read_bytes() for p in (HERE/'patches/swift-sdk').rglob('*') if p.is_file()})
@@ -212,6 +212,24 @@ class NativeProofTests(unittest.TestCase):
             ):
                 with self.assertRaisesRegex(ValueError,'baseline transition'):
                     I.compare_files(changed_old,changed_new)
+
+    def test_stage_validator_transition_requires_exact_reviewed_bytes(self):
+        before = b'previous stage validator fixture\n'
+        current = (ROOT / I.STAGE_VALIDATOR).read_bytes()
+        self.assertEqual(I.digest(current), I.CURRENT_STAGE_VALIDATOR_SHA256)
+        old = dict(self.old, **{I.STAGE_VALIDATOR: before})
+        new = dict(self.new, **{I.STAGE_VALIDATOR: current})
+        with mock.patch.object(I, 'BASELINE_STAGE_VALIDATOR_SHA256', I.digest(before)):
+            result = I.compare_files(old, new)
+            self.assertEqual(result['sdkCompileInputs'], self.comparison['comparison']['sdkCompileInputs'])
+            for changed_old, changed_new in (
+                (dict(old, **{I.STAGE_VALIDATOR: before + b'changed'}), new),
+                (old, dict(new, **{I.STAGE_VALIDATOR: current + b'changed'})),
+            ):
+                with self.assertRaisesRegex(ValueError, 'exact reviewed transition'):
+                    I.compare_files(changed_old, changed_new)
+        with self.assertRaisesRegex(ValueError, 'exact reviewed addition'):
+            I.compare_files(self.old, dict(self.new, **{I.STAGE_VALIDATOR_TEST: b'changed'}))
 
     def test_archive_writer_transition_requires_exact_reviewed_bytes(self):
         before = b'previous archive writer fixture\n'

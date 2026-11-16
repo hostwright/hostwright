@@ -1,9 +1,34 @@
 import Darwin
 import Foundation
 import HostwrightCore
+import HostwrightSecrets
 import Security
 
 let storageCodeSigningRevocationFlag: UInt32 = UInt32(1) << 30
+
+public enum StorageProviderKeychainAccess {
+    public static func secretManager(
+        hostExecutableURL: URL? = Bundle.main.executableURL
+    ) -> MacOSKeychainSecretStore {
+        MacOSKeychainSecretStore(additionalTrustedApplications: {
+            let configuration = try StorageProviderHelperBootstrapConfiguration
+                .installed(hostExecutableURL: hostExecutableURL)
+            let validator = StorageProviderHelperExecutableValidator.signed
+            let identity = try validator.validate(configuration.executableURL)
+            var application: SecTrustedApplication?
+            let status = configuration.executableURL.path.withCString {
+                SecTrustedApplicationCreateFromPath($0, &application)
+            }
+            guard status == errSecSuccess, let application else {
+                throw SecretStoreError.permissionDenied(
+                    "The signed storage helper could not be granted Keychain access."
+                )
+            }
+            try validator.verifyUnchanged(identity)
+            return [application]
+        })
+    }
+}
 
 public enum StorageProviderHelperBootstrapError:
     Error,

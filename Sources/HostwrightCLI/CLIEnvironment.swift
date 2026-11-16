@@ -339,7 +339,7 @@ public struct CLIEnvironment: @unchecked Sendable {
                 store: MacOSKeychainSecretStore()
             )
         },
-        secretManager: { MacOSKeychainSecretStore() },
+        secretManager: { StorageProviderKeychainAccess.secretManager() },
         storageProvider: {
             StorageProviderHelperClient(
                 configuration:

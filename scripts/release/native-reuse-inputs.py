@@ -30,9 +30,15 @@ INPUT_COMPARATOR = 'scripts/release/native-reuse-inputs.py'
 BASELINE_COMPARATOR_SHA256 = '0fbb17ffdbc39f92b0215089512200390204d37b0fe697a07bd6f7111b7b179a'
 NATIVE_REUSE_VERIFIER = 'scripts/release/verify-native-reuse.py'
 BASELINE_REUSE_VERIFIER_SHA256 = '14aec8970f04e06e461e3519727ec35cdf07993eb2cab8fd5a500dfd8209317e'
+STAGE_VALIDATOR = 'scripts/release/validate-run.py'
+BASELINE_STAGE_VALIDATOR_SHA256 = '020c8a025be98c4f388ab73cb86c68702534c973579cc6103623aebcea19a009'
+CURRENT_STAGE_VALIDATOR_SHA256 = '3bc95c4220c8375cc3463090563dad3efe66b694bebcc66540dc91f455832f15'
+STAGE_VALIDATOR_TEST = 'scripts/release/test-validate-run.py'
+STAGE_VALIDATOR_TEST_SHA256 = '105f6cd0526374743aa3bc23dbb823ded5b09763d4fcb3dd17a1fd3d8e1c666e'
 ADDITIONS = (
     'scripts/release/resolve-native-checkpoint.py', 'scripts/release/native-reuse-inputs.py',
     'scripts/release/verify-native-reuse.py', 'scripts/release/test-native-runtime-reuse.py',
+    STAGE_VALIDATOR_TEST,
 )
 PREFIXES = ('scripts/release/', 'ThirdPartyLicenses/', 'Guest/', 'contracts/')
 FILES = ('Package.swift', 'Package.resolved', 'runtime-license-inventory.json',
@@ -158,6 +164,9 @@ def compare_files(old, new):
     require(set(old)-set(new) == set(), 'original native input was removed')
     require(set(new)-set(old) <= set(ADDITIONS), 'unreviewed native producer input was added')
     require(all(name in old and name in new for name in FILES[:3]), 'native package/asset input is missing')
+    if STAGE_VALIDATOR_TEST in new:
+        require(digest(new[STAGE_VALIDATOR_TEST]) == STAGE_VALIDATOR_TEST_SHA256,
+                'stage execution validator tests differ from the exact reviewed addition')
     changes = []
     for name,raw in sorted(old.items()):
         if name == WORKFLOW: continue
@@ -165,6 +174,12 @@ def compare_files(old, new):
         if name in (*CONSUMERS, *TEST_CONSUMERS):
             role = 'reviewed-workflow-routing-test' if name in TEST_CONSUMERS else 'reviewed-final-composition-consumer'
             changes.append(dict(path=name, role=role, before=digest(raw), after=digest(current)))
+        elif name == STAGE_VALIDATOR:
+            require(current == raw or (digest(raw) == BASELINE_STAGE_VALIDATOR_SHA256
+                    and digest(current) == CURRENT_STAGE_VALIDATOR_SHA256),
+                    'stage execution validator differs from the exact reviewed transition')
+            changes.append(dict(path=name, role='exact-stage-execution-validator-transition',
+                                before=digest(raw), after=digest(current)))
         elif name == ASSEMBLER:
             require(current == raw or (digest(raw) == BASELINE_ASSEMBLER_SHA256
                     and digest(current) == STREAMING_ASSEMBLER_SHA256),
@@ -221,7 +236,7 @@ def compare_files(old, new):
         return dict(sha256=digest(json.dumps(hashes,sort_keys=True,separators=(',',':')).encode()),files=hashes)
     old_recipe,new_recipe=recipe(old),recipe(new)
     require(old_recipe == new_recipe, 'original SDK compilation recipe changed')
-    return dict(unchanged={name:digest(raw) for name,raw in old.items() if name not in (*CONSUMERS,*TEST_CONSUMERS,INPUT_COMPARATOR,NATIVE_REUSE_VERIFIER,VERIFIER,ASSEMBLER,WORKFLOW)},
+    return dict(unchanged={name:digest(raw) for name,raw in old.items() if name not in (*CONSUMERS,*TEST_CONSUMERS,INPUT_COMPARATOR,NATIVE_REUSE_VERIFIER,VERIFIER,ASSEMBLER,WORKFLOW,STAGE_VALIDATOR)},
                 reviewedConsumerChanges=changes, workflow=dict(before=digest(old[WORKFLOW]),after=digest(new[WORKFLOW])),
                 sdkCompileInputs=new_recipe,
                 addedConsumers={name:digest(new[name]) for name in sorted(set(new)-set(old))})

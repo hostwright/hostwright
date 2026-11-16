@@ -253,6 +253,12 @@ Manages only Hostwright-owned `keychain://<service>/<account>` generic-password 
 
 Mutations persist a redacted schema-v8 intent before touching Keychain. Interrupted operations are inspected with `hostwright recovery` and may be resumed or, for an exactly verified create, rolled back with the existing confirmation-bound recovery command. Recovery re-observes item identity and enters safe hold when replay or compensation cannot be proven without persisting secret bytes.
 
+New managed keys grant access to their creator and the installed storage helper,
+after verifying the helper's Hostwright signing identity. This lets backup and
+restore use the key without a separate password prompt. Existing keys retain
+their access permissions. Commands fail promptly if Keychain access requires
+user interaction; they do not change existing access permissions automatically.
+
 Manifest workload injection additionally accepts guarded `env-file:///absolute/path#KEY` and `local-file:///absolute/path` references. `external://<provider>/<item>` and `plugin://<provider>/<item>` require an explicitly registered provider. Resolution is authorized for one exact project/resource generation and environment key, and failure occurs before runtime mutation. Resolved values are carried outside argv and never enter Hostwright state or diagnostic output.
 
 ## `hostwright registry ...`

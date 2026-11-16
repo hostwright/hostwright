@@ -66,6 +66,40 @@ final class HostwrightSecretsIntegrationTests: XCTestCase {
         }
     }
 
+    func testTrustedApplicationFailureLeavesNoManagedItem() throws {
+        let reference = try uniqueReference()
+        let store = MacOSKeychainSecretStore(additionalTrustedApplications: {
+            throw SecretStoreError.permissionDenied("Untrusted storage helper.")
+        })
+        XCTAssertThrowsError(
+            try store.create(
+                reference: reference,
+                value: try HostwrightSecretValue("never-written")
+            )
+        )
+        XCTAssertEqual(copyStatus(for: reference), errSecItemNotFound)
+    }
+
+    func testExplicitTrustedApplicationPreservesCreatorAccessAndCleanup() throws {
+        let reference = try uniqueReference()
+        let store = MacOSKeychainSecretStore(additionalTrustedApplications: {
+            var application: SecTrustedApplication?
+            let status = SecTrustedApplicationCreateFromPath(nil, &application)
+            guard status == errSecSuccess, let application else {
+                throw SecretStoreError.backendUnavailable("Creator unavailable.")
+            }
+            return [application]
+        })
+        defer { try? store.delete(reference: reference) }
+        let created = try store.create(
+            reference: reference,
+            value: try HostwrightSecretValue("explicit-access-value")
+        )
+        XCTAssertEqual(try store.readString(reference: reference), "explicit-access-value")
+        try store.delete(reference: reference, expectedItemID: created.itemID)
+        XCTAssertEqual(copyStatus(for: reference), errSecItemNotFound)
+    }
+
     func testLiveMacOSKeychainStorePreservesLegacyReadOnlyItems() throws {
         let secret = "legacy-read-only-\(UUID().uuidString)"
         let item = try addLiveKeychainItem(data: Data(secret.utf8))
@@ -289,6 +323,10 @@ final class HostwrightSecretsIntegrationTests: XCTestCase {
             value: try HostwrightSecretValue("temporary-locked-secret")
         )
         XCTAssertEqual(SecKeychainLock(createdKeychain), errSecSuccess)
+        XCTAssertEqual(
+            SecKeychainSetUserInteractionAllowed(priorInteraction.boolValue),
+            errSecSuccess
+        )
 
         let readStartedAt = Date()
         XCTAssertThrowsError(try store.readString(reference: reference)) { error in
@@ -300,6 +338,9 @@ final class HostwrightSecretsIntegrationTests: XCTestCase {
             XCTAssertFalse(message.contains(reference.account))
         }
         XCTAssertLessThan(Date().timeIntervalSince(readStartedAt), 5)
+        var afterInteraction = DarwinBoolean(false)
+        XCTAssertEqual(SecKeychainGetUserInteractionAllowed(&afterInteraction), errSecSuccess)
+        XCTAssertEqual(afterInteraction.boolValue, priorInteraction.boolValue)
         XCTAssertEqual(
             SecKeychainSetUserInteractionAllowed(
                 priorInteraction.boolValue

@@ -12,6 +12,10 @@ public struct HostwrightCommandTransportEnvironment: @unchecked Sendable {
         String,
         ControlRequestEnvelope
     ) throws -> ControlResponseEnvelope
+    public typealias PersistentInputSend = @Sendable (
+        String,
+        ControlRequestEnvelope
+    ) throws -> ControlResponseEnvelope
     public typealias BootstrapSend = @Sendable (
         ControlRequestEnvelope
     ) throws -> ControlResponseEnvelope
@@ -27,6 +31,7 @@ public struct HostwrightCommandTransportEnvironment: @unchecked Sendable {
 
     public var socketPath: @Sendable () throws -> String
     public var persistentSend: PersistentSend
+    public var persistentInputSend: PersistentInputSend
     public var bootstrapSend: BootstrapSend
     public var streamRun: StreamRun
     public var authorizationScope: AuthorizationScope
@@ -52,10 +57,17 @@ public struct HostwrightCommandTransportEnvironment: @unchecked Sendable {
         },
         readStandardInput: @escaping BoundedStandardInputRead = { maximumBytes in
             try hostwrightReadBoundedStandardInput(maximumBytes: maximumBytes)
+        },
+        persistentInputSend: @escaping PersistentInputSend = { _, _ in
+            throw HostwrightDiagnostic(
+                code: .controlAPIUnavailable,
+                message: "Authenticated unary secret input is unavailable."
+            )
         }
     ) {
         self.socketPath = socketPath
         self.persistentSend = persistentSend
+        self.persistentInputSend = persistentInputSend
         self.bootstrapSend = bootstrapSend
         self.streamRun = streamRun
         self.authorizationScope = authorizationScope
@@ -92,7 +104,10 @@ public struct HostwrightCommandTransportEnvironment: @unchecked Sendable {
             )
         },
         requestID: { UUID().uuidString.lowercased() },
-        workingDirectory: { FileManager.default.currentDirectoryPath }
+        workingDirectory: { FileManager.default.currentDirectoryPath },
+        persistentInputSend: { socketPath, request in
+            try CLIUnarySecretInput.send(socketPath: socketPath, request: request)
+        }
     )
 }
 
@@ -176,7 +191,10 @@ public enum HostwrightCommandRunner {
                 let socketPath = try environment.socketPath()
                 switch route.execution {
                 case .unary:
-                    let response = try environment.persistentSend(
+                    let command = try CLICommand.parse(arguments: route.arguments)
+                    let send = CLIControlCommandExecutor.requiresUnaryInput(command)
+                        ? environment.persistentInputSend : environment.persistentSend
+                    let response = try send(
                         socketPath,
                         try request(
                             route: route,
@@ -184,7 +202,6 @@ public enum HostwrightCommandRunner {
                             environment: environment
                         )
                     )
-                    let command = try CLICommand.parse(arguments: route.arguments)
                     if case .scheduler(let options) = command {
                         return try schedulerResult(
                             response: response,

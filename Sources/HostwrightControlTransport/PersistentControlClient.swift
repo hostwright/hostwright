@@ -2,6 +2,7 @@ import Darwin
 import Foundation
 import HostwrightControlPlane
 import HostwrightControlSecurity
+import HostwrightCore
 
 public enum PersistentControlClientError: Error, Equatable, Sendable {
   case unsafeSocket
@@ -199,10 +200,58 @@ public struct PersistentControlClient: Sendable {
     return response
   }
 
-  public func connectSession() throws -> PersistentControlClientSession {
+  public func send(
+    _ request: ControlRequestEnvelope,
+    inputDescriptor: Int32,
+    prepareInput: () throws -> Void = {},
+    cancellation: PersistentControlRequestCancellation? = nil
+  ) throws -> ControlResponseEnvelope {
+    try request.validate()
+    guard inputDescriptor >= 0 else { throw ControlTransportError.invalidDescriptor }
+    let session = try connectSession(cancellation: cancellation)
+    defer { session.close() }
+    let probe = ControlRequestEnvelope(
+      requestID: "input-capabilities:" + UUID().uuidString.lowercased(),
+      operation: "capabilities",
+      timeoutMilliseconds: ControlPlaneContract.maximumUnaryDeadlineMilliseconds,
+      body: .object([
+        "arguments": .array([.string("capabilities"), .string("--json")]),
+        "authorizationProjectID": .null, "authorizationResourceID": .null,
+        "commandOperation": .string("capabilities"), "commandSchemaVersion": .integer(1),
+        "mutating": .bool(false), "subcommand": .string("capabilities"), "workingDirectory": .null,
+      ])
+    )
+    let response = try session.send(probe)
+    try Self.validateUnaryInputCapability(response)
+    guard cancellation?.isCancelled != true else { throw PersistentControlClientError.connectionClosed }
+    try prepareInput()
+    return try session.send(request, inputDescriptor: inputDescriptor)
+  }
+
+  static func validateUnaryInputCapability(_ response: ControlResponseEnvelope) throws {
+    guard response.status == .completed, response.reasonCode == .completed, response.error == nil,
+      case .object(let fields)? = response.result,
+      Set(fields.keys) == ["exitCode", "resultSchemaVersion", "standardError", "standardOutput"],
+      fields["exitCode"] == .integer(0), fields["resultSchemaVersion"] == .integer(1),
+      fields["standardError"] == .string(""), case .string(let output)? = fields["standardOutput"]
+    else { throw ControlUnaryInputError.unsupported }
+    let data = Data(output.utf8)
+    try Phase09StrictDecoder.validateNoDuplicateKeys(data)
+    let report = try JSONDecoder().decode(HostwrightCapabilityReport.self, from: data)
+    let matchingCapabilities = report.capabilities.filter { $0.identifier == HostwrightUnaryInputCapability.identifier }
+    guard report.schemaVersion == 1, matchingCapabilities.count == 1,
+      matchingCapabilities[0].state == .stable
+    else { throw ControlUnaryInputError.unsupported }
+  }
+
+  public func connectSession(cancellation: PersistentControlRequestCancellation? = nil) throws -> PersistentControlClientSession {
     let pinned = try pinSocket()
     let descriptor = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
     guard descriptor >= 0 else { throw PersistentControlClientError.connectionFailed }
+    guard cancellation?.bind(descriptor: descriptor) != false else {
+      _ = Darwin.close(descriptor)
+      throw PersistentControlClientError.connectionClosed
+    }
     do {
       try ControlFrameCodec.configureNoSigPipe(descriptor: descriptor)
       var address = try Self.address(socketPath)
@@ -237,10 +286,11 @@ public struct PersistentControlClient: Sendable {
         deadline: handshakeDeadline
       )
       let session = PersistentControlClientSession(
-        descriptor: descriptor, protocolRevision: challenge.protocolRevision)
+        descriptor: descriptor, protocolRevision: challenge.protocolRevision, cancellation: cancellation)
       session.start()
       return session
     } catch {
+      cancellation?.unbind(descriptor: descriptor)
       _ = Darwin.close(descriptor)
       throw error
     }

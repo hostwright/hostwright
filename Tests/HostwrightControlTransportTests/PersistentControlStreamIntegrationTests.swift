@@ -1590,7 +1590,7 @@ final class PersistentControlStreamIntegrationTests: XCTestCase {
     let dispatcher = ControlUnaryDispatcher(
       descriptor: -1,
       context: overrunContext,
-      processor: { request in
+      processor: { request, _ in
         let deadline = try ControlTransportDeadline(timeoutMilliseconds: 1)
         Thread.sleep(forTimeInterval: 0.025)
         return (

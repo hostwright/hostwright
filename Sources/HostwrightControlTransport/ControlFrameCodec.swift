@@ -174,24 +174,61 @@ public enum ControlFrameCodec {
     descriptor: Int32,
     deadline: ControlTransportDeadline
   ) throws -> Data {
-    let prefix = try readExactly(
-      prefixBytes,
-      descriptor: descriptor,
-      deadline: deadline
-    )
-    let declaredLength = prefix.withUnsafeBytes { source -> UInt32 in
-      var networkLength: UInt32 = 0
-      withUnsafeMutableBytes(of: &networkLength) { destination in
-        destination.copyBytes(from: source)
-      }
-      return UInt32(bigEndian: networkLength)
+    let frame = try readWithInputDescriptor(kind: kind, descriptor: descriptor, deadline: deadline)
+    guard frame.input == nil else {
+      frame.input?.close()
+      throw ControlUnaryInputError.unexpectedDescriptor
     }
-    try validateDeclaredLength(declaredLength, kind: kind)
-    return try readExactly(
-      Int(declaredLength),
-      descriptor: descriptor,
-      deadline: deadline
-    )
+    return frame.payload
+  }
+
+  public static func write(
+    _ payload: Data, kind: ControlPayloadKind, descriptor: Int32,
+    inputDescriptor: Int32, deadline: ControlTransportDeadline
+  ) throws {
+    guard kind == .request, inputDescriptor >= 0 else {
+      throw ControlUnaryInputError.unexpectedDescriptor
+    }
+    let frame = try encodedFrame(payload: payload, kind: kind)
+    let headerSize = MemoryLayout<cmsghdr>.size
+    let controlSize = headerSize + MemoryLayout<Int32>.size
+    let control = UnsafeMutableRawPointer.allocate(byteCount: controlSize, alignment: MemoryLayout<cmsghdr>.alignment)
+    defer { control.deallocate() }
+    control.initializeMemory(as: UInt8.self, repeating: 0, count: controlSize)
+    control.storeBytes(of: cmsghdr(cmsg_len: socklen_t(controlSize), cmsg_level: SOL_SOCKET, cmsg_type: SCM_RIGHTS), as: cmsghdr.self)
+    control.advanced(by: headerSize).storeBytes(of: inputDescriptor, as: Int32.self)
+    var byte = frame[frame.startIndex]
+    while true {
+      try waitForWrite(descriptor: descriptor, deadline: deadline)
+      let sent = withUnsafeMutablePointer(to: &byte) { pointer in
+        var vector = iovec(iov_base: pointer, iov_len: 1)
+        return withUnsafeMutablePointer(to: &vector) { vectorPointer in
+          var message = msghdr()
+          message.msg_iov = vectorPointer; message.msg_iovlen = 1
+          message.msg_control = control; message.msg_controllen = socklen_t(controlSize)
+          return Darwin.sendmsg(descriptor, &message, 0)
+        }
+      }
+      if sent == 1 { break }
+      if sent < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) { continue }
+      throw ControlTransportError.ioFailure
+    }
+    try writeAll(Data(frame.dropFirst()), descriptor: descriptor, deadline: deadline)
+  }
+
+  public static func readWithInputDescriptor(
+    kind: ControlPayloadKind, descriptor: Int32, deadline: ControlTransportDeadline
+  ) throws -> (payload: Data, input: OwnedInputDescriptor?) {
+    var input: OwnedInputDescriptor?
+    do {
+      let first = try receiveExactly(1, descriptor: descriptor, deadline: deadline, acceptsInput: kind == .request)
+      input = first.input
+      var prefix = first.payload
+      prefix.append(try readExactly(prefixBytes - 1, descriptor: descriptor, deadline: deadline))
+      let declaredLength = prefix.withUnsafeBytes { $0.loadUnaligned(as: UInt32.self).bigEndian }
+      try validateDeclaredLength(declaredLength, kind: kind)
+      return (try readExactly(Int(declaredLength), descriptor: descriptor, deadline: deadline), input)
+    } catch { input?.close(); throw error }
   }
 
   public static func validateDeclaredLength(
@@ -209,36 +246,64 @@ public enum ControlFrameCodec {
     descriptor: Int32,
     deadline: ControlTransportDeadline
   ) throws -> Data {
-    guard descriptor >= 0 else {
-      throw ControlTransportError.invalidDescriptor
-    }
+    try receiveExactly(length, descriptor: descriptor, deadline: deadline, acceptsInput: false).payload
+  }
+
+  private static func receiveExactly(
+    _ length: Int, descriptor: Int32, deadline: ControlTransportDeadline, acceptsInput: Bool
+  ) throws -> (payload: Data, input: OwnedInputDescriptor?) {
+    guard descriptor >= 0 else { throw ControlTransportError.invalidDescriptor }
     var result = Data(count: length)
     var offset = 0
+    var received: [Int32] = []
+    var transferred = false
+    defer { if !transferred { received.forEach { _ = Darwin.close($0) } } }
     try result.withUnsafeMutableBytes { destination in
-      guard let baseAddress = destination.baseAddress else {
-        throw ControlTransportError.ioFailure
-      }
       while offset < length {
         try waitForRead(descriptor: descriptor, deadline: deadline)
-        let count = Darwin.read(
-          descriptor,
-          baseAddress.advanced(by: offset),
-          length - offset
-        )
-        if count > 0 {
-          offset += count
-          continue
+        let capacity = 256
+        let control = UnsafeMutableRawPointer.allocate(byteCount: capacity, alignment: MemoryLayout<cmsghdr>.alignment)
+        defer { control.deallocate() }
+        control.initializeMemory(as: UInt8.self, repeating: 0, count: capacity)
+        var vector = iovec(iov_base: destination.baseAddress!.advanced(by: offset), iov_len: length - offset)
+        var message = msghdr()
+        let count = withUnsafeMutablePointer(to: &vector) { pointer in
+          message.msg_iov = pointer; message.msg_iovlen = 1
+          message.msg_control = control; message.msg_controllen = socklen_t(capacity)
+          return Darwin.recvmsg(descriptor, &message, 0)
         }
-        if count == 0 {
-          throw ControlTransportError.peerClosed
+        if count < 0 {
+          if errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK { continue }
+          throw ControlTransportError.ioFailure
         }
-        if errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK {
-          continue
+        var ancillaryOffset = 0
+        while ancillaryOffset + MemoryLayout<cmsghdr>.size <= Int(message.msg_controllen) {
+          let header = control.advanced(by: ancillaryOffset).load(as: cmsghdr.self)
+          let size = Int(header.cmsg_len)
+          guard size >= MemoryLayout<cmsghdr>.size,
+            ancillaryOffset + size <= Int(message.msg_controllen),
+            header.cmsg_level == SOL_SOCKET, header.cmsg_type == SCM_RIGHTS,
+            (size - MemoryLayout<cmsghdr>.size) % MemoryLayout<Int32>.size == 0 else {
+            throw ControlUnaryInputError.unexpectedDescriptor
+          }
+          let fdCount = (size - MemoryLayout<cmsghdr>.size) / MemoryLayout<Int32>.size
+          for index in 0..<fdCount {
+            received.append(control.advanced(by: ancillaryOffset + MemoryLayout<cmsghdr>.size + index * MemoryLayout<Int32>.size).load(as: Int32.self))
+          }
+          let alignment = MemoryLayout<cmsghdr>.alignment
+          ancillaryOffset += (size + alignment - 1) & ~(alignment - 1)
         }
-        throw ControlTransportError.ioFailure
+        guard message.msg_flags & MSG_CTRUNC == 0,
+          received.count <= (acceptsInput ? 1 : 0) else {
+          throw ControlUnaryInputError.unexpectedDescriptor
+        }
+        if count == 0 { throw ControlTransportError.peerClosed }
+        offset += count
       }
     }
-    return result
+    let input = try received.isEmpty ? nil : OwnedInputDescriptor(adopting: received.removeFirst())
+    transferred = true
+    return (result, input)
   }
 
   private static func writeAll(

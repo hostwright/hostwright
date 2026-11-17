@@ -326,6 +326,8 @@ public struct PersistentControlConnectionServer: Sendable {
     @Sendable (
       AuthenticatedControlPeer, ControlRequestEnvelope
     ) throws -> PersistentControlPreparedRequest
+  public typealias RequestInputPreparer =
+    @Sendable (AuthenticatedControlPeer, ControlRequestEnvelope, OwnedInputDescriptor?, ControlTransportDeadline) throws -> PersistentControlPreparedRequest
   public typealias UnaryRequestCoordinator =
     @Sendable (
       ControlRequestEnvelope,
@@ -342,6 +344,7 @@ public struct PersistentControlConnectionServer: Sendable {
   private let socketIdentity: ControlSocketIdentity
   private let mutatingOperations: Set<String>
   private let requestPreparer: RequestPreparer
+  private let requestInputPreparer: RequestInputPreparer?
   private let unaryRequestCoordinator: UnaryRequestCoordinator
   private let mutationClassifier: MutationClassifier
   private let auditRecorder: any ControlSecurityAuditRecording
@@ -363,6 +366,7 @@ public struct PersistentControlConnectionServer: Sendable {
     socketIdentity: ControlSocketIdentity,
     mutatingOperations: Set<String>,
     requestPreparer: RequestPreparer? = nil,
+    requestInputPreparer: RequestInputPreparer? = nil,
     unaryRequestCoordinator: UnaryRequestCoordinator? = nil,
     mutationClassifier: MutationClassifier? = nil,
     auditRecorder: any ControlSecurityAuditRecording,
@@ -399,6 +403,7 @@ public struct PersistentControlConnectionServer: Sendable {
     self.daemonGeneration = daemonGeneration
     self.socketIdentity = socketIdentity
     self.mutatingOperations = mutatingOperations
+    self.requestInputPreparer = requestInputPreparer
     self.requestPreparer = requestPreparer ?? { _, request in
       try PersistentControlPreparedRequest(request: request)
     }
@@ -432,9 +437,9 @@ public struct PersistentControlConnectionServer: Sendable {
     let unary = ControlUnaryDispatcher(
       descriptor: descriptor,
       context: context,
-      processor: { request in
+      processor: { request, input in
         try unaryRequestCoordinator(request) {
-          try process(peer: peer, request: request)
+          try process(peer: peer, request: request, input: input)
         }
       }
     )
@@ -446,14 +451,18 @@ public struct PersistentControlConnectionServer: Sendable {
       do {
         try authenticator.validateSession(peer.binding, daemonGeneration: daemonGeneration)
         try ControlFrameCodec.waitForFrame(descriptor: descriptor)
-        let requestData = try ControlFrameCodec.read(
+        let received = try ControlFrameCodec.readWithInputDescriptor(
           kind: .request,
           descriptor: descriptor,
           deadline: try ControlTransportDeadline(
             timeoutMilliseconds: ControlPlaneContract.maximumAuthenticationHandshakeMilliseconds
           )
         )
-        if let frame = try? ControlStreamFrameContract.decode(requestData) {
+        if let frame = try? ControlStreamFrameContract.decode(received.payload) {
+          guard received.input == nil else {
+            received.input?.close()
+            throw PersistentControlServerError.invalidRequest
+          }
           switch frame.kind {
           case .open:
             guard let streamAuthorizer, let streamCursorValidator, let streamReauthorizer,
@@ -476,10 +485,13 @@ public struct PersistentControlConnectionServer: Sendable {
             throw PersistentControlServerError.invalidRequest
           }
         } else {
-          let request = try Self.decodeRequest(requestData)
-          try unary.submit(request)
+          do {
+            let request = try Self.decodeRequest(received.payload)
+            try unary.submit(request, input: received.input)
+          } catch { received.input?.close(); throw error }
         }
       } catch ControlTransportError.peerClosed {
+        unary.cancelInputRequests()
         unary.drain()
         context.drainAfterInputHalfClose()
         return
@@ -517,7 +529,8 @@ public struct PersistentControlConnectionServer: Sendable {
 
   private func process(
     peer: AuthenticatedControlPeer,
-    request originalRequest: ControlRequestEnvelope
+    request originalRequest: ControlRequestEnvelope,
+    input: OwnedInputDescriptor?
   ) throws -> (response: ControlResponseEnvelope, deadline: ControlTransportDeadline) {
     try authenticator.validateSession(peer.binding, daemonGeneration: daemonGeneration)
     let deadline = try ControlTransportDeadline(
@@ -576,7 +589,9 @@ public struct PersistentControlConnectionServer: Sendable {
         )
       }
     }
-    let prepared = try requestPreparer(peer, originalRequest)
+    guard input == nil || requestInputPreparer != nil else { throw PersistentControlServerError.invalidRequest }
+    let prepared = try requestInputPreparer?(peer, originalRequest, input, deadline)
+      ?? requestPreparer(peer, originalRequest)
     defer { prepared.cleanup() }
     var effectivePrepared: PersistentControlPreparedRequest?
     defer { effectivePrepared?.cleanup() }
@@ -691,7 +706,8 @@ public struct PersistentControlConnectionServer: Sendable {
           deadline)
       }
       if evaluated.effectiveRequest != request {
-        let canonical = try requestPreparer(peer, evaluated.effectiveRequest)
+        let canonical = try requestInputPreparer?(peer, evaluated.effectiveRequest, input, deadline)
+          ?? requestPreparer(peer, evaluated.effectiveRequest)
         guard canonical.request == evaluated.effectiveRequest else {
           canonical.cleanup()
           throw PersistentControlServerError.invalidRequest
@@ -862,6 +878,13 @@ public struct PersistentControlConnectionServer: Sendable {
     var response: ControlResponseEnvelope
     do {
       try authenticator.validateSession(peer.binding, daemonGeneration: daemonGeneration)
+      let inputRequest = effectiveRequest
+      input?.setAuthorizationCheck {
+        try authenticator.validateSession(peer.binding, daemonGeneration: daemonGeneration)
+        let decision = try authorizer(peer, inputRequest, now())
+        try decision.validate()
+        guard decision.effect == .allow else { throw PersistentControlServerError.invalidRequest }
+      }
       if let execution = preparedExecution {
         response = try execution(effectiveRequest, deadline)
       } else {

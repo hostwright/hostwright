@@ -11,6 +11,19 @@ public struct CLIControlPreparedCommand: @unchecked Sendable {
 }
 
 public enum CLIControlCommandExecutor {
+    public static func requiresUnaryInput(_ command: CLICommand) -> Bool {
+        switch command {
+        case .secret(let options):
+            switch options.action {
+            case .create, .update: true
+            default: false
+            }
+        case .registry(let options):
+            if case .login = options.action { true } else { false }
+        default: false
+        }
+    }
+
     public static func prepare(
         request: ControlRequestEnvelope,
         environment: CLIEnvironment,

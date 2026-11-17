@@ -462,8 +462,12 @@ public struct CLIControlRoute: Equatable, Sendable {
         case "diagnostics":
             if value(1) == "support", let verb = value(2) { return "support.\(verb)" }
             return "inspect"
-        default:
+        case "observability", "runtime", "state", "secret", "daemon",
+             "restart-budget", "maintenance", "ownership", "metrics", "traces",
+             "migrate", "recovery", "scheduler":
             return value(1) ?? operation
+        default:
+            return operation
         }
     }
 

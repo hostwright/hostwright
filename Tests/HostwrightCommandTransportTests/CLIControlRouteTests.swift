@@ -4,6 +4,8 @@ import XCTest
 import HostwrightCLI
 import HostwrightControlPlane
 import HostwrightCore
+@testable import HostwrightPolicy
+import HostwrightState
 
 final class CLIControlRouteTests: XCTestCase {
     func testBoundedSDKLogsPreservesAuthenticatedControlStreamRouteAndProviderFlag() throws {
@@ -87,6 +89,130 @@ final class CLIControlRouteTests: XCTestCase {
                 expectedMutation,
                 arguments.joined(separator: " ")
             )
+        }
+    }
+
+    func testLongManifestPathsKeepLifecycleRoutesAndAuthorizationIndependentOfArgumentOrder() throws {
+        let manifest = "/tmp/" + String(repeating: "a", count: 112) + "/hostwright.yaml"
+        XCTAssertEqual(manifest.utf8.count, 133)
+        let cases: [(LifecycleCommandKind, RBACVerb)] = [
+            (.up, .start), (.down, .stop), (.run, .start), (.start, .start),
+            (.stop, .stop), (.restart, .restart), (.rm, .delete), (.update, .update),
+        ]
+        for (command, verb) in cases {
+            for confirmation in [["--dry-run"], ["--confirm-plan", String(repeating: "b", count: 64)]] {
+                let options = confirmation + ["--state-db", "/tmp/state.sqlite", "--runtime-provider", "apple-cli", "--json"]
+                    + (command == .run ? ["--service", "api"] : [])
+                for arguments in [[command.rawValue, manifest] + options, [command.rawValue] + options + [manifest]] {
+                    let route = try CLIControlRoute.classify(arguments: arguments)
+                    XCTAssertEqual(route.operation, command.rawValue)
+                    XCTAssertEqual(route.subcommand, command.rawValue)
+                    XCTAssertEqual(route.arguments, arguments)
+                    XCTAssertEqual(route.transport, .persistentControlAPI)
+                    XCTAssertEqual(route.execution, .unary)
+                    XCTAssertTrue(route.mutating)
+                    XCTAssertEqual(route.output, .json)
+                    let request = request(route: route)
+                    XCTAssertEqual(try CLIControlRoute.validate(request: request), route)
+                    let target = try RBACAuthorizationEngine.target(for: request)
+                    XCTAssertEqual(target.resource, .service)
+                    XCTAssertEqual(target.verb, verb)
+                }
+            }
+        }
+    }
+
+    func testLeafCommandOperandsNeverBecomeSemanticSubcommands() throws {
+        let manifest = "/tmp/" + String(repeating: "a", count: 112) + "/hostwright.yaml"
+        let cases: [([String], Bool)] = [
+            (["validate", manifest], false),
+            (["plan", manifest], false),
+            (["status", manifest], false),
+            (["apply", manifest, "--confirm-plan", String(repeating: "b", count: 64)], true),
+            (["import-stack", manifest], false),
+            (["export-stack", manifest], false),
+            (["plan-stack-update", manifest, "/tmp/desired.yaml"], false),
+            (["copy", manifest, "api:/tmp/output"], true),
+            (["export", "api", manifest], true),
+            (["inspect", "api", "--manifest", manifest], false),
+            (["stats", "api", "--manifest", manifest], false),
+            (["logs", "api", manifest], false),
+        ]
+        for (arguments, mutating) in cases {
+            let route = try CLIControlRoute.classify(arguments: arguments)
+            XCTAssertEqual(route.subcommand, arguments[0], arguments.joined(separator: " "))
+            XCTAssertEqual(route.arguments, arguments)
+            XCTAssertEqual(route.mutating, mutating)
+            XCTAssertEqual(try CLIControlRoute.validate(request: request(route: route)), route)
+            XCTAssertNoThrow(try RBACAuthorizationEngine.target(for: request(route: route)))
+        }
+    }
+
+    func testLongManifestLifecycleRoutingPreservesRoleAllowAndDenyDecisions() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "hostwright-route-authorization-\(UUID().uuidString)", isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = SQLiteStateStore(path: root.appendingPathComponent("state.sqlite").path)
+        try store.migrate()
+        let timestamp = "2026-08-02T20:00:00Z"
+        for (index, subject) in ["owner", "viewer", "operator"].enumerated() {
+            let identity = ControlPeerIdentityRecord(
+                subjectID: subject, userID: 501,
+                codeIdentity: CodeIdentity(
+                    teamIdentifier: "993YC3JY4Q", signingIdentifier: "hostwright-\(subject)",
+                    codeDirectoryHash: String(repeating: String(index + 10, radix: 16), count: 40),
+                    validationMode: .installedRequirement
+                ),
+                declaredBySubjectID: "owner", declaredAt: timestamp, updatedAt: timestamp
+            )
+            if subject == "owner" {
+                try store.controlIdentities.bootstrap(identity)
+                try store.rbac.bootstrapDefaultRolesAndOwner(subjectID: subject, timestamp: timestamp)
+            } else {
+                try store.controlIdentities.declare(identity)
+                _ = try store.rbac.createBinding(RBACBindingRecord(
+                    bindingID: "\(subject)-binding", subjectID: subject, roleID: subject,
+                    scope: .init(kind: .global), createdBySubjectID: "owner",
+                    createdAt: timestamp, updatedAt: timestamp
+                ))
+            }
+        }
+        let engine = RBACAuthorizationEngine(repository: store.rbac)
+        let now = try XCTUnwrap(ISO8601DateFormatter().date(from: timestamp))
+        let manifest = "/tmp/" + String(repeating: "a", count: 112) + "/hostwright.yaml"
+        for operation in ["up", "down", "update", "rm"] {
+            let route = try CLIControlRoute.classify(arguments: [operation, manifest, "--dry-run"])
+            let request = request(route: route)
+            XCTAssertEqual(try engine.preview(subjectID: "owner", request: request, at: now).effect, .allow)
+            XCTAssertEqual(try engine.preview(subjectID: "viewer", request: request, at: now).effect, .deny)
+            XCTAssertEqual(
+                try engine.preview(subjectID: "operator", request: request, at: now).effect,
+                ["up", "down"].contains(operation) ? .allow : .deny
+            )
+        }
+    }
+
+    func testSemanticRoutingPreservesAuthorizationAndArgumentBounds() throws {
+        let route = try CLIControlRoute.classify(arguments: ["up", "hostwright.yaml", "--dry-run"])
+        for key in ["subcommand", "projectUUID", "resourceUUID"] {
+            let forged = ControlRequestEnvelope(
+                requestID: "oversized-target", operation: route.operation, timeoutMilliseconds: 1_000,
+                idempotencyKey: "oversized-target",
+                body: replacing(route.requestBody(), key: key, with: .string(String(repeating: "a", count: 129)))
+            )
+            XCTAssertThrowsError(try RBACAuthorizationEngine.target(for: forged)) { error in
+                XCTAssertEqual(error as? RBACAuthorizationError, .invalidTarget)
+            }
+            assertDiagnostic(.controlAPIInvalid) {
+                _ = try CLIControlRoute.validate(request: forged)
+            }
+        }
+        assertDiagnostic(.controlAPIInvalid) {
+            _ = try CLIControlRoute.classify(arguments: [
+                "up", String(repeating: "a", count: CLIControlRoute.maximumArgumentBytes + 1), "--dry-run",
+            ])
         }
     }
 

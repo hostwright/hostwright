@@ -60,6 +60,44 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
     )
   }
 
+  static func unaryInputEnvironment(
+    for command: CLICommand, input: OwnedInputDescriptor?, deadline: ControlTransportDeadline,
+    environment: CLIEnvironment
+  ) throws -> CLIEnvironment {
+    guard CLIControlCommandExecutor.requiresUnaryInput(command) == (input != nil) else {
+      throw HostwrightDiagnostic(code: .controlAPIInvalid, message: "The CLI command requires its exact protected input channel.")
+    }
+    guard let input else { return environment }
+    let identity: String
+    switch command {
+    case .secret(let options):
+      switch options.action {
+      case .create(let reference): identity = "secret.create:" + reference.rawValue
+      case .update(let reference): identity = "secret.update:" + reference.rawValue
+      default: throw PersistentControlServerError.invalidRequest
+      }
+    case .registry(let options):
+      guard case .login(let server, let username) = options.action else { throw PersistentControlServerError.invalidRequest }
+      identity = "registry.login:" + server + "\n" + username
+    default: throw PersistentControlServerError.invalidRequest
+    }
+    try input.bindConsumer(identity)
+    var scoped = environment
+    let registry: Bool
+    if case .registry = command { registry = true } else { registry = false }
+    scoped.readSecretInput = {
+      do { return try input.read(maximumBytes: 65_536, deadline: deadline) }
+      catch ControlUnaryInputError.tooLarge {
+        throw HostwrightDiagnostic(code: registry ? .registryInvalid : .secretInvalid,
+          message: "Secret values must not exceed 64 KiB.")
+      } catch is CancellationError {
+        throw HostwrightDiagnostic(code: registry ? .registryCancelled : .secretCancelled,
+          message: "Secret input was cancelled.")
+      }
+    }
+    return scoped
+  }
+
   static func lifecycleOperationIdentity(
     subjectID: String, request: ControlRequestEnvelope
   ) throws -> String {
@@ -460,7 +498,7 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
       daemonGeneration: UInt64.random(in: 1...UInt64(Int64.max)),
       socketIdentity: listener.identity,
       mutatingOperations: mutatingOperations,
-      requestPreparer: { peer, request in
+      requestInputPreparer: { peer, request, input, deadline in
         var peerEnvironment = commandEnvironment
         peerEnvironment.lifecycleOperationIdempotencyKeySHA256 = try Self.lifecycleOperationIdentity(
           subjectID: peer.binding.subject.identifier, request: request
@@ -474,6 +512,7 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
           environment: commandEnvironment,
           streamPreparation: true
         ) {
+          guard input == nil else { throw PersistentControlServerError.invalidRequest }
           return try PersistentControlPreparedRequest(
             request: prepared.request,
             execution: { _, _ in
@@ -490,6 +529,14 @@ final class HostwrightDaemonControlService: DaemonControlServing, @unchecked Sen
               )
             }
           )
+        }
+        if let route = try CLIControlRoute.validate(request: request) {
+          let command = try CLICommand.parse(arguments: route.arguments)
+          peerEnvironment = try Self.unaryInputEnvironment(
+            for: command, input: input, deadline: deadline, environment: peerEnvironment
+          )
+        } else if input != nil {
+          throw PersistentControlServerError.invalidRequest
         }
         if let prepared = try CLIControlCommandExecutor.prepare(
           request: request,

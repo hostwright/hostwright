@@ -5,7 +5,7 @@ import HostwrightCore
 
 final class ControlUnaryDispatcher: @unchecked Sendable {
   typealias Processor = @Sendable (
-    ControlRequestEnvelope
+    ControlRequestEnvelope, OwnedInputDescriptor?
   ) throws -> (response: ControlResponseEnvelope, deadline: ControlTransportDeadline)
 
   private let descriptor: Int32
@@ -18,6 +18,8 @@ final class ControlUnaryDispatcher: @unchecked Sendable {
   private let group = DispatchGroup()
   private let lock = NSLock()
   private let cancellation = HostwrightCancellationToken()
+  private var inputCancellations: [UUID: HostwrightCancellationToken] = [:]
+  private var inputDisconnected = false
   private var outstanding = 0
   private var failed = false
 
@@ -31,15 +33,20 @@ final class ControlUnaryDispatcher: @unchecked Sendable {
     self.processor = processor
   }
 
-  func submit(_ request: ControlRequestEnvelope) throws {
+  func submit(_ request: ControlRequestEnvelope, input: OwnedInputDescriptor? = nil) throws {
+    let inputID = input == nil ? nil : UUID()
+    let requestCancellation = input == nil ? cancellation : HostwrightCancellationToken()
     let admitted = lock.withLock { () -> Bool in
-      guard !failed, outstanding < ControlPlaneContract.maximumOutstandingUnary else {
+      guard !failed, !(input != nil && inputDisconnected),
+        outstanding < ControlPlaneContract.maximumOutstandingUnary else {
         return false
       }
       outstanding += 1
+      if let inputID { inputCancellations[inputID] = requestCancellation }
       return true
     }
     guard admitted else {
+      input?.close()
       let deadline = try ControlTransportDeadline(
         timeoutMilliseconds: request.timeoutMilliseconds!
       )
@@ -60,16 +67,22 @@ final class ControlUnaryDispatcher: @unchecked Sendable {
     group.enter()
     queue.async { [self] in
       defer {
-        lock.withLock { outstanding -= 1 }
+        input?.close()
+        lock.withLock {
+          outstanding -= 1
+          if let inputID { inputCancellations.removeValue(forKey: inputID) }
+        }
         group.leave()
       }
       do {
-        let result = try HostwrightCancellationContext.$token.withValue(cancellation) {
-          guard !cancellation.isCancelled else { throw CancellationError() }
-          return try processor(request)
+        let result = try HostwrightCancellationContext.$token.withValue(requestCancellation) {
+          guard !requestCancellation.isCancelled else { throw CancellationError() }
+          return try processor(request, input)
         }
+        if disconnectedInput(inputID, cancellation: requestCancellation) { return }
         try context.writeResponse(result.response, deadline: result.deadline)
       } catch {
+        if disconnectedInput(inputID, cancellation: requestCancellation) { return }
         failConnection()
       }
     }
@@ -83,14 +96,27 @@ final class ControlUnaryDispatcher: @unchecked Sendable {
 
   func cancel() { failConnection() }
 
-  private func failConnection() {
-    let shouldShutdown = lock.withLock { () -> Bool in
-      if failed { return false }
-      failed = true
-      return true
+  func cancelInputRequests() {
+    let tokens = lock.withLock {
+      inputDisconnected = true
+      return Array(inputCancellations.values)
     }
-    if shouldShutdown {
+    for token in tokens { token.cancel() }
+  }
+
+  private func disconnectedInput(_ inputID: UUID?, cancellation: HostwrightCancellationToken) -> Bool {
+    inputID != nil && cancellation.isCancelled && lock.withLock { inputDisconnected }
+  }
+
+  private func failConnection() {
+    let tokens = lock.withLock { () -> [HostwrightCancellationToken]? in
+      if failed { return nil }
+      failed = true
+      return Array(inputCancellations.values)
+    }
+    if let tokens {
       cancellation.cancel()
+      for token in tokens { token.cancel() }
       _ = shutdown(descriptor, SHUT_RDWR)
     }
   }

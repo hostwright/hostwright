@@ -25,6 +25,82 @@ final class ControlFrameCodecTests: XCTestCase {
     }
   }
 
+  func testInputDescriptorIsBoundToOneFrameAndNeverAcceptedAsOrdinaryPayload() throws {
+    let pipe = Pipe()
+    try pipe.fileHandleForWriting.write(contentsOf: Data([0, 65, 10]))
+    try pipe.fileHandleForWriting.close()
+    try withSocketPair { writer, reader in
+      try ControlFrameCodec.write(Data("first".utf8), kind: .request, descriptor: writer,
+        inputDescriptor: pipe.fileHandleForReading.fileDescriptor, deadline: deadline())
+      try ControlFrameCodec.write(Data("second".utf8), kind: .request, descriptor: writer, deadline: deadline())
+      let first = try ControlFrameCodec.readWithInputDescriptor(kind: .request, descriptor: reader, deadline: deadline())
+      XCTAssertEqual(first.payload, Data("first".utf8))
+      let input = try XCTUnwrap(first.input)
+      try input.bindConsumer("test")
+      XCTAssertEqual(try input.read(maximumBytes: 64, deadline: deadline()), Data([0, 65, 10]))
+      XCTAssertThrowsError(try input.read(maximumBytes: 64, deadline: deadline()))
+      let second = try ControlFrameCodec.readWithInputDescriptor(kind: .request, descriptor: reader, deadline: deadline())
+      XCTAssertNil(second.input)
+      XCTAssertEqual(second.payload, Data("second".utf8))
+    }
+    try withSocketPair { writer, reader in
+      try ControlFrameCodec.write(Data("unexpected".utf8), kind: .request, descriptor: writer,
+        inputDescriptor: pipe.fileHandleForReading.fileDescriptor, deadline: deadline())
+      XCTAssertThrowsError(try ControlFrameCodec.read(kind: .request, descriptor: reader, deadline: deadline())) {
+        XCTAssertEqual($0 as? ControlUnaryInputError, .unexpectedDescriptor)
+      }
+    }
+  }
+
+  func testInputDescriptorCannotBeAttachedInsideFrameBody() throws {
+    let pipe = Pipe()
+    try withSocketPair { writer, reader in
+      let payload = Data("body".utf8)
+      let frame = try ControlFrameCodec.encodedFrame(payload: payload, kind: .request)
+      try writeRaw(Data(frame.prefix(4)), descriptor: writer)
+      try ControlFrameCodec.write(payload, kind: .request, descriptor: writer,
+        inputDescriptor: pipe.fileHandleForReading.fileDescriptor, deadline: deadline())
+      XCTAssertThrowsError(try ControlFrameCodec.readWithInputDescriptor(kind: .request, descriptor: reader, deadline: deadline())) {
+        XCTAssertEqual($0 as? ControlUnaryInputError, .unexpectedDescriptor)
+      }
+    }
+  }
+
+  func testRejectsAndClosesMultipleAncillaryDescriptors() throws {
+    let pipe = Pipe()
+    try withSocketPair { writer, reader in
+      let frame = try ControlFrameCodec.encodedFrame(payload: Data("duplicate".utf8), kind: .request)
+      let headerSize = MemoryLayout<cmsghdr>.size
+      let size = headerSize + 2 * MemoryLayout<Int32>.size
+      let control = UnsafeMutableRawPointer.allocate(byteCount: size, alignment: MemoryLayout<cmsghdr>.alignment)
+      defer { control.deallocate() }
+      control.initializeMemory(as: UInt8.self, repeating: 0, count: size)
+      control.storeBytes(of: cmsghdr(cmsg_len: socklen_t(size), cmsg_level: SOL_SOCKET, cmsg_type: SCM_RIGHTS), as: cmsghdr.self)
+      for index in 0..<2 {
+        control.advanced(by: headerSize + index * MemoryLayout<Int32>.size).storeBytes(of: pipe.fileHandleForReading.fileDescriptor, as: Int32.self)
+      }
+      var byte = frame[0]
+      let sent = withUnsafeMutablePointer(to: &byte) { pointer in
+        var vector = iovec(iov_base: pointer, iov_len: 1)
+        return withUnsafeMutablePointer(to: &vector) { vectorPointer in
+          var message = msghdr()
+          message.msg_iov = vectorPointer; message.msg_iovlen = 1
+          message.msg_control = control; message.msg_controllen = socklen_t(size)
+          return Darwin.sendmsg(writer, &message, 0)
+        }
+      }
+      XCTAssertEqual(sent, 1)
+      try writeRaw(Data(frame.dropFirst()), descriptor: writer)
+      try pipe.fileHandleForReading.close()
+      XCTAssertThrowsError(try ControlFrameCodec.readWithInputDescriptor(kind: .request, descriptor: reader, deadline: deadline())) {
+        XCTAssertEqual($0 as? ControlUnaryInputError, .unexpectedDescriptor)
+      }
+      var event = pollfd(fd: pipe.fileHandleForWriting.fileDescriptor, events: Int16(POLLOUT), revents: 0)
+      XCTAssertGreaterThan(Darwin.poll(&event, 1, 100), 0)
+      XCTAssertNotEqual(event.revents & Int16(POLLERR | POLLHUP), 0, "both received pipe readers must be closed")
+    }
+  }
+
   func testReadsFragmentedPrefixAndBody() throws {
     try withSocketPair { writer, reader in
       let payload = Data("{\"fragmented\":true}".utf8)

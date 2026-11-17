@@ -2,10 +2,15 @@ import Darwin
 import Foundation
 import HostwrightControlPlane
 import HostwrightControlSecurity
+import HostwrightCore
 import HostwrightState
 import XCTest
 
 @testable import HostwrightControlTransport
+
+private final class InputDescriptorObservation: @unchecked Sendable {
+  weak var input: OwnedInputDescriptor?
+}
 
 final class PersistentControlServerTests: XCTestCase {
   func testListenerRecoversOnlyVerifiedStaleSocket() throws {
@@ -272,6 +277,201 @@ final class PersistentControlServerTests: XCTestCase {
     session.close()
     wait(for: [serverFinished], timeout: 2)
     XCTAssertNil(serverResult.error)
+  }
+
+  func testUnaryInputIsReadAfterAuthorizationOnceAndReplayDoesNotConsumeNewBytes() throws {
+    let root = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = SQLiteStateStore(path: root.appendingPathComponent("state.sqlite").path)
+    try store.migrate()
+    let identity = fixtureIdentity()
+    try store.controlIdentities.bootstrap(
+      ControlPeerIdentityRecord(
+        subjectID: "control-test-subject",
+        userID: UInt32(geteuid()),
+        codeIdentity: identity,
+        declaredBySubjectID: "control-test-subject",
+        declaredAt: "2026-08-02T20:00:00Z",
+        updatedAt: "2026-08-02T20:00:00Z"
+      )
+    )
+    let adapter = try SQLiteControlIdentitySecurityAdapter(
+      store: store,
+      sessionLifetime: 600,
+      now: { Date(timeIntervalSince1970: 1_785_715_200) }
+    )
+    let rawCredentials = RawControlPeerCredentials(
+      peerUID: UInt32(geteuid()),
+      peerGID: UInt32(getegid()),
+      peerPID: getpid(),
+      auditEffectiveUID: UInt32(geteuid()),
+      auditEffectiveGID: UInt32(getegid()),
+      auditPID: getpid(),
+      auditPIDVersion: 1,
+      auditSessionID: 1,
+      auditTokenData: Data(repeating: 7, count: MemoryLayout<audit_token_t>.size)
+    )
+    let authenticator = ControlPeerAuthenticator(
+      policy: try ControlPeerTrustPolicy(
+        expectedUserID: UInt32(geteuid()),
+        pinnedAdHocCodeDirectoryHashes: [identity.codeDirectoryHash]
+      ),
+      credentialReader: FixedCredentialReader(credentials: rawCredentials),
+      codeValidator: FixedCodeValidator(identity: identity),
+      subjectResolver: adapter,
+      sessionStore: adapter
+    )
+    let invocations = InvocationCounter()
+    let repository = ControlRequestRepository(store: store, now: { Date(timeIntervalSince1970: 1_785_715_200) })
+    let server = try PersistentControlConnectionServer(
+      authenticator: authenticator, requestRepository: repository, daemonGeneration: 1,
+      socketIdentity: ControlSocketIdentity(device: 31, inode: 37), mutatingOperations: ["secret.create"],
+      requestInputPreparer: { _, request, input, deadline in
+        let input = try XCTUnwrap(input)
+        try input.bindConsumer("secret.create:exact")
+        return try PersistentControlPreparedRequest(request: request, execution: { _, _ in
+          XCTAssertEqual(try input.read(maximumBytes: 64, deadline: deadline), Data([0, 77]))
+          invocations.increment()
+          return ControlResponseEnvelope(requestID: request.requestID, status: .completed, reasonCode: .completed)
+        })
+      },
+      auditRecorder: TestControlAuditRecorder(),
+      authorizer: { peer, request, at in
+        if request.requestID == "denied-input" {
+          return RBACDecision(effect: .deny, ruleIdentifiers: [], reasonCode: "authorization.denied")
+        }
+        return try allowingTestControlRequestAuthorizer(peer, request, at)
+      },
+      admissionEvaluator: allowingTestControlAdmissionEvaluator,
+      now: { Date(timeIntervalSince1970: 1_785_715_200) },
+      handler: { _, _, _ in XCTFail("prepared input execution required"); throw PersistentControlServerError.invalidRequest }
+    )
+    let pair = try socketPair()
+    defer { _ = Darwin.close(pair.client); _ = Darwin.close(pair.server) }
+    try ControlFrameCodec.configureNoSigPipe(descriptor: pair.client)
+    let serverResult = ServerResult()
+    let finished = expectation(description: "input server closes")
+    DispatchQueue.global().async {
+      defer { finished.fulfill() }
+      do { try server.serve(descriptor: pair.server) } catch { serverResult.error = error }
+    }
+    try completeAuthentication(descriptor: pair.client)
+    for (id, bytes, shouldConsume) in [
+      ("denied-input", Data("unread-denied".utf8), false),
+      ("accepted-input", Data([0, 77]), true),
+      ("accepted-input", Data("unread-replay".utf8), false),
+    ] {
+      let pipe = Pipe()
+      try pipe.fileHandleForWriting.write(contentsOf: bytes)
+      try pipe.fileHandleForWriting.close()
+      let request = ControlRequestEnvelope(requestID: id, operation: "secret.create", timeoutMilliseconds: 1_000, idempotencyKey: id)
+      try ControlFrameCodec.write(try ControlPlaneCanonicalJSON.encode(request), kind: .request,
+        descriptor: pair.client, inputDescriptor: pipe.fileHandleForReading.fileDescriptor, deadline: deadline())
+      let response = try readResponse(descriptor: pair.client)
+      XCTAssertEqual(response.status, id == "denied-input" ? .rejected : .completed)
+      if !shouldConsume { XCTAssertEqual(try pipe.fileHandleForReading.readToEnd(), bytes) }
+    }
+    XCTAssertEqual(invocations.value, 1)
+    _ = shutdown(pair.client, SHUT_RDWR)
+    wait(for: [finished], timeout: 2)
+    XCTAssertNil(serverResult.error)
+  }
+
+  func testDisconnectCancelsInputWithoutConsumingNextBytesAndDrainsOrdinaryUnary() throws {
+    let root = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = SQLiteStateStore(path: root.appendingPathComponent("state.sqlite").path)
+    try store.migrate()
+    let identity = fixtureIdentity()
+    try store.controlIdentities.bootstrap(ControlPeerIdentityRecord(
+      subjectID: "control-test-subject", userID: UInt32(geteuid()), codeIdentity: identity,
+      declaredBySubjectID: "control-test-subject", declaredAt: "2026-08-02T20:00:00Z",
+      updatedAt: "2026-08-02T20:00:00Z"
+    ))
+    let adapter = try SQLiteControlIdentitySecurityAdapter(
+      store: store, sessionLifetime: 600,
+      now: { Date(timeIntervalSince1970: 1_785_715_200) }
+    )
+    let credentials = RawControlPeerCredentials(
+      peerUID: UInt32(geteuid()), peerGID: UInt32(getegid()), peerPID: getpid(),
+      auditEffectiveUID: UInt32(geteuid()), auditEffectiveGID: UInt32(getegid()),
+      auditPID: getpid(), auditPIDVersion: 1, auditSessionID: 1,
+      auditTokenData: Data(repeating: 7, count: MemoryLayout<audit_token_t>.size)
+    )
+    let authenticator = ControlPeerAuthenticator(
+      policy: try ControlPeerTrustPolicy(expectedUserID: UInt32(geteuid()), pinnedAdHocCodeDirectoryHashes: [identity.codeDirectoryHash]),
+      credentialReader: FixedCredentialReader(credentials: credentials),
+      codeValidator: FixedCodeValidator(identity: identity), subjectResolver: adapter, sessionStore: adapter
+    )
+    let ordinaryStarted = DispatchSemaphore(value: 0)
+    let finishOrdinary = DispatchSemaphore(value: 0)
+    let inputStarted = DispatchSemaphore(value: 0)
+    let inputFinished = DispatchSemaphore(value: 0)
+    let mutations = InvocationCounter()
+    let observation = InputDescriptorObservation()
+    let server = try PersistentControlConnectionServer(
+      authenticator: authenticator,
+      requestRepository: ControlRequestRepository(store: store, now: { Date(timeIntervalSince1970: 1_785_715_200) }),
+      daemonGeneration: 1, socketIdentity: ControlSocketIdentity(device: 31, inode: 37),
+      mutatingOperations: ["secret.create"],
+      requestInputPreparer: { _, request, input, deadline in
+        if let input {
+          observation.input = input
+          try input.bindConsumer("secret.create:disconnect")
+          return try PersistentControlPreparedRequest(request: request, execution: { _, _ in
+            defer { inputFinished.signal() }
+            inputStarted.signal()
+            _ = try input.read(maximumBytes: 64, deadline: deadline)
+            mutations.increment()
+            return ControlResponseEnvelope(requestID: request.requestID, status: .completed, reasonCode: .completed)
+          })
+        }
+        return try PersistentControlPreparedRequest(request: request, execution: { _, _ in
+          ordinaryStarted.signal()
+          guard finishOrdinary.wait(timeout: .now() + 3) == .success else { throw CancellationError() }
+          XCTAssertFalse(try XCTUnwrap(HostwrightCancellationContext.token).isCancelled)
+          return ControlResponseEnvelope(requestID: request.requestID, status: .completed, reasonCode: .completed)
+        })
+      },
+      auditRecorder: TestControlAuditRecorder(), authorizer: allowingTestControlRequestAuthorizer,
+      admissionEvaluator: allowingTestControlAdmissionEvaluator,
+      now: { Date(timeIntervalSince1970: 1_785_715_200) },
+      handler: { _, _, _ in throw PersistentControlServerError.invalidRequest }
+    )
+    let pair = try socketPair()
+    defer { _ = Darwin.close(pair.client); _ = Darwin.close(pair.server) }
+    try ControlFrameCodec.configureNoSigPipe(descriptor: pair.client)
+    let serverResult = ServerResult()
+    let finished = expectation(description: "disconnected input drained")
+    DispatchQueue.global().async {
+      defer { finished.fulfill() }
+      do { try server.serve(descriptor: pair.server) } catch { serverResult.error = error }
+    }
+    try completeAuthentication(descriptor: pair.client)
+    let ordinary = ControlRequestEnvelope(requestID: "ordinary-halfclose", operation: "status", timeoutMilliseconds: 3_000)
+    try writeRequest(try ControlPlaneCanonicalJSON.encode(ordinary), descriptor: pair.client)
+    XCTAssertEqual(ordinaryStarted.wait(timeout: .now() + 1), .success)
+    let pipe = Pipe()
+    let originalFlags = fcntl(pipe.fileHandleForReading.fileDescriptor, F_GETFL)
+    let request = ControlRequestEnvelope(requestID: "disconnect-input", operation: "secret.create", timeoutMilliseconds: 3_000, idempotencyKey: "disconnect-input")
+    try ControlFrameCodec.write(try ControlPlaneCanonicalJSON.encode(request), kind: .request,
+      descriptor: pair.client, inputDescriptor: pipe.fileHandleForReading.fileDescriptor, deadline: deadline())
+    XCTAssertEqual(inputStarted.wait(timeout: .now() + 1), .success)
+    XCTAssertEqual(shutdown(pair.client, SHUT_WR), 0)
+    XCTAssertEqual(inputFinished.wait(timeout: .now() + 1), .success)
+    let nextLine = Data("next-shell-line\n".utf8)
+    try pipe.fileHandleForWriting.write(contentsOf: nextLine)
+    try pipe.fileHandleForWriting.close()
+    XCTAssertEqual(try pipe.fileHandleForReading.readToEnd(), nextLine)
+    XCTAssertEqual(fcntl(pipe.fileHandleForReading.fileDescriptor, F_GETFL), originalFlags)
+    finishOrdinary.signal()
+    let response = try readResponse(descriptor: pair.client)
+    XCTAssertEqual(response.requestID, ordinary.requestID)
+    XCTAssertEqual(response.status, .completed)
+    wait(for: [finished], timeout: 2)
+    XCTAssertEqual(mutations.value, 0)
+    XCTAssertNil(serverResult.error)
+    XCTAssertNil(observation.input)
   }
 
   func testAuthenticatedMutationPersistsBeforeReplyAndIdempotentReplaySkipsHandler() throws {
@@ -1208,7 +1408,7 @@ final class PersistentControlServerTests: XCTestCase {
       isDirectory: true
     ).appendingPathComponent(".build", isDirectory: true)
     let candidate = buildDirectory.appendingPathComponent(
-      "hw-p09-\(UUID().uuidString.prefix(8))",
+      "u-\(UUID().uuidString.prefix(8))",
       isDirectory: true
     )
     try FileManager.default.createDirectory(at: buildDirectory, withIntermediateDirectories: true)

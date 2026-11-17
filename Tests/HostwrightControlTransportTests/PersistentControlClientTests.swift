@@ -2,11 +2,34 @@ import Darwin
 import Foundation
 import HostwrightControlPlane
 import HostwrightControlSecurity
+import HostwrightCore
 @testable import HostwrightControlTransport
 import HostwrightState
 import XCTest
 
 final class PersistentControlClientTests: XCTestCase {
+  func testUnaryInputNegotiationRejectsMissingBlockedAndDuplicateCapabilities() throws {
+    let capability = try XCTUnwrap(HostwrightCapabilityCatalog.report.capabilities.first {
+      $0.identifier == HostwrightUnaryInputCapability.identifier
+    })
+    let blocked = HostwrightCapability(identifier: capability.identifier, title: capability.title, state: .blocked,
+      phase: capability.phase, issue: capability.issue, reason: capability.reason, requiredEvidence: capability.requiredEvidence)
+    for rows in [[], [blocked], [capability, blocked], [capability]] {
+      let report = HostwrightCapabilityReport(capabilities: rows)
+      let output = String(decoding: try JSONEncoder().encode(report), as: UTF8.self)
+      let response = ControlResponseEnvelope(requestID: "feature-probe", status: .completed, reasonCode: .completed,
+        result: .object(["resultSchemaVersion": .integer(1), "exitCode": .integer(0), "standardOutput": .string(output), "standardError": .string("")]))
+      if rows.count == 1 && rows[0].state == .stable {
+        XCTAssertNoThrow(try PersistentControlClient.validateUnaryInputCapability(response))
+      } else {
+        XCTAssertThrowsError(try PersistentControlClient.validateUnaryInputCapability(response))
+      }
+    }
+    let denied = ControlResponseEnvelope(requestID: "feature-probe", status: .rejected, reasonCode: .unauthorized,
+      error: SanitizedError(code: "denied", message: "Denied"))
+    XCTAssertThrowsError(try PersistentControlClient.validateUnaryInputCapability(denied))
+  }
+
   func testCancellationPinsDescriptorUntilShutdownCompletes() {
     let shutdownStarted = DispatchSemaphore(value: 0)
     let allowShutdown = DispatchSemaphore(value: 0)
@@ -462,7 +485,7 @@ final class PersistentControlClientTests: XCTestCase {
       .deletingLastPathComponent()
     let compactID = UUID().uuidString.lowercased().replacingOccurrences(of: "-", with: "")
     let root = repository.appendingPathComponent(
-      ".build/p09c-\(compactID.prefix(12))",
+      ".build/uc-\(compactID.prefix(8))",
       isDirectory: true
     )
     try FileManager.default.createDirectory(at: root.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -472,9 +495,9 @@ final class PersistentControlClientTests: XCTestCase {
   }
 
   private func removeOwnedRoot(_ root: URL) {
-    let expected = "/.build/p09c-"
+    let expected = "/.build/uc-"
     guard root.path.contains(expected),
-      root.lastPathComponent.range(of: "^p09c-[a-f0-9]{12}$", options: .regularExpression) != nil,
+      root.lastPathComponent.range(of: "^uc-[a-f0-9]{8}$", options: .regularExpression) != nil,
       (try? FileManager.default.attributesOfItem(atPath: root.path)[.posixPermissions] as? NSNumber)?
         .intValue == 0o700
     else {

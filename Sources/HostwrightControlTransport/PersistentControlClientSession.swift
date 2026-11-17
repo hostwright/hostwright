@@ -9,6 +9,7 @@ public final class PersistentControlClientSession: @unchecked Sendable {
     let resumed: Bool
   }
   private let descriptor: Int32
+  private let cancellation: PersistentControlRequestCancellation?
   private let sessionProtocolRevision: ControlProtocolRevision
   private let condition = NSCondition()
   private let writerLock = NSLock()
@@ -35,9 +36,11 @@ public final class PersistentControlClientSession: @unchecked Sendable {
   init(
     descriptor: Int32,
     protocolRevision: ControlProtocolRevision = .previous,
-    frameWriter: @escaping ControlFrameWriteOperation = defaultControlFrameWrite
+    frameWriter: @escaping ControlFrameWriteOperation = defaultControlFrameWrite,
+    cancellation: PersistentControlRequestCancellation? = nil
   ) {
     self.descriptor = descriptor
+    self.cancellation = cancellation
     self.sessionProtocolRevision = protocolRevision
     self.frameWriter = frameWriter
   }
@@ -49,6 +52,10 @@ public final class PersistentControlClientSession: @unchecked Sendable {
   }
 
   public func send(_ request: ControlRequestEnvelope) throws -> ControlResponseEnvelope {
+    try send(request, inputDescriptor: nil)
+  }
+
+  func send(_ request: ControlRequestEnvelope, inputDescriptor: Int32?) throws -> ControlResponseEnvelope {
     try request.validate()
     guard let requestRevision = request.protocolRevision,
       ControlProtocolCompatibility.supportsRequestRevision(requestRevision),
@@ -75,7 +82,8 @@ public final class PersistentControlClientSession: @unchecked Sendable {
         try write(
           try ControlPlaneCanonicalJSON.encode(request),
           kind: .request,
-          deadline: deadline
+          deadline: deadline,
+          inputDescriptor: inputDescriptor
         )
       } catch {
         close()
@@ -437,10 +445,15 @@ public final class PersistentControlClientSession: @unchecked Sendable {
   private func write(
     _ data: Data,
     kind: ControlPayloadKind,
-    deadline: ControlTransportDeadline
+    deadline: ControlTransportDeadline,
+    inputDescriptor: Int32? = nil
   ) throws {
     try withWriterDeadline(deadline) {
-      try frameWriter(data, kind, descriptor, deadline)
+      if let inputDescriptor {
+        try ControlFrameCodec.write(data, kind: kind, descriptor: descriptor, inputDescriptor: inputDescriptor, deadline: deadline)
+      } else {
+        try frameWriter(data, kind, descriptor, deadline)
+      }
     }
   }
 
@@ -481,7 +494,7 @@ public final class PersistentControlClientSession: @unchecked Sendable {
   }
 
   private func readLoop() {
-    defer { _ = Darwin.close(descriptor) }
+    defer { cancellation?.unbind(descriptor: descriptor); _ = Darwin.close(descriptor) }
     do {
       while true {
         try ControlFrameCodec.waitForFrame(descriptor: descriptor)

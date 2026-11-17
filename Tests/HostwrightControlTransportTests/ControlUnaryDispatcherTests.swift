@@ -11,7 +11,7 @@ final class ControlUnaryDispatcherTests: XCTestCase {
         let context = ControlStreamConnectionContext(
             descriptor: -1, globalBudget: ControlStreamGlobalBudget(), validateSession: {}
         )
-        let dispatcher = ControlUnaryDispatcher(descriptor: -1, context: context) { _ in
+        let dispatcher = ControlUnaryDispatcher(descriptor: -1, context: context) { _, _ in
             defer { finished.fulfill() }
             let token = try XCTUnwrap(HostwrightCancellationContext.token)
             started.signal()

@@ -55,6 +55,10 @@ public struct HostwrightCapabilityReport: Codable, Equatable, Sendable {
     }
 }
 
+public enum HostwrightUnaryInputCapability {
+    public static let identifier = "api.control-unary-input"
+}
+
 public enum HostwrightCapabilityCatalog {
     public static let report = HostwrightCapabilityReport(capabilities: catalog)
 
@@ -62,6 +66,7 @@ public enum HostwrightCapabilityCatalog {
         capability("accelerators.guest-passthrough", "Direct guest GPU and ANE passthrough", .blocked, 10, 219, "GPU and ANE passthrough is deferred for v0.0.2. No supported public Apple API exposes this boundary; the local release makes no accelerator claim.", [.unitContract, .securityAssessment, .hardwareBenchmark]),
         capability("accelerators.host-native", "Metal, Core ML, and MLX host-native service", .unavailable, 10, 219, "Host-native accelerators are deferred for v0.0.2. Retained development contracts and service slices do not establish supported accelerator execution.", [.unitContract, .localIntegration, .securityAssessment, .hardwareBenchmark]),
         capability("api.control-v2", "Persistent local Control API 2.2", .experimental, 9, 206, "The authenticated local Unix-socket API implements bounded unary requests and streams, authorization, RBAC, revocation, deterministic admission and plan confirmation. Current candidate security qualification remains required; complete CLI and desktop parity is deferred.", [.unitContract, .localIntegration, .securityAssessment]),
+        capability(HostwrightUnaryInputCapability.identifier, "Request-bound unary standard input", .stable, 9, 206, "Authenticated unary secret creation, secret updates and registry login accept a request-bound input descriptor. Input is read only after authorization, with bounded size and deadline; secret bytes are excluded from request JSON, arguments, logs and temporary files.", [.unitContract, .localIntegration, .securityAssessment]),
         capability("architecture.contracts", "Versioned local v0.0.2 contracts", .experimental, 1, 110, "The local release uses Manifest v3, Control API 2.2 and SQLite schema v24, with declared Runtime Provider API v2 and Storage Provider API v1 capabilities. Final candidate and GA qualification remain required.", [.unitContract, .migrationUpgrade]),
         capability("ci.distribution", "Protected signed distribution and local qualification", .experimental, 15, 283, "Protected workflows implement exact-source signed/notarized staging, retained evidence acceptance and immutable promotion. Runtime qualification uses one physical M4 Pro and one macOS VM; current candidate acceptance and GA publication remain pending.", [.distributionArtifact, .securityAssessment]),
         capability("cloud.control-plane", "Optional team cloud control plane", .unavailable, 14, 270, "Cloud control-plane and team service claims are deferred for v0.0.2. The local release grants no tenant, remote-agent or cloud availability guarantee.", [.securityAssessment, .resilienceChaos, .uxAccessibility]),

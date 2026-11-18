@@ -122,7 +122,17 @@ def runtime_verifier():
     return validator
 
 
-def verify(bundle, expected_archive=None, expected_manifest=None, expected_source=None, expected_version=None, gpg=None, gpg_sha256=None):
+def staged_product_verifier():
+    spec = importlib.util.spec_from_file_location(
+        'hostwright_source_stage', pathlib.Path(__file__).with_name('stage-corresponding-source.py')
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def verify(bundle, expected_archive=None, expected_manifest=None, expected_source=None,
+           expected_version=None, gpg=None, gpg_sha256=None, *, staged_root=None):
     verifier_arguments=gpg_arguments(gpg,gpg_sha256)
     bundle=regular(bundle)
     archive_sha=digest_file(bundle)
@@ -142,7 +152,12 @@ def verify(bundle, expected_archive=None, expected_manifest=None, expected_sourc
         if (expected_source and manifest['releaseSourceRevision']!=expected_source) or (expected_version and manifest['version']!=expected_version):raise ValueError('source bundle differs from accepted source/version')
         verify_records(archive,manifest['files'],max_bytes=max_member_bytes(source_kind))
         if source_kind==NEW_RUNTIME_KIND:
-            validator.verify_source_bundle(archive,manifest['releaseSourceRevision'])
+            if staged_root is None:
+                validator.verify_source_bundle(archive, manifest['releaseSourceRevision'])
+            else:
+                staged_product_verifier().verify_staged_product(
+                    staged_root, archive, manifest['releaseSourceRevision'], source_kind
+                )
             return dict(archiveSHA256=archive_sha,manifestSHA256=manifest_sha,sizeBytes=bundle.stat().st_size,
                         version=manifest['version'],releaseSourceRevision=manifest['releaseSourceRevision'],status=manifest['status'])
         records={r['path']:r for r in manifest['files']}
@@ -179,6 +194,10 @@ def verify(bundle, expected_archive=None, expected_manifest=None, expected_sourc
                     import shutil
                     shutil.copyfileobj(incoming,outgoing,1024*1024)
             subprocess.run(['python3',str(pathlib.Path(__file__).with_name('verify-kernel-source-signature.py')),'--inputs',str(temporary),'--output',str(temporary/'verified-signature.json')]+verifier_arguments,check=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        if staged_root is not None:
+            staged_product_verifier().verify_staged_product(
+                staged_root, archive, manifest['releaseSourceRevision'], source_kind
+            )
     return dict(archiveSHA256=archive_sha,manifestSHA256=manifest_sha,sizeBytes=bundle.stat().st_size,
                 version=manifest['version'],releaseSourceRevision=manifest['releaseSourceRevision'],status=manifest['status'])
 
@@ -362,6 +381,7 @@ def main():
     p=argparse.ArgumentParser();subs=p.add_subparsers(dest='command',required=True)
     q=subs.add_parser('prepare');q.add_argument('--root',type=pathlib.Path,required=True);q.add_argument('--kernel-inputs',type=pathlib.Path);q.add_argument('--kata-recipes',type=pathlib.Path);q.add_argument('--loader-receipt',type=pathlib.Path);q.add_argument('--runtime-provenance-archive',type=pathlib.Path);q.add_argument('--output-parent',type=pathlib.Path,required=True);q.add_argument('--version',required=True);q.add_argument('--source',required=True)
     q=subs.add_parser('verify');q.add_argument('--archive',type=pathlib.Path,required=True);q.add_argument('--expected-archive-sha256',required=True);q.add_argument('--expected-manifest-sha256',required=True);q.add_argument('--expected-source',required=True);q.add_argument('--expected-version',required=True)
+    q.add_argument('--staged-root', type=pathlib.Path)
     for parser in subs.choices.values():parser.add_argument('--gpg');parser.add_argument('--gpg-sha256')
     args=p.parse_args()
     gpg_arguments(args.gpg,args.gpg_sha256)
@@ -371,5 +391,9 @@ def main():
             print(json.dumps(result,sort_keys=True))
     else:
         if not re.fullmatch('[a-f0-9]{64}',args.expected_archive_sha256) or not re.fullmatch('[a-f0-9]{64}',args.expected_manifest_sha256):raise ValueError('exact staged archive and manifest digests are required')
-        print(json.dumps(verify(args.archive,args.expected_archive_sha256,args.expected_manifest_sha256,args.expected_source,args.expected_version,args.gpg,args.gpg_sha256),sort_keys=True))
+        print(json.dumps(verify(
+            args.archive, args.expected_archive_sha256, args.expected_manifest_sha256,
+            args.expected_source, args.expected_version, args.gpg, args.gpg_sha256,
+            staged_root=args.staged_root,
+        ), sort_keys=True))
 if __name__=='__main__':main()

@@ -62,9 +62,33 @@ def gpg_arguments(path=None,digest=None):
  executable=pathlib.Path(path)
  if not executable.is_absolute() or '..' in executable.parts or not re.fullmatch('[a-f0-9]{64}',digest):raise ValueError('GPG requires an absolute path and exact SHA256')
  return ['--gpg',str(executable),'--gpg-sha256',digest]
+def verify_staged_product(root, bundle, commit, source_kind):
+ source=root/'source'
+ manifests=[m for m in bundle.getmembers() if m.name=='source-manifest.json'];runtimes=[m for m in bundle.getmembers() if m.name=='licenses/runtime-license-inventory.json']
+ if len(manifests)!=1 or not manifests[0].isfile() or bundle.extractfile(manifests[0]).read()!=read(source/'source-manifest.json'):raise ValueError('external source manifest differs from bundled bytes')
+ if len(runtimes)!=1 or not runtimes[0].isfile() or runtimes[0].size>16*1024**2:raise ValueError('source bundle lacks exact runtime license inventory')
+ source_runtime=parse(bundle.extractfile(runtimes[0]).read())
+ release=parse(read(root/'release/release-manifest.json'))
+ if (pathlib.PurePosixPath(release['archive']['fileName']).name!=release['archive']['fileName'] or not release['archive']['fileName'].endswith('.zip') or not re.fullmatch('[A-Za-z0-9_.-]+',release['artifactID'])):raise ValueError('unsafe product archive identity')
+ product=root/'release'/release['archive']['fileName']
+ if sha(product)!=release['archive']['sha256']:raise ValueError('product archive changed')
+ prefix=release['artifactID']+'/'
+ path=prefix+'share/doc/hostwright/runtime-license-inventory.json'
+ with zipfile.ZipFile(product) as archive:
+  matches=[i for i in archive.infolist() if i.filename==path]
+  if len(matches)!=1 or matches[0].file_size>16*1024**2 or stat.S_IFMT(matches[0].external_attr>>16) not in (0,stat.S_IFREG):raise ValueError('product lacks exact runtime license inventory')
+  product_runtime=parse(archive.read(matches[0]))
+  if source_evidence_contents(source_runtime)!=source_evidence_contents(product_runtime):raise ValueError('product runtime source evidence differs from corresponding-source contents')
+  if source_kind!=NEW_RUNTIME_KIND:
+   raise ValueError('legacy runtime source lacks authenticated actual-byte provenance')
+  entries=[item for item in archive.infolist() if item.filename.startswith(prefix+'share/hostwright/containerization/') and not item.is_dir()]
+  if len({item.filename for item in entries})!=len(entries) or any(item.file_size>2*1024**3 or stat.S_IFMT(item.external_attr>>16) not in (0,stat.S_IFREG) for item in entries):raise ValueError('unsafe actual product runtime closure')
+  product_payloads={item.filename[len(prefix):]:archive.read(item) for item in entries}
+ qualified_runtime(bundle,commit,product_payloads)
+
 def verify_contract(root,commit,version,gpg=None,gpg_sha256=None):
  binding=descriptor(root,commit,version);source=root/'source';archive=source/binding['archive']['fileName']
- command=['python3',str(pathlib.Path(__file__).with_name('corresponding-source.py')),'verify','--archive',str(archive),'--expected-archive-sha256',binding['archive']['sha256'],'--expected-manifest-sha256',binding['manifest']['sha256'],'--expected-source',commit,'--expected-version',version]+gpg_arguments(gpg,gpg_sha256)
+ command=['python3',str(pathlib.Path(__file__).with_name('corresponding-source.py')),'verify','--archive',str(archive),'--expected-archive-sha256',binding['archive']['sha256'],'--expected-manifest-sha256',binding['manifest']['sha256'],'--expected-source',commit,'--expected-version',version,'--staged-root',str(root)]+gpg_arguments(gpg,gpg_sha256)
  try:result=subprocess.run(command,check=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
  except subprocess.CalledProcessError as error:
   diagnostic=(error.stderr or b'')[-8192:].decode('utf-8',errors='replace').strip() or '(no stderr)'
@@ -72,30 +96,6 @@ def verify_contract(root,commit,version,gpg=None,gpg_sha256=None):
   raise ValueError('independent source verifier failed with exit '+str(error.returncode)+':\n'+diagnostic) from None
  verified=parse(result.stdout)
  if verified.get('archiveSHA256')!=binding['archive']['sha256'] or verified.get('manifestSHA256')!=binding['manifest']['sha256'] or verified.get('releaseSourceRevision')!=commit or verified.get('version')!=version:raise ValueError('independent source verifier returned different bindings')
- with runtime_verifier().open_source_archive(archive) as bundle:
-  manifests=[m for m in bundle.getmembers() if m.name=='source-manifest.json'];runtimes=[m for m in bundle.getmembers() if m.name=='licenses/runtime-license-inventory.json']
-  if len(manifests)!=1 or not manifests[0].isfile() or bundle.extractfile(manifests[0]).read()!=read(source/'source-manifest.json'):raise ValueError('external source manifest differs from bundled bytes')
-  if len(runtimes)!=1 or not runtimes[0].isfile() or runtimes[0].size>16*1024**2:raise ValueError('source bundle lacks exact runtime license inventory')
-  source_runtime=parse(bundle.extractfile(runtimes[0]).read())
- release=parse(read(root/'release/release-manifest.json'))
- if (pathlib.PurePosixPath(release['archive']['fileName']).name!=release['archive']['fileName'] or not release['archive']['fileName'].endswith('.zip') or not re.fullmatch('[A-Za-z0-9_.-]+',release['artifactID'])):raise ValueError('unsafe product archive identity')
- product=root/'release'/release['archive']['fileName']
- if sha(product)!=release['archive']['sha256']:raise ValueError('product archive changed')
- path=release['artifactID']+'/share/doc/hostwright/runtime-license-inventory.json'
- with zipfile.ZipFile(product) as archive:
-  matches=[i for i in archive.infolist() if i.filename==path]
-  if len(matches)!=1 or matches[0].file_size>16*1024**2 or stat.S_IFMT(matches[0].external_attr>>16) not in (0,stat.S_IFREG):raise ValueError('product lacks exact runtime license inventory')
-  product_runtime=parse(archive.read(matches[0]))
- if source_evidence_contents(source_runtime)!=source_evidence_contents(product_runtime):raise ValueError('product runtime source evidence differs from corresponding-source contents')
- if binding['sourceManifestKind']!=NEW_RUNTIME_KIND:
-  raise ValueError('legacy runtime source lacks authenticated actual-byte provenance')
- prefix=release['artifactID']+'/'
- with zipfile.ZipFile(product) as product_archive:
-  entries=[item for item in product_archive.infolist() if item.filename.startswith(prefix+'share/hostwright/containerization/') and not item.is_dir()]
-  if len({item.filename for item in entries})!=len(entries) or any(item.file_size>2*1024**3 or stat.S_IFMT(item.external_attr>>16) not in (0,stat.S_IFREG) for item in entries):raise ValueError('unsafe actual product runtime closure')
-  product_payloads={item.filename[len(prefix):]:product_archive.read(item) for item in entries}
- with runtime_verifier().open_source_archive(source/binding['archive']['fileName']) as source_archive:
-  qualified_runtime(source_archive,commit,product_payloads)
  return binding
 
 def install(root,prepared,commit,version,gpg=None,gpg_sha256=None):

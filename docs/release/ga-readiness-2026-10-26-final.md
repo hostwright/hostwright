@@ -1,5 +1,7 @@
 # GA readiness — final-version preparation, October 26, 2026
 
+This is a historical October 26 preparation record. The current release policy is [ADR 0017](../design/adr-0017-focused-v002-qualification.md): five focused groups, signed downloads and the vendor tap. Former eighteen-gate, repeated timed-campaign and official Homebrew launch requirements below are superseded. Original results, failures and artifact bindings remain unchanged. See the [published v0.0.2 release](https://github.com/hostwright/hostwright/releases/tag/v0.0.2) and [current compatibility matrix](../reference/compatibility.md).
+
 Current source prepares unpublished `0.0.2` artifacts. No supported RC or GA is published, and official `brew install hostwright` is not yet available. Manifest v3, Control API 2.2, state schema v24 and the existing single-Mac CLI, desktop and narrow Compose scope remain unchanged.
 
 The maintainer approved one complete qualification of the final version, replacing the separate accepted-RC prerequisite. All eighteen acceptance gates remain required. Historical RC records retain their exact bindings; no RC outcome becomes final-version evidence.

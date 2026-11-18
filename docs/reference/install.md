@@ -6,11 +6,11 @@ acceptance and the prior timed qualification campaigns are deferred. Historical
 procedures below do not add requirements to the focused five-group policy.
 
 
-This guide covers signed v0.0.2 downloads and the vendor tap. [GitHub Releases](https://github.com/hostwright/hostwright/releases) is the authority for published versions and verification assets. Source builds and unpublished candidates do not establish release qualification; historical dev.11/dev.12 channels remain unsupported.
+This guide covers the published [signed v0.0.2 downloads](https://github.com/hostwright/hostwright/releases/tag/v0.0.2) and vendor tap. [GitHub Releases](https://github.com/hostwright/hostwright/releases) is the authority for published versions and verification assets. Source builds and unpublished candidates do not establish release qualification; historical dev.11/dev.12 channels remain unsupported.
 
 ## Package Manager Truth
 
-`brew install hostwright` does not exist today. Do not publish or repeat that command as an available installation path.
+Use the fully qualified vendor command below. Official Homebrew core/cask acceptance is deferred; no fresh-machine short-name installation is claimed.
 
 Phase 02 delivered:
 
@@ -27,7 +27,7 @@ The Hostwright-controlled package-manager command is:
 brew install hostwright/tap/hostwright
 ```
 
-That command uses [`hostwright/homebrew-tap`](https://github.com/hostwright/homebrew-tap). The v0.0.2 formula must select the exact verified signed archive after publication. Check `hostwright --version` before following v0.0.2 quickstarts; a formula still selecting dev.12 installs an unsupported historical qualification release with older contracts.
+That command uses [`hostwright/homebrew-tap`](https://github.com/hostwright/homebrew-tap) and the exact verified signed v0.0.2 archive. Check `hostwright --version` before following v0.0.2 quickstarts. Existing dev.12 installations use older contracts and must follow the verified upgrade path.
 
 The v0.0.2 launch uses signed downloads and the verified vendor tap. Official
 Homebrew cask/core inclusion is deferred and does not block publication or release
@@ -73,7 +73,7 @@ v0.0.2-dev.12 -> 71414005104933d8ee3591e8c91bc831bce2e2a2
 ```
 
 The current exact value is also recorded in `contracts/v0.0.2/versions.json`.
-Do not check out or tag `v0.0.2` until the Phase 15 GA gate has passed. Phase 02 published the two immutable unsupported `v0.0.2-dev.11` and `v0.0.2-dev.12` qualification prereleases solely for real signed-byte and vendor-tap upgrade evidence; neither is promoted or presented as a supported release. Historical `v0.1.0-alpha.1` documentation is retained as an immutable project record and is not the current installation target.
+The immutable `v0.0.2` tag names qualified source `9df19732120d8220ed76a05a234177c483d42dff`. Use its published signed assets for installation. Phase 02 published the two immutable unsupported `v0.0.2-dev.11` and `v0.0.2-dev.12` qualification prereleases solely for real signed-byte and vendor-tap upgrade evidence; neither is promoted or presented as a supported release. Historical `v0.1.0-alpha.1` documentation is retained as an immutable project record and is not the current installation target.
 
 ## Development Executables
 
@@ -124,7 +124,7 @@ The complete precedence, `0700`/`0600` policy, migration failure behavior, and r
 
 `hostwright-dist` now implements install, strict upgrade, same-generation repair, status, explicit legacy adoption, interrupted-operation recovery, one-generation verified rollback, and ownership-scoped uninstall for a verifier-produced artifact at an explicit existing prefix. Every lifecycle command uses structured JSON. Upgrade snapshots and migrates a bound compatible state database; rollback restores the exact pre-upgrade snapshot when one was retained.
 
-This installed-lifecycle behavior is available through the vendor tap and signed `.pkg` qualification channels, but it is not a GA support claim. The prefix is always explicit. The `.pkg` implementation stages its payload only in the private root-owned `/Library/Application Support/Hostwright/InstallerPayload` directory. Its `postinstall` entrypoint runs elevated `hostwright-dist package-apply`, which verifies the exact `dev.hostwright.cli` receipt/version, staged manifest and digests, executable signatures against the trusted release's exact Team ID, package-origin status, and `/usr/local` prefix before using the existing durable install/upgrade/repair lifecycle. Package application does not create/register/autostart a LaunchAgent, edit `PATH` or shell profiles, or mutate Apple container workloads. It stops and restores only an exact existing Homebrew launchd record bound to this prefix; an unmanaged installed `hostwrightd` is refused instead of killed or adopted. The separate current-user `hostwright daemon install` command owns `dev.hostwright.daemon` after explicit invocation.
+The published v0.0.2 archive and signed `.pkg` have their own installation, upgrade, rollback, repair and uninstall evidence under the focused release policy. The prefix is always explicit. The `.pkg` implementation stages its payload only in the private root-owned `/Library/Application Support/Hostwright/InstallerPayload` directory. Its `postinstall` entrypoint runs elevated `hostwright-dist package-apply`, which verifies the exact `dev.hostwright.cli` receipt/version, staged manifest and digests, executable signatures against the trusted release's exact Team ID, package-origin status, and `/usr/local` prefix before using the existing durable install/upgrade/repair lifecycle. Package application does not create/register/autostart a LaunchAgent, edit `PATH` or shell profiles, or mutate Apple container workloads. It stops and restores only an exact existing Homebrew launchd record bound to this prefix; an unmanaged installed `hostwrightd` is refused instead of killed or adopted. The separate current-user `hostwright daemon install` command owns `dev.hostwright.daemon` after explicit invocation.
 
 Generic explicitly bound installs offer two exact choices:
 
@@ -145,10 +145,10 @@ to a supported GA release.
 
 A source checkout remains separate from an installed prefix. Deleting the checkout does not run `hostwright-dist uninstall` and does not remove Application Support data or runtime resources.
 
-## Gate Before Package Claims
+## Historical Qualification and Current Release Evidence
 
-Phase 02 qualification passed on a clean macOS 26 Apple-silicon VM. Evidence covers Gatekeeper, package and tap install, reboot-surviving service operation, dev.11-to-dev.12 upgrade, rollback, repair, downgrade refusal, uninstall, state backup/restore/migration, signed doctor cells, sanitizer lanes, abrupt-power recovery, and exact owned cleanup. Final GA requirements remain in the [v0.0.2 implementation plan](../roadmap/v0.0.2/IMPLEMENTATION_PLAN.md) and [distribution evidence rules](testing-evidence.md).
+Phase 02 qualification passed on a clean macOS 26 Apple-silicon VM. Evidence covers Gatekeeper, package and tap install, reboot-surviving service operation, dev.11-to-dev.12 upgrade, rollback, repair, downgrade refusal, uninstall, state backup/restore/migration, signed doctor cells, sanitizer lanes, abrupt-power recovery, and exact owned cleanup. Those results retain their original development-artifact bindings. The v0.0.2 release is qualified separately under the [focused release process](../release/RELEASE_PROCESS.md) and [distribution evidence rules](testing-evidence.md).
 
 All production installer, distribution, extension, tool-inspection, and Apple-runtime subprocesses use the [secure process execution boundary](process-execution.md). The trusted distribution tool propagates one cancellation token through identity lookup, both clean builds, archive/package operations, notarization, verification, install lifecycle, and cleanup; SIGINT/SIGTERM enter the same path. Phase 02 issue #116 implements that shared boundary, and the credentialed qualification pipeline passed it for both immutable prereleases.
 
-The immutable dev.11/dev.12 prereleases passed their recorded signing, vendor-tap, clean-Mac lifecycle, state recovery, doctor, and interruption checks. Current RC and GA artifacts require new evidence through [staged release promotion](release-promotion.md). See [installed lifecycle](installed-lifecycle.md) for package ownership, upgrade, rollback, and recovery.
+The immutable dev.11/dev.12 prereleases passed their recorded signing, vendor-tap, clean-Mac lifecycle, state recovery, doctor, and interruption checks. The published v0.0.2 artifacts have separately bound focused evidence through [staged release promotion](release-promotion.md); earlier development results are not relabeled as final-release execution. See [installed lifecycle](installed-lifecycle.md) for package ownership, upgrade, rollback, and recovery.

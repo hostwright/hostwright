@@ -37,7 +37,7 @@ jobs:
     if: ${{ github.ref == 'refs/heads/main' }}
     runs-on: [self-hosted, macOS, ARM64, hostwright-release]
     environment: release
-    timeout-minutes: 30
+    timeout-minutes: 40
     permissions:
       contents: write
       actions: read

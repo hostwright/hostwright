@@ -1,13 +1,13 @@
 # Hostwright v0.0.2 Local Release Plan
 
-The active release target is `v0.0.2`: a reliable single-Mac CLI, native desktop app,
-and narrow Compose conversion workflow. The current source prepares `0.0.2-rc.11`; RC and GA publication
-remain gated on exact-source and artifact qualification. Scope decision: [ADR 0015](../../design/adr-0015-reduced-local-release.md).
+The published [`v0.0.2` release](https://github.com/hostwright/hostwright/releases/tag/v0.0.2) provides the single-Mac CLI, native desktop app
+and narrow Compose conversion workflow. Its immutable source is `9df19732120d8220ed76a05a234177c483d42dff`; the signed bytes have their own focused qualification. Scope decisions: [ADR 0015](../../design/adr-0015-reduced-local-release.md) and [ADR 0017](../../design/adr-0017-focused-v002-qualification.md).
 
 The ledger preserves one master issue, 15 phase epics, and 167 child workstreams.
 Of the 78 issues open at the original scope decision, 28 were retained and 50
-deferred. The October 8 amendment returns #282 to required work: 29 retained and
-49 deferred from that original set.
+deferred. The October 8 amendment temporarily returned #282 to required work. ADR 0017
+deferred official Homebrew acceptance again, restoring 28 retained and 50 deferred
+from that original set; #282 is closed as not planned.
 Phases 01–09 remain closed with their historical evidence; later changes receive
 regression coverage for the supported local product under [ADR 0016](../../design/adr-0016-release-focused-test-suite.md). A deferred closure is not completed implementation.
 

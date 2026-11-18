@@ -1,5 +1,7 @@
 # GA readiness — October 15, updated October 16, 2026
 
+This is a historical October 15–16 preparation record. The current release policy is [ADR 0017](../design/adr-0017-focused-v002-qualification.md): five focused groups, signed downloads and the vendor tap. Former eighteen-gate, repeated timed-campaign and official Homebrew launch requirements below are superseded. Original results, failures and artifact bindings remain unchanged. See the [published v0.0.2 release](https://github.com/hostwright/hostwright/releases/tag/v0.0.2) and [current compatibility matrix](../reference/compatibility.md).
+
 The frozen candidate is `0.0.2-rc.12`, source
 [`aa8586a1ccc7887f7ae09dcccdc32bf13c27c705`](https://github.com/hostwright/hostwright/commit/aa8586a1ccc7887f7ae09dcccdc32bf13c27c705).
 Its completed supported source matrix passed **3,554 unique cases**, with zero

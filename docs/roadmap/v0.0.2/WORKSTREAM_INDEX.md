@@ -265,15 +265,15 @@ Epic: [#283](https://github.com/hostwright/hostwright/issues/283) — required
 
 | Marker | Issue | Workstream | Release disposition | Recorded state |
 | --- | ---: | --- | --- | --- |
-| `P15-C01` | [#271](https://github.com/hostwright/hostwright/issues/271) | Freeze the supported local compatibility matrix | required | open |
+| `P15-C01` | [#271](https://github.com/hostwright/hostwright/issues/271) | Freeze the supported local compatibility matrix | required | closed: completed |
 | `P15-C02` | [#272](https://github.com/hostwright/hostwright/issues/272) | Review shipped local security boundaries | required | closed: completed |
 | `P15-C03` | [#273](https://github.com/hostwright/hostwright/issues/273) | Run bounded fuzzing and retained corpus replay | required | closed: completed |
 | `P15-C04` | [#274](https://github.com/hostwright/hostwright/issues/274) | Run supported local sanitizer lanes | required | closed: completed |
 | `P15-C05` | [#275](https://github.com/hostwright/hostwright/issues/275) | Complete release dependency and supply-chain checks | required | open |
 | `P15-C06` | [#276](https://github.com/hostwright/hostwright/issues/276) | Measure bounded single-Mac performance and stability | required | closed: completed |
-| `P15-C07` | [#277](https://github.com/hostwright/hostwright/issues/277) | Verify local backup, recovery and interruption handling | required | open |
+| `P15-C07` | [#277](https://github.com/hostwright/hostwright/issues/277) | Verify local backup, recovery and interruption handling | required | closed: completed |
 | `P15-C08` | [#278](https://github.com/hostwright/hostwright/issues/278) | Verify release upgrade lineage and rollback | required | open |
 | `P15-C09` | [#279](https://github.com/hostwright/hostwright/issues/279) | Execute local quickstarts and synchronize public documentation | required | open |
 | `P15-C10` | [#280](https://github.com/hostwright/hostwright/issues/280) | Document local release support and incident recovery | required | closed: completed |
 | `P15-C11` | [#281](https://github.com/hostwright/hostwright/issues/281) | Publish and verify signed v0.0.2 local release artifacts | required | open |
-| `P15-C12` | [#282](https://github.com/hostwright/hostwright/issues/282) | Qualify and obtain official Homebrew cask distribution | deferred | open |
+| `P15-C12` | [#282](https://github.com/hostwright/hostwright/issues/282) | Qualify and obtain official Homebrew cask distribution | deferred | closed: not planned |

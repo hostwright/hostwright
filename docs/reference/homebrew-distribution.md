@@ -6,12 +6,12 @@ acceptance and the prior timed qualification campaigns are deferred. Historical
 procedures below do not add requirements to the focused five-group policy.
 
 
-Hostwright's controlled distribution channel is
-`brew install hostwright/tap/hostwright`. Check the installed version: historical
-`0.0.2-dev.12` formulae use older contracts and are unsupported. The v0.0.2
-formula must select its own verified signed archive after publication.
-Generate, test and publish the final formula against the verified release
-inventory. Follow the [release process](../release/RELEASE_PROCESS.md).
+Hostwright's vendor distribution channel is
+`brew install hostwright/tap/hostwright`. The published v0.0.2 formula selects
+the same verified signed archive as the [release downloads](https://github.com/hostwright/hostwright/releases/tag/v0.0.2).
+Check the installed version: historical `0.0.2-dev.12` formulae use older contracts
+and are unsupported. Formula publication and public installation are verified
+against the release inventory under the [release process](../release/RELEASE_PROCESS.md).
 
 ## Installing without a separate tap command
 
@@ -98,22 +98,18 @@ Exceptions are discretionary; meeting the thresholds does not guarantee acceptan
 
 ## Release order
 
-1. Complete RC qualification, independent review and final-version qualification.
-2. Publish the verified signed archive/package and matching vendor formula through
-   protected promotion; verify public bytes and installation.
-3. Prepare the official cask proposal against that stable distribution and current
-   support/interest evidence. Treat a core CLI recipe as separate work.
-4. Advertise official short-name commands only after acceptance and verification
-   in a fresh Homebrew environment.
+1. Complete the five focused qualification groups for the final signed bytes.
+2. Promote the verified archive/package without rebuilding, verify public downloads,
+   then publish the matching vendor formula and verify public installation.
+3. Treat official cask/core submission as future work outside v0.0.2. Advertise an
+   official short-name command only after its acceptance and fresh-machine verification.
 
-The October 8 amendment to
-[ADR 0015](../design/adr-0015-reduced-local-release.md#official-homebrew-availability-2026-10-08)
-adds official cask acceptance to the requested Homebrew-available GA launch.
-The core formula remains deferred. There is no guaranteed maintainer-review ETA;
-keep #282 and the release parents open until the official channel passes, unless
-the maintainer explicitly changes that launch requirement.
+[ADR 0017](../design/adr-0017-focused-v002-qualification.md) supersedes the October 8
+official-Homebrew launch requirement. #282 is closed as not planned. This deferral
+claims no official acceptance; the release parents depend on signed publication,
+focused product qualification and the verified vendor tap.
 
-## Generate the cask from verified release bytes
+## Future official cask preparation
 
 The release tooling provides a generator without a hard-coded candidate download
 or invented checksum:
@@ -177,6 +173,7 @@ survive removal. Test an existing vendor-formula installation for name/path
 conflicts; do not prescribe `--force` as a migration. Repeat the final short-name
 installation after official acceptance with no vendor tap present.
 
-At preparation time no stable `0.0.2` download exists. The public-interest threshold
-and current-major-macOS qualification also remain unresolved. A generator test or
-Ruby/style pass does not resolve any of these submission prerequisites.
+The stable v0.0.2 downloads and vendor-tap checks do not establish official
+Homebrew eligibility or current-major-macOS cask qualification. Those prerequisites
+must be assessed when a future submission is prepared. A generator test or Ruby/style
+pass does not establish official acceptance.

@@ -60,7 +60,7 @@
       "scopeDecision": "docs/design/adr-0017-focused-v002-qualification.md",
       "acceptanceCriteria": [
         "Every required child satisfies its reduced acceptance criteria with clean final evidence.",
-        "Every deferred child is explicitly closed as not planned under ADR 0015; deferral is not implementation.",
+        "Every deferred child is explicitly closed as not planned under ADR 0015 or ADR 0017; deferral is not implementation.",
         "Public capability, compatibility, packaging and documentation claims match the tested local release scope."
       ],
       "requiredEvidence": [
@@ -78,7 +78,7 @@
       "phase": 1,
       "child": null,
       "parent": 284,
-      "title": "Phase 01 \u2014 Truth reset, architecture contracts, and verification constitution",
+      "title": "Phase 01 — Truth reset, architecture contracts, and verification constitution",
       "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/110",
       "labels": [
@@ -112,7 +112,7 @@
       "phase": 2,
       "child": null,
       "parent": 284,
-      "title": "Phase 02 \u2014 Trusted installation, secure local foundation, and durable state",
+      "title": "Phase 02 — Trusted installation, secure local foundation, and durable state",
       "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/120",
       "labels": [
@@ -144,7 +144,7 @@
       "phase": 3,
       "child": null,
       "parent": 284,
-      "title": "Phase 03 \u2014 Apple `container` and Containerization runtime conformance",
+      "title": "Phase 03 — Apple `container` and Containerization runtime conformance",
       "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/129",
       "labels": [
@@ -174,7 +174,7 @@
       "phase": 4,
       "child": null,
       "parent": 284,
-      "title": "Phase 04 \u2014 Manifest v2 and complete single-host lifecycle",
+      "title": "Phase 04 — Manifest v2 and complete single-host lifecycle",
       "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/140",
       "labels": [
@@ -208,7 +208,7 @@
       "phase": 5,
       "child": null,
       "parent": 284,
-      "title": "Phase 05 \u2014 Images, registries, secrets, and supply-chain trust",
+      "title": "Phase 05 — Images, registries, secrets, and supply-chain trust",
       "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/152",
       "labels": [
@@ -241,7 +241,7 @@
       "phase": 6,
       "child": null,
       "parent": 284,
-      "title": "Phase 06 \u2014 Persistent storage and data protection",
+      "title": "Phase 06 — Persistent storage and data protection",
       "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/163",
       "labels": [
@@ -272,7 +272,7 @@
       "phase": 7,
       "child": null,
       "parent": 284,
-      "title": "Phase 07 \u2014 Networking, DNS, ingress, policy, and secure tunnels",
+      "title": "Phase 07 — Networking, DNS, ingress, policy, and secure tunnels",
       "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/178",
       "labels": [
@@ -303,7 +303,7 @@
       "phase": 8,
       "child": null,
       "parent": 284,
-      "title": "Phase 08 \u2014 Autonomous daemon, health, recovery, observability, and garbage collection",
+      "title": "Phase 08 — Autonomous daemon, health, recovery, observability, and garbage collection",
       "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/194",
       "labels": [
@@ -336,7 +336,7 @@
       "phase": 9,
       "child": null,
       "parent": 284,
-      "title": "Phase 09 \u2014 Control API, identity, RBAC, admission, audit, and secure extensions",
+      "title": "Phase 09 — Control API, identity, RBAC, admission, audit, and secure extensions",
       "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/206",
       "labels": [
@@ -369,7 +369,7 @@
       "phase": 10,
       "child": null,
       "parent": 284,
-      "title": "Phase 10 \u2014 Local resource admission and scheduling",
+      "title": "Phase 10 — Local resource admission and scheduling",
       "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/219",
       "labels": [
@@ -413,7 +413,7 @@
       "phase": 11,
       "child": null,
       "parent": 284,
-      "title": "Phase 11 \u2014 Multi-Mac consensus, high availability, and remote operations",
+      "title": "Phase 11 — Multi-Mac consensus, high availability, and remote operations",
       "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/235",
       "labels": [
@@ -446,7 +446,7 @@
       "phase": 12,
       "child": null,
       "parent": 284,
-      "title": "Phase 12 \u2014 Kubernetes, CRI, CNI, CSI, and Helm interoperability",
+      "title": "Phase 12 — Kubernetes, CRI, CNI, CSI, and Helm interoperability",
       "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/247",
       "labels": [
@@ -481,7 +481,7 @@
       "phase": 13,
       "child": null,
       "parent": 284,
-      "title": "Phase 13 \u2014 Narrow Compose conversion and execution",
+      "title": "Phase 13 — Narrow Compose conversion and execution",
       "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/257",
       "labels": [
@@ -524,7 +524,7 @@
       "phase": 14,
       "child": null,
       "parent": 284,
-      "title": "Phase 14 \u2014 Local desktop console and lifecycle actions",
+      "title": "Phase 14 — Local desktop console and lifecycle actions",
       "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/270",
       "labels": [
@@ -570,7 +570,7 @@
       "phase": 15,
       "child": null,
       "parent": 284,
-      "title": "Phase 15 \u2014 Bounded local qualification and v0.0.2 release",
+      "title": "Phase 15 — Bounded local qualification and v0.0.2 release",
       "state": "open",
       "url": "https://github.com/hostwright/hostwright/issues/283",
       "labels": [
@@ -596,7 +596,7 @@
       "scopeDecision": "docs/design/adr-0017-focused-v002-qualification.md",
       "acceptanceCriteria": [
         "Every required child satisfies its reduced acceptance criteria with clean final evidence.",
-        "Every deferred child is explicitly closed as not planned under ADR 0015; deferral is not implementation.",
+        "Every deferred child is explicitly closed as not planned under ADR 0015 or ADR 0017; deferral is not implementation.",
         "Public capability, compatibility, packaging and documentation claims match the tested local release scope."
       ],
       "requiredEvidence": [
@@ -5493,7 +5493,7 @@
       "child": 1,
       "parent": 283,
       "title": "P15-C01: Freeze the supported local compatibility matrix",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/271",
       "labels": [
         "area:ci",
@@ -5502,7 +5502,7 @@
         "area:release",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:docs",
         "type:implementation",
         "type:release",
@@ -5524,7 +5524,7 @@
         "live-runtime",
         "distribution-artifact"
       ],
-      "stateReason": null
+      "stateReason": "completed"
     },
     {
       "marker": "P15-C02",
@@ -5735,7 +5735,7 @@
       "child": 7,
       "parent": 283,
       "title": "P15-C07: Verify local backup, recovery and interruption handling",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/277",
       "labels": [
         "area:ci",
@@ -5744,7 +5744,7 @@
         "area:release",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:planned",
+        "status:verification",
         "type:docs",
         "type:implementation",
         "type:release",
@@ -5767,7 +5767,7 @@
         "migration-upgrade",
         "resilience-chaos"
       ],
-      "stateReason": null
+      "stateReason": "completed"
     },
     {
       "marker": "P15-C08",
@@ -5924,7 +5924,7 @@
       "acceptanceCriteria": [
         "Enable reviewed RC and GA versions in the protected release workflow with correct prerelease status.",
         "Build and verify signed/notarized CLI, app and required helpers, archive/package, checksums, SBOM and provenance.",
-        "Complete all eighteen gates once for unpublished final-version v0.0.2 artifacts, including independent artifact lifecycle verification; capture trusted staging's mandatory full source run without duplication, publish immutable accepted bytes without rebuilding and update the vendor tap. A separately accepted RC is not required."
+        "Complete the five focused qualification groups in ADR 0017 for the exact signed v0.0.2 artifacts, including actual installation, provider lifecycle, recovery and quickstart evidence; capture trusted staging's full source run without duplication, promote the verified signed bytes without rebuilding, verify public downloads and update and test the vendor tap. Official Homebrew acceptance and a separately accepted RC are not required."
       ],
       "requiredEvidence": [
         "distribution-artifact",
@@ -5942,7 +5942,7 @@
       "child": 12,
       "parent": 283,
       "title": "P15-C12: Qualify and obtain official Homebrew cask distribution",
-      "state": "open",
+      "state": "closed",
       "url": "https://github.com/hostwright/hostwright/issues/282",
       "labels": [
         "area:ci",
@@ -5951,7 +5951,6 @@
         "area:release",
         "risk:high",
         "roadmap:v0.0.2",
-        "status:in-progress",
         "type:docs",
         "type:implementation",
         "type:release",
@@ -5963,7 +5962,7 @@
       ],
       "releaseDisposition": "deferred",
       "scopeDecision": "docs/design/adr-0017-focused-v002-qualification.md",
-      "stateReason": null,
+      "stateReason": "not_planned",
       "acceptanceCriteria": [
         "Official Homebrew distribution is outside v0.0.2; close as not planned."
       ],

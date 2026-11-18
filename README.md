@@ -2,9 +2,9 @@
 
 Hostwright manages Apple container workloads on one Apple silicon Mac. Declare services in a YAML manifest, review a plan, and confirm it through the CLI or native desktop app. Hostwright tracks resource ownership and operations in a local SQLite database.
 
-**Release target:** `0.0.2`, distributed through signed Apple-silicon downloads and the vendor Homebrew tap. [GitHub Releases](https://github.com/hostwright/hostwright/releases) lists published versions, checksums, signatures and corresponding source.
+**Current release:** [`v0.0.2`](https://github.com/hostwright/hostwright/releases/tag/v0.0.2), available as signed Apple-silicon downloads and through the vendor Homebrew tap. The release includes checksums, signatures, provenance and corresponding source.
 
-Publication requires the five focused groups in [ADR 0017](docs/design/adr-0017-focused-v002-qualification.md): source, artifact integrity, installation, working product and documentation. A source build or unpublished candidate does not establish release qualification. Historical dev.11/dev.12 and RC evidence remains bound to its original source and artifacts.
+The published release is bound to source `9df19732120d8220ed76a05a234177c483d42dff` and the five focused groups in [ADR 0017](docs/design/adr-0017-focused-v002-qualification.md): source, artifact integrity, installation, working product and documentation. A source build does not establish release qualification. Historical dev.11/dev.12 and RC evidence remains bound to its original source and artifacts.
 
 | Channel | Role |
 | --- | --- |
@@ -27,7 +27,7 @@ See [compatibility](docs/reference/compatibility.md) for provider differences an
 
 ### Signed downloads and vendor tap
 
-Use the signed v0.0.2 assets from [GitHub Releases](https://github.com/hostwright/hostwright/releases) or the vendor formula after v0.0.2 publication. Check the installed version before following the quickstart; historical dev.11/dev.12 releases use older contracts and remain unsupported.
+Use the signed v0.0.2 assets from [GitHub Releases](https://github.com/hostwright/hostwright/releases/tag/v0.0.2) or the vendor formula. Check the installed version before following the quickstart; historical dev.11/dev.12 releases use older contracts and remain unsupported.
 
 ```bash
 brew install hostwright/tap/hostwright
@@ -49,7 +49,7 @@ Source builds can run local help/version commands and development tests. Authent
 
 ## Quick start
 
-This quickstart targets Manifest v3 in a signed v0.0.2 installation. A source build alone and the historical dev.12 tap release cannot run this workflow. The [release process](docs/release/RELEASE_PROCESS.md) requires execution against the exact signed candidate before publication.
+This quickstart targets Manifest v3 in a signed v0.0.2 installation and was executed against its exact signed bytes during qualification. A source build alone and the historical dev.12 tap release cannot run this workflow. See the [release process](docs/release/RELEASE_PROCESS.md) for the evidence requirements.
 
 Start Apple `container` and save this file as `hostwright.yaml`:
 

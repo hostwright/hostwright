@@ -70,7 +70,17 @@ Deferred issues are not implementation closures. Under [ADR 0015](../design/adr-
 
 ## Bounded v0.0.2 Release Qualification
 
-The local release requires ten live lifecycle cycles per supported provider, one checkpointed 30-minute physical-host soak, five minutes of fuzzing per shipped critical parser/protocol with retained corpus replay, supported sanitizers, focused independent security review, and one clean RC plus independent signed-artifact lifecycle verification. Required lanes still fail on missing prerequisites, failures or incomplete cleanup. Exact scoped requirements live in the issue manifest and release process; historical multi-day results are retained rather than relabeled as current evidence.
+The [focused v0.0.2 policy](../design/adr-0017-focused-v002-qualification.md)
+requires five evidence groups covering source, artifact integrity, installation,
+working product, and documentation. Retain targeted regressions and one complete
+source suite from trusted staging. Run one lifecycle per declared provider, the
+required installation and recovery paths, and the signed CLI, Compose, and
+desktop quickstarts.
+
+The [release process](../release/RELEASE_PROCESS.md) defines the required outcomes
+and the source, artifact, and cleanup bindings. Promotion publishes the accepted
+signed bytes without rebuilding. Reuse results for unchanged inputs with their
+original bindings and a recorded comparison.
 
 ## Evidence Storage
 

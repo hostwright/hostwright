@@ -6,6 +6,33 @@ import HostwrightCore
 @testable import HostwrightCommandTransport
 
 final class CLIUnaryInputRoutingTests: XCTestCase {
+    func testRestoreFailureAfterResponseReturnsResponseAndWarnsOnce() throws {
+        let response = ControlResponseEnvelope(requestID: "unary-input-test", status: .completed, reasonCode: .completed)
+        var warnings: [String] = []
+        var restores = 0
+        let actual = try CLIUnarySecretInput.sendRestoringInput(restore: {
+            restores += 1
+            throw InputFailure.restore
+        }, warn: { warnings.append($0) }) { response }
+
+        XCTAssertEqual(actual, response)
+        XCTAssertEqual(restores, 1)
+        XCTAssertEqual(warnings, ["Warning: terminal settings could not be restored. Run `stty sane`.\n"])
+    }
+
+    func testRestoreFailureAfterRequestErrorPreservesOriginalError() {
+        var restores = 0
+        XCTAssertThrowsError(try CLIUnarySecretInput.sendRestoringInput(restore: {
+            restores += 1
+            throw InputFailure.restore
+        }, warn: { _ in XCTFail("Unexpected restore warning after request failure") }) {
+            throw InputFailure.request
+        }) {
+            XCTAssertEqual($0 as? InputFailure, .request)
+        }
+        XCTAssertEqual(restores, 1)
+    }
+
     func testOnlyInputCommandsUseDescriptorTransportWithUnchangedRequestShape() throws {
         let calls = InputCalls()
         let environment = makeEnvironment(
@@ -124,7 +151,7 @@ private func completedInputResponse(_ request: ControlRequestEnvelope) -> Contro
     )
 }
 
-private enum InputFailure: Error { case unexpected }
+private enum InputFailure: Error { case unexpected, request, restore }
 
 private final class InputCalls: @unchecked Sendable {
     private let lock = NSLock()

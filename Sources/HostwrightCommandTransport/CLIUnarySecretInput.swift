@@ -14,19 +14,36 @@ enum CLIUnarySecretInput {
         let cancellation = PersistentControlRequestCancellation()
         let signals = UnaryInputSignals(cancellation: cancellation)
         defer { signals.stop() }
-        do {
-            let response = try PersistentControlClient(socketPath: socketPath).send(
+        return try sendRestoringInput(restore: input.restore, warn: { message in
+            try? FileHandle.standardError.write(contentsOf: Data(message.utf8))
+        }) {
+            try PersistentControlClient(socketPath: socketPath).send(
                 request,
                 inputDescriptor: input.descriptor,
                 prepareInput: { try input.prepare() },
                 cancellation: cancellation
             )
-            try input.restore()
-            return response
+        }
+    }
+
+    static func sendRestoringInput(
+        restore: () throws -> Void,
+        warn: (String) -> Void,
+        send: () throws -> ControlResponseEnvelope
+    ) throws -> ControlResponseEnvelope {
+        let response: ControlResponseEnvelope
+        do {
+            response = try send()
         } catch {
-            try input.restore()
+            try? restore()
             throw error
         }
+        do {
+            try restore()
+        } catch {
+            warn("Warning: terminal settings could not be restored. Run `stty sane`.\n")
+        }
+        return response
     }
 }
 

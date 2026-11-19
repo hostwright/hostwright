@@ -37,6 +37,7 @@ final class ControlFrameCodecTests: XCTestCase {
       XCTAssertEqual(first.payload, Data("first".utf8))
       let input = try XCTUnwrap(first.input)
       try input.bindConsumer("test")
+      input.setAuthorizationCheck {}
       XCTAssertEqual(try input.read(maximumBytes: 64, deadline: deadline()), Data([0, 65, 10]))
       XCTAssertThrowsError(try input.read(maximumBytes: 64, deadline: deadline()))
       let second = try ControlFrameCodec.readWithInputDescriptor(kind: .request, descriptor: reader, deadline: deadline())

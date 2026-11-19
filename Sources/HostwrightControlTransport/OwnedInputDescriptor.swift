@@ -55,13 +55,16 @@ public final class OwnedInputDescriptor: @unchecked Sendable {
       (1...65_536).contains(maximumBytes) else {
       throw ControlUnaryInputError.unexpectedDescriptor
     }
+    guard let check = authorizationCheck else {
+      throw ControlUnaryInputError.unexpectedDescriptor
+    }
     consumed = true
     func assertActive() throws {
       if HostwrightCancellationContext.token?.isCancelled == true { throw CancellationError() }
       try deadline.assertActive()
     }
     try assertActive()
-    try authorizationCheck?()
+    try check()
     try assertActive()
     let flags = fcntl(descriptor, F_GETFL)
     guard flags >= 0, flags & O_ACCMODE != O_WRONLY else {
@@ -99,14 +102,14 @@ public final class OwnedInputDescriptor: @unchecked Sendable {
         if readError == EINTR || readError == EAGAIN || readError == EWOULDBLOCK { continue }
         throw ControlTransportError.ioFailure
       }
-      if count == 0 { try authorizationCheck?(); try assertActive(); return result }
+      if count == 0 { try check(); try assertActive(); return result }
       let bytes = buffer.prefix(count)
       let accepted = terminal ? bytes.prefix { $0 != 10 && $0 != 13 } : bytes[...]
       guard accepted.count <= maximumBytes - result.count else {
         throw ControlUnaryInputError.tooLarge
       }
       result.append(contentsOf: accepted)
-      if terminal && accepted.count < bytes.count { try authorizationCheck?(); try assertActive(); return result }
+      if terminal && accepted.count < bytes.count { try check(); try assertActive(); return result }
     }
   }
 }

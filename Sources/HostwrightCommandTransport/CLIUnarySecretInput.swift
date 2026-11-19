@@ -31,19 +31,14 @@ enum CLIUnarySecretInput {
         warn: (String) -> Void,
         send: () throws -> ControlResponseEnvelope
     ) throws -> ControlResponseEnvelope {
-        let response: ControlResponseEnvelope
-        do {
-            response = try send()
-        } catch {
-            try? restore()
-            throw error
+        defer {
+            do {
+                try restore()
+            } catch {
+                warn("Warning: terminal settings could not be restored. Run `stty sane`.\n")
+            }
         }
-        do {
-            try restore()
-        } catch {
-            warn("Warning: terminal settings could not be restored. Run `stty sane`.\n")
-        }
-        return response
+        return try send()
     }
 }
 

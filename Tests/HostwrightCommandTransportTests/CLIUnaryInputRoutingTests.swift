@@ -21,16 +21,32 @@ final class CLIUnaryInputRoutingTests: XCTestCase {
     }
 
     func testRestoreFailureAfterRequestErrorPreservesOriginalError() {
+        var warnings: [String] = []
         var restores = 0
         XCTAssertThrowsError(try CLIUnarySecretInput.sendRestoringInput(restore: {
             restores += 1
             throw InputFailure.restore
-        }, warn: { _ in XCTFail("Unexpected restore warning after request failure") }) {
+        }, warn: { warnings.append($0) }) {
             throw InputFailure.request
         }) {
             XCTAssertEqual($0 as? InputFailure, .request)
         }
         XCTAssertEqual(restores, 1)
+        XCTAssertEqual(warnings, ["Warning: terminal settings could not be restored. Run `stty sane`.\n"])
+    }
+
+    func testSuccessfulRestoreAfterRequestErrorDoesNotWarn() {
+        var warnings: [String] = []
+        var restores = 0
+        XCTAssertThrowsError(try CLIUnarySecretInput.sendRestoringInput(restore: {
+            restores += 1
+        }, warn: { warnings.append($0) }) {
+            throw InputFailure.request
+        }) {
+            XCTAssertEqual($0 as? InputFailure, .request)
+        }
+        XCTAssertEqual(restores, 1)
+        XCTAssertTrue(warnings.isEmpty)
     }
 
     func testOnlyInputCommandsUseDescriptorTransportWithUnchangedRequestShape() throws {

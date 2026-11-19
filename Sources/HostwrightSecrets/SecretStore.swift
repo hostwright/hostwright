@@ -1,4 +1,5 @@
 import Foundation
+import HostwrightKeychainSupport
 import LocalAuthentication
 import Security
 
@@ -748,20 +749,11 @@ public struct MacOSKeychainSecretStore: SecretManager, @unchecked Sendable {
         }
     }
 
-    private static let interactionLock = NSRecursiveLock()
-
-    private static func noninteractive(_ operation: () -> OSStatus) -> OSStatus {
-        // File-based Keychain authentication ignores LAContext in some paths.
-        interactionLock.lock()
-        defer { interactionLock.unlock() }
-        var previous = DarwinBoolean(false)
-        let readStatus = SecKeychainGetUserInteractionAllowed(&previous)
-        guard readStatus == errSecSuccess else { return readStatus }
-        let disableStatus = SecKeychainSetUserInteractionAllowed(false)
-        guard disableStatus == errSecSuccess else { return disableStatus }
-        let result = operation()
-        let restoreStatus = SecKeychainSetUserInteractionAllowed(previous.boolValue)
-        return restoreStatus == errSecSuccess ? result : restoreStatus
+    static func noninteractive(_ operation: () -> OSStatus) -> OSStatus {
+        switch KeychainInteraction.withDisabled(operation) {
+        case .success(let status): return status
+        case .failure(let failure): return failure.status
+        }
     }
 
     private var authenticationContext: LAContext {

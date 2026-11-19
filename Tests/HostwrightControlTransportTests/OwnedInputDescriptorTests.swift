@@ -5,6 +5,22 @@ import XCTest
 @testable import HostwrightControlTransport
 
 final class OwnedInputDescriptorTests: XCTestCase {
+  func testMissingAuthorizationDoesNotReadOrConsumeInput() throws {
+    let pipe = Pipe()
+    let bytes = Data([65, 0, 66])
+    try pipe.fileHandleForWriting.write(contentsOf: bytes)
+    try pipe.fileHandleForWriting.close()
+    let input = try OwnedInputDescriptor(adopting: dup(pipe.fileHandleForReading.fileDescriptor))
+    try input.bindConsumer("secret.create:one")
+    let deadline = try ControlTransportDeadline(timeoutMilliseconds: 1_000)
+
+    XCTAssertThrowsError(try input.read(maximumBytes: 4, deadline: deadline)) {
+      XCTAssertEqual($0 as? ControlUnaryInputError, .unexpectedDescriptor)
+    }
+    input.setAuthorizationCheck {}
+    XCTAssertEqual(try input.read(maximumBytes: 4, deadline: deadline), bytes)
+  }
+
   func testBoundedReadPreservesBinaryAndRestoresSharedFlags() throws {
     let pipe = Pipe()
     let flags = fcntl(pipe.fileHandleForReading.fileDescriptor, F_GETFL)
@@ -12,6 +28,7 @@ final class OwnedInputDescriptorTests: XCTestCase {
     try pipe.fileHandleForWriting.close()
     let input = try OwnedInputDescriptor(adopting: dup(pipe.fileHandleForReading.fileDescriptor))
     try input.bindConsumer("secret.create:one")
+    input.setAuthorizationCheck {}
     XCTAssertThrowsError(try input.bindConsumer("secret.create:two"))
     XCTAssertEqual(try input.read(maximumBytes: 4, deadline: ControlTransportDeadline(timeoutMilliseconds: 1_000)), Data([65, 0, 66, 10]))
     XCTAssertEqual(fcntl(pipe.fileHandleForReading.fileDescriptor, F_GETFL), flags)
@@ -26,6 +43,7 @@ final class OwnedInputDescriptorTests: XCTestCase {
       if oversize { try pipe.fileHandleForWriting.write(contentsOf: Data(repeating: 65, count: 8)) }
       let input = try OwnedInputDescriptor(adopting: dup(pipe.fileHandleForReading.fileDescriptor))
       try input.bindConsumer("secret.create:test")
+      input.setAuthorizationCheck {}
       XCTAssertThrowsError(try input.read(maximumBytes: 4, deadline: ControlTransportDeadline(timeoutMilliseconds: 10))) {
         if oversize { XCTAssertEqual($0 as? ControlUnaryInputError, .tooLarge) }
         else { XCTAssertEqual($0 as? ControlTransportError, .deadlineExceeded) }

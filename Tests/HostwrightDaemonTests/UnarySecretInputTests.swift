@@ -2,10 +2,10 @@ import Darwin
 import Foundation
 import HostwrightCLI
 import HostwrightControlPlane
-import HostwrightControlTransport
 import HostwrightSecrets
 import HostwrightCore
 import XCTest
+@testable import HostwrightControlTransport
 @testable import HostwrightDaemon
 
 final class UnarySecretInputTests: XCTestCase {
@@ -35,6 +35,7 @@ final class UnarySecretInputTests: XCTestCase {
           try? writer.write(contentsOf: bytes)
         }
         let input = try OwnedInputDescriptor(adopting: dup(pipe.fileHandleForReading.fileDescriptor))
+        input.setAuthorizationCheck {}
         let manager = UnaryInputNoMutationManager(reference: reference)
         var environment = CLIEnvironment.live
         environment.secretManager = { manager }
@@ -64,6 +65,7 @@ final class UnarySecretInputTests: XCTestCase {
     ] {
       let pipe = Pipe()
       let input = try OwnedInputDescriptor(adopting: dup(pipe.fileHandleForReading.fileDescriptor))
+      input.setAuthorizationCheck {}
       let scoped = try HostwrightDaemonControlService.unaryInputEnvironment(
         for: CLICommand.parse(arguments: arguments), input: input,
         deadline: ControlTransportDeadline(timeoutMilliseconds: 1_000), environment: .live)
@@ -85,6 +87,7 @@ final class UnarySecretInputTests: XCTestCase {
       try pipe.fileHandleForWriting.write(contentsOf: Data([65, 0, 66]))
       try pipe.fileHandleForWriting.close()
       let input = try OwnedInputDescriptor(adopting: dup(pipe.fileHandleForReading.fileDescriptor))
+      input.setAuthorizationCheck {}
       let scoped = try HostwrightDaemonControlService.unaryInputEnvironment(
         for: CLICommand.parse(arguments: arguments), input: input,
         deadline: ControlTransportDeadline(timeoutMilliseconds: 1_000), environment: .live)

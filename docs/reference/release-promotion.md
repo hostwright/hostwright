@@ -69,5 +69,12 @@ revalidates signed inventory and source, then publishes those accepted bytes
 without rebuilding. Verify public asset hashes, publish the matching vendor-tap
 formula and test public installation/upgrade. Official Homebrew acceptance is deferred.
 
-Published releases, tags and evidence remain immutable. Failed/cancelled promotion
-retains any created tag/assets for review; no automatic destructive rollback is allowed.
+Repository rules protect version tags from updates and deletion. Preserve published
+assets and evidence with their original inventory bindings. Failed or cancelled
+promotion retains any created tag and assets for maintainer review.
+
+After an authorized maintainer completes publication, run **Verify published release**
+on `main` with the published version, exact signed source commit, and successful
+qualification acceptance run ID. This read-only workflow authenticates the acceptance
+receipt and checks the annotated tag, release channel, and every GitHub asset digest
+against the accepted inventory. Actions records the verification as a separate run.

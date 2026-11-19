@@ -101,18 +101,67 @@ def inventory(root, commit, release_version, run, attempt):
     return dict(kind='hostwright.stage-inventory.v2', sourceCommit=commit, version=release_version,
                 buildRunID=run, buildRunAttempt=attempt, files=files, correspondingSource=source)
 
+def verify_published(receipt, release, tag_ref, tag_object, commit, release_version, qualification_run):
+    tag = 'v' + version(release_version)
+    if not re.fullmatch('[a-f0-9]{40}', commit) or commit == '0' * 40:
+        raise ValueError('invalid source commit')
+    if not re.fullmatch('[1-9][0-9]*', qualification_run):
+        raise ValueError('invalid qualification run ID')
+    binding = dict(kind='hostwright.promotion-receipt.v3', qualificationPolicy=QUALIFICATION_POLICY,
+                   acceptanceRunID=qualification_run, sourceCommit=commit, version=release_version)
+    if any(receipt.get(key) != value for key, value in binding.items()):
+        raise ValueError('accepted inventory does not match the selected release')
+
+    ref = tag_ref['object']
+    target = tag_object['object']
+    if (tag_ref['ref'] != 'refs/tags/' + tag or ref['type'] != 'tag'
+            or ref['sha'] != tag_object['sha'] or tag_object['tag'] != tag
+            or target['type'] != 'commit' or target['sha'] != commit):
+        raise ValueError('annotated version tag does not resolve to the accepted source')
+    if (release['tag_name'] != tag or release['target_commitish'] != commit
+            or release['draft'] is not False or not release['published_at']
+            or release['prerelease'] is not (release_version != '0.0.2')):
+        raise ValueError('public release identity or channel differs')
+
+    expected = {}
+    for relative, sha256 in receipt['files'].items():
+        if (not re.fullmatch(r'(?:release|Formula|source)/[A-Za-z0-9_.-]+', relative)
+                or not re.fullmatch('[a-f0-9]{64}', sha256)):
+            raise ValueError('invalid file in accepted inventory')
+        name = pathlib.PurePosixPath(relative).name
+        if name in expected:
+            raise ValueError(f'duplicate public asset name in accepted inventory: {name}')
+        expected[name] = 'sha256:' + sha256
+    assets = release['assets']
+    actual = {asset['name']: asset['digest'] for asset in assets if asset['state'] == 'uploaded'}
+    if len(expected) != 16 or len(assets) != len(actual) or actual != expected:
+        raise ValueError('public asset list or digests differ from the accepted inventory')
+    return len(actual)
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('mode', choices=['version', 'stage', 'verify', 'receipt'])
+    parser.add_argument('mode', choices=['version', 'stage', 'verify', 'receipt', 'published'])
     parser.add_argument('--root', type=pathlib.Path)
     parser.add_argument('--commit')
     parser.add_argument('--version', required=True)
     parser.add_argument('--run')
     parser.add_argument('--attempt')
     parser.add_argument('--receipt', type=pathlib.Path)
+    parser.add_argument('--qualification-run')
+    parser.add_argument('--release', type=pathlib.Path)
+    parser.add_argument('--tag-ref', type=pathlib.Path)
+    parser.add_argument('--tag-object', type=pathlib.Path)
     args = parser.parse_args()
     version(args.version)
     if args.mode == 'version':
+        return
+    if args.mode == 'published':
+        if not all((args.commit, args.qualification_run, args.receipt, args.release, args.tag_ref, args.tag_object)):
+            parser.error('published verification requires source, qualification run, receipt, release, and both tag objects')
+        count = verify_published(load(args.receipt), load(args.release), load(args.tag_ref), load(args.tag_object),
+                                 args.commit, args.version, args.qualification_run)
+        print(f'v{args.version} is published with {count} asset digests matching acceptance run {args.qualification_run}.')
         return
     actual = inventory(args.root, args.commit, args.version, args.run, args.attempt)
     inventory_path = args.root / 'stage-inventory.json'

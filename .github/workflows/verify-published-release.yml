@@ -1,0 +1,76 @@
+name: Verify published release
+run-name: Verify published v${{ inputs.version }}
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Published version without the v prefix
+        required: true
+        type: string
+      commit:
+        description: Exact source commit from the accepted release
+        required: true
+        type: string
+      qualification_run:
+        description: Successful protected qualification acceptance run ID
+        required: true
+        type: string
+permissions:
+  actions: read
+  attestations: read
+  contents: read
+
+jobs:
+  verify:
+    name: Compare release assets with the accepted inventory
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_COMMIT: ${{ inputs.commit }}
+      QUALIFICATION_RUN: ${{ inputs.qualification_run }}
+    steps:
+      - name: Check out the release verifier
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Resolve the successful acceptance run
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = hostwright/hostwright
+          test "$GITHUB_REF" = refs/heads/main
+          [[ "$QUALIFICATION_RUN" =~ ^[1-9][0-9]*$ ]]
+          python3 scripts/release/staged-release.py version --version "$RELEASE_VERSION"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QUALIFICATION_RUN" > "$RUNNER_TEMP/acceptance.json"
+          python3 scripts/release/validate-run.py "$RUNNER_TEMP/acceptance.json" release-qualification-acceptance.yml
+      - name: Retrieve the accepted inventory
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: hostwright-promotion-receipt
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.qualification_run }}
+          path: ${{ runner.temp }}/qualification
+      - name: Authenticate the receipt and verify public metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          receipt="$RUNNER_TEMP/qualification/promotion-receipt.json"
+          acceptance_commit="$(jq -er '.head_sha' "$RUNNER_TEMP/acceptance.json")"
+          gh attestation verify "$receipt" --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow hostwright/hostwright/.github/workflows/release-qualification-acceptance.yml \
+            --signer-digest "$acceptance_commit" --source-ref refs/heads/main --deny-self-hosted-runners
+          repo="repos/$GITHUB_REPOSITORY"
+          tag="v$RELEASE_VERSION"
+          test "$(gh api "$repo" --jq '.private')" = false
+          gh api "$repo/releases/tags/$tag" > "$RUNNER_TEMP/release.json"
+          gh api "$repo/git/ref/tags/$tag" > "$RUNNER_TEMP/tag-ref.json"
+          tag_object="$(jq -er '.object | select(.type == "tag").sha' "$RUNNER_TEMP/tag-ref.json")"
+          [[ "$tag_object" =~ ^[a-f0-9]{40}$ ]]
+          gh api "$repo/git/tags/$tag_object" > "$RUNNER_TEMP/tag-object.json"
+          python3 scripts/release/staged-release.py published \
+            --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" --qualification-run "$QUALIFICATION_RUN" \
+            --receipt "$receipt" --release "$RUNNER_TEMP/release.json" \
+            --tag-ref "$RUNNER_TEMP/tag-ref.json" --tag-object "$RUNNER_TEMP/tag-object.json" \
+            | tee -a "$GITHUB_STEP_SUMMARY"

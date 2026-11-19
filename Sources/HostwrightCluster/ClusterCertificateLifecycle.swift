@@ -1,6 +1,7 @@
 import CryptoKit
 import Darwin
 import Foundation
+import HostwrightKeychainSupport
 import LocalAuthentication
 @preconcurrency import Security
 import X509
@@ -1075,7 +1076,6 @@ final class ClusterCertificateKeychainStore: @unchecked Sendable {
     }
 
     private let keychain: SecKeychain
-    private static let userInteractionLock = NSRecursiveLock()
 
     init(keychain: SecKeychain) {
         self.keychain = keychain
@@ -1098,39 +1098,21 @@ final class ClusterCertificateKeychainStore: @unchecked Sendable {
         return context
     }
 
-    private func withUserInteractionDisabled<T>(
+    static func withUserInteractionDisabled<T>(
         _ operation: () throws -> T
     ) throws -> T {
-        // Legacy SecKeychain interaction is process-global, so the disable window
-        // must be serialized and restored exactly.
-        Self.userInteractionLock.lock()
-        defer { Self.userInteractionLock.unlock() }
-
-        var priorInteraction = DarwinBoolean(false)
-        let readStatus = SecKeychainGetUserInteractionAllowed(&priorInteraction)
-        guard readStatus == errSecSuccess else {
-            throw Self.mapStatus(readStatus)
+        let interaction = KeychainInteraction.withDisabled { Result(catching: operation) }
+        switch interaction {
+        case .success(let result): return try result.get()
+        case .failure(let failure): throw Self.mapStatus(failure.status)
         }
-        let disableStatus = SecKeychainSetUserInteractionAllowed(false)
-        guard disableStatus == errSecSuccess else {
-            throw Self.mapStatus(disableStatus)
-        }
+    }
 
-        let result: Result<T, Error>
-        do {
+    private func withUnlockedKeychain<T>(_ operation: () throws -> T) throws -> T {
+        try Self.withUserInteractionDisabled {
             try requireUnlockedKeychain()
-            result = .success(try operation())
-        } catch {
-            result = .failure(error)
+            return try operation()
         }
-
-        let restoreStatus = SecKeychainSetUserInteractionAllowed(
-            priorInteraction.boolValue
-        )
-        guard restoreStatus == errSecSuccess else {
-            throw Self.mapStatus(restoreStatus)
-        }
-        return try result.get()
     }
 
     private func applyNonInteractiveLookup(to query: inout [CFString: Any]) {
@@ -1148,7 +1130,7 @@ final class ClusterCertificateKeychainStore: @unchecked Sendable {
         leafValidity: TimeInterval,
         now: Date
     ) throws -> ClusterCertificateGenerationCredential {
-        try withUserInteractionDisabled {
+        try withUnlockedKeychain {
             let roles = roles.sorted { $0.rawValue < $1.rawValue }
             guard !roles.isEmpty,
                   Set(roles).count == roles.count,
@@ -1379,7 +1361,7 @@ final class ClusterCertificateKeychainStore: @unchecked Sendable {
         ownershipID: String,
         roles: [ClusterCertificateRole]
     ) throws {
-        try withUserInteractionDisabled {
+        try withUnlockedKeychain {
         try refuseCollision(
             clusterID: clusterID,
             nodeID: nodeID,
@@ -1393,7 +1375,7 @@ final class ClusterCertificateKeychainStore: @unchecked Sendable {
     func validateGeneration(
         _ record: ClusterCertificateGenerationCredential
     ) throws {
-        try withUserInteractionDisabled {
+        try withUnlockedKeychain {
         let authorityCertificate = try resolveCertificate(
             reference: record.authority.references.certificatePersistentReference,
             expectedDER: record.authority.authority.certificateDER,
@@ -1471,7 +1453,7 @@ final class ClusterCertificateKeychainStore: @unchecked Sendable {
         _ record: ClusterCertificateGenerationCredential,
         now: Date
     ) throws {
-        try withUserInteractionDisabled {
+        try withUnlockedKeychain {
         try validateGeneration(record)
         let trustBundle = try ClusterCertificateTrustBundle(
             clusterID: record.clusterID,
@@ -1510,7 +1492,7 @@ final class ClusterCertificateKeychainStore: @unchecked Sendable {
         role: ClusterCertificateRole,
         now: Date
     ) throws -> ClusterCertificateIdentityHandle {
-        try withUserInteractionDisabled {
+        try withUnlockedKeychain {
         try validateGeneration(generation, now: now)
         guard let credential = generation.leaf(role: role) else {
             throw ClusterCertificateLifecycleError.invalidConfiguration(
@@ -1570,7 +1552,7 @@ final class ClusterCertificateKeychainStore: @unchecked Sendable {
     func cleanupGeneration(
         _ record: ClusterCertificateGenerationCredential
     ) throws {
-        try withUserInteractionDisabled {
+        try withUnlockedKeychain {
         for leaf in record.leaves.reversed() {
             try deleteOwned(
                 references: leaf.references,
@@ -1601,7 +1583,7 @@ final class ClusterCertificateKeychainStore: @unchecked Sendable {
         ownershipID: String,
         roles: [ClusterCertificateRole]
     ) throws {
-        try withUserInteractionDisabled {
+        try withUnlockedKeychain {
         for role in roles.reversed() {
             try cleanupPartialItem(
                 clusterID: clusterID,

@@ -623,7 +623,12 @@ let package = Package(
             ]
         ),
         .target(
+            name: "HostwrightKeychainSupport",
+            linkerSettings: [.linkedFramework("Security")]
+        ),
+        .target(
             name: "HostwrightSecrets",
+            dependencies: ["HostwrightKeychainSupport"],
             linkerSettings: [
                 .linkedFramework("LocalAuthentication"),
                 .linkedFramework("Security")
@@ -642,6 +647,7 @@ let package = Package(
             dependencies: [
                 "HostwrightCore",
                 "HostwrightControlPlane",
+                "HostwrightKeychainSupport",
                 .product(name: "X509", package: "swift-certificates")
             ],
             linkerSettings: [
@@ -997,6 +1003,10 @@ let package = Package(
                 "HostwrightRegistry",
                 "HostwrightTestSupport"
             ]
+        ),
+        .testTarget(
+            name: "HostwrightClusterTests",
+            dependencies: ["HostwrightCluster", "HostwrightSecrets"]
         ),
         .testTarget(
             name: "HostwrightSecretsTests",

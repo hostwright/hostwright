@@ -1099,7 +1099,7 @@ final class TrustedReleaseTests: XCTestCase {
         let syntax = try run(brew, arguments: ["ruby", "--", "-c", formulaURL.path])
         XCTAssertEqual(syntax.status, 0, syntax.output)
         XCTAssertTrue(syntax.output.contains("Syntax OK"))
-        let style = try run(brew, arguments: ["style", "--formula", formulaURL.path])
+        let style = try run(brew, arguments: ["style", "--formula", "\(tap)/hostwright"])
         XCTAssertEqual(style.status, 0, style.output)
     }
 

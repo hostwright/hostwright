@@ -28,6 +28,12 @@ Map local output and Actions artifacts to their producer run, source commit, con
 
 Record measured space reclaimed and any retained exceptions. Scan source, history, and relevant text diagnostics without logging credentials or verifying them against providers. Keep reports private and use [private disclosure](../../SECURITY.md) for confirmed security findings.
 
+## Split oversized Swift sources
+
+Swift source files under `Sources/` have an 800-line limit. The [source size baseline](../../scripts/swift-source-file-size-baseline.tsv) lists existing exceptions in descending size order. Work through the list from the top in one PR per file or cohesive group. Keep behavior unchanged and run the affected tests.
+
+After a split brings an oversized file within the limit, refresh the list with `python3 scripts/check-swift-source-file-sizes.py --write-baseline`. CI compares against the base revision and rejects new files over the limit and growth in existing oversized files.
+
 ## Maintain protections
 
 Main requires PRs and the `latest-macos-build`, `test`, and `runtime-provenance` checks from GitHub Actions. Main and published version tags reject destructive updates. New security checks should become required only after their baseline succeeds on the supported runners.

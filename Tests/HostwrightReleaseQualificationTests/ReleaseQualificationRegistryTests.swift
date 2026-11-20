@@ -158,6 +158,7 @@ func makeDocumentationSnapshotRepository() throws -> URL {
     let required = [
         "README.md", "CONTRIBUTING.md", "GOVERNANCE.md", "SECURITY.md",
         "scripts/check-doc-links.py", "scripts/check-current-truth.py",
+        "scripts/swift-source-file-size-baseline.tsv",
         "scripts/phase09-gate16-qualification.sh",
         "scripts/release/staged-release.py", "scripts/release/accept-qualification.py",
         "docs/design/adr-0016-release-focused-test-suite.md",

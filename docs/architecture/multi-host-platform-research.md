@@ -2,6 +2,8 @@
 
 > **Historical research, promoted to implementation:** v0.0.2 Phase 11 owns managed-etcd multi-Mac consensus, node agents, fencing, remote operations/storage/discovery, failover, upgrades, and disaster recovery. The current build remains single-host; that is a present limitation, not a permanent non-goal.
 
+For the v0.0.3 product direction, see [ADR 0018](../design/adr-0018-multi-mac-cluster-mode.md).
+
 Status: Phase 30 research-only decision record.
 
 Phase 30 records the boundary for multi-host Apple silicon platform work. It does not implement multi-host orchestration, remote mutation, host agents, state replication, membership, scheduler APIs, cloud control plane, DNS, tunnels, discovery, transport, certificates, or runtime behavior.

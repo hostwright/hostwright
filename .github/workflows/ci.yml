@@ -16,6 +16,8 @@ jobs:
   latest-macos-build:
     runs-on: xcode-27
     timeout-minutes: 40
+    env:
+      HOSTWRIGHT_CI_SWIFT_INPUT_HASHING: ${{ github.event_name == 'pull_request' }}
     permissions:
       contents: read
     steps:
@@ -30,13 +32,39 @@ jobs:
           [[ "$(uname -m)" == arm64 ]] || exit 1
           xcodebuild -version
           swift --version
-      - name: Build the package and exercise the Docker proxy process
+      - name: Identify the Swift toolchain
+        id: toolchain
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: scripts/ci-swift-toolchain-key.sh
+      - name: Restore SwiftPM build output
+        id: swift-cache
+        if: github.event_name == 'pull_request'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .build
+          # Increment v1 to invalidate existing SwiftPM caches.
+          key: spm-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.hash }}-${{ hashFiles('Package.resolved') }}
+          restore-keys: spm-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.hash }}-
+      - name: Build the package
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
-          swift build --jobs 1
+          scripts/ci-swift.sh build --jobs 1
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+      - name: Save SwiftPM build output
+        if: github.event_name == 'pull_request' && steps.swift-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .build
+          key: ${{ steps.swift-cache.outputs.cache-primary-key }}
+      - name: Exercise the Docker proxy process
+        shell: bash
+        run: |
+          set -euo pipefail
           python3 scripts/test-docker-proxy.py "$(swift build --show-bin-path)/hostwright-docker-proxy"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
@@ -44,6 +72,8 @@ jobs:
   test:
     runs-on: macos-26
     timeout-minutes: 60
+    env:
+      HOSTWRIGHT_CI_SWIFT_INPUT_HASHING: ${{ github.event_name == 'pull_request' }}
     permissions:
       contents: read
     steps:
@@ -137,6 +167,38 @@ jobs:
             ${{ runner.temp }}/hostwright-netfilter-linux-arm64.sha256
           retention-days: 1
           if-no-files-found: error
+      - name: Identify the Swift toolchain
+        id: toolchain
+        if: github.event_name == 'pull_request' && steps.check-scope.outputs.run_regression == 'true'
+        shell: bash
+        run: scripts/ci-swift-toolchain-key.sh
+      - name: Restore SwiftPM build output
+        id: swift-cache
+        if: github.event_name == 'pull_request' && steps.check-scope.outputs.run_regression == 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .build
+          key: spm-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.hash }}-${{ hashFiles('Package.resolved') }}
+          restore-keys: spm-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.hash }}-
+      - name: Build the package
+        if: steps.check-scope.outputs.run_regression == 'true'
+        shell: bash
+        env:
+          HOSTWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/hostwright-test-results
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          mkdir -p "$HOSTWRIGHT_TEST_RESULTS_DIR"
+          scripts/test.sh pr-build 2>&1 | tee "$HOSTWRIGHT_TEST_RESULTS_DIR/pr.log"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+      - name: Save SwiftPM build output
+        if: github.event_name == 'pull_request' && steps.check-scope.outputs.run_regression == 'true' && steps.swift-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .build
+          key: ${{ steps.swift-cache.outputs.cache-primary-key }}
       - name: Pull-request regression gate
         if: steps.check-scope.outputs.run_regression == 'true'
         shell: bash
@@ -147,8 +209,8 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
           mkdir -p "$HOSTWRIGHT_TEST_RESULTS_DIR"
-          scripts/test.sh pr 2>&1 \
-            | tee "$HOSTWRIGHT_TEST_RESULTS_DIR/pr.log"
+          scripts/test.sh pr-tests 2>&1 \
+            | tee -a "$HOSTWRIGHT_TEST_RESULTS_DIR/pr.log"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
       - name: Native runtime provenance regressions

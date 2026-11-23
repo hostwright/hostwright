@@ -6,7 +6,7 @@ readonly durable_lifecycle_sentinel_filter='DistributionDurableLifecycleTests/(t
 
 usage() {
   cat <<'EOF'
-usage: scripts/test.sh [full|pr|qualification <shard>]
+usage: scripts/test.sh [full|pr|pr-build|pr-tests|qualification <shard>]
 
 qualification shards:
   distribution
@@ -57,13 +57,21 @@ run_full() {
   scripts/check-docs.sh
 }
 
-run_pr() {
-  run_cheap_checks
+run_pr_build() {
   swift build --jobs 1
+}
+
+run_pr_tests() {
   python3 scripts/test-docker-proxy.py "$(swift build --show-bin-path)/hostwright-docker-proxy"
   scripts/integration.sh
   swift_test pr-fast --skip "$qualification_filter"
   swift_test pr-durable-lifecycle-sentinels --filter "$durable_lifecycle_sentinel_filter"
+}
+
+run_pr() {
+  run_cheap_checks
+  run_pr_build
+  run_pr_tests
 }
 
 run_qualification() {
@@ -116,6 +124,15 @@ case "$1" in
   pr)
     [[ "$#" == 1 ]] || { usage >&2; exit 64; }
     run_pr
+    ;;
+  pr-build)
+    [[ "$#" == 1 ]] || { usage >&2; exit 64; }
+    run_pr_build
+    ;;
+  pr-tests)
+    [[ "$#" == 1 ]] || { usage >&2; exit 64; }
+    run_cheap_checks
+    run_pr_tests
     ;;
   qualification)
     [[ "$#" == 2 ]] || { usage >&2; exit 64; }

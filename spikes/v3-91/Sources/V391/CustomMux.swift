@@ -62,7 +62,7 @@ private actor MuxWriter {
     func send(_ frame: MuxFrame, highPriority: Bool = true) async throws {
         guard frame.payload.count <= bulkPayload.count else { throw BenchmarkError("Oversized outgoing mux frame.") }
         try await withCheckedThrowingContinuation { (completion: CheckedContinuation<Void, Error>) in
-            guard priority.count < 8, bulk.count < 8 else {
+            guard (highPriority ? priority.count : bulk.count) < 8 else {
                 completion.resume(throwing: BenchmarkError("Mux writer queue exhausted."))
                 return
             }

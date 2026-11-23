@@ -1006,7 +1006,12 @@ let package = Package(
         ),
         .testTarget(
             name: "HostwrightClusterTests",
-            dependencies: ["HostwrightCluster", "HostwrightSecrets"]
+            dependencies: [
+                "HostwrightCluster",
+                "HostwrightSecrets",
+                .product(name: "X509", package: "swift-certificates")
+            ],
+            resources: [.copy("Fixtures/ManagedEtcdSupervisorFixture.swift")]
         ),
         .testTarget(
             name: "HostwrightSecretsTests",

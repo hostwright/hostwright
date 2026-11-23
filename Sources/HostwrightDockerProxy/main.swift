@@ -53,25 +53,25 @@ enum HostwrightDockerProxyMain {
         var controlSocketPath: String?
         var index = 0
         while index < arguments.count {
-            guard index + 1 < arguments.count else { throw UsageError.invalid }
+            guard index + 1 < arguments.count else { throw ProxyUsageError.invalid }
             switch arguments[index] {
             case "--socket":
-                guard socketPath == nil else { throw UsageError.invalid }
+                guard socketPath == nil else { throw ProxyUsageError.invalid }
                 socketPath = arguments[index + 1]
             case "--control-socket":
-                guard controlSocketPath == nil else { throw UsageError.invalid }
+                guard controlSocketPath == nil else { throw ProxyUsageError.invalid }
                 controlSocketPath = arguments[index + 1]
             default:
-                throw UsageError.invalid
+                throw ProxyUsageError.invalid
             }
             index += 2
         }
-        guard let socketPath, let controlSocketPath else { throw UsageError.invalid }
+        guard let socketPath, let controlSocketPath else { throw ProxyUsageError.invalid }
         return Options(socketPath: socketPath, controlSocketPath: controlSocketPath, help: false)
     }
 }
 
-private enum UsageError: Error {
+private enum ProxyUsageError: Error {
     case invalid
 }
 

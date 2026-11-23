@@ -52,6 +52,7 @@ references are pinned to the control Mac. Secret delivery is default-deny.
 
 Publish two or three dependency-ready issues per batch and close each after its
 acceptance criteria are verified and the PR lands. Use the existing required
-checks. Defer CI optimizations and release-pipeline cleanup until they are needed
-to unblock product work or publication. Capability claims require the planned
-rehearsal and live proof on real Macs.
+checks. Phase 0 includes CI speed work (V3-01 to V3-06), release-gate
+generalization (V3-07), and evidence-based test cleanup (V3-08 to V3-10).
+Cluster work proceeds in parallel. The CI targets do not block it. Capability
+claims require the planned rehearsal and live proof on real Macs.

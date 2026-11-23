@@ -96,7 +96,7 @@ The hard limits are a **$60 one-time** budget for rented hardware, one physical 
 | Per-user LaunchAgent in `gui/<uid>` | Every node needs a logged-in GUI session with an unlocked login Keychain |
 | Local Network privacy on macOS 15+ | A per-user LaunchAgent that dials or listens on the LAN gets a consent prompt on each Mac, possibly again after every upgrade (V3-14). Root daemons are exempt, but Hostwright has none. |
 | Single maintainer, AI-assisted | Vertical slices behind feature flags, with each phase demonstrable on its own |
-| PR CI about 35 min, release pipeline about 161 min | Verify locally and use existing required PR checks. Defer pipeline optimization. |
+| PR CI about 35 min, release pipeline about 161 min | Phase 0 fixes this before cluster work multiplies it |
 
 ---
 
@@ -531,8 +531,6 @@ Every phase ends with a demo that runs at test tier T2 or T3 (section 7) and a s
 
 ### Phase 0: foundations (sprints 1–2)
 
-V3-01–V3-06 and V3-08–V3-10 are deferred. Take on V3-07 when version-specific release tooling blocks a product change or publication.
-
 | ID | Title | Depends on | Acceptance |
 |---|---|---|---|
 | V3-01 | Cache SwiftPM build output in PR CI | none | `.build` restored, keyed on `Package.resolved`, toolchain, and OS; cold vs warm times recorded |
@@ -558,7 +556,7 @@ V3-01–V3-06 and V3-08–V3-10 are deferred. Take on V3-07 when version-specifi
 | V3-91 | Spike: link transport | V3-14 | QUIC, gRPC/HTTP/2 over Network.framework, and a hand-written multiplexer measured against the D7 criteria, including mutual TLS with a non-exportable Keychain identity; decision recorded before V3-23 |
 | V3-92 | Spike: a second macOS user as a free real-container node | none | Two users on the host Mac, each with a GUI session (fast user switching), Apple `container`, and its own `hostwrightd`. If both run containers at once, it becomes tier T2b (section 7). It cannot prove cross-host networking. |
 
-**Exit:** ADR 0018 and the threat model approved, spikes V3-14, V3-15, V3-91, and V3-92 answered, and the harness verified locally. Start Phase 1 work as its listed dependencies are met.
+**Exit:** CI fixes V3-01 to V3-06 landed and their effect measured. The 15-minute PR and 75-minute release targets are tracked under R9 and do not block Phase 1. ADR 0018 and the threat model approved, spikes V3-14, V3-15, V3-91, and V3-92 answered, and the harness running in PR CI in under 3 minutes.
 
 ### Phase 1: a container on another Mac (sprints 3–5)
 
@@ -789,7 +787,7 @@ Funding is a bonus, not a dependency. The maintainer submits every application. 
 | R6 | Duplicate stateful workload after a partition | Low | High | Never auto re-place stateful services; fencing on reconnect; flag default off | Any S10 duplicate |
 | R7 | Control Mac loss | Low | High | Documented re-enrollment; store backups; v0.0.4 HA | none (accepted) |
 | R8 | Scope too large for one maintainer | High | High | Vertical slices; phases ship behind flags; matrix allows Partial | A phase overruns by 2x |
-| R9 | CI time grows with cluster tests | Medium | Medium | Run focused suites locally and monitor existing required checks for regressions | A new cluster suite blocks a required PR check |
+| R9 | CI time grows with cluster tests | Medium | Medium | T1 in PR under 3 min; T2 nightly; Phase 0 targets | PR CI p50 over 15 min |
 | R10 | Rental overspend | Low | Medium | Budget alert; scripted teardown; one guaranteed attempt, a second only if the first bill leaves room under $60 | Alert fires |
 | R11 | Secret exposure on a worker | Low | High | Default deny; Keychain binding; deletion; V3-57 tests | Any value found in logs or state |
 | R12 | Clock skew breaks certificates or leases | Medium | Medium | Skew check in preflight; tolerance; control-side monotonic timers | Skew over 2 s |
@@ -806,7 +804,8 @@ Funding is a bonus, not a dependency. The maintainer submits every application. 
 - **One source of truth for scope:** this plan, then the issues generated from it. No parallel scope documents.
 - **Prove once, with a script.** No release-candidate series. A failed proof gets a T1 reproduction, a fix, and a rerun only if the budget allows (section 8).
 - **Docs describe behavior.** They do not re-certify it. Docs change in the same PR as the behavior.
-- **Batch delivery:** Two or three issues at a time, with focused local verification and the repository's existing required checks. Pipeline tuning is deferred.
+- **CI budget:** PR `test` p50 at or under 15 min, release stage at or under 75 min, measured monthly from run history.
+- **Batch delivery:** Two or three issues at a time, with focused local verification and the repository's existing required checks.
 - **Vertical slices:** each phase ends with a demo. Nothing is scaffolded ahead of its first working path.
 - **Tests by evidence:** new tests land with their feature. Removals follow the V3-08 coverage method.
 
@@ -840,7 +839,7 @@ Funding is a bonus, not a dependency. The maintainer submits every application. 
 
 | Phase | Size | Main cost driver |
 |---|---|---|
-| 0 Foundations | M | Restored tests, design review, spikes, and harness |
+| 0 Foundations | M | CI and gate-script changes, restored tests, design review, spikes, and harness |
 | 1 First slice | L | Transport, join, placement filter and placement IDs, multi-project daemon, assignment protocol |
 | 2 Scheduling | M–L | Unblocking engine paths, the cross-node action graph, every lifecycle verb across Macs |
 | 3 Networking | L | Tunnel rework, DNS, allowlist, relay |

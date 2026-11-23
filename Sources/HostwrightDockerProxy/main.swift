@@ -71,7 +71,7 @@ enum HostwrightDockerProxyMain {
     }
 }
 
-private enum ProxyUsageError: Error {
+private enum RemovedProxyUsageError: Error {
     case invalid
 }
 

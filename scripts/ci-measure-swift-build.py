@@ -31,7 +31,7 @@ def main():
     subprocess.run(['/usr/bin/vm_stat'], check=True)
     start = time.monotonic()
     peak_rss_kib = 0
-    with subprocess.Popen(['/usr/bin/time', '-l', 'swift', 'build', '--jobs', jobs]) as build:
+    with subprocess.Popen(['/usr/bin/time', '-l', 'scripts/ci-swift.sh', 'build', '--jobs', jobs]) as build:
         while build.poll() is None:
             peak_rss_kib = max(peak_rss_kib, process_tree_rss_kib(build.pid))
             time.sleep(1)

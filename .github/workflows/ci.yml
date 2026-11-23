@@ -52,7 +52,7 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
-          scripts/ci-swift.sh build --jobs 1
+          scripts/ci-swift.sh build --jobs 3
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
       - name: Save SwiftPM build output

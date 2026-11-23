@@ -24,11 +24,11 @@ swift_test() {
 
   if [[ -n "${HOSTWRIGHT_TEST_RESULTS_DIR:-}" ]]; then
     mkdir -p "$HOSTWRIGHT_TEST_RESULTS_DIR"
-    scripts/ci-swift.sh test --jobs 1 "$@" --xunit-output "$HOSTWRIGHT_TEST_RESULTS_DIR/$result_name.xml"
+    scripts/ci-swift.sh test --jobs 3 "$@" --xunit-output "$HOSTWRIGHT_TEST_RESULTS_DIR/$result_name.xml"
     return
   fi
 
-  scripts/ci-swift.sh test --jobs 1 "$@"
+  scripts/ci-swift.sh test --jobs 3 "$@"
 }
 
 run_cheap_checks() {
@@ -50,7 +50,7 @@ run_cheap_checks() {
 
 run_full() {
   run_cheap_checks
-  swift build --jobs 1
+  swift build --jobs 3
   python3 scripts/test-docker-proxy.py "$(swift build --show-bin-path)/hostwright-docker-proxy"
   swift_test full
   scripts/integration.sh
@@ -58,7 +58,7 @@ run_full() {
 }
 
 run_pr_build() {
-  scripts/ci-swift.sh build --jobs 1
+  scripts/ci-swift.sh build --jobs 3
 }
 
 run_pr_tests() {

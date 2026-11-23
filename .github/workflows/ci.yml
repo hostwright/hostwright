@@ -17,7 +17,7 @@ jobs:
     runs-on: xcode-27
     timeout-minutes: 40
     env:
-      HOSTWRIGHT_CI_SWIFT_INPUT_HASHING: ${{ github.event_name == 'pull_request' }}
+      HOSTWRIGHT_CI_SWIFT_INPUT_HASHING: 'true'
     permissions:
       contents: read
     steps:
@@ -32,10 +32,11 @@ jobs:
           [[ "$(uname -m)" == arm64 ]] || exit 1
           xcodebuild -version
           swift --version
-      - name: Identify the Swift toolchain
+      - name: Compute the SwiftPM cache key
         id: toolchain
-        if: github.event_name == 'pull_request'
         shell: bash
+        env:
+          SWIFTPM_LOCK_HASH: ${{ hashFiles('Package.resolved') }}
         run: scripts/ci-swift-toolchain-key.sh
       - name: Restore SwiftPM build output
         id: swift-cache
@@ -43,9 +44,8 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .build
-          # Increment v1 to invalidate existing SwiftPM caches.
-          key: spm-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.hash }}-${{ hashFiles('Package.resolved') }}
-          restore-keys: spm-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.hash }}-
+          key: ${{ steps.toolchain.outputs.key }}
+          restore-keys: ${{ steps.toolchain.outputs.prefix }}
       - name: Build the package
         shell: bash
         run: |
@@ -56,11 +56,11 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
       - name: Save SwiftPM build output
-        if: github.event_name == 'pull_request' && steps.swift-cache.outputs.cache-hit != 'true'
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && steps.swift-cache.outputs.cache-hit != 'true')
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .build
-          key: ${{ steps.swift-cache.outputs.cache-primary-key }}
+          key: ${{ steps.toolchain.outputs.key }}
       - name: Exercise the Docker proxy process
         shell: bash
         run: |
@@ -73,7 +73,7 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 60
     env:
-      HOSTWRIGHT_CI_SWIFT_INPUT_HASHING: ${{ github.event_name == 'pull_request' }}
+      HOSTWRIGHT_CI_SWIFT_INPUT_HASHING: 'true'
     permissions:
       contents: read
     steps:
@@ -128,6 +128,7 @@ jobs:
         if: steps.check-scope.outputs.run_regression == 'true'
         with:
           go-version: 1.26.5
+          cache: ${{ github.event_name == 'pull_request' }}
           cache-dependency-path: Guest/HostwrightNetfilter/go.sum
       - name: Guest network-policy loader
         if: steps.check-scope.outputs.run_regression == 'true'
@@ -167,10 +168,12 @@ jobs:
             ${{ runner.temp }}/hostwright-netfilter-linux-arm64.sha256
           retention-days: 1
           if-no-files-found: error
-      - name: Identify the Swift toolchain
+      - name: Compute the SwiftPM cache key
         id: toolchain
-        if: github.event_name == 'pull_request' && steps.check-scope.outputs.run_regression == 'true'
+        if: steps.check-scope.outputs.run_regression == 'true'
         shell: bash
+        env:
+          SWIFTPM_LOCK_HASH: ${{ hashFiles('Package.resolved') }}
         run: scripts/ci-swift-toolchain-key.sh
       - name: Restore SwiftPM build output
         id: swift-cache
@@ -178,8 +181,8 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .build
-          key: spm-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.hash }}-${{ hashFiles('Package.resolved') }}
-          restore-keys: spm-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.hash }}-
+          key: ${{ steps.toolchain.outputs.key }}
+          restore-keys: ${{ steps.toolchain.outputs.prefix }}
       - name: Build the package
         if: steps.check-scope.outputs.run_regression == 'true'
         shell: bash
@@ -194,11 +197,11 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
       - name: Save SwiftPM build output
-        if: github.event_name == 'pull_request' && steps.check-scope.outputs.run_regression == 'true' && steps.swift-cache.outputs.cache-hit != 'true'
+        if: steps.check-scope.outputs.run_regression == 'true' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && steps.swift-cache.outputs.cache-hit != 'true'))
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .build
-          key: ${{ steps.swift-cache.outputs.cache-primary-key }}
+          key: ${{ steps.toolchain.outputs.key }}
       - name: Pull-request regression gate
         if: steps.check-scope.outputs.run_regression == 'true'
         shell: bash

@@ -24,11 +24,11 @@ swift_test() {
 
   if [[ -n "${HOSTWRIGHT_TEST_RESULTS_DIR:-}" ]]; then
     mkdir -p "$HOSTWRIGHT_TEST_RESULTS_DIR"
-    swift test --jobs 1 "$@" --xunit-output "$HOSTWRIGHT_TEST_RESULTS_DIR/$result_name.xml"
+    swift test --jobs "${SWIFTPM_JOBS:-1}" "$@" --xunit-output "$HOSTWRIGHT_TEST_RESULTS_DIR/$result_name.xml"
     return
   fi
 
-  swift test --jobs 1 "$@"
+  swift test --jobs "${SWIFTPM_JOBS:-1}" "$@"
 }
 
 run_cheap_checks() {

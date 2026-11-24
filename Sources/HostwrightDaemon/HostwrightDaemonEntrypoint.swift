@@ -19,7 +19,14 @@ struct HostwrightDaemonEntrypoint {
         let arguments = Array(CommandLine.arguments.dropFirst())
         #if HOSTWRIGHT_TEST_RUNTIME
         if arguments.first == "--test-runtime" {
-            exit(with: await HostwrightTestRuntimeCommand.run(arguments: Array(arguments.dropFirst())))
+            let shutdownToken = DaemonShutdownToken()
+            let signals = installShutdownSignals(shutdownToken: shutdownToken)
+            let result = await HostwrightTestRuntimeCommand.run(
+                arguments: Array(arguments.dropFirst()),
+                shutdownToken: shutdownToken
+            )
+            withExtendedLifetime(signals) {}
+            exit(with: result)
         }
         #endif
         if arguments == ["--bootstrap-state-recovery"] {

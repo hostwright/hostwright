@@ -14,6 +14,8 @@ NATIVE_REUSE = {
     'scripts/test-ci-check-scope.py',
     '.github/workflows/ci.yml',
 }
+CODEQL_SWIFT_SUFFIXES = ('.swift', '.c', '.h', '.m', '.mm', '.modulemap')
+CODEQL_SWIFT_INPUTS = {'Package.swift', 'Package.resolved', '.github/workflows/security.yml'}
 
 
 def documentation(path):
@@ -30,21 +32,44 @@ def choose(paths):
     return 'full'
 
 
-def git_scope(event, base, head):
-    if event not in ('pull_request', 'push') or any(not re.fullmatch('[a-f0-9]{40}', value) or value == '0'*40 for value in (base, head)):
-        return 'full'
+def changed_paths(base, head):
+    if any(not re.fullmatch('[a-f0-9]{40}', value) or value == '0'*40 for value in (base, head)):
+        return None
     try:
         for commit in (base, head):
             subprocess.run(['git', 'cat-file', '-e', commit+'^{commit}'], check=True, capture_output=True, timeout=15)
-        result = subprocess.run(['git', 'diff', '--name-only', '-z', base, head], check=True, capture_output=True, timeout=30)
-        return choose([path.decode('utf-8', 'strict') for path in result.stdout.split(b'\0') if path])
+        result = subprocess.run(
+            ['git', 'diff', '--no-renames', '--name-only', '-z', base, head, '--'],
+            check=True, capture_output=True, timeout=30,
+        )
+        return [path.decode('utf-8', 'strict') for path in result.stdout.split(b'\0') if path]
     except (subprocess.SubprocessError, UnicodeError):
+        return None
+
+
+def git_scope(event, base, head):
+    if event not in ('pull_request', 'push'):
         return 'full'
+    return choose(changed_paths(base, head))
+
+
+def codeql_swift(event, base, head):
+    if event != 'pull_request':
+        return True
+    paths = changed_paths(base, head)
+    return paths is None or any(
+        path in CODEQL_SWIFT_INPUTS or path.startswith('Sources/') or path.endswith(CODEQL_SWIFT_SUFFIXES)
+        for path in paths
+    )
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     for name in ('event', 'base', 'head'):
         parser.add_argument('--'+name, default='')
+    parser.add_argument('--codeql-swift', action='store_true')
     args = parser.parse_args()
-    print(git_scope(args.event, args.base, args.head))
+    if args.codeql_swift:
+        print(str(codeql_swift(args.event, args.base, args.head)).lower())
+    else:
+        print(git_scope(args.event, args.base, args.head))

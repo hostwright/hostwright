@@ -32,6 +32,21 @@ class CheckScopeTests(unittest.TestCase):
         with mock.patch.object(scope.subprocess, 'run', side_effect=subprocess.CalledProcessError(1, 'git')):
             self.assertEqual(scope.git_scope('pull_request', 'a'*40, 'b'*40), 'full')
 
+    def test_codeql_swift_path_selection(self):
+        for path in ('Tests/Example.swift', 'fixture.c', 'fixture.h', 'fixture.m', 'fixture.mm',
+                     'fixture.modulemap', 'Package.swift', 'Package.resolved', 'Sources/data.json',
+                     '.github/workflows/security.yml'):
+            with self.subTest(path=path), mock.patch.object(scope, 'changed_paths', return_value=[path]):
+                self.assertTrue(scope.codeql_swift('pull_request', '', ''))
+        with mock.patch.object(scope, 'changed_paths', return_value=['docs/guide.md', 'Guest/main.go']):
+            self.assertFalse(scope.codeql_swift('pull_request', '', ''))
+
+    def test_codeql_swift_runs_outside_prs_and_for_uncertain_diffs(self):
+        for event in ('push', 'schedule', 'workflow_dispatch', 'pull_request'):
+            self.assertTrue(scope.codeql_swift(event, '', ''))
+        with mock.patch.object(scope.subprocess, 'run', side_effect=subprocess.CalledProcessError(1, 'git')):
+            self.assertTrue(scope.codeql_swift('pull_request', 'a'*40, 'b'*40))
+
 
 if __name__ == '__main__':
     unittest.main()

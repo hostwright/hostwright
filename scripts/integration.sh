@@ -4,10 +4,10 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 
-swift build --jobs 1 --product hostwright
-swift build --jobs 1 --product hostwright-control
-swift build --jobs 1 --product hostwright-dist
-swift build --jobs 1 --product HostwrightLocalIntegrationTool
+scripts/ci-swift.sh build --jobs 1 --product hostwright
+scripts/ci-swift.sh build --jobs 1 --product hostwright-control
+scripts/ci-swift.sh build --jobs 1 --product hostwright-dist
+scripts/ci-swift.sh build --jobs 1 --product HostwrightLocalIntegrationTool
 bin_dir="$(swift build --show-bin-path)"
 hostwright_cli="$bin_dir/hostwright"
 hostwright="$bin_dir/HostwrightLocalIntegrationTool"

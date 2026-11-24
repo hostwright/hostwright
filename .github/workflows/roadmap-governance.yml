@@ -8,6 +8,10 @@ on:
 
 permissions: {}
 
+concurrency:
+  group: roadmap-governance-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   pull-request-closure-gate:
     if: github.event_name == 'pull_request'

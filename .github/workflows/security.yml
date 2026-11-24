@@ -65,10 +65,34 @@ jobs:
           GOTOOLCHAIN: local
         run: '"$RUNNER_TEMP/security-bin/govulncheck" ./...'
 
+  changes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      swift: ${{ steps.scope.outputs.swift }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Select Swift and C analysis
+        id: scope
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          python3 scripts/test-ci-check-scope.py
+          swift_scope=$(python3 scripts/ci-check-scope.py --codeql-swift --event "$EVENT_NAME" --base "$BASE_SHA" --head "$GITHUB_SHA")
+          printf 'swift=%s\n' "$swift_scope" >> "$GITHUB_OUTPUT"
+
   codeql:
     name: CodeQL (${{ matrix.language }})
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: ${{ matrix.language == 'swift,c-cpp' && 180 || 60 }}
+    timeout-minutes: 60
     permissions:
       contents: read
       security-events: write
@@ -84,9 +108,6 @@ jobs:
             build-mode: none
           - language: go
             runner: ubuntu-24.04
-            build-mode: manual
-          - language: swift,c-cpp
-            runner: macos-26
             build-mode: manual
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -111,8 +132,32 @@ jobs:
           GOARCH: arm64
           GOTOOLCHAIN: local
         run: go build -mod=readonly -o "$RUNNER_TEMP/hostwright-netfilter" .
+      - name: Analyze
+        uses: github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4
+
+  codeql-swift:
+    name: CodeQL (swift,c-cpp)
+    needs: changes
+    if: needs.changes.outputs.swift == 'true'
+    runs-on: macos-26
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4
+        with:
+          languages: swift,c-cpp
+          build-mode: manual
+          queries: security-extended
       - name: Build the native application and C boundary
-        if: matrix.language == 'swift,c-cpp'
         run: swift build --jobs 2 --disable-automatic-resolution
       - name: Analyze
         uses: github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4
+        with:
+          # Preserve the analysis category used by the former matrix entry.
+          category: '.github/workflows/security.yml:codeql/build-mode:manual/language:swift,c-cpp/runner:macos-26'

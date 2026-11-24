@@ -6,12 +6,12 @@ import NIOTransportServices
 
 private let pingToken = HTTP2PingData(withInteger: 0x5633_3931)
 
-func runHTTP2(_ credentials: BenchmarkCredentials) async throws -> BenchmarkMeasurement {
+func runHTTP2(_ credentials: BenchmarkCredentials, scenario: BenchmarkScenario) async throws -> BenchmarkMeasurement {
     let group = NIOTSEventLoopGroup(loopCount: 2)
     defer { group.shutdownGracefully { _ in } }
-    let bulkReceived = ByteCounter()
+    let bulkReceived = (0..<scenario.bulkStreamCount).map { _ in ByteCounter() }
     let canceled = ByteCounter()
-    let windowUpdates = ByteCounter()
+    let windowUpdates = bulkReceived.map { _ in ByteCounter() }
     let acknowledged = ByteCounter()
     let peerBounds = ByteCounter()
     let settings: HTTP2Settings = [
@@ -50,7 +50,7 @@ func runHTTP2(_ credentials: BenchmarkCredentials) async throws -> BenchmarkMeas
     ) async throws -> (Channel, NIOHTTP2Handler.StreamMultiplexer) {
         try await NIOTSConnectionBootstrap(group: group)
             .connectTimeout(.seconds(5))
-            .tlsOptions(credentials.tlsOptions(server: false, alpn: "h2", includeIdentity: includeIdentity))
+            .tlsOptions(credentials.tlsOptions(server: false, alpn: "h2", clientIdentity: includeIdentity ? .pinned : .missing))
             .connect(to: address) { channel in
                 channel.configureHTTP2Pipeline(
                     mode: .client, connectionConfiguration: clientConfiguration, streamConfiguration: .init()
@@ -103,22 +103,29 @@ func runHTTP2(_ credentials: BenchmarkCredentials) async throws -> BenchmarkMeas
 
     let replies = AsyncStream<Data>.makeStream(bufferingPolicy: .bufferingNewest(1))
     let rpc = try await openHTTP2Stream(multiplexer, path: "/rpc", replies: replies.continuation)
-    let bulk = try await openHTTP2Stream(multiplexer, path: "/bulk", windows: windowUpdates)
-    let bulkSender = Task {
-        let chunk = http2Data(bulkPayload)
-        while !Task.isCancelled { try await bulk.writeAndFlush(chunk).get() }
+    defer { rpc.close(promise: nil) }
+    var bulkStreams: [Channel] = []
+    defer { bulkStreams.forEach { $0.close(promise: nil) } }
+    for index in bulkReceived.indices {
+        bulkStreams.append(try await openHTTP2Stream(
+            multiplexer, path: "/bulk/\(index)", windows: windowUpdates[index]
+        ))
     }
-    defer {
-        bulkSender.cancel()
-        bulk.close(promise: nil)
-        rpc.close(promise: nil)
+    let bulkSenders = bulkStreams.map { stream in
+        Task {
+            let chunk = http2Data(bulkPayload)
+            while !Task.isCancelled { try await stream.writeAndFlush(chunk).get() }
+        }
     }
-    try await pollFor("sustained bulk and per-stream WINDOW_UPDATE") {
-        bulkReceived.value >= 256 * 1_024 && windowUpdates.value > 0
+    defer { bulkSenders.forEach { $0.cancel() } }
+    if !bulkStreams.isEmpty {
+        try await pollFor("sustained bulk and per-stream WINDOW_UPDATE") {
+            bulkReceived.allSatisfy { $0.value >= 256 * 1_024 } && windowUpdates.allSatisfy { $0.value > 0 }
+        }
+        print("HTTP/2 observed per-stream WINDOW_UPDATE under bulk traffic; limits 8 streams, 16 KiB frames")
     }
-    print("HTTP/2 observed per-stream WINDOW_UPDATE under bulk traffic; limits 8 streams, 16 KiB frames")
     var response = replies.stream.makeAsyncIterator()
-    return try await measure(bulkReceived: bulkReceived) {
+    return try await measure(bulkStreams: bulkReceived) {
         try await rpc.writeAndFlush(http2Data(rpcPayload)).get()
         guard await response.next() == rpcPayload else { throw BenchmarkError("HTTP/2 echo mismatch.") }
     }
@@ -183,11 +190,11 @@ private final class HTTP2Receiver: ChannelInboundHandler {
     typealias InboundIn = HTTP2Frame.FramePayload
     typealias OutboundOut = HTTP2Frame.FramePayload
 
-    let bulkReceived: ByteCounter
+    let bulkReceived: [ByteCounter]
     let canceled: ByteCounter
     var path = ""
 
-    init(bulkReceived: ByteCounter, canceled: ByteCounter) {
+    init(bulkReceived: [ByteCounter], canceled: ByteCounter) {
         self.bulkReceived = bulkReceived
         self.canceled = canceled
     }
@@ -206,8 +213,9 @@ private final class HTTP2Receiver: ChannelInboundHandler {
             let response = HPACKHeaders([(":status", "200")])
             context.writeAndFlush(wrapOutboundOut(.headers(.init(headers: response))), promise: nil)
         case .data(let part):
-            if path == "/bulk", case .byteBuffer(let buffer) = part.data {
-                bulkReceived.add(buffer.readableBytes)
+            if path.hasPrefix("/bulk/"), let index = Int(path.dropFirst("/bulk/".count)),
+               bulkReceived.indices.contains(index), case .byteBuffer(let buffer) = part.data {
+                bulkReceived[index].add(buffer.readableBytes)
             } else if path == "/rpc" {
                 context.writeAndFlush(wrapOutboundOut(.data(part)), promise: nil)
             }

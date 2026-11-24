@@ -46,32 +46,29 @@ private struct MuxFrame {
 private actor MuxWriter {
     private struct Pending {
         let bytes: Data
+        let highPriority: Bool
         let completion: CheckedContinuation<Void, Error>
     }
 
     private let connection: NWConnection
-    private var priority: [Pending] = []
-    private var bulk: [Pending] = []
+    private let priorityEnabled: Bool
+    private var queue: [Pending] = []
     private var draining = false
     private(set) var prioritySelections = 0
 
-    init(_ connection: NWConnection) {
+    init(_ connection: NWConnection, priorityEnabled: Bool) {
         self.connection = connection
+        self.priorityEnabled = priorityEnabled
     }
 
     func send(_ frame: MuxFrame, highPriority: Bool = true) async throws {
         guard frame.payload.count <= bulkPayload.count else { throw BenchmarkError("Oversized outgoing mux frame.") }
         try await withCheckedThrowingContinuation { (completion: CheckedContinuation<Void, Error>) in
-            guard (highPriority ? priority.count : bulk.count) < 8 else {
+            guard queue.lazy.filter({ $0.highPriority == highPriority }).count < 8 else {
                 completion.resume(throwing: BenchmarkError("Mux writer queue exhausted."))
                 return
             }
-            let pending = Pending(bytes: frame.encoded, completion: completion)
-            if highPriority {
-                priority.append(pending)
-            } else {
-                bulk.append(pending)
-            }
+            queue.append(Pending(bytes: frame.encoded, highPriority: highPriority, completion: completion))
             if !draining {
                 draining = true
                 Task { await drain() }
@@ -80,9 +77,10 @@ private actor MuxWriter {
     }
 
     private func drain() async {
-        while !priority.isEmpty || !bulk.isEmpty {
-            if !priority.isEmpty, !bulk.isEmpty { prioritySelections += 1 }
-            let frame = priority.isEmpty ? bulk.removeFirst() : priority.removeFirst()
+        while !queue.isEmpty {
+            let index = priorityEnabled ? queue.firstIndex(where: \.highPriority) ?? 0 : 0
+            if index > 0 { prioritySelections += 1 }
+            let frame = queue.remove(at: index)
             do {
                 try await sendTCP(frame.bytes, over: connection)
                 frame.completion.resume()
@@ -98,7 +96,7 @@ private actor MuxPeer {
     private let isWorker: Bool
     private let connection: NWConnection
     private let writer: MuxWriter
-    private let bulkReceived: ByteCounter
+    private let bulkReceived: [UInt8: ByteCounter]
     private var streams: [UInt8: MuxStream] = [:]
     private var pendingReplies: [UInt8: CheckedContinuation<Data, Error>] = [:]
     private var replies: [UInt8: Data] = [:]
@@ -110,9 +108,9 @@ private actor MuxPeer {
     private static let maximumStreams = 8
     private static let initialCredit = 16
 
-    init(_ connection: NWConnection, isWorker: Bool, bulkReceived: ByteCounter) {
+    init(_ connection: NWConnection, isWorker: Bool, bulkReceived: [UInt8: ByteCounter], priorityEnabled: Bool) {
         self.connection = connection
-        self.writer = MuxWriter(connection)
+        self.writer = MuxWriter(connection, priorityEnabled: priorityEnabled)
         self.isWorker = isWorker
         self.bulkReceived = bulkReceived
     }
@@ -235,8 +233,10 @@ private actor MuxPeer {
                     try await writer.send(MuxFrame(.data, id, frame.payload))
                 }
             case .bulk:
-                guard !owns(id), frame.payload.count == bulkPayload.count else { throw BenchmarkError("Invalid mux bulk frame.") }
-                bulkReceived.add(frame.payload.count)
+                guard !owns(id), frame.payload.count == bulkPayload.count, let counter = bulkReceived[id] else {
+                    throw BenchmarkError("Invalid mux bulk frame.")
+                }
+                counter.add(frame.payload.count)
                 try await writer.send(MuxFrame(.window, id))
             case nil:
                 throw BenchmarkError("Mux data arrived for an unknown stream.")
@@ -264,7 +264,7 @@ private actor MuxPeer {
     }
 }
 
-func runTLSMux(_ credentials: BenchmarkCredentials) async throws -> BenchmarkMeasurement {
+func runTLSMux(_ credentials: BenchmarkCredentials, scenario: BenchmarkScenario) async throws -> BenchmarkMeasurement {
     let alpn = "hostwright-spike-mux/1"
     let serverParameters = NWParameters(tls: try credentials.tlsOptions(server: true, alpn: alpn), tcp: muxTCPOptions())
     serverParameters.requiredLocalEndpoint = .hostPort(host: loopback, port: .any)
@@ -307,9 +307,11 @@ func runTLSMux(_ credentials: BenchmarkCredentials) async throws -> BenchmarkMea
         }
     }
 
-    let received = ByteCounter()
-    let control = MuxPeer(client, isWorker: false, bulkReceived: received)
-    let worker = MuxPeer(server, isWorker: true, bulkReceived: received)
+    let bulkIDs = (0..<scenario.bulkStreamCount).map { UInt8(3 + 2 * $0) }
+    let received = bulkIDs.map { _ in ByteCounter() }
+    let counters = Dictionary(uniqueKeysWithValues: zip(bulkIDs, received))
+    let control = MuxPeer(client, isWorker: false, bulkReceived: [:], priorityEnabled: scenario.priority == .on)
+    let worker = MuxPeer(server, isWorker: true, bulkReceived: counters, priorityEnabled: scenario.priority == .on)
     let controlReader = Task { await control.readFrames() }
     let workerReader = Task { await worker.readFrames() }
     defer {
@@ -330,17 +332,19 @@ func runTLSMux(_ credentials: BenchmarkCredentials) async throws -> BenchmarkMea
         try await Task.sleep(for: .milliseconds(5))
     }
     try await control.open(1, as: .rpc)
-    try await control.open(3, as: .bulk)
-    let producer = Task {
-        while !Task.isCancelled { try await control.sendBulk(on: 3) }
+    for id in bulkIDs { try await control.open(id, as: .bulk) }
+    let producers = bulkIDs.map { id in
+        Task {
+            while !Task.isCancelled { try await control.sendBulk(on: id) }
+        }
     }
-    defer { producer.cancel() }
-    let result = try await measure(bulkReceived: received) { try await control.ping(on: 1) }
+    defer { producers.forEach { $0.cancel() } }
+    let result = try await measure(bulkStreams: received) { try await control.ping(on: 1) }
     print("mux worker-originated and control-originated RPC echoed; worker cancellation observed; heartbeat echoed; streams=8 frame_bytes=16384 bulk_outstanding_frames=16 priority_preemptions=\(await control.prioritySelections)")
     return result
 }
 
-private func muxTCPOptions() -> NWProtocolTCP.Options {
+func muxTCPOptions() -> NWProtocolTCP.Options {
     let tcp = NWProtocolTCP.Options()
     tcp.noDelay = true
     tcp.enableKeepalive = true

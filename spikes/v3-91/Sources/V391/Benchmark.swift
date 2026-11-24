@@ -27,6 +27,16 @@ final class ByteCounter: @unchecked Sendable {
     }
 }
 
+enum BenchmarkPriority: String, Sendable {
+    case on, off, none
+}
+
+struct BenchmarkScenario: Sendable {
+    let bulkStreamCount: Int
+    let priority: BenchmarkPriority
+    let checkIdleSurvival: Bool
+}
+
 struct BenchmarkMeasurement {
     let samples: Int
     let p50Milliseconds: Double
@@ -37,34 +47,40 @@ struct BenchmarkMeasurement {
 
     var output: String {
         String(
-            format: "samples=%d p50_ms=%.3f p99_ms=%.3f seconds=%.3f received_bytes=%lld bulk_MiB_s=%.2f progress_intervals=%d/%d",
+            format: "samples=%d p50_ms=%.3f p99_ms=%.3f seconds=%.3f received_bytes=%lld bulk_MiB_s=%.2f min_stream_progress_intervals=%d/%d",
             samples, p50Milliseconds, p99Milliseconds, seconds, Int64(receivedBytes),
             Double(receivedBytes) / seconds / 1_048_576, progressIntervals, samples
         )
     }
 }
 
-func measure(bulkReceived: ByteCounter, ping: () async throws -> Void) async throws -> BenchmarkMeasurement {
-    try await pollFor("bulk receiver to warm up") { bulkReceived.value >= bulkPayload.count }
+func measure(bulkStreams: [ByteCounter], ping: () async throws -> Void) async throws -> BenchmarkMeasurement {
+    try await pollFor("every bulk stream to warm up") {
+        bulkStreams.allSatisfy { $0.value >= bulkPayload.count }
+    }
+    for _ in 0..<20 { try await ping() }
+
     let clock = ContinuousClock()
     let beginning = clock.now
-    let initialBytes = bulkReceived.value
+    let initialBytes = bulkStreams.map(\.value)
     var previousBytes = initialBytes
-    var progress = 0
+    var progress = initialBytes.map { _ in 0 }
     var samples: [Double] = []
     for _ in 0..<500 {
         let start = clock.now
         try await ping()
         samples.append(elapsedSeconds(start.duration(to: clock.now)) * 1_000)
         try await Task.sleep(for: .milliseconds(2))
-        let currentBytes = bulkReceived.value
-        if currentBytes > previousBytes { progress += 1 }
+        let currentBytes = bulkStreams.map(\.value)
+        for index in progress.indices where currentBytes[index] > previousBytes[index] {
+            progress[index] += 1
+        }
         previousBytes = currentBytes
     }
     let end = clock.now
-    let receivedBytes = bulkReceived.value - initialBytes
-    guard receivedBytes > bulkPayload.count, progress >= samples.count / 2 else {
-        throw BenchmarkError("Bulk traffic did not keep progressing during the RPC sample. Progress: \(progress)/\(samples.count).")
+    let receivedBytes = previousBytes.reduce(0, +) - initialBytes.reduce(0, +)
+    guard progress.allSatisfy({ $0 >= samples.count / 2 }) else {
+        throw BenchmarkError("Expected continuing receiver progress on each bulk stream. Intervals: \(progress)/\(samples.count).")
     }
     let ordered = samples.sorted()
     return BenchmarkMeasurement(
@@ -73,7 +89,7 @@ func measure(bulkReceived: ByteCounter, ping: () async throws -> Void) async thr
         p99Milliseconds: ordered[Int(ceil(Double(samples.count) * 0.99)) - 1],
         seconds: elapsedSeconds(beginning.duration(to: end)),
         receivedBytes: receivedBytes,
-        progressIntervals: progress
+        progressIntervals: progress.min() ?? 0
     )
 }
 
@@ -88,6 +104,10 @@ func pollFor(_ operation: String, timeout: Duration = .seconds(8), _ predicate: 
 func elapsedSeconds(_ duration: Duration) -> Double {
     let parts = duration.components
     return Double(parts.seconds) + Double(parts.attoseconds) / 1e18
+}
+
+enum ProbeClientIdentity: Sendable {
+    case pinned, missing, different
 }
 
 final class BenchmarkCredentials: @unchecked Sendable {
@@ -126,22 +146,42 @@ final class BenchmarkCredentials: @unchecked Sendable {
         }
     }
 
-    func tlsOptions(server: Bool, alpn: String, includeIdentity: Bool = true) throws -> NWProtocolTLS.Options {
+    func tlsOptions(
+        server: Bool,
+        alpn: String,
+        clientIdentity: ProbeClientIdentity = .pinned,
+        onPeerDecision: (@Sendable (Bool) -> Void)? = nil
+    ) throws -> NWProtocolTLS.Options {
         let options = NWProtocolTLS.Options()
         let security = options.securityProtocolOptions
         sec_protocol_options_set_min_tls_protocol_version(security, .TLSv13)
         sec_protocol_options_set_max_tls_protocol_version(security, .TLSv13)
-        sec_protocol_options_set_peer_authentication_required(security, true)
         sec_protocol_options_set_tls_resumption_enabled(security, false)
         sec_protocol_options_add_tls_application_protocol(security, alpn)
-        if includeIdentity {
-            sec_protocol_options_set_local_identity(security, try localIdentity(server: server))
+        try configureAuthentication(
+            security, server: server, clientIdentity: clientIdentity, onPeerDecision: onPeerDecision
+        )
+        return options
+    }
+
+    func configureAuthentication(
+        _ security: sec_protocol_options_t,
+        server: Bool,
+        clientIdentity: ProbeClientIdentity = .pinned,
+        onPeerDecision: (@Sendable (Bool) -> Void)? = nil
+    ) throws {
+        if server || clientIdentity != .missing {
+            sec_protocol_options_set_local_identity(
+                security, try localIdentity(server: server || clientIdentity == .different)
+            )
         }
+        sec_protocol_options_set_peer_authentication_required(security, true)
         let verify = validator(server: server)
         sec_protocol_options_set_verify_block(security, { _, trust, completion in
-            completion(verify(trust))
+            let accepted = verify(trust)
+            onPeerDecision?(accepted)
+            completion(accepted)
         }, benchmarkQueue)
-        return options
     }
 }
 
@@ -150,8 +190,27 @@ enum LinkTransportBenchmark {
     static func main() async {
         let candidates = ["quic", "http2", "mux"]
         let arguments = Array(CommandLine.arguments.dropFirst())
-        guard arguments.count == 1, let candidate = arguments.first, candidates.contains(candidate) else {
-            print("Usage: v391-link-transport quic|http2|mux")
+        if arguments == ["security"] {
+            do {
+                try await runSecurityProbes()
+            } catch {
+                FileHandle.standardError.write(Data("security error=\(error.localizedDescription)\n".utf8))
+                exit(1)
+            }
+            return
+        }
+        if arguments == ["quic-modern"] {
+            do {
+                try await probeModernQUIC(BenchmarkCredentials())
+            } catch {
+                FileHandle.standardError.write(Data("quic-modern error=\(error.localizedDescription)\n".utf8))
+                exit(1)
+            }
+            return
+        }
+        guard let candidate = arguments.first, candidates.contains(candidate),
+              let scenario = parseScenario(arguments, candidate: candidate) else {
+            print("Usage: v391-link-transport quic|http2|mux [0|1|4 on|off|none] | quic-modern | security")
             exit(64)
         }
         do {
@@ -159,22 +218,37 @@ enum LinkTransportBenchmark {
             let measurement: BenchmarkMeasurement
             switch candidate {
             case "quic":
-                measurement = try await runQUIC(credentials)
+                measurement = try await runQUIC(credentials, scenario: scenario)
             case "http2":
-                measurement = try await runHTTP2(credentials)
+                measurement = try await runHTTP2(credentials, scenario: scenario)
             case "mux":
-                measurement = try await runTLSMux(credentials)
+                measurement = try await runTLSMux(credentials, scenario: scenario)
             default:
                 throw BenchmarkError("Unsupported benchmark candidate.")
             }
             guard credentials.workerVerifications.value > 0, credentials.controlVerifications.value > 0 else {
                 throw BenchmarkError("Both peer verifiers must confirm the pinned certificates.")
             }
-            print("transport=\(candidate) \(measurement.output)")
+            print("transport=\(candidate) bulk_streams=\(scenario.bulkStreamCount) priority=\(scenario.priority.rawValue) \(measurement.output)")
             print("pinned_mutual_auth=pass worker_verifications=\(credentials.workerVerifications.value) control_verifications=\(credentials.controlVerifications.value)")
         } catch {
             FileHandle.standardError.write(Data("transport=\(candidate) error=\(error.localizedDescription)\n".utf8))
             exit(1)
         }
+    }
+
+    private static func parseScenario(_ arguments: [String], candidate: String) -> BenchmarkScenario? {
+        if arguments.count == 1 {
+            return BenchmarkScenario(
+                bulkStreamCount: 1, priority: candidate == "http2" ? .none : .on, checkIdleSurvival: true
+            )
+        }
+        guard arguments.count == 3,
+              let bulk = Int(arguments[1]), [0, 1, 4].contains(bulk),
+              let priority = BenchmarkPriority(rawValue: arguments[2]),
+              (candidate == "http2") == (priority == .none) else {
+            return nil
+        }
+        return BenchmarkScenario(bulkStreamCount: bulk, priority: priority, checkIdleSurvival: false)
     }
 }

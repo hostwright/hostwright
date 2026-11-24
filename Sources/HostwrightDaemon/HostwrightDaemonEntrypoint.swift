@@ -17,6 +17,11 @@ import HostwrightState
 struct HostwrightDaemonEntrypoint {
     static func main() async {
         let arguments = Array(CommandLine.arguments.dropFirst())
+        #if HOSTWRIGHT_TEST_RUNTIME
+        if arguments.first == "--test-runtime" {
+            exit(with: await HostwrightTestRuntimeCommand.run(arguments: Array(arguments.dropFirst())))
+        }
+        #endif
         if arguments == ["--bootstrap-state-recovery"] {
             do {
                 let request = try LocalControlInputReader.read(maximumBytes: ControlPlaneContract.maximumRequestBytes)
@@ -105,6 +110,10 @@ struct HostwrightDaemonEntrypoint {
         }
         withExtendedLifetime(signals) {}
 
+        exit(with: result)
+    }
+
+    private static func exit(with result: DaemonProcessResult) -> Never {
         if !result.standardOutput.isEmpty {
             print(result.standardOutput, terminator: "")
         }

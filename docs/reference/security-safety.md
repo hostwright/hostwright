@@ -351,18 +351,16 @@ Phase 10 implements a host-native accelerator service only with a threat model, 
 
 ## Unsupported Security-Sensitive Scope
 
-The current development build does not yet include the following. Their v0.0.2 implementations are owned by Phases 02–15; this list is a present-tense safety boundary, not a non-goal list:
+Hostwright v0.0.2 ships signed downloads and a verified vendor tap. It manages
+workloads on one Mac, with a current-user daemon LaunchAgent and bounded Compose
+import. The following are outside the shipped security boundary.
 
-- privileged helper;
-- supported/qualified installer channel or launch agent;
-- daemon mutation outside the shared local lifecycle saga or without exact ownership and fencing;
-- arbitrary DNS mutation or unmanaged tunnel management;
-- cloud control plane;
-- Kubernetes, CRI, Docker API, or Docker Compose compatibility;
-- GPU/ANE scheduling, Metal/Core ML/MLX/PyTorch MPS container support, host-native accelerator helpers, or host accelerator device exposure;
-- generic plugin loader, capability invocation, remote plugin registry, binary plugin distribution, or untrusted extension execution;
-- cloud team service, central remote control, hosted audit log, user tracking, enterprise support workflow, or remote policy distribution;
-- credentialed passing Developer ID/notarization/stapling/Gatekeeper evidence, published signed installer verification, vendor-tap availability, dependency/image SBOM claims, or vulnerability scanning;
-- external telemetry, hosted diagnostics, or automatic diagnostic upload.
-- unredacted OSLog fields, OSLog-derived operation authority, or automatic unified-log export.
-- support SLA, enterprise support workflow, enforced CODEOWNERS, or branch-protection policy.
+- Privileged helpers, daemon mutations outside the shared local lifecycle saga, and mutations without exact ownership and fencing.
+- Arbitrary DNS mutation, unmanaged tunnel management, and cross-Mac networking or workload placement.
+- Multi-Mac consensus and failover, Kubernetes or CRI orchestration, a Docker Engine endpoint, and general Compose execution.
+- GPU or ANE scheduling, accelerator passthrough, and host-native accelerator services.
+- Arbitrary plugin loading, untrusted extension execution, and remote plugin registries.
+- Cloud control and team services, hosted audit or diagnostics, remote policy distribution, external telemetry, and automatic diagnostic upload.
+- Implicit image vulnerability scanning. Image vulnerability policy evaluates supplied evidence.
+- Unredacted OSLog fields, OSLog-derived operation authority, and automatic unified-log export.
+- Official Homebrew core or cask distribution and a production support SLA.

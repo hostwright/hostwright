@@ -11,4 +11,4 @@ The host probe uses Network.framework over TCP on 127.0.0.1. Both peers require 
 
 If the verified TLS session supplies no matching exporter, D8 uses a MAC over the transcript including both certificate SHA-256 fingerprints. A failed TLS handshake is inconclusive about exporter support.
 
-The VM experiment measures consent from a user LaunchAgent over an on-link connection. See the [VM runbook](vm/RUNBOOK.md) and [results template](vm/RESULTS.md).
+The VM experiment measures consent from a user LaunchAgent over on-link TCP and QUIC (UDP). The two modes use fresh Local Network privacy state for their first connection, then repeat after reboot and an in-place signed upgrade. See the [VM runbook](vm/RUNBOOK.md) and [results template](vm/RESULTS.md).

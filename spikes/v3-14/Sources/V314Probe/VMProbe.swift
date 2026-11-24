@@ -2,6 +2,18 @@ import Dispatch
 import Foundation
 import Network
 
+enum VMProbeTransport {
+    case tcp
+    case quic(Data)
+
+    var prefix: String {
+        switch self {
+        case .tcp: ""
+        case .quic: "quic "
+        }
+    }
+}
+
 enum VMProbe {
     static let version = {
         #if HOSTWRIGHT_V314_BUILD_2
@@ -27,20 +39,7 @@ enum VMProbe {
         parameters.requiredLocalEndpoint = .hostPort(host: host, port: port)
         let listener = try NWListener(using: parameters, on: port)
         listener.newConnectionHandler = { connection in
-            connection.start(queue: queue)
-            connection.receive(minimumIncompleteLength: request.count, maximumLength: request.count) { received, _, _, error in
-                guard error == nil, received == request else {
-                    connection.cancel()
-                    return
-                }
-                connection.send(content: reply, completion: .contentProcessed { error in
-                    if error == nil {
-                        record("listen reply=ok")
-                    }
-                    connection.cancel()
-                })
-            }
-            queue.asyncAfter(deadline: .now() + 5) { connection.cancel() }
+            respond(to: connection, on: queue)
         }
         listener.stateUpdateHandler = { [listener] state in
             switch state {
@@ -57,9 +56,33 @@ enum VMProbe {
         dispatchMain()
     }
 
-    static func dial(_ host: NWEndpoint.Host, _ port: NWEndpoint.Port, once: Bool) throws -> Never {
+    static func respond(
+        to connection: NWConnection, on queue: DispatchQueue, prefix: String = "", keepOpen: Bool = false
+    ) {
+        connection.start(queue: queue)
+        connection.receive(minimumIncompleteLength: request.count, maximumLength: request.count) { received, _, _, error in
+            guard error == nil, received == request else {
+                connection.cancel()
+                return
+            }
+            connection.send(content: reply, completion: .contentProcessed { error in
+                if error == nil {
+                    record("\(prefix)listen reply=ok")
+                }
+                // Cancelling a QUIC stream immediately can reset it before the peer reads the reply.
+                if error != nil || !keepOpen {
+                    connection.cancel()
+                }
+            })
+        }
+        queue.asyncAfter(deadline: .now() + 5) { connection.cancel() }
+    }
+
+    static func dial(
+        _ host: NWEndpoint.Host, _ port: NWEndpoint.Port, transport: VMProbeTransport = .tcp, once: Bool
+    ) throws -> Never {
         guard port != .any else { throw ProbeFailure("Dial requires a nonzero port") }
-        VMProbeDialer(host: host, port: port, once: once).start()
+        VMProbeDialer(host: host, port: port, transport: transport, once: once).start()
         dispatchMain()
     }
 
@@ -69,15 +92,27 @@ enum VMProbe {
 }
 
 private final class VMProbeDialer: @unchecked Sendable {
+    private final class Attempt: @unchecked Sendable {
+        var connection: NWConnection?
+
+        func cancel() {
+            connection?.stateUpdateHandler = nil
+            connection?.pathUpdateHandler = nil
+            connection?.cancel()
+        }
+    }
+
     private let queue = DispatchQueue(label: "dev.hostwright.v314.dial")
     private let host: NWEndpoint.Host
     private let port: NWEndpoint.Port
+    private let transport: VMProbeTransport
     private let once: Bool
-    private var active: NWConnection?
+    private var active: Attempt?
 
-    init(host: NWEndpoint.Host, port: NWEndpoint.Port, once: Bool) {
+    init(host: NWEndpoint.Host, port: NWEndpoint.Port, transport: VMProbeTransport, once: Bool) {
         self.host = host
         self.port = port
+        self.transport = transport
         self.once = once
     }
 
@@ -85,59 +120,88 @@ private final class VMProbeDialer: @unchecked Sendable {
         queue.async { self.connect() }
     }
 
-    // The queue owns the connection and serializes completion, timeout and retry.
+    // The queue serializes path, trust, completion, and retry callbacks.
     private func connect() {
-        let connection = NWConnection(host: host, port: port, using: .tcp)
-        active = connection
-        VMProbe.record("dial start")
-        connection.stateUpdateHandler = { [self, weak connection] state in
-            guard let connection else { return }
+        let attempt = Attempt()
+        active = attempt
+        record("start")
+        let parameters: NWParameters
+        switch transport {
+        case .tcp:
+            parameters = .tcp
+        case .quic(let pin):
+            parameters = VMQUICProbe.dialParameters(pin: pin, queue: queue) { [self, weak attempt] in
+                if let attempt {
+                    finish(attempt, result: "rejected reference certificate", success: false)
+                }
+            }
+        }
+
+        // The direct QUIC NWConnection exposes the handshake's own path. The listener accepts its stream via a group.
+        let connection = NWConnection(host: host, port: port, using: parameters)
+        attempt.connection = connection
+        if case .quic = transport {
+            connection.pathUpdateHandler = { [self, weak attempt] path in
+                guard let attempt, active === attempt else { return }
+                record("path_update \(pathDetails(path))")
+            }
+        }
+        connection.stateUpdateHandler = { [self, weak attempt, weak connection] state in
+            guard let attempt, let connection, active === attempt else { return }
             switch state {
             case .waiting(let error):
-                let reason = connection.currentPath.flatMap { path in
-                    path.status == .unsatisfied ? String(describing: path.unsatisfiedReason) : nil
-                } ?? "unavailable"
-                VMProbe.record("dial waiting error=\(error) path_reason=\(reason)")
+                record("waiting error=\(error) \(pathDetails(connection.currentPath))")
             case .ready:
-                VMProbe.record("dial ready")
-                exchange(on: connection)
+                record("ready \(pathDetails(connection.currentPath))")
+                exchange(on: connection, for: attempt)
             case .failed(let error):
-                finish(connection, result: "failed error=\(error)", success: false)
+                finish(attempt, result: "failed error=\(error)", success: false)
             default:
                 break
             }
         }
         connection.start(queue: queue)
-        queue.asyncAfter(deadline: .now() + 20) { [self, weak connection] in
-            if let connection {
-                finish(connection, result: "timeout", success: false)
+        queue.asyncAfter(deadline: .now() + 20) { [self, weak attempt] in
+            if let attempt {
+                finish(attempt, result: "timeout", success: false)
             }
         }
     }
 
-    private func exchange(on connection: NWConnection) {
-        connection.send(content: VMProbe.request, completion: .contentProcessed { [self] error in
+    private func pathDetails(_ path: NWPath?) -> String {
+        guard let path else { return "path_status=unavailable path_reason=unavailable" }
+        let reason = path.status == .unsatisfied ? String(describing: path.unsatisfiedReason) : "none"
+        return "path_status=\(path.status) path_reason=\(reason)"
+    }
+
+    private func exchange(on stream: NWConnection, for attempt: Attempt) {
+        stream.send(content: VMProbe.request, completion: .contentProcessed { [self] error in
+            guard active === attempt else { return }
             if let error {
-                finish(connection, result: "send_failed error=\(error)", success: false)
+                finish(attempt, result: "send_failed error=\(error)", success: false)
                 return
             }
-            connection.receive(minimumIncompleteLength: VMProbe.reply.count, maximumLength: VMProbe.reply.count) {
+            stream.receive(minimumIncompleteLength: VMProbe.reply.count, maximumLength: VMProbe.reply.count) {
                 [self] received, _, _, error in
                 let success = error == nil && received == VMProbe.reply
-                finish(connection, result: success ? "reply=ok" : "reply=invalid", success: success)
+                finish(attempt, result: success ? "reply=ok" : "reply=invalid", success: success)
             }
         })
     }
 
-    private func finish(_ connection: NWConnection, result: String, success: Bool) {
-        guard active === connection else { return }
+    private func finish(_ attempt: Attempt, result: String, success: Bool) {
+        guard active === attempt else { return }
         active = nil
-        connection.stateUpdateHandler = nil
-        connection.cancel()
-        VMProbe.record("dial \(result)")
+        let path = pathDetails(attempt.connection?.currentPath)
+        attempt.cancel()
+        record("\(result) \(path)")
         if once {
             exit(success ? 0 : 1)
         }
         queue.asyncAfter(deadline: .now() + 3) { self.connect() }
+    }
+
+    private func record(_ event: String) {
+        VMProbe.record("\(transport.prefix)dial \(event)")
     }
 }

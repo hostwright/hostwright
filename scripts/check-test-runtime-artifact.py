@@ -35,7 +35,10 @@ def scan(binary: Path) -> list[str]:
         capture_output=True, check=True,
     ).stdout
 
-    findings = [marker for marker in SYMBOL_MARKERS if marker.encode("ascii") in symbols]
+    findings = [
+        marker for marker in SYMBOL_MARKERS
+        if marker.encode("ascii") in symbols or marker.encode("ascii") in literals
+    ]
     if PROVIDER_ID.encode("ascii") in literals:
         findings.append(PROVIDER_ID)
     return findings
@@ -43,24 +46,28 @@ def scan(binary: Path) -> list[str]:
 
 def self_test() -> None:
     fixtures = [
-        ("clean", "int main(void) { return 0; }", []),
-        ("provider-id", f'#include <stdio.h>\nint main(void) {{ return puts("{PROVIDER_ID}"); }}', [PROVIDER_ID]),
+        ("clean", "int main(void) { return 0; }", [], False),
+        ("provider-id", f'#include <stdio.h>\nint main(void) {{ return puts("{PROVIDER_ID}"); }}', [PROVIDER_ID], True),
     ]
     for marker in SYMBOL_MARKERS:
         fixtures.append((marker, f"int {marker}Probe(void) {{ return 0; }}\n"
-                         f"int main(void) {{ return {marker}Probe(); }}", [marker]))
+                         f"int main(void) {{ return {marker}Probe(); }}", [marker], False))
+        fixtures.append((f"{marker}-stripped", f'#include <stdio.h>\nint main(void) {{ return puts("{marker}"); }}',
+                         [marker], True))
 
     with TemporaryDirectory(prefix="hostwright-test-runtime-artifact-") as directory:
-        for name, source, expected in fixtures:
+        for name, source, expected, strip in fixtures:
             binary = Path(directory) / name
             subprocess.run(
-                ["/usr/bin/clang", "-x", "c", "-", "-o", str(binary)],
+                ["/usr/bin/clang", "-O2", "-x", "c", "-", "-o", str(binary)],
                 input=source.encode("ascii"), capture_output=True, check=True,
             )
+            if strip:
+                subprocess.run(["/usr/bin/strip", str(binary)], capture_output=True, check=True)
             findings = scan(binary)
             if findings != expected:
                 raise ValueError(f"{name} fixture expected {expected}, found {findings}")
-    print("test-runtime artifact self-test passed: clean binary, provider ID, and both symbol markers")
+    print("test-runtime artifact self-test passed: clean binary, provider ID, and type names in symbols and strings")
 
 
 def main() -> int:

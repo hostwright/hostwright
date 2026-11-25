@@ -8,7 +8,7 @@ The instrumented baseline used the `46821da5` tree on arm64 macOS 26.6.2 with Sw
 
 Measure the two Swift PR invocations with the selectors in the PR test runner. The coverage denominator is the compiler-mapped lines and branch outcomes in checked-in first-party `Sources/` files. Test sources, SwiftPM dependencies and system libraries are excluded. Branch totals include only compiler-emitted outcomes. A dash marks an unavailable branch denominator. [PR test runner](../../../scripts/test.sh)
 
-The instrumented run observed 3,623 test cases across the PR invocations. 3,618 passed and 5 skipped. The fast and sentinel invocations took 533.9s and 76.7s locally. Coverage was 211,246 of 283,180 mapped lines and 71,977 of 107,474 code regions. The instrumented objects emitted no mapped branch outcomes for first-party sources. The skipped cases require the optional scheduler performance cell, live registry access, attended Tahoe VM inputs, or an official etcd archive.
+The instrumented run observed 3,623 test cases across the PR invocations. 3,618 passed and 5 skipped. The fast and sentinel invocations took 533.9s and 76.7s locally. Coverage was 211,246 of 283,180 mapped lines and 71,977 of 107,474 code regions. This Swift coverage build emitted no branch outcomes, and the only first-party C source is a SQLite wrapper with a single call. The omission analysis uses source regions to measure execution within a line. Branch coverage is unavailable in this measurement. The skipped cases require the optional scheduler performance cell, live registry access, attended Tahoe VM inputs, or an official etcd archive.
 
 ## Omission measurements
 
@@ -51,9 +51,9 @@ The two complete runs matched on case identifiers and outcomes. The canonical ru
 
 The ledger proposes 1 removal, 1 nightly move, and 31 keeps. The separate release qualification run passed 37 cases in 12.103s of suite execution. Its profile hit 460 lines outside the canonical PR baseline. Retain the existing release qualification lane and keep the remaining durable distribution qualification cases on their current selector. The distribution qualification remainder is outside the PR measurement and has no PR timing or omission claim. The existing native live qualification selectors are also outside the PR baseline.
 
-The Phase 04 README phrase inventory adds no measured first-party line or code region. The documentation quickstart verified all four example plans with the covered binaries. The interactive command tests exercise operation wiring. The retirement applies to the prose inventory.
+The Phase 04 README phrase inventory adds no measured first-party line or code region. The proposed removal retires the check that the example READMEs document the dry-run and `--confirm-plan "$PLAN_SHA256"` sequence and omit unsupported `hostwright pull`, `build`, and `load` commands.
 
-The Homebrew style case spent 33.687s in the warm PR job. It is a nightly candidate with 0 unique lines and 0 unique code regions. The retained PR case covers the immutable URL, digest and installed command surface. The test continues to use real Homebrew in nightly. V3-10 needs a paired timing run before any savings claim.
+The Homebrew style case spent 33.687s in the warm PR job. It is a nightly candidate with 0 unique lines and 0 unique code regions. The retained PR case covers the immutable URL, digest and installed command surface. V3-10 must add a nightly job that runs the real Ruby and Homebrew style case in the same PR that removes the case from PR selection. V3-10 needs a paired timing run before any savings claim.
 
 Keep the six durable PR sentinels, the live-driver suite and the two workflow safety assertions. The durable and live-driver cases guard recovery, mutation and scheduler authority across state transitions. The workflow assertions guard protected tags and credential isolation, which source coverage alone cannot establish.
 

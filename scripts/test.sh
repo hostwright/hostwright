@@ -2,6 +2,7 @@
 set -euo pipefail
 
 readonly qualification_filter='(DistributionIntegrationTests|DistributionDurableLifecycleTests|ReleaseQualificationRegistryTests|Phase07ContainerizationNetworkLiveTests|Phase07LANExposureLiveTests|LifecycleGate05LiveTests|Phase07LocalNetworkForwardingLiveTests|Phase07NetworkGate01LiveTests)/'
+readonly nightly_homebrew_filter='TrustedReleaseTests/testRenderedHomebrewFormulaPassesRealRubyAndHomebrewStyle$'
 readonly pr_parallel_xctest_filter='(LifecycleLiveDriverTests|TrustedReleaseTests|'\
 'ReleaseQualificationCLITests|MutationCheckpointQualificationScriptTests|DaemonLocalLifecycleAuthorityTests|'\
 'NetworkHelperIngressBrokerTests|HostwrightDaemonCoreTests|PersistentControlStreamIntegrationTests|'\
@@ -17,7 +18,8 @@ qualification shards:
   distribution
   release
   live
-  all
+  homebrew
+  all (excludes the nightly-only Homebrew case)
 
 Set HOSTWRIGHT_TEST_RESULTS_DIR to write one xUnit XML file per Swift test invocation.
 EOF
@@ -67,11 +69,13 @@ run_pr_build() {
 }
 
 run_pr_tests() {
+  local excluded_filter="$qualification_filter|$nightly_homebrew_filter"
+
   python3 scripts/test-docker-proxy.py "$(swift build --show-bin-path)/hostwright-docker-proxy"
   scripts/integration.sh
-  swift_test pr-fast --skip "$qualification_filter|$pr_parallel_xctest_filter"
+  swift_test pr-fast --skip "$excluded_filter|$pr_parallel_xctest_filter"
   swift_test pr-parallel-xctest --skip-build --disable-swift-testing --parallel --num-workers 3 \
-    --filter "$pr_parallel_xctest_filter" --skip "$qualification_filter"
+    --filter "$pr_parallel_xctest_filter" --skip "$excluded_filter"
   swift_test pr-durable-lifecycle-sentinels --filter "$durable_lifecycle_sentinel_filter"
 }
 
@@ -94,6 +98,24 @@ run_qualification() {
       ;;
     live)
       filter='(Phase07ContainerizationNetworkLiveTests|Phase07LANExposureLiveTests|LifecycleGate05LiveTests|Phase07LocalNetworkForwardingLiveTests|Phase07NetworkGate01LiveTests)/'
+      ;;
+    homebrew)
+      # SwiftPM can omit XCTest xUnit output.
+      swift_test qualification-homebrew --disable-swift-testing --filter "$nightly_homebrew_filter" 2>&1 |
+        awk -v expected="'-[HostwrightDistributionTests.TrustedReleaseTests testRenderedHomebrewFormulaPassesRealRubyAndHomebrewStyle]'" '
+          /^Test Case / {
+            if ($0 ~ /\]\047 started\.$/) started++
+            if ($0 ~ /\]\047 (passed|failed|skipped) \(/) completed++
+            if (index($0, "Test Case " expected " passed (") == 1) passed++
+          }
+          { print }
+          END {
+            if (started != 1 || completed != 1 || passed != 1) {
+              print "Expected exactly one passing Homebrew qualification case: " expected > "/dev/stderr"
+              exit 1
+            }
+          }'
+      return
       ;;
     all)
       filter="$qualification_filter"

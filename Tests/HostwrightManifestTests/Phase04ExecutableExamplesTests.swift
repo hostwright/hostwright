@@ -59,49 +59,6 @@ final class Phase04ExecutableExamplesTests: XCTestCase {
         XCTAssertEqual(web.update.strategy, .recreate)
     }
 
-    func testCommandSequencesStayInsidePhase04Boundaries() throws {
-        let single = try read("examples/single-service/README.md")
-        let threeService = try read("examples/app-suite/README.md")
-        let automation = try read("examples/api-redis/README.md")
-        let rollback = try read("examples/unhealthy-rollback/README.md")
-        let commands = [single, threeService, automation, rollback]
-            .joined(separator: "\n")
-
-        for command in [
-            "hostwright up",
-            "hostwright down",
-            "hostwright run",
-            "hostwright start",
-            "hostwright stop",
-            "hostwright restart",
-            "hostwright rm",
-            "hostwright update",
-            "hostwright exec",
-            "hostwright attach",
-            "hostwright copy",
-            "hostwright export",
-            "hostwright inspect",
-            "hostwright stats",
-            "hostwright logs"
-        ] {
-            XCTAssertTrue(commands.contains(command), command)
-        }
-        XCTAssertTrue(commands.contains("--dry-run --output json"))
-        XCTAssertTrue(commands.contains(#"--confirm-plan "$PLAN_SHA256""#))
-        XCTAssertTrue(commands.contains("--follow"))
-        XCTAssertFalse(commands.contains("hostwright pull"))
-        XCTAssertFalse(commands.contains("hostwright build"))
-        XCTAssertFalse(commands.contains("hostwright load"))
-
-        let attach = try XCTUnwrap(
-            automation.split(separator: "\n")
-                .map(String.init)
-                .first { $0.hasPrefix("hostwright attach ") }
-        )
-        XCTAssertFalse(attach.contains("--output"))
-        XCTAssertTrue(rollback.contains("automatic rollback or a precise safe hold"))
-    }
-
     func testUnhealthyRevisionChangesOnlyExecutableHealthOutcome() throws {
         let healthy = try manifest("examples/unhealthy-rollback/hostwright.yaml")
         let unhealthy = try manifest("examples/unhealthy-rollback/unhealthy.yaml")

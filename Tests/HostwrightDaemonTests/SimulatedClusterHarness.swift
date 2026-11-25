@@ -28,6 +28,7 @@ final class SimulatedClusterHarness {
         case replay
         case partitioned
         case offline
+        case crashedBeforeFenceWrite
         case leaseExpired
         case rejected(ClusterMutationFenceRejection)
     }
@@ -69,6 +70,7 @@ final class SimulatedClusterHarness {
         let home: URL
         var runtime: HostwrightTestRecordingRuntime?
         var clockSkew: Int64 = 0
+        var crashBeforeFenceWrite = false
 
         var lastFenceURL: URL { home.appending(path: "simulated-mutation-fence.json") }
 
@@ -189,10 +191,14 @@ final class SimulatedClusterHarness {
         nodes[id]?.clockSkew = milliseconds
     }
 
-    // Crash injection happens between deliveries. Both the recorder and replay fence reopen from disk.
     func crash(_ id: ClusterNodeID) throws {
         _ = try node(id)
         nodes[id]?.runtime = nil
+    }
+
+    func crashBeforeNextFenceWrite(on id: ClusterNodeID) throws {
+        _ = try runtime(on: id)
+        nodes[id]?.crashBeforeFenceWrite = true
     }
 
     func reopen(_ id: ClusterNodeID) throws {
@@ -240,7 +246,7 @@ final class SimulatedClusterHarness {
         let localTime = worker.clockSkew >= 0
             ? try adding(UInt64(worker.clockSkew), to: time)
             : time - min(time, worker.clockSkew.magnitude)
-        guard !lease.isExpired(atMilliseconds: time), !lease.isExpired(atMilliseconds: localTime) else {
+        guard !lease.isExpired(atMilliseconds: localTime) else {
             return .leaseExpired
         }
         guard let sourceLease = leaseHistory[message.token], sourceLease.leaderNodeID == message.source else {
@@ -281,6 +287,11 @@ final class SimulatedClusterHarness {
                         confirmation: RuntimeMutationConfirmation(confirmed: true, reason: "simulated cluster fence")
                     )
                 }
+            }
+            if worker.crashBeforeFenceWrite {
+                nodes[destination]?.crashBeforeFenceWrite = false
+                try crash(destination)
+                return .crashedBeforeFenceWrite
             }
             try proof.canonicalJSON().write(to: worker.lastFenceURL, options: .atomic)
             return .applied

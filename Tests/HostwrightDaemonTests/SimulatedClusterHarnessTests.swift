@@ -73,6 +73,27 @@ final class SimulatedClusterHarnessTests: XCTestCase {
         }
     }
 
+    func testCrashAfterRecordingRecoversWithoutRepeatingCreate() async throws {
+        try await withCluster { cluster in
+            let worker = cluster.nodeIDs[1]
+            let message = try cluster.message("create-api", service: "api", to: worker)
+            try cluster.crashBeforeNextFenceWrite(on: worker)
+            try cluster.enqueue(message, duplicate: true)
+            try await cluster.advance(by: 0)
+            XCTAssertEqual(cluster.events.map(\.outcome), [.crashedBeforeFenceWrite, .offline])
+
+            try cluster.reopen(worker)
+            let observed = try await cluster.observedState(on: worker)
+            XCTAssertEqual(observed.services.map(\.identity.serviceName), ["api"])
+            try await assertRecorded(["api"], on: worker, in: cluster)
+
+            try cluster.enqueue(message, duplicate: true)
+            try await cluster.advance(by: 0)
+            XCTAssertEqual(cluster.events.map(\.outcome), [.crashedBeforeFenceWrite, .offline, .applied, .replay])
+            try await assertRecorded(["api"], on: worker, in: cluster)
+        }
+    }
+
     func testDuplicateDeliveryRecordsExactlyOneAction() async throws {
         try await withCluster { cluster in
             let worker = cluster.nodeIDs[1]
@@ -126,14 +147,28 @@ final class SimulatedClusterHarnessTests: XCTestCase {
             try await cluster.advance(by: 0)
             XCTAssertEqual(cluster.events.last?.outcome, .applied)
             try await assertRecorded(["api"], on: workerA, in: cluster)
+        }
+    }
 
-            try cluster.setClockSkew(-Int64(SimulatedClusterHarness.leaseLifetime), on: workerA)
-            let slowClockRequest = try cluster.message("slow-clock", service: "expired", to: workerA)
-            try await cluster.advance(by: SimulatedClusterHarness.leaseLifetime)
-            try cluster.enqueue(slowClockRequest)
+    func testSlowClockAcceptsLeaseUntilReplacementFencesIt() async throws {
+        try await withCluster { cluster in
+            let slowWorker = cluster.nodeIDs[1]
+            let onTimeWorker = cluster.nodeIDs[2]
+            let lifetime = SimulatedClusterHarness.leaseLifetime
+            try cluster.setClockSkew(-Int64(lifetime), on: slowWorker)
+            try cluster.enqueue(cluster.message("slow-clock", service: "api", to: slowWorker), delay: lifetime)
+            try cluster.enqueue(cluster.message("on-time", service: "api", to: onTimeWorker), delay: lifetime)
+            let pendingOldFence = try cluster.message("old-fence", service: "stale", to: slowWorker)
+            try await cluster.advance(by: lifetime)
+            XCTAssertEqual(cluster.events.map(\.outcome), [.applied, .leaseExpired])
+            try await assertRecorded(["api"], on: slowWorker, in: cluster)
+            try await assertRecorded([], on: onTimeWorker, in: cluster)
+
+            try cluster.replaceExpiredAuthority()
+            try cluster.enqueue(pendingOldFence)
             try await cluster.advance(by: 0)
-            XCTAssertEqual(cluster.events.last?.outcome, .leaseExpired)
-            try await assertRecorded(["api"], on: workerA, in: cluster)
+            XCTAssertEqual(cluster.events.last?.outcome, .rejected(.staleFencingToken(expected: 2, actual: 1)))
+            try await assertRecorded(["api"], on: slowWorker, in: cluster)
         }
     }
 

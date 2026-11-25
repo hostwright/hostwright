@@ -13,8 +13,13 @@ spec.loader.exec_module(scope)
 class CheckScopeTests(unittest.TestCase):
     def test_native_reuse_and_documentation_changes_use_targeted_regressions(self):
         self.assertEqual(scope.choose(sorted(scope.NATIVE_REUSE)), 'native-reuse')
-        self.assertEqual(scope.choose(['docs/reference/install.md', *scope.NATIVE_REUSE]), 'native-reuse')
-        self.assertEqual(scope.choose(['README.md', 'docs/design/policy.md']), 'docs')
+        self.assertEqual(scope.choose(['README.md', 'docs/design/policy.md']), 'docs-qualification')
+
+    def test_qualification_snapshot_docs_select_required_documentation_validation(self):
+        paths = ['docs/roadmap/v0.0.3/TEST_SUITE_MEASUREMENTS.md']
+        self.assertEqual(scope.choose(paths), 'docs-qualification')
+        self.assertEqual(scope.choose([*paths, *scope.NATIVE_REUSE]), 'native-reuse-docs')
+        self.assertEqual(scope.choose([*paths, 'Sources/HostwrightCLI/main.swift']), 'full')
 
     def test_any_product_dependency_or_unknown_input_keeps_full_regressions(self):
         for path in ('Sources/HostwrightCLI/main.swift', 'Tests/HostwrightCoreTests/test.swift',
@@ -33,13 +38,18 @@ class CheckScopeTests(unittest.TestCase):
             self.assertEqual(scope.git_scope('pull_request', 'a'*40, 'b'*40), 'full')
 
     def test_codeql_swift_path_selection(self):
-        for path in ('Tests/Example.swift', 'fixture.c', 'fixture.h', 'fixture.m', 'fixture.mm',
+        for path in ('Sources/HostwrightCLI/main.swift', 'fixture.c', 'fixture.h', 'fixture.m', 'fixture.mm',
                      'fixture.modulemap', 'Package.swift', 'Package.resolved', 'Sources/data.json',
                      '.github/workflows/security.yml'):
             with self.subTest(path=path), mock.patch.object(scope, 'changed_paths', return_value=[path]):
                 self.assertTrue(scope.codeql_swift('pull_request', '', ''))
-        with mock.patch.object(scope, 'changed_paths', return_value=['docs/guide.md', 'Guest/main.go']):
-            self.assertFalse(scope.codeql_swift('pull_request', '', ''))
+        for paths in (['docs/guide.md', 'Guest/main.go'],
+                      ['Tests/Example.swift', 'Tests/Fixtures/legacy.c'],
+                      ['Tests/Example.swift', 'docs/guide.md']):
+            with self.subTest(paths=paths), mock.patch.object(scope, 'changed_paths', return_value=paths):
+                self.assertFalse(scope.codeql_swift('pull_request', '', ''))
+        with mock.patch.object(scope, 'changed_paths', return_value=['Tests/Example.swift', 'Package.swift']):
+            self.assertTrue(scope.codeql_swift('pull_request', '', ''))
 
     def test_codeql_swift_runs_outside_prs_and_for_uncertain_diffs(self):
         for event in ('push', 'schedule', 'workflow_dispatch', 'pull_request'):

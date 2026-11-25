@@ -107,14 +107,21 @@ jobs:
           set -euo pipefail
           scope="$(python3 scripts/ci-check-scope.py --event "$EVENT_NAME" --base "$BASE_SHA" --head "$HEAD_SHA")"
           python3 scripts/test-ci-check-scope.py
+          run_regression=false
+          run_native_reuse=false
+          run_docs_qualification=false
           case "$scope" in
-            full) run_regression=true; run_native_reuse=false ;;
-            native-reuse) run_regression=false; run_native_reuse=true ;;
-            docs) run_regression=false; run_native_reuse=false ;;
+            full) run_regression=true ;;
+            native-reuse) run_native_reuse=true ;;
+            native-reuse-docs) run_native_reuse=true; run_docs_qualification=true ;;
+            docs-qualification) run_docs_qualification=true ;;
             *) exit 1 ;;
           esac
-          printf 'run_regression=%s\n' "$run_regression" >> "$GITHUB_OUTPUT"
-          printf 'run_native_reuse=%s\n' "$run_native_reuse" >> "$GITHUB_OUTPUT"
+          {
+            printf 'run_regression=%s\n' "$run_regression"
+            printf 'run_native_reuse=%s\n' "$run_native_reuse"
+            printf 'run_docs_qualification=%s\n' "$run_docs_qualification"
+          } >> "$GITHUB_OUTPUT"
           if [[ "$EVENT_NAME" == pull_request || "$EVENT_NAME" == push ]] \
             && [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ && "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] \
             && [[ "$BASE_SHA" != 0000000000000000000000000000000000000000 ]] \
@@ -170,14 +177,14 @@ jobs:
           if-no-files-found: error
       - name: Compute the SwiftPM cache key
         id: toolchain
-        if: steps.check-scope.outputs.run_regression == 'true'
+        if: steps.check-scope.outputs.run_regression == 'true' || steps.check-scope.outputs.run_docs_qualification == 'true'
         shell: bash
         env:
           SWIFTPM_LOCK_HASH: ${{ hashFiles('Package.resolved') }}
         run: scripts/ci-swift-toolchain-key.sh
       - name: Restore SwiftPM build output
         id: swift-cache
-        if: github.event_name == 'pull_request' && steps.check-scope.outputs.run_regression == 'true'
+        if: (github.event_name == 'pull_request' && steps.check-scope.outputs.run_regression == 'true') || steps.check-scope.outputs.run_docs_qualification == 'true'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .build
@@ -239,6 +246,22 @@ jobs:
             2>&1 | tee "$HOSTWRIGHT_TEST_RESULTS_DIR/recording-runtime.log"
           grep -F "Test Suite 'SimulatedClusterHarnessTests' passed" "$HOSTWRIGHT_TEST_RESULTS_DIR/recording-runtime.log"
           grep -F "Test Suite 'TestRuntimeFlavorTests' passed" "$HOSTWRIGHT_TEST_RESULTS_DIR/recording-runtime.log"
+      - name: Documentation qualification regressions
+        if: steps.check-scope.outputs.run_docs_qualification == 'true'
+        shell: bash
+        env:
+          HOSTWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/hostwright-test-results
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOSTWRIGHT_TEST_RESULTS_DIR"
+          log="$HOSTWRIGHT_TEST_RESULTS_DIR/qualification-docs.log"
+          passing=testDocumentationLaneProducesExactNonPromotableOrPassingEvidence
+          stale=testDocumentationLaneMarksEvidenceStaleWhenTrackedSourceChangesDuringExecution
+          scripts/ci-swift.sh test --jobs 3 --disable-swift-testing \
+            --filter "ReleaseQualificationCLITests/($passing|$stale)$" 2>&1 | tee "$log"
+          for test_case in "$passing" "$stale"; do
+            grep -F "ReleaseQualificationCLITests $test_case]' passed" "$log"
+          done
       - name: Native runtime provenance regressions
         if: steps.check-scope.outputs.run_native_reuse == 'true'
         shell: bash
@@ -259,7 +282,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
       - name: Retain pull-request logs and results
-        if: ${{ always() && (steps.check-scope.outputs.run_regression == 'true' || steps.check-scope.outputs.run_native_reuse == 'true') }}
+        if: ${{ always() && (steps.check-scope.outputs.run_regression == 'true' || steps.check-scope.outputs.run_native_reuse == 'true' || steps.check-scope.outputs.run_docs_qualification == 'true') }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ci-test-results-${{ github.run_id }}-${{ github.run_attempt }}

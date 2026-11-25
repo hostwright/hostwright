@@ -2,6 +2,10 @@
 
 import PackageDescription
 
+let recordingRuntimeSettings: [SwiftSetting] = Context.environment["HOSTWRIGHT_TEST_RUNTIME"] == "1"
+    ? [.define("HOSTWRIGHT_TEST_RUNTIME")]
+    : []
+
 let package = Package(
     name: "hostwright",
     platforms: [
@@ -280,7 +284,8 @@ let package = Package(
                 "HostwrightRuntime",
                 "HostwrightScheduler",
                 "HostwrightState"
-            ]
+            ],
+            swiftSettings: recordingRuntimeSettings
         ),
         .executableTarget(
             name: "HostwrightDistributionTool",
@@ -908,6 +913,7 @@ let package = Package(
             name: "HostwrightDaemonTests",
             dependencies: [
                 "HostwrightCLI",
+                "HostwrightCluster",
                 "HostwrightCommandTransport",
                 "HostwrightDaemon",
                 "HostwrightDaemonCore",
@@ -916,7 +922,8 @@ let package = Package(
                 "HostwrightRuntime",
                 "HostwrightScheduler",
                 "HostwrightState"
-            ]
+            ],
+            swiftSettings: recordingRuntimeSettings
         ),
         .testTarget(
             name: "HostwrightCLITests",

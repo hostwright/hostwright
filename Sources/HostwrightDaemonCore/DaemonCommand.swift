@@ -247,42 +247,72 @@ public enum HostwrightDaemonMain {
             case .version:
                 return DaemonProcessResult(standardOutput: "\(HostwrightIdentity.version)\n")
             case .run(let configuration):
-                let controlService = try controlServiceFactory?(configuration)
-                let configurationMonitor = DaemonConfigurationChangeMonitor()
-                let clock = SystemDaemonClock(
-                    shutdownToken: shutdownToken,
-                    configurationMonitor: configurationMonitor
-                )
-                let runner = DaemonLoopRunner(
+                return await run(
                     configuration: configuration,
                     runtimeAdapter: runtimeAdapter,
                     reconciliationDriver: reconciliationDriver,
-                    clock: clock,
-                    instanceLock: FileDaemonInstanceLock(path: configuration.lockFilePath),
                     shutdownToken: shutdownToken,
-                    configurationMonitor: configurationMonitor,
-                    controlService: controlService,
-                    readConfig: { try String(contentsOfFile: $0, encoding: .utf8) },
-                    readConfiguration: SecureDaemonConfigurationReader.read
-                )
-                let summary = try await runner.run()
-                return DaemonProcessResult(
-                    standardOutput: """
-                    hostwrightd \(configuration.mode.rawValue) loop stopped
-                    Iterations: \(summary.iterations)
-                    Successful: \(summary.successfulIterations)
-                    Failed: \(summary.failedIterations)
-                    Shutdown requested: \(summary.stoppedByShutdown)
-
-                    """
+                    controlServiceFactory: controlServiceFactory
                 )
             }
-        } catch let error as DaemonError {
-            return DaemonProcessResult(standardError: "\(error)\n", exitCode: 64)
-        } catch let error as StateStoreError {
-            return DaemonProcessResult(standardError: "\(HostwrightErrorCode.stateStoreUnavailable.rawValue): \(error)\n", exitCode: 66)
         } catch {
-            return DaemonProcessResult(standardError: "\(HostwrightErrorCode.runtimeUnavailable.rawValue): \(RuntimeRedactionPolicy.default.redact(String(describing: error)))\n", exitCode: 69)
+            return failure(error)
+        }
+    }
+
+    package static func run(
+        configuration: DaemonConfiguration,
+        runtimeAdapter: any RuntimeAdapter,
+        reconciliationDriver: any DaemonReconciliationDriving,
+        shutdownToken: DaemonShutdownToken,
+        controlServiceFactory: (@Sendable (DaemonConfiguration) throws -> any DaemonControlServing)?,
+        readConfiguration: @escaping @Sendable (
+            String, DaemonConfigurationTargetKind, DaemonConfigurationTarget?
+        ) throws -> DaemonConfigurationSnapshot = SecureDaemonConfigurationReader.read
+    ) async -> DaemonProcessResult {
+        do {
+            let controlService = try controlServiceFactory?(configuration)
+            let configurationMonitor = DaemonConfigurationChangeMonitor()
+            let clock = SystemDaemonClock(
+                shutdownToken: shutdownToken,
+                configurationMonitor: configurationMonitor
+            )
+            let runner = DaemonLoopRunner(
+                configuration: configuration,
+                runtimeAdapter: runtimeAdapter,
+                reconciliationDriver: reconciliationDriver,
+                clock: clock,
+                instanceLock: FileDaemonInstanceLock(path: configuration.lockFilePath),
+                shutdownToken: shutdownToken,
+                configurationMonitor: configurationMonitor,
+                controlService: controlService,
+                readConfig: { try String(contentsOfFile: $0, encoding: .utf8) },
+                readConfiguration: readConfiguration
+            )
+            let summary = try await runner.run()
+            return DaemonProcessResult(
+                standardOutput: """
+                hostwrightd \(configuration.mode.rawValue) loop stopped
+                Iterations: \(summary.iterations)
+                Successful: \(summary.successfulIterations)
+                Failed: \(summary.failedIterations)
+                Shutdown requested: \(summary.stoppedByShutdown)
+
+                """
+            )
+        } catch {
+            return failure(error)
+        }
+    }
+
+    private static func failure(_ error: any Error) -> DaemonProcessResult {
+        switch error {
+        case let error as DaemonError:
+            DaemonProcessResult(standardError: "\(error)\n", exitCode: 64)
+        case let error as StateStoreError:
+            DaemonProcessResult(standardError: "\(HostwrightErrorCode.stateStoreUnavailable.rawValue): \(error)\n", exitCode: 66)
+        default:
+            DaemonProcessResult(standardError: "\(HostwrightErrorCode.runtimeUnavailable.rawValue): \(RuntimeRedactionPolicy.default.redact(String(describing: error)))\n", exitCode: 69)
         }
     }
 }

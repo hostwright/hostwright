@@ -2649,7 +2649,7 @@ private final class DeterministicIDs {
 }
 
 @discardableResult
-private func seedDaemonSchedulerAuthority(
+func seedDaemonSchedulerAuthority(
     databasePath: String,
     manifestText: String,
     subjectID: String = "owner",

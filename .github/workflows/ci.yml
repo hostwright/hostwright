@@ -216,6 +216,29 @@ jobs:
             | tee -a "$HOSTWRIGHT_TEST_RESULTS_DIR/pr.log"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
+      - name: Build the recording-runtime test flavor
+        if: github.event_name == 'pull_request' && steps.check-scope.outputs.run_regression == 'true'
+        shell: bash
+        env:
+          HOSTWRIGHT_TEST_RUNTIME: '1'
+        run: |
+          python3 scripts/check-test-runtime-artifact.py --self-test
+          scripts/ci-swift.sh build --jobs 3 --build-tests
+      - name: Run the simulated cluster and recording-runtime tests
+        if: github.event_name == 'pull_request' && steps.check-scope.outputs.run_regression == 'true'
+        timeout-minutes: 3
+        shell: bash
+        env:
+          HOSTWRIGHT_TEST_RUNTIME: '1'
+          HOSTWRIGHT_TEST_RESULTS_DIR: ${{ runner.temp }}/hostwright-test-results
+        run: |
+          set -euo pipefail
+          scripts/ci-swift.sh test --jobs 3 --skip-build \
+            --filter 'SimulatedClusterHarnessTests|TestRuntimeFlavorTests' \
+            --xunit-output "$HOSTWRIGHT_TEST_RESULTS_DIR/recording-runtime.xml" \
+            2>&1 | tee "$HOSTWRIGHT_TEST_RESULTS_DIR/recording-runtime.log"
+          grep -F "Test Suite 'SimulatedClusterHarnessTests' passed" "$HOSTWRIGHT_TEST_RESULTS_DIR/recording-runtime.log"
+          grep -F "Test Suite 'TestRuntimeFlavorTests' passed" "$HOSTWRIGHT_TEST_RESULTS_DIR/recording-runtime.log"
       - name: Native runtime provenance regressions
         if: steps.check-scope.outputs.run_native_reuse == 'true'
         shell: bash

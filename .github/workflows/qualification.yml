@@ -1,6 +1,8 @@
 name: Qualification tests
 
 on:
+  schedule:
+    - cron: '23 7 * * *'
   workflow_dispatch:
     inputs:
       source_commit:
@@ -29,7 +31,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [distribution, release, live]
+        shard: ${{ github.event_name == 'schedule' && fromJSON('["homebrew"]') || fromJSON('["distribution", "release", "live"]') }}
     steps:
       - name: Validate source and runner selection
         shell: bash

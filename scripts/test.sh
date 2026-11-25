@@ -2,6 +2,7 @@
 set -euo pipefail
 
 readonly qualification_filter='(DistributionIntegrationTests|DistributionDurableLifecycleTests|ReleaseQualificationRegistryTests|Phase07ContainerizationNetworkLiveTests|Phase07LANExposureLiveTests|LifecycleGate05LiveTests|Phase07LocalNetworkForwardingLiveTests|Phase07NetworkGate01LiveTests)/'
+readonly nightly_homebrew_filter='TrustedReleaseTests/testRenderedHomebrewFormulaPassesRealRubyAndHomebrewStyle$'
 readonly durable_lifecycle_sentinel_filter='DistributionDurableLifecycleTests/(testLegacyRollbackPostRestoreCancellationAndInterruptionRecoverCurrentGeneration|testPackageLifecycleUsesExistingRepairUpgradeRollbackAndDowngradeRules|testInterruptedUpgradeRecoversThenUpgradeAndVerifiedRollbackRestoreBinaryAndState|testRequiredOperationRejectsLockedStateMismatchWithoutMutation|testRemoveDataRequiresCurrentPlanAndInterruptedRemovalRestoresPayloadAndState|testManagedServiceSymlinkExecutableIsRejectedBeforeLifecycleMutation)$'
 
 usage() {
@@ -12,6 +13,7 @@ qualification shards:
   distribution
   release
   live
+  homebrew
   all
 
 Set HOSTWRIGHT_TEST_RESULTS_DIR to write one xUnit XML file per Swift test invocation.
@@ -64,7 +66,7 @@ run_pr_build() {
 run_pr_tests() {
   python3 scripts/test-docker-proxy.py "$(swift build --show-bin-path)/hostwright-docker-proxy"
   scripts/integration.sh
-  swift_test pr-fast --skip "$qualification_filter"
+  swift_test pr-fast --skip "$qualification_filter|$nightly_homebrew_filter"
   swift_test pr-durable-lifecycle-sentinels --filter "$durable_lifecycle_sentinel_filter"
 }
 
@@ -87,6 +89,9 @@ run_qualification() {
       ;;
     live)
       filter='(Phase07ContainerizationNetworkLiveTests|Phase07LANExposureLiveTests|LifecycleGate05LiveTests|Phase07LocalNetworkForwardingLiveTests|Phase07NetworkGate01LiveTests)/'
+      ;;
+    homebrew)
+      filter="$nightly_homebrew_filter"
       ;;
     all)
       filter="$qualification_filter"

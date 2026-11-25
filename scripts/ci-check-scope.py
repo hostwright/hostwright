@@ -15,7 +15,12 @@ NATIVE_REUSE = {
     '.github/workflows/ci.yml',
 }
 CODEQL_SWIFT_SUFFIXES = ('.swift', '.c', '.h', '.m', '.mm', '.modulemap')
-CODEQL_SWIFT_INPUTS = {'Package.swift', 'Package.resolved', '.github/workflows/security.yml'}
+CODEQL_SWIFT_INPUTS = {
+    'Package.swift',
+    'Package.resolved',
+    '.github/workflows/security.yml',
+    'scripts/ci-check-scope.py',
+}
 
 
 def documentation(path):

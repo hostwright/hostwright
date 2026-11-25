@@ -40,7 +40,7 @@ class CheckScopeTests(unittest.TestCase):
     def test_codeql_swift_path_selection(self):
         for path in ('Sources/HostwrightCLI/main.swift', 'fixture.c', 'fixture.h', 'fixture.m', 'fixture.mm',
                      'fixture.modulemap', 'Package.swift', 'Package.resolved', 'Sources/data.json',
-                     '.github/workflows/security.yml'):
+                     '.github/workflows/security.yml', 'scripts/ci-check-scope.py'):
             with self.subTest(path=path), mock.patch.object(scope, 'changed_paths', return_value=[path]):
                 self.assertTrue(scope.codeql_swift('pull_request', '', ''))
         for paths in (['docs/guide.md', 'Guest/main.go'],

@@ -14,7 +14,7 @@ qualification shards:
   release
   live
   homebrew
-  all
+  all (excludes the nightly-only Homebrew case)
 
 Set HOSTWRIGHT_TEST_RESULTS_DIR to write one xUnit XML file per Swift test invocation.
 EOF
@@ -91,7 +91,22 @@ run_qualification() {
       filter='(Phase07ContainerizationNetworkLiveTests|Phase07LANExposureLiveTests|LifecycleGate05LiveTests|Phase07LocalNetworkForwardingLiveTests|Phase07NetworkGate01LiveTests)/'
       ;;
     homebrew)
-      filter="$nightly_homebrew_filter"
+      # SwiftPM can omit XCTest xUnit output.
+      swift_test qualification-homebrew --disable-swift-testing --filter "$nightly_homebrew_filter" 2>&1 |
+        awk -v expected="'-[HostwrightDistributionTests.TrustedReleaseTests testRenderedHomebrewFormulaPassesRealRubyAndHomebrewStyle]'" '
+          /^Test Case / {
+            if ($0 ~ /\]\047 started\.$/) started++
+            if ($0 ~ /\]\047 (passed|failed|skipped) \(/) completed++
+            if (index($0, "Test Case " expected " passed (") == 1) passed++
+          }
+          { print }
+          END {
+            if (started != 1 || completed != 1 || passed != 1) {
+              print "Expected exactly one passing Homebrew qualification case: " expected > "/dev/stderr"
+              exit 1
+            }
+          }'
+      return
       ;;
     all)
       filter="$qualification_filter"

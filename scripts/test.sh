@@ -3,6 +3,11 @@ set -euo pipefail
 
 readonly qualification_filter='(DistributionIntegrationTests|DistributionDurableLifecycleTests|ReleaseQualificationRegistryTests|Phase07ContainerizationNetworkLiveTests|Phase07LANExposureLiveTests|LifecycleGate05LiveTests|Phase07LocalNetworkForwardingLiveTests|Phase07NetworkGate01LiveTests)/'
 readonly nightly_homebrew_filter='TrustedReleaseTests/testRenderedHomebrewFormulaPassesRealRubyAndHomebrewStyle$'
+readonly pr_parallel_xctest_filter='(LifecycleLiveDriverTests|TrustedReleaseTests|'\
+'ReleaseQualificationCLITests|MutationCheckpointQualificationScriptTests|DaemonLocalLifecycleAuthorityTests|'\
+'NetworkHelperIngressBrokerTests|HostwrightDaemonCoreTests|PersistentControlStreamIntegrationTests|'\
+'SecureSubprocessTests|SchedulerAdmissionRepositoryTests|HostwrightCLITests|PluginControlOperationsTests|'\
+'LifecycleSchedulerSDKFenceTests|LocalSchedulerDaemonLifecycleTests)/'
 readonly durable_lifecycle_sentinel_filter='DistributionDurableLifecycleTests/(testLegacyRollbackPostRestoreCancellationAndInterruptionRecoverCurrentGeneration|testPackageLifecycleUsesExistingRepairUpgradeRollbackAndDowngradeRules|testInterruptedUpgradeRecoversThenUpgradeAndVerifiedRollbackRestoreBinaryAndState|testRequiredOperationRejectsLockedStateMismatchWithoutMutation|testRemoveDataRequiresCurrentPlanAndInterruptedRemovalRestoresPayloadAndState|testManagedServiceSymlinkExecutableIsRejectedBeforeLifecycleMutation)$'
 
 usage() {
@@ -64,9 +69,13 @@ run_pr_build() {
 }
 
 run_pr_tests() {
+  local excluded_filter="$qualification_filter|$nightly_homebrew_filter"
+
   python3 scripts/test-docker-proxy.py "$(swift build --show-bin-path)/hostwright-docker-proxy"
   scripts/integration.sh
-  swift_test pr-fast --skip "$qualification_filter|$nightly_homebrew_filter"
+  swift_test pr-fast --skip "$excluded_filter|$pr_parallel_xctest_filter"
+  swift_test pr-parallel-xctest --skip-build --disable-swift-testing --parallel --num-workers 3 \
+    --filter "$pr_parallel_xctest_filter" --skip "$excluded_filter"
   swift_test pr-durable-lifecycle-sentinels --filter "$durable_lifecycle_sentinel_filter"
 }
 

@@ -15,7 +15,12 @@ NATIVE_REUSE = {
     '.github/workflows/ci.yml',
 }
 CODEQL_SWIFT_SUFFIXES = ('.swift', '.c', '.h', '.m', '.mm', '.modulemap')
-CODEQL_SWIFT_INPUTS = {'Package.swift', 'Package.resolved', '.github/workflows/security.yml'}
+CODEQL_SWIFT_INPUTS = {
+    'Package.swift',
+    'Package.resolved',
+    '.github/workflows/security.yml',
+    'scripts/ci-check-scope.py',
+}
 
 
 def documentation(path):
@@ -26,9 +31,9 @@ def choose(paths):
     if not paths or any(not isinstance(path, str) or not path for path in paths):
         return 'full'
     if all(documentation(path) for path in paths):
-        return 'docs'
+        return 'docs-qualification'
     if all(documentation(path) or path in NATIVE_REUSE for path in paths):
-        return 'native-reuse'
+        return 'native-reuse-docs' if any(map(documentation, paths)) else 'native-reuse'
     return 'full'
 
 
@@ -58,7 +63,9 @@ def codeql_swift(event, base, head):
         return True
     paths = changed_paths(base, head)
     return paths is None or any(
-        path in CODEQL_SWIFT_INPUTS or path.startswith('Sources/') or path.endswith(CODEQL_SWIFT_SUFFIXES)
+        path in CODEQL_SWIFT_INPUTS
+        or path.startswith('Sources/')
+        or (not path.startswith('Tests/') and path.endswith(CODEQL_SWIFT_SUFFIXES))
         for path in paths
     )
 

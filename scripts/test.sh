@@ -65,7 +65,7 @@ run_full() {
 }
 
 run_pr_build() {
-  scripts/ci-swift.sh build --jobs 3
+  scripts/ci-swift.sh build --jobs 3 --build-tests
 }
 
 run_pr_tests() {

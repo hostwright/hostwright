@@ -8,6 +8,7 @@ fi
 swift_version=$(swift --version 2>&1)
 xcode_version=$(xcodebuild -version 2>&1)
 toolchain_hash=$(printf '%s\0%s\0' "$swift_version" "$xcode_version" | shasum -a 256 | cut -d ' ' -f 1)
-# Increment v1 to invalidate existing SwiftPM caches.
-prefix="spm-v1-$RUNNER_OS-$RUNNER_ARCH-$toolchain_hash-"
+# Keep test products in a separate namespace from package-only builds.
+namespace="${SWIFTPM_CACHE_NAMESPACE:-spm-v1}"
+prefix="$namespace-$RUNNER_OS-$RUNNER_ARCH-$toolchain_hash-"
 printf 'prefix=%s\nkey=%s%s\n' "$prefix" "$prefix" "$SWIFTPM_LOCK_HASH" >> "$GITHUB_OUTPUT"

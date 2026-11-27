@@ -181,6 +181,7 @@ jobs:
         shell: bash
         env:
           SWIFTPM_LOCK_HASH: ${{ hashFiles('Package.resolved') }}
+          SWIFTPM_CACHE_NAMESPACE: spm-v1-tests
         run: scripts/ci-swift-toolchain-key.sh
       - name: Restore SwiftPM build output
         id: swift-cache

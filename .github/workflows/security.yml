@@ -119,7 +119,7 @@ jobs:
           go-version: 1.26.5
           cache: false
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        uses: github/codeql-action/init@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
@@ -133,7 +133,7 @@ jobs:
           GOTOOLCHAIN: local
         run: go build -mod=readonly -o "$RUNNER_TEMP/hostwright-netfilter" .
       - name: Analyze
-        uses: github/codeql-action/analyze@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        uses: github/codeql-action/analyze@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
 
   codeql-swift:
     name: CodeQL (swift,c-cpp)
@@ -149,7 +149,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        uses: github/codeql-action/init@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
         with:
           languages: swift,c-cpp
           build-mode: manual
@@ -157,7 +157,7 @@ jobs:
       - name: Build the native application and C boundary
         run: swift build --jobs 2 --disable-automatic-resolution
       - name: Analyze
-        uses: github/codeql-action/analyze@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        uses: github/codeql-action/analyze@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
         with:
           # Preserve the analysis category used by the former matrix entry.
           category: '.github/workflows/security.yml:codeql/build-mode:manual/language:swift,c-cpp/runner:macos-26'
